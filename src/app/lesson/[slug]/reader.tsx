@@ -7,12 +7,18 @@ import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
 
+interface CheckQuestion {
+  question: string;
+  options: string[];
+}
+
 interface StepData {
   id: string;
   type: "theory" | "visual" | "check" | "code" | "recall" | "quiz";
   title: string;
   visual?: string;
   exercise_fn?: string;
+  check?: CheckQuestion[];
   body: string;
 }
 
@@ -24,6 +30,27 @@ interface LessonData {
   // at the wrong position.
   steps: Record<string, StepData>;
   source: { title: string };
+}
+
+// Renders the questions a `check` step already carries in its frontmatter as
+// plain text: question and options, no correct answer, no interactivity. The
+// answering UI belongs to a later slice; showing what exists beats showing a
+// placeholder that pretends nothing was written.
+function CheckQuestions({ questions }: { questions: CheckQuestion[] }) {
+  return (
+    <ol className="list-decimal space-y-4 rounded bg-slate-100 px-4 py-3 pl-8 text-sm">
+      {questions.map((item, index) => (
+        <li key={index} className="space-y-1">
+          <p className="font-medium">{item.question}</p>
+          <ul className="list-disc pl-5">
+            {item.options.map((option, optionIndex) => (
+              <li key={optionIndex}>{option}</li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function ErrorBanner({ message }: { message: string }) {
@@ -175,6 +202,20 @@ export function Reader({ slug }: { slug: string }) {
       {step.type === "recall" && step.exercise_fn && (
         <p className="rounded bg-slate-100 px-3 py-2 text-sm">
           Ты уже писал эту функцию в одном из прошлых уроков — <code>{step.exercise_fn}</code>.
+        </p>
+      )}
+      {step.type === "check" &&
+        (step.check && step.check.length > 0 ? (
+          <CheckQuestions questions={step.check} />
+        ) : (
+          <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+            Вопросы к этому шагу ещё не готовы — они появятся в следующем срезе. Пока проверь себя
+            сам и иди дальше.
+          </p>
+        ))}
+      {step.type === "quiz" && (
+        <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+          Итоговый квиз урока ещё не готов — он появится в следующем срезе.
         </p>
       )}
 
