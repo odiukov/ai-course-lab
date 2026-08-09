@@ -13,17 +13,20 @@ describe("loadConfig", () => {
   });
 
   it("падает, если COURSE_REPO указывает не на директорию", () => {
-    expect(() => loadConfig({ COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv))
-      .toThrow(/не найдена/);
+    expect(() =>
+      loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv),
+    ).toThrow(/не найдена/);
   });
 
   it("принимает существующий COURSE_REPO", () => {
-    const cfg = loadConfig({ COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv);
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv);
     expect(cfg.courseRepo).toBe(FIXTURE);
   });
 
   it("агент по умолчанию claude, AGENT=codex переключает", () => {
     expect(loadConfig({} as NodeJS.ProcessEnv).agent).toBe("claude");
-    expect(loadConfig({ AGENT: "codex" } as NodeJS.ProcessEnv).agent).toBe("codex");
+    expect(loadConfig({ NODE_ENV: "test", AGENT: "codex" } as NodeJS.ProcessEnv).agent).toBe(
+      "codex",
+    );
   });
 });
