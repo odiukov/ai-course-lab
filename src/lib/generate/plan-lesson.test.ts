@@ -22,6 +22,11 @@ const BROKEN = JSON.stringify([
   { id: "002-c", type: "code", title: "matmul", exercise_fn: "matmul" },
 ]);
 
+const SCHEMA_INVALID = JSON.stringify([
+  { id: "001-t", type: "theory", title: "Зачем" },
+  { id: "002-c", type: "unknown", title: "transpose", exercise_fn: "transpose" },
+]);
+
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "plan-"));
 }
@@ -37,6 +42,24 @@ describe("extractJsonBlock", () => {
 
   it("падает, если JSON нет", () => {
     expect(() => extractJsonBlock("просто текст")).toThrow(/JSON/);
+  });
+
+  it("достаёт голый JSON с текстом после него", () => {
+    expect(extractJsonBlock("Here is the plan: [1,2] Hope this helps!")).toEqual([1, 2]);
+  });
+
+  it("пропускает нерелевантный ```python-блок и находит JSON после него", () => {
+    expect(extractJsonBlock("```python\nx = 1\n```\n[1,2]")).toEqual([1, 2]);
+  });
+
+  it("не обрезает массив на ] внутри строкового значения", () => {
+    const json = JSON.stringify([{ id: "001-t", type: "theory", title: "Шаг [важный]" }]);
+    expect(extractJsonBlock(json)).toEqual([{ id: "001-t", type: "theory", title: "Шаг [важный]" }]);
+  });
+
+  it("пропускает первый нерелевантный блок и берёт JSON из второго", () => {
+    const text = "```text\nэто не JSON\n```\n```json\n[1,2]\n```";
+    expect(extractJsonBlock(text)).toEqual([1, 2]);
   });
 });
 
@@ -69,5 +92,40 @@ describe("generateLessonPlan", () => {
     await expect(generateLessonPlan({ contentDir, source: SOURCE, deps: { run } }))
       .rejects.toThrow(/план/i);
     expect(readLessonPlan(contentDir, SOURCE.ref.slug)).toBeNull();
+  });
+
+  it("перезапрашивает, если первый ответ вообще не содержит JSON", async () => {
+    const contentDir = tmpDir();
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce("Sorry, I cannot help with that request today.")
+      .mockResolvedValueOnce(VALID);
+    const plan = await generateLessonPlan({ contentDir, source: SOURCE, deps: { run } });
+    expect(plan.steps).toHaveLength(4);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(String(run.mock.calls[1][0])).toMatch(/JSON/);
+  });
+
+  it("перезапрашивает, если JSON не проходит схему шага", async () => {
+    const contentDir = tmpDir();
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce(SCHEMA_INVALID)
+      .mockResolvedValueOnce(VALID);
+    const plan = await generateLessonPlan({ contentDir, source: SOURCE, deps: { run } });
+    expect(plan.steps).toHaveLength(4);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(String(run.mock.calls[1][0])).toMatch(/type/);
+  });
+
+  it("прокидывает события из run в onEvent", async () => {
+    const contentDir = tmpDir();
+    const events: unknown[] = [];
+    const run = vi.fn().mockImplementation(async (_prompt: string, onEvent: (e: unknown) => void) => {
+      onEvent({ type: "text", text: "генерирую..." });
+      return VALID;
+    });
+    await generateLessonPlan({ contentDir, source: SOURCE, deps: { run }, onEvent: (e) => events.push(e) });
+    expect(events).toEqual([{ type: "text", text: "генерирую..." }]);
   });
 });

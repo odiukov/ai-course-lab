@@ -10,17 +10,63 @@ export interface GenerateDeps {
   run: (prompt: string, onEvent: (event: AgentEvent) => void) => Promise<string>;
 }
 
-export function extractJsonBlock(text: string): unknown {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  const candidate = fenced ? fenced[1] : text;
-  const start = candidate.search(/[[{]/);
-  if (start === -1) throw new Error("В ответе агента не найден JSON");
-  const sliced = candidate.slice(start).trimEnd();
-  try {
-    return JSON.parse(sliced);
-  } catch (error) {
-    throw new Error(`В ответе агента не найден корректный JSON: ${(error as Error).message}`);
+// Scans `text` starting at the first `[` or `{`, tracking bracket depth so
+// that brackets inside JSON string literals (and backslash-escaped
+// characters within those strings) don't confuse the scan. Returns the
+// slice from that opening bracket to its matching close, or null if no
+// balanced JSON value is found.
+function sliceBalancedJson(text: string): string | null {
+  const start = text.search(/[[{]/);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "[" || ch === "{") {
+      depth += 1;
+    } else if (ch === "]" || ch === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
   }
+  return null;
+}
+
+export function extractJsonBlock(text: string): unknown {
+  const candidates: string[] = [];
+  const fenceRegex = /```(?:\w+)?\s*([\s\S]*?)```/g;
+  let fence: RegExpExecArray | null;
+  while ((fence = fenceRegex.exec(text)) !== null) {
+    candidates.push(fence[1]);
+  }
+  candidates.push(text);
+
+  for (const candidate of candidates) {
+    const slice = sliceBalancedJson(candidate);
+    if (slice === null) continue;
+    try {
+      return JSON.parse(slice);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("В ответе агента не найден корректный JSON");
 }
 
 export async function generateLessonPlan(opts: {
@@ -45,12 +91,25 @@ export async function generateLessonPlan(opts: {
         .join("\n") || "(ничего ещё не написано)",
   });
 
+  const retryPrompt = (errors: string[]) =>
+    `${base}\n\nПредыдущая попытка нарушила правила:\n${errors.map((e) => `- ${e}`).join("\n")}\n\nИсправь и верни план заново.`;
+
   let prompt = base;
   let lastErrors: string[] = [];
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const raw = await deps.run(prompt, onEvent);
-    const parsed = z.array(stepMetaSchema).safeParse(extractJsonBlock(raw));
+
+    let extracted: unknown;
+    try {
+      extracted = extractJsonBlock(raw);
+    } catch (error) {
+      lastErrors = [(error as Error).message];
+      prompt = retryPrompt(lastErrors);
+      continue;
+    }
+
+    const parsed = z.array(stepMetaSchema).safeParse(extracted);
     if (!parsed.success) {
       lastErrors = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     } else {
@@ -69,7 +128,7 @@ export async function generateLessonPlan(opts: {
         return plan;
       }
     }
-    prompt = `${base}\n\nПредыдущая попытка нарушила правила:\n${lastErrors.map((e) => `- ${e}`).join("\n")}\n\nИсправь и верни план заново.`;
+    prompt = retryPrompt(lastErrors);
   }
 
   throw new Error(`Не удалось получить валидный план урока: ${lastErrors.join("; ")}`);
