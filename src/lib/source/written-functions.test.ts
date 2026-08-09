@@ -69,3 +69,63 @@ describe("readWrittenFunctions", () => {
     expect(readWrittenFunctions(makeSource({}))).toEqual([]);
   });
 });
+
+describe("readWrittenFunctions — многострочные сигнатуры и краевые случаи", () => {
+  it("видит функцию с многострочной сигнатурой и настоящим телом, сигнатура склеена в одну строку", () => {
+    const source = `def adamw_step(
+    params, grads, m, v, t, lr=0.001, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.01
+):
+    """AdamW update."""
+    return params
+`;
+    const dir = makeSource({ "learning-exercises/p03-l06-optimizers/exercise.py": source });
+    const written = readWrittenFunctions(dir);
+    expect(written.map((w) => w.fn)).toEqual(["adamw_step"]);
+    expect(written[0].signature).toBe(
+      "adamw_step(params, grads, m, v, t, lr=0.001, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.01)",
+    );
+  });
+
+  it("не считает написанной функцию с многострочной сигнатурой, если тело — заглушка", () => {
+    const source = `def stub_multiline(
+    a, b
+):
+    raise NotImplementedError
+`;
+    const dir = makeSource({ "learning-exercises/p03-l06-optimizers/exercise.py": source });
+    expect(readWrittenFunctions(dir)).toEqual([]);
+  });
+
+  it("не теряет функцию, определённую прямо перед функцией с многострочной сигнатурой", () => {
+    const source = `def before_fn(x):
+    return x + 1
+
+
+def adamw_step(
+    params, grads
+):
+    """AdamW update."""
+    return params
+`;
+    const dir = makeSource({ "learning-exercises/p03-l06-optimizers/exercise.py": source });
+    expect(readWrittenFunctions(dir).map((w) => w.fn)).toEqual(["before_fn", "adamw_step"]);
+  });
+
+  it("не считает написанной заглушку с докстрингом в одинарных тройных кавычках", () => {
+    const source = `def bad_docstring(x):
+    '''Stub with single-quote docstring.'''
+    raise NotImplementedError
+`;
+    const dir = makeSource({ "learning-exercises/p01-l02-beta/exercise.py": source });
+    expect(readWrittenFunctions(dir)).toEqual([]);
+  });
+
+  it("видит написанную async def функцию", () => {
+    const source = `async def fetch_data(url):
+    """Fetch async."""
+    return await something(url)
+`;
+    const dir = makeSource({ "learning-exercises/p01-l02-beta/exercise.py": source });
+    expect(readWrittenFunctions(dir).map((w) => w.fn)).toEqual(["fetch_data"]);
+  });
+});
