@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ai-course-lab
 
-## Getting Started
+Локальная платформа для прохождения курса ai-engineering-from-scratch:
+теория мелкими шагами, интерактивные визуализации, практика по одной функции.
 
-First, run the development server:
+## Запуск
 
 ```bash
+cp .env.example .env.local   # прописать COURSE_REPO — только для импорта
+npm install
+npm run import -- 01-math-foundations__02-vectors-matrices-operations
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Нужны локально установленные и залогиненные `claude` и `codex` —
+генерация идёт через них, API-ключи не используются.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Уроки переезжают в `source/` по одному, командой `npm run import`. Уже
+импортированные уроки читаются без `COURSE_REPO`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Что где
 
-## Learn More
+- `source/` — материалы импортированных уроков, правятся руками
+- `src/lib/source` — чтение и импорт материалов урока
+- `src/lib/content` — файлы сгенерированных шагов и планов уроков
+- `src/lib/agent` — запуск CLI-агентов и разбор их вывода
+- `src/lib/generate` — генерация плана урока и тел шагов
+- `prompts/` — промпты, правятся без пересборки
+- `content/` — сгенерированные уроки, лежат в git
 
-To learn more about Next.js, take a look at the following resources:
+## Ограничения текущего среза
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Чата и уточнений ещё нет (план 2).
+- Редактора кода и прогона тестов ещё нет (план 3).
+- Прогресс не сохраняется: позиция в уроке живёт только в памяти вкладки.
+- Подбор визуализаций по номеру урока корректен только для первой фазы.
+- Импорт урока — командой в терминале; кнопки в интерфейсе пока нет (план 2).
