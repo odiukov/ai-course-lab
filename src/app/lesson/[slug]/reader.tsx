@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 
@@ -34,15 +35,45 @@ function errorStatus(kind: string | undefined, message: string): string {
   }
 }
 
+// Mirrors the guard the API applies to `from`: a non-negative integer only,
+// anything else (missing, negative, fractional, non-numeric) falls back to 0.
+function parseStepParam(value: string | null): number {
+  const parsed = Number(value);
+  return value !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
 export function Reader({ slug }: { slug: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState<LessonData | null>(null);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => parseStepParam(searchParams.get("step")));
   const [status, setStatus] = useState<string | null>(null);
+
+  // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
+  // the URL. `replace` (not `push`) so the back button leaves the lesson
+  // instead of walking back through every step.
+  const goTo = useCallback(
+    (next: number, total: number) => {
+      const clamped = total > 0 ? Math.min(Math.max(next, 0), total - 1) : 0;
+      setIndex(clamped);
+      router.replace(`/lesson/${slug}?step=${clamped}`, { scroll: false });
+    },
+    [router, slug],
+  );
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/lesson/${slug}`);
-    setData(await response.json());
-  }, [slug]);
+    const json = (await response.json()) as LessonData;
+    setData(json);
+    const total = json.plan?.steps.length ?? json.steps.length;
+    setIndex((current) => {
+      const clamped = total > 0 ? Math.min(current, total - 1) : 0;
+      if (clamped !== current) {
+        router.replace(`/lesson/${slug}?step=${clamped}`, { scroll: false });
+      }
+      return clamped;
+    });
+  }, [slug, router]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount, no external state to subscribe to
@@ -81,6 +112,7 @@ export function Reader({ slug }: { slug: string }) {
 
   if (!data) return <p className="text-slate-400">Загружаю…</p>;
 
+  const total = data.plan?.steps.length ?? data.steps.length;
   const step = data.steps[index];
 
   if (!step) {
@@ -92,8 +124,9 @@ export function Reader({ slug }: { slug: string }) {
           {data.plan ? "Следующие шаги ещё не написаны." : "Урок ещё не разобран на шаги."}
         </p>
         <button
+          disabled={status !== null}
           onClick={() => generate(index)}
-          className="rounded bg-slate-900 px-4 py-2 text-white"
+          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30"
         >
           {data.plan ? "Написать дальше" : "Разобрать урок"}
         </button>
@@ -107,7 +140,7 @@ export function Reader({ slug }: { slug: string }) {
       <div className="flex items-baseline justify-between text-sm text-slate-400">
         <Link href="/" className="hover:text-slate-600">← к списку</Link>
         <span>
-          {index + 1} / {data.plan?.steps.length ?? data.steps.length}
+          {index + 1} / {total}
         </span>
       </div>
 
@@ -134,18 +167,19 @@ export function Reader({ slug }: { slug: string }) {
       <div className="flex gap-3 pt-4">
         <button
           disabled={index === 0}
-          onClick={() => setIndex((value) => value - 1)}
+          onClick={() => goTo(index - 1, total)}
           className="rounded border px-4 py-2 disabled:opacity-30"
         >
           Назад
         </button>
         <button
+          disabled={status !== null}
           onClick={() => {
             const next = index + 1;
-            setIndex(next);
+            goTo(next, total);
             if (!data.steps[next + 2]) void generate(next);
           }}
-          className="rounded bg-slate-900 px-4 py-2 text-white"
+          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30"
         >
           Дальше
         </button>
