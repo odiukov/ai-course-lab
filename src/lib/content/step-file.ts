@@ -1,5 +1,8 @@
 import matter from "gray-matter";
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
+import { lessonPaths } from "./paths";
 
 export const STEP_TYPES = ["theory", "visual", "check", "code", "recall", "quiz"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
@@ -47,4 +50,16 @@ export function serializeStep(step: Step): string {
     Object.entries(meta).filter(([, value]) => value !== undefined),
   );
   return matter.stringify(body ? `\n${body}\n` : "", clean);
+}
+
+export function readStep(contentDir: string, slug: string, id: string): Step | null {
+  const file = lessonPaths(contentDir, slug).stepFile(id);
+  if (!fs.existsSync(file)) return null;
+  return parseStep(fs.readFileSync(file, "utf8"));
+}
+
+export function writeStep(contentDir: string, slug: string, step: Step): void {
+  const file = lessonPaths(contentDir, slug).stepFile(step.id);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, serializeStep(step), "utf8");
 }
