@@ -29,6 +29,9 @@ export const claudeAdapter: Adapter = {
     if (data.type === "result") {
       const text = typeof data.result === "string" ? data.result : "";
       if (data.is_error) {
+        // The recorded fixture's only "result" line has is_error: false — a genuine
+        // non-limit failure (the "error" branch below) was never observed in Task 7's
+        // recording and is NOT verified against real CLI output.
         return [{ type: isLimitMessage(text) ? "limit" : "error", message: text || "Агент вернул ошибку" }];
       }
       return [{ type: "done", text }];

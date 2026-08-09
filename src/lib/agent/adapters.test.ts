@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { claudeAdapter } from "./claude-adapter";
 import { codexAdapter } from "./codex-adapter";
-import { collectText, type AgentEvent } from "./events";
+import { collectText, isLimitMessage, type AgentEvent } from "./events";
 
 const FIXTURES = path.resolve(__dirname, "../../../tests/fixtures/agent");
 
@@ -49,5 +49,40 @@ describe("распознавание лимита", () => {
   it("не помечает лимитом успешный прогон, где встретился rate_limit_event", () => {
     const events = replay(claudeAdapter, "claude-stream.jsonl");
     expect(events.filter((e) => e.type === "limit")).toHaveLength(0);
+  });
+
+  it("claude: обычная ошибка без лимитной формулировки даёт тип error, не limit", () => {
+    const events = claudeAdapter.parseLine(
+      JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "Внутренняя ошибка агента",
+      }),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({ type: "error", message: "Внутренняя ошибка агента" });
+  });
+
+  // codex's error/limit branch was never observed in the Task 7 recording (no codex
+  // error occurred); these two tests pin down the *code's* current behaviour against
+  // the shape claude-adapter's error branch already expects, they do not confirm that
+  // shape against real CLI output.
+  it("codex: обычная ошибка даёт тип error", () => {
+    const events = codexAdapter.parseLine(JSON.stringify({ type: "error", error: "Внутренняя ошибка агента" }));
+    expect(events).toEqual([{ type: "error", message: "Внутренняя ошибка агента" }]);
+  });
+
+  it("codex: ошибка с лимитной формулировкой даёт тип limit", () => {
+    const events = codexAdapter.parseLine(JSON.stringify({ type: "error", error: "Codex usage limit reached" }));
+    expect(events).toEqual([{ type: "limit", message: "Codex usage limit reached" }]);
+  });
+
+  it("isLimitMessage: обычная ошибка — не лимит", () => {
+    expect(isLimitMessage("Внутренняя ошибка агента")).toBe(false);
+  });
+
+  it("isLimitMessage: реальная формулировка лимита распознаётся", () => {
+    expect(isLimitMessage("Claude AI usage limit reached")).toBe(true);
   });
 });
