@@ -1,0 +1,3 @@
+# Gamma Lesson
+
+Gamma text.
