@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
+import { errorStatus } from "@/lib/agent/error-message";
 
 interface StepData {
   id: string;
@@ -25,17 +26,12 @@ interface LessonData {
   source: { title: string };
 }
 
-type ErrorKind = "limit" | "agent" | "spawn" | "exit" | "parse" | "aborted";
-
-function errorStatus(kind: string | undefined, message: string): string {
-  switch (kind as ErrorKind | undefined) {
-    case "limit":
-      return "Упёрлись в лимит подписки — генерация приостановлена.";
-    case "spawn":
-      return "Агент не найден на сервере — читать урок можно, но дописать его пока нельзя.";
-    default:
-      return `Ошибка: ${message}`;
-  }
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <p role="alert" className="rounded bg-red-50 px-3 py-2 text-sm text-red-800">
+      {message}
+    </p>
+  );
 }
 
 // Mirrors the guard the API applies to `from`: a non-negative integer only,
@@ -50,7 +46,12 @@ export function Reader({ slug }: { slug: string }) {
   const searchParams = useSearchParams();
   const [data, setData] = useState<LessonData | null>(null);
   const [index, setIndex] = useState(() => parseStepParam(searchParams.get("step")));
+  // Two separate states on purpose. `status` is transient progress and is
+  // cleared when the SSE loop ends; `error` outlives the loop, otherwise the
+  // frame that reports "CLI not found" or "usage limit" is wiped one tick
+  // after it arrives and the learner never sees why nothing was written.
   const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
   // the URL. `replace` (not `push`) so the back button leaves the lesson
@@ -85,6 +86,7 @@ export function Reader({ slug }: { slug: string }) {
 
   const generate = useCallback(
     async (from: number) => {
+      setError(null);
       setStatus("Генерирую…");
       const response = await fetch(`/api/lesson/${slug}/generate?from=${from}`, { method: "POST" });
       const reader = response.body!.getReader();
@@ -103,7 +105,7 @@ export function Reader({ slug }: { slug: string }) {
           if (!event || !payload) continue;
           const parsed = JSON.parse(payload) as { text?: string; message?: string; kind?: string };
           if (event === "progress" && parsed.text) setStatus(parsed.text.slice(-120));
-          if (event === "error") setStatus(errorStatus(parsed.kind, parsed.message ?? ""));
+          if (event === "error") setError(errorStatus(parsed.kind, parsed.message ?? ""));
         }
       }
 
@@ -142,6 +144,7 @@ export function Reader({ slug }: { slug: string }) {
           {data.plan ? "Написать дальше" : "Разобрать урок"}
         </button>
         {status && <p className="text-sm text-slate-400">{status}</p>}
+        {error && <ErrorBanner message={error} />}
       </div>
     );
   }
@@ -200,6 +203,8 @@ export function Reader({ slug }: { slug: string }) {
         </button>
         {status && <span className="self-center text-sm text-slate-400">{status}</span>}
       </div>
+
+      {error && <ErrorBanner message={error} />}
     </article>
   );
 }
