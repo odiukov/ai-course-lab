@@ -64,5 +64,9 @@ describe("serializeStep", () => {
     const out = serializeStep({ id: "001-a", type: "theory", title: "А", body: "Б" });
     expect(out).not.toContain("visual");
     expect(out).not.toContain("exercise_fn");
+    // Must contain required fields with correct values
+    expect(out).toContain("id: 001-a");
+    expect(out).toContain("type: theory");
+    expect(out).toContain("title: А");
   });
 });
