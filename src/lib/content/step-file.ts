@@ -1,7 +1,7 @@
 import matter from "gray-matter";
 import { z } from "zod";
 
-export const STEP_TYPES = ["theory", "visual", "check", "code", "quiz"] as const;
+export const STEP_TYPES = ["theory", "visual", "check", "code", "recall", "quiz"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
 const checkSchema = z.object({
@@ -21,6 +21,13 @@ export const stepMetaSchema = z.object({
   visual: z.string().optional(),
   exercise_fn: z.string().optional(),
   check: z.array(checkSchema).optional(),
+  baseline: z
+    .object({
+      lesson: z.string(),
+      fn: z.string(),
+      changes: z.string().min(1),
+    })
+    .optional(),
 });
 
 export type StepMeta = z.infer<typeof stepMetaSchema>;

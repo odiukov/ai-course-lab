@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
+import type { WrittenFunction } from "../source/written-functions";
 import type { StepMeta } from "./step-file";
 import { isStale, readLessonPlan, validatePlan, writeLessonPlan, type LessonPlan } from "./lesson-plan";
 
@@ -69,6 +70,50 @@ describe("validatePlan", () => {
       step({ id: "005-c", type: "code", exercise_fn: "matmul" }),
     ];
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/подряд/);
+  });
+});
+
+describe("повторное написание функций", () => {
+  const written: WrittenFunction[] = [
+    {
+      fn: "transpose",
+      exerciseSlug: "p01-l02-beta",
+      lessonSlug: "01-math-foundations__02-beta",
+      signature: "transpose(M)",
+    },
+  ];
+
+  it("не пускает пустой повтор уже написанной функции", () => {
+    const errors = validatePlan(GOOD, SOURCE, written);
+    expect(errors.join(" ")).toMatch(/transpose/);
+    expect(errors.join(" ")).toMatch(/уже написан/);
+  });
+
+  it("пускает повтор, если указано, что изменилось", () => {
+    const plan = GOOD.map((step) =>
+      step.exercise_fn === "transpose"
+        ? {
+            ...step,
+            baseline: {
+              lesson: "01-math-foundations__02-beta",
+              fn: "transpose",
+              changes: "теперь без zip, вручную по индексам",
+            },
+          }
+        : step,
+    );
+    expect(validatePlan(plan, SOURCE, written)).toEqual([]);
+  });
+
+  it("пускает recall-шаг вместо повторного задания", () => {
+    const plan = GOOD.map((step) =>
+      step.exercise_fn === "transpose" ? { ...step, type: "recall" as const } : step,
+    );
+    expect(validatePlan(plan, SOURCE, written)).toEqual([]);
+  });
+
+  it("без реестра ведёт себя как раньше", () => {
+    expect(validatePlan(GOOD, SOURCE)).toEqual([]);
   });
 });
 

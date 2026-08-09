@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { LessonSource } from "../source/lesson-source";
+import type { WrittenFunction } from "../source/written-functions";
 import { lessonPaths } from "./paths";
 import { stepMetaSchema, type StepMeta } from "./step-file";
 
@@ -17,7 +18,11 @@ const planSchema = z.object({
 
 export type LessonPlan = z.infer<typeof planSchema>;
 
-export function validatePlan(steps: StepMeta[], source: LessonSource): string[] {
+export function validatePlan(
+  steps: StepMeta[],
+  source: LessonSource,
+  written: WrittenFunction[] = [],
+): string[] {
   const errors: string[] = [];
 
   const seen = new Set<string>();
@@ -28,6 +33,7 @@ export function validatePlan(steps: StepMeta[], source: LessonSource): string[] 
 
   const known = new Set(source.exercise?.functions ?? []);
   const used = new Set<string>();
+  const writtenByName = new Map(written.map((item) => [item.fn, item]));
   let theorySincePrevCode = true;
 
   for (const step of steps) {
@@ -35,10 +41,10 @@ export function validatePlan(steps: StepMeta[], source: LessonSource): string[] 
       theorySincePrevCode = true;
       continue;
     }
-    if (step.type !== "code") continue;
+    if (step.type !== "code" && step.type !== "recall") continue;
 
     if (!step.exercise_fn) {
-      errors.push(`Шаг ${step.id}: у code-шага нет exercise_fn`);
+      errors.push(`Шаг ${step.id}: у ${step.type}-шага нет exercise_fn`);
     } else {
       if (!known.has(step.exercise_fn)) {
         errors.push(`Шаг ${step.id}: функция ${step.exercise_fn} отсутствует в упражнении`);
@@ -47,6 +53,16 @@ export function validatePlan(steps: StepMeta[], source: LessonSource): string[] 
         errors.push(`Шаг ${step.id}: функция ${step.exercise_fn} уже занята другим шагом`);
       }
       used.add(step.exercise_fn);
+    }
+
+    if (step.type !== "code") continue;
+
+    const previous = step.exercise_fn ? writtenByName.get(step.exercise_fn) : undefined;
+    if (previous && !step.baseline?.changes) {
+      errors.push(
+        `Шаг ${step.id}: функция ${step.exercise_fn} уже написана (${previous.lessonSlug ?? previous.exerciseSlug}). ` +
+          `Нужен либо шаг recall, либо baseline с описанием того, что меняется`,
+      );
     }
     if (!theorySincePrevCode) {
       errors.push(`Шаг ${step.id}: два code-шага подряд, между ними нет теории`);
