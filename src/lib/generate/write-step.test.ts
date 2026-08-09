@@ -5,8 +5,9 @@ import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
 import { readStep } from "../content/step-file";
+import type { StepMeta } from "../content/step-file";
 import type { LessonPlan } from "../content/lesson-plan";
-import { ensureSteps, excerptForStep } from "./write-step";
+import { ensureSteps, excerptForStep, resolveStepExcerpts } from "./write-step";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -29,6 +30,81 @@ const PLAN: LessonPlan = {
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "steps-"));
 }
+
+function fakeSource(text: string) {
+  return {
+    ref: SOURCE.ref,
+    lang: "ru" as const,
+    textPath: "in-memory.md",
+    text,
+    sourceHash: "test",
+    quiz: [],
+    visuals: [],
+    exercise: null,
+  };
+}
+
+describe("excerptForStep — границы среза", () => {
+  it("останавливается на следующем заголовке того же уровня, а не идёт до конца", () => {
+    const source = fakeSource(
+      ["# Lesson", "", "### Transpose", "", "Transpose content here.", "", "### Matmul", "", "Matmul content here."].join(
+        "\n",
+      ),
+    );
+
+    const text = excerptForStep(source, "### Transpose");
+    expect(text).toContain("Transpose content here.");
+    expect(text).not.toContain("Matmul content here.");
+  });
+
+  it("включает более глубокие подзаголовки — они не считаются границей", () => {
+    const source = fakeSource(
+      [
+        "# Lesson",
+        "",
+        "## The Concept",
+        "",
+        "### Sub One",
+        "",
+        "Detail one.",
+        "",
+        "### Sub Two",
+        "",
+        "Detail two.",
+        "",
+        "## Next Big Section",
+        "",
+        "Something else.",
+      ].join("\n"),
+    );
+
+    const text = excerptForStep(source, "## The Concept");
+    expect(text).toContain("Detail one.");
+    expect(text).toContain("Detail two.");
+    expect(text).not.toContain("Something else.");
+  });
+});
+
+describe("resolveStepExcerpts", () => {
+  it("шаги с одинаковым заголовком получают свой, а не чужой раздел", () => {
+    const source = fakeSource(
+      ["# Lesson", "", "### Example", "", "First example text.", "", "### Example", "", "Second example text."].join(
+        "\n",
+      ),
+    );
+    const steps: StepMeta[] = [
+      { id: "s1", type: "theory", title: "One", source_anchor: "### Example" },
+      { id: "s2", type: "theory", title: "Two", source_anchor: "### Example" },
+    ];
+
+    const excerpts = resolveStepExcerpts(source, steps);
+
+    expect(excerpts.get("s1")).toContain("First example text");
+    expect(excerpts.get("s1")).not.toContain("Second example text");
+    expect(excerpts.get("s2")).toContain("Second example text");
+    expect(excerpts.get("s2")).not.toContain("First example text");
+  });
+});
 
 describe("excerptForStep", () => {
   it("режет исходник по якорю до следующего заголовка того же уровня", () => {
@@ -66,5 +142,51 @@ describe("ensureSteps", () => {
     const run = vi.fn().mockResolvedValue("Тело.");
     const ids = await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 3, deps: { run } });
     expect(ids).toEqual(["004-c"]);
+  });
+
+  it("в соседях нет текущего шага, но есть соседний", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело.");
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
+
+    const prompt = run.mock.calls[0][0] as string;
+    const match = /Соседние шаги, чтобы не повторяться:\n([\s\S]*?)\n\nКусок/.exec(prompt);
+    expect(match).not.toBeNull();
+    const neighbours = match![1];
+
+    expect(neighbours).not.toContain("transpose");
+    expect(neighbours).toContain("Зачем");
+    expect(neighbours).toContain("Дальше");
+  });
+
+  it("сохраняет visual и baseline из плана шага в файле", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело.");
+    const planWithExtras: LessonPlan = {
+      ...PLAN,
+      steps: [
+        {
+          id: "005-v",
+          type: "visual",
+          title: "Смотрим на матрицу",
+          visual: "p01-l02-beta-demo",
+          baseline: {
+            lesson: "01-math-foundations__01-alpha",
+            fn: "transpose",
+            changes: "теперь принимает матрицу NxM",
+          },
+        },
+      ],
+    };
+
+    await ensureSteps({ contentDir, source: SOURCE, plan: planWithExtras, fromIndex: 0, deps: { run } });
+    const step = readStep(contentDir, planWithExtras.slug, "005-v");
+
+    expect(step?.visual).toBe("p01-l02-beta-demo");
+    expect(step?.baseline).toEqual({
+      lesson: "01-math-foundations__01-alpha",
+      fn: "transpose",
+      changes: "теперь принимает матрицу NxM",
+    });
   });
 });
