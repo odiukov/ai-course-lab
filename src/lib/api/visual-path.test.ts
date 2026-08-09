@@ -62,4 +62,24 @@ describe("resolveVisualPath", () => {
     const result = resolveVisualPath(sourceDir, "learning-visuals/evil.html");
     expect(result).toEqual({ ok: false, reason: "forbidden" });
   });
+
+  it("отклоняет .html-симлинк внутри дерева, ведущий на не-HTML файл", () => {
+    const { sourceDir, visualsDir } = makeTree();
+    const notHtml = path.join(visualsDir, "data.json");
+    fs.writeFileSync(notHtml, "{}");
+    fs.symlinkSync(notHtml, path.join(visualsDir, "looks-like.html"));
+
+    const result = resolveVisualPath(sourceDir, "learning-visuals/looks-like.html");
+    expect(result).toEqual({ ok: false, reason: "forbidden" });
+  });
+
+  it("отклоняет .html-симлинк внутри дерева, ведущий на директорию", () => {
+    const { sourceDir, visualsDir } = makeTree();
+    const subdir = path.join(visualsDir, "subdir");
+    fs.mkdirSync(subdir);
+    fs.symlinkSync(subdir, path.join(visualsDir, "dir-link.html"));
+
+    const result = resolveVisualPath(sourceDir, "learning-visuals/dir-link.html");
+    expect(result).toEqual({ ok: false, reason: "forbidden" });
+  });
 });

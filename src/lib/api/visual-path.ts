@@ -23,6 +23,13 @@ function isContained(root: string, target: string): boolean {
 // is re-applied to the canonical paths. The root is canonicalized too, so
 // the check still holds if the project directory itself is reached through
 // a symlinked path.
+//
+// The `.html` requirement and the "it's a regular file" requirement are
+// re-checked against the *canonical* path too, not just the requested one:
+// a `something.html` symlink inside learning-visuals/ can resolve to a
+// non-HTML file (still inside the tree, so the containment re-check alone
+// wouldn't catch it) or to a directory (which would make fs.readFileSync
+// throw EISDIR instead of cleanly rejecting).
 export function resolveVisualPath(sourceDir: string, rel: string): VisualPathResolution {
   const root = path.join(sourceDir, "learning-visuals");
   const target = path.resolve(sourceDir, rel);
@@ -36,7 +43,11 @@ export function resolveVisualPath(sourceDir: string, rel: string): VisualPathRes
 
   const canonicalRoot = fs.realpathSync(root);
   const canonicalTarget = fs.realpathSync(target);
-  if (!isContained(canonicalRoot, canonicalTarget)) {
+  if (
+    !isContained(canonicalRoot, canonicalTarget) ||
+    !canonicalTarget.endsWith(".html") ||
+    !fs.statSync(canonicalTarget).isFile()
+  ) {
     return { ok: false, reason: "forbidden" };
   }
 
