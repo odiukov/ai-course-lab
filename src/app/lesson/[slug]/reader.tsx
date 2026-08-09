@@ -18,7 +18,10 @@ interface StepData {
 interface LessonData {
   plan: { title: string; steps: { id: string; title: string }[] } | null;
   stale: boolean;
-  steps: StepData[];
+  // Keyed by plan step id. The API cannot send an array: an unwritten step in
+  // the middle of the plan would compact the array and put every later step
+  // at the wrong position.
+  steps: Record<string, StepData>;
   source: { title: string };
 }
 
@@ -65,7 +68,7 @@ export function Reader({ slug }: { slug: string }) {
     const response = await fetch(`/api/lesson/${slug}`);
     const json = (await response.json()) as LessonData;
     setData(json);
-    const total = json.plan?.steps.length ?? json.steps.length;
+    const total = json.plan?.steps.length ?? 0;
     setIndex((current) => {
       const clamped = total > 0 ? Math.min(current, total - 1) : 0;
       if (clamped !== current) {
@@ -112,8 +115,14 @@ export function Reader({ slug }: { slug: string }) {
 
   if (!data) return <p className="text-slate-400">Загружаю…</p>;
 
-  const total = data.plan?.steps.length ?? data.steps.length;
-  const step = data.steps[index];
+  // `index` is a PLAN position throughout: it is what ?step= carries, what the
+  // "N / total" counter shows and what the generate endpoint receives as
+  // `from`. The step itself is resolved through the plan's id, so a hole in
+  // the generated steps stays a hole instead of pulling a later step forward.
+  const planSteps = data.plan?.steps ?? [];
+  const total = planSteps.length;
+  const currentId = planSteps[index]?.id;
+  const step = currentId ? data.steps[currentId] : undefined;
 
   if (!step) {
     return (
@@ -121,7 +130,9 @@ export function Reader({ slug }: { slug: string }) {
         <Link href="/" className="text-sm text-slate-400 hover:text-slate-600">← к списку</Link>
         <h1 className="text-2xl font-semibold">{data.source.title}</h1>
         <p className="text-slate-600">
-          {data.plan ? "Следующие шаги ещё не написаны." : "Урок ещё не разобран на шаги."}
+          {data.plan
+            ? `Шаг ${index + 1} из ${total} ещё не написан.`
+            : "Урок ещё не разобран на шаги."}
         </p>
         <button
           disabled={status !== null}
@@ -177,7 +188,11 @@ export function Reader({ slug }: { slug: string }) {
           onClick={() => {
             const next = index + 1;
             goTo(next, total);
-            if (!data.steps[next + 2]) void generate(next);
+            // Keep three steps ahead written. Only asks the agent for work if
+            // something in that window is actually missing, so the last steps
+            // of a finished lesson don't fire a pointless request.
+            const ahead = planSteps.slice(next, next + 3);
+            if (ahead.some((meta) => !data.steps[meta.id])) void generate(next);
           }}
           className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30"
         >

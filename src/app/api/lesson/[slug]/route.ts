@@ -1,6 +1,6 @@
 import { loadConfig } from "@/lib/config";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
-import { readStep, type Step } from "@/lib/content/step-file";
+import { readStepsById } from "@/lib/content/step-file";
 import { findLesson } from "@/lib/source/catalog";
 import { readLessonSource } from "@/lib/source/lesson-source";
 
@@ -12,9 +12,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 
   const source = readLessonSource(config.sourceDir, ref);
   const plan = readLessonPlan(config.contentDir, slug);
-  const steps = (plan?.steps ?? [])
-    .map((meta) => readStep(config.contentDir, slug, meta.id))
-    .filter((step): step is Step => step !== null);
+  // Keyed by plan id, not positional: an unwritten step in the middle of the
+  // plan must leave a hole the reader can see, not shift its neighbours.
+  const steps = readStepsById(
+    config.contentDir,
+    slug,
+    (plan?.steps ?? []).map((meta) => meta.id),
+  );
 
   return Response.json({
     plan,

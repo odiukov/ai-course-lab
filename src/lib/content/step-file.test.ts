@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { parseStep, serializeStep, type Step } from "./step-file";
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { parseStep, readStepsById, serializeStep, writeStep, type Step } from "./step-file";
 
 const SAMPLE = `---
 id: "003-broadcasting"
@@ -68,5 +71,39 @@ describe("serializeStep", () => {
     expect(out).toContain("id: 001-a");
     expect(out).toContain("type: theory");
     expect(out).toContain("title: А");
+  });
+});
+
+describe("readStepsById", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function contentDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "steps-"));
+    dirs.push(dir);
+    return dir;
+  }
+
+  it("отдаёт написанные шаги под их id, а дыры просто отсутствуют", () => {
+    const dir = contentDir();
+    const ids = ["001-a", "002-b", "003-c", "004-d"];
+    for (const id of ["002-b", "004-d"]) {
+      writeStep(dir, "slug", { id, type: "theory", title: `Шаг ${id}`, body: `тело ${id}` });
+    }
+
+    const steps = readStepsById(dir, "slug", ids);
+
+    expect(Object.keys(steps).sort()).toEqual(["002-b", "004-d"]);
+    // Ключ — id из плана, а не позиция: дыра на 001 не сдвигает 002 на нулевое место.
+    expect(steps["002-b"].body).toBe("тело 002-b");
+    expect(steps["001-a"]).toBeUndefined();
+    expect(steps["003-c"]).toBeUndefined();
+  });
+
+  it("на пустой директории отдаёт пустой объект, а не падает", () => {
+    expect(readStepsById(contentDir(), "slug", ["001-a"])).toEqual({});
   });
 });

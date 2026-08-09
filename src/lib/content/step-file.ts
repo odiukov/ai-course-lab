@@ -58,6 +58,26 @@ export function readStep(contentDir: string, slug: string, id: string): Step | n
   return parseStep(fs.readFileSync(file, "utf8"));
 }
 
+/**
+ * Reads the steps of `ids` that exist on disk and returns them keyed by step
+ * id. Deliberately NOT an array: a lesson can have holes (a hand-edited plan
+ * regenerated with new ids, a partial generation window), and a compacted
+ * array would silently shift every later step onto the wrong plan position.
+ * Callers address a step by its plan id instead.
+ */
+export function readStepsById(
+  contentDir: string,
+  slug: string,
+  ids: string[],
+): Record<string, Step> {
+  const steps: Record<string, Step> = {};
+  for (const id of ids) {
+    const step = readStep(contentDir, slug, id);
+    if (step) steps[id] = step;
+  }
+  return steps;
+}
+
 export function writeStep(contentDir: string, slug: string, step: Step): void {
   const file = lessonPaths(contentDir, slug).stepFile(step.id);
   fs.mkdirSync(path.dirname(file), { recursive: true });
