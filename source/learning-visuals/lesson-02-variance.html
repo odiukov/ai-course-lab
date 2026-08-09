@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 2 — Дисперсия</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171c22; --line: #2a323c;
+    --text: #e6edf3; --dim: #8b98a5;
+    --a: #4dabf7; --ok: #51cf66; --or: #ff922b; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px; max-width: 880px; margin-bottom: 16px;
+  }
+  svg { display: block; touch-action: none; width: 100%; height: auto; }
+
+  table { border-collapse: collapse; margin-top: 14px; font: 13px ui-monospace, monospace; }
+  th, td { padding: 5px 12px 5px 0; text-align: right; }
+  th { color: var(--dim); font-weight: 600; }
+  td.lbl { text-align: left; color: var(--dim); }
+  tr.tot td { border-top: 1px solid var(--line); font-weight: 700; padding-top: 8px; }
+  .sq { color: var(--or); }
+
+  .out { font: 17px ui-monospace, monospace; margin-top: 16px; line-height: 2; }
+  .out .v { color: var(--or); font-weight: 700; }
+  .out .m { color: var(--a); font-weight: 700; }
+  .out .s { color: var(--ok); font-weight: 700; }
+  .verdict { font-size: 13px; color: var(--dim); margin-top: 8px; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  button {
+    background: #222a33; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 11px; font: 12px ui-monospace, monospace; cursor: pointer;
+  }
+  button:hover { border-color: var(--a); color: var(--a); }
+  .hint { color: var(--dim); font-size: 13px; margin-top: 14px; }
+  .hint b { color: var(--or); }
+</style>
+</head>
+<body>
+
+<h1>Дисперсия — насколько числа разбросаны</h1>
+<p class="sub">Таскай оранжевые точки по линейке. Синяя — среднее, оно двигается само.</p>
+
+<div class="card">
+  <svg id="plot" viewBox="0 0 840 260"></svg>
+
+  <div class="row">
+    <button data-p="0,0,0,0,0">все одинаковые</button>
+    <button data-p="-2,-1,0,1,2">класс Б: 2,3,4,5,6</button>
+    <button data-p="-4,-3,3,4,0">разлетелись</button>
+    <button data-p="-1,0,0,0,5">один выброс</button>
+  </div>
+
+  <div class="out" id="out"></div>
+  <div class="verdict" id="verdict"></div>
+
+  <table id="tbl"></table>
+
+  <p class="hint">
+    Попробуй <b>«один выброс»</b>: четыре точки стоят кучей, одна улетела.
+    Среднее почти не сдвинулось, а дисперсия подскочила — квадрат делает
+    дальние точки очень «тяжёлыми». Поэтому один битый пример в датасете
+    портит статистику сильнее, чем кажется.
+  </p>
+</div>
+
+<script>
+const W = 840, H = 260, AX = 175, PAD = 60;
+const svg = document.getElementById('plot');
+const out = document.getElementById('out');
+const verdict = document.getElementById('verdict');
+const tbl = document.getElementById('tbl');
+const NS = 'http://www.w3.org/2000/svg';
+
+// значения оценок 0..8, стартуем на классе Б (2,3,4,5,6)
+let V = [2, 3, 4, 5, 6];
+const LO = 0, HI = 8;
+
+const sx = v => PAD + (v - LO) / (HI - LO) * (W - PAD * 2);
+const ux = px => LO + (px - PAD) / (W - PAD * 2) * (HI - LO);
+
+function el(t, a, txt) {
+  const n = document.createElementNS(NS, t);
+  for (const k in a) n.setAttribute(k, a[k]);
+  if (txt !== undefined) n.textContent = txt;
+  return n;
+}
+const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+
+function draw() {
+  const m = mean(V);
+  const dev = V.map(v => v - m);
+  const sq = dev.map(d => d * d);
+  const varr = mean(sq);
+
+  svg.innerHTML = '';
+  svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: H, fill: '#12181e', rx: 8 }));
+
+  // линейка
+  svg.appendChild(el('line', { x1: PAD, y1: AX, x2: W - PAD, y2: AX, stroke: '#3d4650', 'stroke-width': 2 }));
+  for (let t = LO; t <= HI; t++) {
+    svg.appendChild(el('line', { x1: sx(t), y1: AX - 6, x2: sx(t), y2: AX + 6, stroke: '#3d4650' }));
+    svg.appendChild(el('text', {
+      x: sx(t), y: AX + 26, fill: '#8b98a5', 'font-size': 12, 'text-anchor': 'middle',
+      'font-family': 'ui-monospace, monospace'
+    }, t));
+  }
+
+  // среднее
+  const mx = sx(m);
+  svg.appendChild(el('line', { x1: mx, y1: 34, x2: mx, y2: AX + 40, stroke: '#4dabf7', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+  svg.appendChild(el('text', {
+    x: mx, y: 26, fill: '#4dabf7', 'font-size': 13, 'text-anchor': 'middle', 'font-weight': 700,
+    'font-family': 'ui-monospace, monospace'
+  }, `среднее ${(Math.round(m * 100) / 100)}`));
+
+  // квадраты отклонений — площадь буквально
+  V.forEach((v, i) => {
+    const x = sx(v);
+    const side = Math.abs(x - mx);
+    if (side > 1) {
+      svg.appendChild(el('rect', {
+        x: Math.min(x, mx), y: AX - 40 - side, width: side, height: side,
+        fill: '#ff922b', opacity: .13, stroke: '#ff922b', 'stroke-opacity': .35
+      }));
+    }
+    // линия отклонения
+    svg.appendChild(el('line', {
+      x1: mx, y1: AX - 40, x2: x, y2: AX - 40,
+      stroke: '#ff922b', 'stroke-width': 2, opacity: .6
+    }));
+  });
+
+  // точки
+  V.forEach((v, i) => {
+    const x = sx(v);
+    svg.appendChild(el('line', { x1: x, y1: AX - 40, x2: x, y2: AX, stroke: '#5c6773', 'stroke-width': 1 }));
+    svg.appendChild(el('circle', {
+      cx: x, cy: AX - 40, r: 10, fill: '#ff922b', stroke: '#0f1216', 'stroke-width': 2,
+      'data-i': i, style: 'cursor:grab'
+    }));
+    svg.appendChild(el('text', {
+      x: x, y: AX - 36, fill: '#0f1216', 'font-size': 11, 'text-anchor': 'middle',
+      'font-weight': 700, 'font-family': 'ui-monospace, monospace', 'pointer-events': 'none'
+    }, v));
+  });
+
+  render(m, dev, sq, varr);
+}
+
+function render(m, dev, sq, varr) {
+  const f = n => (Math.round(n * 100) / 100).toString();
+  let h = '<tr><th style="text-align:left">оценка</th><th>откл. от среднего</th><th>квадрат</th></tr>';
+  V.forEach((v, i) => {
+    h += `<tr><td class="lbl">${v}</td><td>${v} − ${f(m)} = ${f(dev[i])}</td>` +
+         `<td class="sq">${f(dev[i])}² = ${f(sq[i])}</td></tr>`;
+  });
+  h += `<tr class="tot"><td class="lbl">сумма</td><td>${f(dev.reduce((s, v) => s + v, 0))} — всегда 0</td>` +
+       `<td class="sq">${f(sq.reduce((s, v) => s + v, 0))}</td></tr>`;
+  tbl.innerHTML = h;
+
+  out.innerHTML =
+    `среднее      = <span class="m">${f(m)}</span>\n` +
+    `дисперсия    = ${f(sq.reduce((s, v) => s + v, 0))} / 5 = <span class="v">${f(varr)}</span>\n` +
+    `станд. откл. = sqrt(${f(varr)}) = <span class="s">${f(Math.sqrt(varr))}</span>`;
+  out.style.whiteSpace = 'pre';
+
+  verdict.textContent =
+    varr === 0 ? 'разброса нет вообще — все числа одинаковые'
+    : varr < 1.5 ? 'жмутся к среднему — кучно'
+    : varr < 5 ? 'заметный разброс'
+    : 'разлетелись далеко';
+}
+
+let drag = null;
+function pt(e) {
+  const r = svg.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return (t.clientX - r.left) * (W / r.width);
+}
+svg.addEventListener('mousedown', e => {
+  const i = e.target.getAttribute && e.target.getAttribute('data-i');
+  if (i !== null && i !== undefined) drag = +i;
+});
+svg.addEventListener('touchstart', e => {
+  const i = e.target.getAttribute && e.target.getAttribute('data-i');
+  if (i !== null && i !== undefined) { drag = +i; e.preventDefault(); }
+}, { passive: false });
+function move(e) {
+  if (drag === null) return;
+  e.preventDefault();
+  V[drag] = Math.min(HI, Math.max(LO, Math.round(ux(pt(e)))));
+  draw();
+}
+window.addEventListener('mousemove', move);
+window.addEventListener('touchmove', move, { passive: false });
+window.addEventListener('mouseup', () => drag = null);
+window.addEventListener('touchend', () => drag = null);
+
+document.querySelectorAll('button[data-p]').forEach(b => b.addEventListener('click', () => {
+  V = b.dataset.p.split(',').map(n => 4 + Number(n));
+  draw();
+}));
+
+draw();
+</script>
+</body>
+</html>

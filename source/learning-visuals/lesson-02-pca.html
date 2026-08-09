@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 2 — PCA: выбор угла</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171c22; --line: #2a323c;
+    --text: #e6edf3; --dim: #8b98a5;
+    --a: #4dabf7; --ok: #51cf66; --or: #ff922b; --vio: #b197fc; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px;
+  }
+  .panel { min-width: 330px; flex: 1; max-width: 430px; }
+  svg { display: block; touch-action: none; }
+
+  .ctl { margin-bottom: 14px; }
+  .ctl label { display: block; font: 12px ui-monospace, monospace; color: var(--dim); margin-bottom: 6px; }
+  input[type=range] { width: 100%; accent-color: var(--or); }
+
+  .bars { margin: 6px 0 14px; }
+  .bar { margin-bottom: 10px; }
+  .bar .lab { font: 12px ui-monospace, monospace; color: var(--dim); display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .track { height: 22px; background: #12181e; border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .fill { height: 100%; transition: width .1s; }
+  .fill.f1 { background: linear-gradient(90deg, #ff922b, #ffc078); }
+  .fill.f2 { background: linear-gradient(90deg, #b197fc, #d0bfff); }
+
+  .out { font: 13px/1.9 ui-monospace, monospace; white-space: pre; }
+  .out .v { color: var(--or); font-weight: 700; }
+  .out .w { color: var(--vio); font-weight: 700; }
+  .out .s { color: var(--ok); font-weight: 700; }
+  .out .muted { color: var(--dim); }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    background: #222a33; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 11px; font: 12px ui-monospace, monospace; cursor: pointer;
+  }
+  button:hover { border-color: var(--a); color: var(--a); }
+  button.best { border-color: var(--or); color: var(--or); }
+  .hint { color: var(--dim); font-size: 13px; margin-top: 14px; line-height: 1.7; }
+  .hint b { color: var(--or); }
+  table { border-collapse: collapse; font: 12px ui-monospace, monospace; margin-top: 12px; width: 100%; }
+  th, td { padding: 4px 6px; text-align: right; }
+  th { color: var(--dim); font-weight: 600; }
+  td.n { text-align: left; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>PCA — поворачивай ось и смотри, куда течёт разброс</h1>
+<p class="sub">Пять студентов, два экзамена. Сумма разбросов всегда 400 — меняется только то, как она поделена.</p>
+
+<div class="wrap">
+  <div class="card">
+    <svg id="plot" width="440" height="440"></svg>
+  </div>
+
+  <div class="card panel">
+    <div class="ctl">
+      <label>угол новой оси: <span id="angLab"></span></label>
+      <input type="range" id="ang" min="0" max="180" step="1" value="0">
+    </div>
+
+    <div class="bars">
+      <div class="bar">
+        <div class="lab"><span>ось 1 (оранжевая)</span><span id="v1"></span></div>
+        <div class="track"><div class="fill f1" id="b1"></div></div>
+      </div>
+      <div class="bar">
+        <div class="lab"><span>ось 2 (фиолетовая, перпендикулярна)</span><span id="v2"></span></div>
+        <div class="track"><div class="fill f2" id="b2"></div></div>
+      </div>
+    </div>
+
+    <div class="out" id="out"></div>
+
+    <div class="row">
+      <button data-a="0">оси как есть (математика)</button>
+      <button data-a="45" class="best">45° — главная компонента</button>
+      <button data-a="90">физика</button>
+      <button data-a="135">поперёк — худший угол</button>
+    </div>
+
+    <table id="tbl"></table>
+
+    <p class="hint">
+      На <b>45°</b> оранжевая ось ловит 380 из 400, это 95%. На
+      <b>135°</b> — наоборот, всего 20. Ось одна и та же длина, данные
+      те же; разница только в угле съёмки.
+    </p>
+  </div>
+</div>
+
+<script>
+const NAMES = ['Кира', 'Лёва', 'Марк', 'Нина', 'Олег'];
+const DATA = [[90, 90], [70, 60], [50, 50], [80, 80], [60, 70]];
+const MX = 70, MY = 70;
+const DEV = DATA.map(p => [p[0] - MX, p[1] - MY]);
+
+const S = 440, C = S / 2, U = 4.2;   // пикселей на единицу отклонения
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('plot');
+const angEl = document.getElementById('ang');
+
+function el(t, a, txt) {
+  const n = document.createElementNS(NS, t);
+  for (const k in a) n.setAttribute(k, a[k]);
+  if (txt !== undefined) n.textContent = txt;
+  return n;
+}
+const px = d => ({ x: C + d[0] * U, y: C - d[1] * U });
+
+function variance(vals) {
+  const m = vals.reduce((s, v) => s + v, 0) / vals.length;
+  return vals.reduce((s, v) => s + (v - m) ** 2, 0) / vals.length;
+}
+
+function draw() {
+  const deg = +angEl.value;
+  const th = deg * Math.PI / 180;
+  const u = [Math.cos(th), Math.sin(th)];          // ось 1
+  const w = [-Math.sin(th), Math.cos(th)];         // ось 2, перпендикулярна
+
+  const p1 = DEV.map(d => d[0] * u[0] + d[1] * u[1]);
+  const p2 = DEV.map(d => d[0] * w[0] + d[1] * w[1]);
+  const var1 = variance(p1), var2 = variance(p2);
+  const tot = var1 + var2;
+
+  svg.innerHTML = '';
+  svg.appendChild(el('rect', { x: 0, y: 0, width: S, height: S, fill: '#12181e', rx: 8 }));
+
+  // сетка
+  for (let i = -40; i <= 40; i += 10) {
+    const c = i === 0 ? '#3d4650' : '#1c242c';
+    svg.appendChild(el('line', { x1: C + i * U, y1: 0, x2: C + i * U, y2: S, stroke: c }));
+    svg.appendChild(el('line', { x1: 0, y1: C + i * U, x2: S, y2: C + i * U, stroke: c }));
+  }
+  svg.appendChild(el('text', { x: S - 8, y: C - 8, fill: '#8b98a5', 'font-size': 11,
+    'text-anchor': 'end', 'font-family': 'ui-monospace, monospace' }, 'математика →'));
+  svg.appendChild(el('text', { x: C + 8, y: 14, fill: '#8b98a5', 'font-size': 11,
+    'font-family': 'ui-monospace, monospace' }, 'физика ↑'));
+
+  const L = 300;
+  // ось 2
+  svg.appendChild(el('line', {
+    x1: C - w[0] * L, y1: C + w[1] * L, x2: C + w[0] * L, y2: C - w[1] * L,
+    stroke: '#b197fc', 'stroke-width': 2, opacity: .5
+  }));
+  // ось 1
+  svg.appendChild(el('line', {
+    x1: C - u[0] * L, y1: C + u[1] * L, x2: C + u[0] * L, y2: C - u[1] * L,
+    stroke: '#ff922b', 'stroke-width': 3
+  }));
+
+  // проекции
+  DEV.forEach((d, i) => {
+    const P = px(d);
+    const q = px([u[0] * p1[i], u[1] * p1[i]]);
+    svg.appendChild(el('line', {
+      x1: P.x, y1: P.y, x2: q.x, y2: q.y,
+      stroke: '#b197fc', 'stroke-width': 1.3, 'stroke-dasharray': '4 3', opacity: .8
+    }));
+    svg.appendChild(el('circle', { cx: q.x, cy: q.y, r: 5, fill: '#ff922b' }));
+  });
+
+  // точки
+  DEV.forEach((d, i) => {
+    const P = px(d);
+    svg.appendChild(el('circle', { cx: P.x, cy: P.y, r: 8, fill: '#4dabf7', stroke: '#0f1216', 'stroke-width': 2 }));
+    svg.appendChild(el('text', {
+      x: P.x, y: P.y - 14, fill: '#e6edf3', 'font-size': 11, 'text-anchor': 'middle',
+      'font-family': 'ui-monospace, monospace'
+    }, NAMES[i]));
+  });
+
+  update(deg, var1, var2, tot, p1, p2);
+}
+
+function update(deg, var1, var2, tot, p1, p2) {
+  const f = n => (Math.round(n * 10) / 10).toString();
+  document.getElementById('angLab').textContent = deg + '°';
+  document.getElementById('v1').textContent = f(var1) + '  (' + Math.round(var1 / tot * 100) + '%)';
+  document.getElementById('v2').textContent = f(var2) + '  (' + Math.round(var2 / tot * 100) + '%)';
+  document.getElementById('b1').style.width = (var1 / 400 * 100) + '%';
+  document.getElementById('b2').style.width = (var2 / 400 * 100) + '%';
+
+  document.getElementById('out').innerHTML =
+    `разброс на оси 1 = <span class="v">${f(var1)}</span>\n` +
+    `разброс на оси 2 = <span class="w">${f(var2)}</span>\n` +
+    `сумма            = <span class="s">${f(tot)}</span>   <span class="muted">всегда 400</span>\n\n` +
+    `оставим только ось 1: <span class="v">${Math.round(var1 / tot * 100)}%</span> информации`;
+
+  let h = '<tr><th class="n" style="text-align:left">кто</th><th>ось 1</th><th>ось 2</th></tr>';
+  NAMES.forEach((n, i) => {
+    h += `<tr><td class="n">${n}</td><td style="color:#ff922b">${f(p1[i])}</td>` +
+         `<td style="color:#b197fc">${f(p2[i])}</td></tr>`;
+  });
+  document.getElementById('tbl').innerHTML = h;
+}
+
+angEl.addEventListener('input', draw);
+document.querySelectorAll('button[data-a]').forEach(b => b.addEventListener('click', () => {
+  angEl.value = b.dataset.a;
+  draw();
+}));
+draw();
+</script>
+</body>
+</html>

@@ -5,8 +5,11 @@ import { loadConfig } from "./config";
 const FIXTURE = path.resolve(__dirname, "../../tests/fixtures/course");
 
 describe("loadConfig", () => {
-  it("падает, если COURSE_REPO не задан", () => {
-    expect(() => loadConfig({} as NodeJS.ProcessEnv)).toThrow(/COURSE_REPO/);
+  it("работает без COURSE_REPO — импорт просто недоступен", () => {
+    const cfg = loadConfig({} as NodeJS.ProcessEnv);
+    expect(cfg.courseRepo).toBeNull();
+    expect(path.isAbsolute(cfg.sourceDir)).toBe(true);
+    expect(cfg.sourceDir.endsWith("source")).toBe(true);
   });
 
   it("падает, если COURSE_REPO указывает не на директорию", () => {
@@ -14,15 +17,13 @@ describe("loadConfig", () => {
       .toThrow(/не найдена/);
   });
 
-  it("отдаёт абсолютные пути и агента по умолчанию", () => {
+  it("принимает существующий COURSE_REPO", () => {
     const cfg = loadConfig({ COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv);
     expect(cfg.courseRepo).toBe(FIXTURE);
-    expect(cfg.agent).toBe("claude");
-    expect(path.isAbsolute(cfg.contentDir)).toBe(true);
   });
 
-  it("уважает AGENT=codex", () => {
-    const cfg = loadConfig({ COURSE_REPO: FIXTURE, AGENT: "codex" } as NodeJS.ProcessEnv);
-    expect(cfg.agent).toBe("codex");
+  it("агент по умолчанию claude, AGENT=codex переключает", () => {
+    expect(loadConfig({} as NodeJS.ProcessEnv).agent).toBe("claude");
+    expect(loadConfig({ AGENT: "codex" } as NodeJS.ProcessEnv).agent).toBe("codex");
   });
 });
