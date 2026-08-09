@@ -10,7 +10,15 @@ import { readWrittenFunctions } from "@/lib/source/written-functions";
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const from = Number(new URL(request.url).searchParams.get("from") ?? "0");
+  const rawFrom = new URL(request.url).searchParams.get("from") ?? "0";
+  const from = Number(rawFrom);
+  if (!Number.isInteger(from) || from < 0) {
+    return Response.json(
+      { error: `Параметр from должен быть целым числом ≥ 0, получено: ${rawFrom}` },
+      { status: 400 },
+    );
+  }
+
   const config = loadConfig();
   const deps = defaultDeps(config);
 
@@ -18,11 +26,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const ref = findLesson(config.sourceDir, slug);
     if (!ref) throw new Error("Урок не найден");
     const source = readLessonSource(config.sourceDir, ref);
-    const written = readWrittenFunctions(config.sourceDir);
 
     let plan = readLessonPlan(config.contentDir, slug);
     if (!plan || isStale(plan, source)) {
       send("progress", { stage: "plan", text: "Составляю план урока" });
+      const written = readWrittenFunctions(config.sourceDir);
       plan = await generateLessonPlan({
         contentDir: config.contentDir,
         source,
@@ -40,7 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       contentDir: config.contentDir,
       source,
       plan,
-      fromIndex: Number.isFinite(from) ? from : 0,
+      fromIndex: from,
       deps,
       onEvent: (event) => {
         if (event.type === "text") send("progress", { stage: "steps", text: event.text });

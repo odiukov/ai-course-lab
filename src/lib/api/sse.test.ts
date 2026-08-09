@@ -24,4 +24,26 @@ describe("sseStream", () => {
     });
     expect(await readAll(response)).toContain("всё сломалось");
   });
+
+  it("добавляет kind в событие error, если он есть у ошибки", async () => {
+    const response = sseStream(async () => {
+      const error = new Error("упёрлись в лимит") as Error & { kind: string };
+      error.kind = "limit";
+      throw error;
+    });
+    const body = await readAll(response);
+    expect(body).toContain("event: error");
+    expect(body).toContain('"message":"упёрлись в лимит"');
+    expect(body).toContain('"kind":"limit"');
+  });
+
+  it("не добавляет kind для обычной ошибки без этого поля", async () => {
+    const response = sseStream(async () => {
+      throw new Error("обычная ошибка");
+    });
+    const body = await readAll(response);
+    expect(body).toContain("event: error");
+    expect(body).toContain('"message":"обычная ошибка"');
+    expect(body).not.toContain("kind");
+  });
 });
