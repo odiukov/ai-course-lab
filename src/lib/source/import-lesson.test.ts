@@ -15,6 +15,10 @@ function beta() {
   return findLesson(COURSE, "01-math-foundations__02-beta")!;
 }
 
+function gamma() {
+  return findLesson(COURSE, "02-ml-fundamentals__01-gamma")!;
+}
+
 describe("importLesson", () => {
   it("переносит текст, перевод, квиз, визуализацию и упражнение", () => {
     const sourceDir = tmp();
@@ -32,9 +36,30 @@ describe("importLesson", () => {
 
   it("не тащит визуализации и упражнения чужих уроков", () => {
     const sourceDir = tmp();
-    importLesson(COURSE, sourceDir, findLesson(COURSE, "01-math-foundations__01-alpha")!);
-    expect(fs.existsSync(path.join(sourceDir, "learning-visuals"))).toBe(false);
+    const result = importLesson(COURSE, sourceDir, findLesson(COURSE, "01-math-foundations__01-alpha")!);
+    // alpha — фаза 1, урок 1: легаси-имя lesson-01-* однозначно принадлежит
+    // ей по правилам фазы 1, поэтому копируется. Но phase-qualified файл
+    // другого урока (p02-l01-gamma.html) и чужие упражнения не появляются.
+    const visuals = result.copied.filter((rel) => rel.startsWith("learning-visuals/"));
+    expect(visuals).toEqual(["learning-visuals/lesson-01-gamma-demo.html"]);
     expect(fs.existsSync(path.join(sourceDir, "learning-exercises"))).toBe(false);
+  });
+
+  it("не путает лёгаси-имя визуализации другой фазы с тем же номером урока", () => {
+    const sourceDir = tmp();
+    const result = importLesson(COURSE, sourceDir, gamma());
+    // gamma — это phase 2, lesson 1. Лёгаси-имя lesson-01-* принадлежит
+    // только фазе 1, поэтому gamma не должна получить lesson-01-gamma-demo.html.
+    expect(fs.existsSync(path.join(sourceDir, "learning-visuals", "lesson-01-gamma-demo.html"))).toBe(false);
+    expect(result.copied).not.toContain("learning-visuals/lesson-01-gamma-demo.html");
+  });
+
+  it("тащит визуализацию с полным именем phase+lesson", () => {
+    const sourceDir = tmp();
+    const result = importLesson(COURSE, sourceDir, gamma());
+    expect(fs.existsSync(path.join(sourceDir, "learning-visuals", "p02-l01-gamma.html"))).toBe(true);
+    const visuals = result.copied.filter((rel) => rel.startsWith("learning-visuals/"));
+    expect(visuals).toEqual(["learning-visuals/p02-l01-gamma.html"]);
   });
 
   it("не перетирает уже импортированные файлы", () => {
@@ -47,6 +72,24 @@ describe("importLesson", () => {
     expect(fs.readFileSync(mine, "utf8")).toBe("мой правленый текст");
     expect(again.copied).toEqual([]);
     expect(again.skipped.length).toBeGreaterThan(5);
+  });
+
+  it("падает, а не угадывает, если под префикс попадают два каталога упражнения", () => {
+    const courseRepo = tmp();
+    const ref = {
+      slug: "01-ambiguous__01-dup",
+      phaseDir: "01-ambiguous",
+      lessonDir: "01-dup",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Dup",
+    };
+    fs.mkdirSync(path.join(courseRepo, "phases", ref.phaseDir, ref.lessonDir, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(courseRepo, "phases", ref.phaseDir, ref.lessonDir, "docs", "en.md"), "text");
+    fs.mkdirSync(path.join(courseRepo, "learning-exercises", "p01-l01-foo"), { recursive: true });
+    fs.mkdirSync(path.join(courseRepo, "learning-exercises", "p01-l01-bar"), { recursive: true });
+
+    expect(() => importLesson(courseRepo, tmp(), ref)).toThrow(/p01-l01-foo.*p01-l01-bar|p01-l01-bar.*p01-l01-foo/);
   });
 });
 

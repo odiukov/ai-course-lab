@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { LessonRef } from "./catalog";
+import { pad2, visualPrefixes } from "./visual-naming";
 
 const SKIP_DIRS = new Set(["__pycache__", ".pytest_cache"]);
 const SKIP_EXT = new Set([".pyc"]);
@@ -9,10 +10,6 @@ export interface ImportResult {
   slug: string;
   copied: string[];
   skipped: string[];
-}
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
 }
 
 function walk(dir: string): string[] {
@@ -54,9 +51,9 @@ export function importLesson(courseRepo: string, sourceDir: string, ref: LessonR
 
   const visualsDir = path.join(courseRepo, "learning-visuals");
   if (fs.existsSync(visualsDir)) {
-    const prefix = `lesson-${pad2(ref.lessonNumber)}-`;
+    const prefixes = visualPrefixes(ref);
     for (const name of fs.readdirSync(visualsDir)) {
-      if (name.startsWith(prefix) && name.endsWith(".html")) {
+      if (name.endsWith(".html") && prefixes.some((prefix) => name.startsWith(prefix))) {
         copyFile(courseRepo, sourceDir, path.join(visualsDir, name), result);
       }
     }
@@ -65,7 +62,13 @@ export function importLesson(courseRepo: string, sourceDir: string, ref: LessonR
   const exercisesRoot = path.join(courseRepo, "learning-exercises");
   if (fs.existsSync(exercisesRoot)) {
     const prefix = `p${pad2(ref.phaseNumber)}-l${pad2(ref.lessonNumber)}-`;
-    const found = fs.readdirSync(exercisesRoot).find((name) => name.startsWith(prefix));
+    const candidates = fs.readdirSync(exercisesRoot).filter((name) => name.startsWith(prefix));
+    if (candidates.length > 1) {
+      throw new Error(
+        `Неоднозначное совпадение упражнения для ${ref.slug}: ${candidates.join(", ")}`,
+      );
+    }
+    const found = candidates[0];
     if (found) copyTree(courseRepo, sourceDir, path.join("learning-exercises", found), result);
   }
 

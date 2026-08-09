@@ -39,7 +39,17 @@ describe("readLessonSource", () => {
   it("находит визуализации по номеру урока", () => {
     expect(source("01-math-foundations__02-beta").visuals)
       .toEqual(["learning-visuals/lesson-02-shapes.html"]);
-    expect(source("01-math-foundations__01-alpha").visuals).toEqual([]);
+    // alpha — фаза 1, урок 1: легаси-имя lesson-01-* однозначно принадлежит
+    // ей по правилам фазы 1.
+    expect(source("01-math-foundations__01-alpha").visuals)
+      .toEqual(["learning-visuals/lesson-01-gamma-demo.html"]);
+  });
+
+  it("для визуализаций вне фазы 1 требует полное имя phase+lesson", () => {
+    // gamma — фаза 2, урок 1. Лёгаси-имя lesson-01-* принадлежит только
+    // фазе 1 и не подходит; находится только phase-qualified файл.
+    expect(source("02-ml-fundamentals__01-gamma").visuals)
+      .toEqual(["learning-visuals/p02-l01-gamma.html"]);
   });
 
   it("находит упражнение и публичные функции", () => {
