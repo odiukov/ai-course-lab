@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
 import { validatePlan, writeLessonPlan, type LessonPlan } from "../content/lesson-plan";
+import { repoRelative } from "../content/paths";
 import { stepMetaSchema } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
 import type { WrittenFunction } from "../source/written-functions";
@@ -119,7 +120,7 @@ export async function generateLessonPlan(opts: {
           slug: source.ref.slug,
           title: source.ref.title,
           lang: source.lang,
-          sourcePath: source.textPath,
+          sourcePath: repoRelative(source.textPath),
           sourceHash: source.sourceHash,
           generatedAt: new Date().toISOString(),
           steps: parsed.data,

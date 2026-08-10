@@ -74,6 +74,18 @@ describe("generateLessonPlan", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("пишет sourcePath относительно корня репозитория, а не абсолютным", async () => {
+    // lesson.json лежит в git: абсолютный путь утёк бы вместе с раскладкой
+    // машины автора и был бы бесполезен в любом другом клоне.
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("```json\n" + VALID + "\n```");
+    const plan = await generateLessonPlan({ contentDir, source: SOURCE, deps: { run } });
+    expect(path.isAbsolute(plan.sourcePath)).toBe(false);
+    expect(plan.sourcePath).toBe(
+      "tests/fixtures/course/i18n/ru/phases/01-math-foundations/02-beta/docs/ru.md",
+    );
+  });
+
   it("перезапрашивает один раз, если план нарушает правила", async () => {
     const contentDir = tmpDir();
     const run = vi
