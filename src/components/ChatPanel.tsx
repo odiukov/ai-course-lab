@@ -15,10 +15,12 @@ interface Message {
 export function ChatPanel({
   slug,
   stepId,
+  draft,
   onKept,
 }: {
   slug: string;
   stepId: string;
+  draft?: { text: string; at: number } | null;
   onKept: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -26,6 +28,13 @@ export function ChatPanel({
   const [streaming, setStreaming] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Кнопка «Объясни» из блока вопросов подставляет готовый текст в это же поле.
+  // Ключ по `at`, а не по тексту: два одинаковых нажатия должны сработать оба.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- подстановка текста из блока вопросов
+    if (draft) setQuestion(draft.text);
+  }, [draft]);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/lesson/${slug}/chat?stepId=${encodeURIComponent(stepId)}`);

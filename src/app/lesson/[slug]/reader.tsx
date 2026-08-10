@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
 import { Clarifications } from "@/components/Clarifications";
 import { ExercisePanel } from "@/components/ExercisePanel";
+import { QuestionSet } from "@/components/QuestionSet";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -42,27 +43,6 @@ interface LessonData {
   clarifications: Record<string, ClarificationData[]>;
   progress: { readStepIds: string[]; resumeStepId: string | null };
   source: { title: string };
-}
-
-// Renders the questions a `check` step already carries in its frontmatter as
-// plain text: question and options, no correct answer, no interactivity. The
-// answering UI belongs to a later slice; showing what exists beats showing a
-// placeholder that pretends nothing was written.
-function CheckQuestions({ questions }: { questions: CheckQuestion[] }) {
-  return (
-    <ol className="list-decimal space-y-4 rounded bg-slate-100 px-4 py-3 pl-8 text-sm dark:bg-slate-800">
-      {questions.map((item, index) => (
-        <li key={index} className="space-y-1">
-          <p className="font-medium">{item.question}</p>
-          <ul className="list-disc pl-5">
-            {item.options.map((option, optionIndex) => (
-              <li key={optionIndex}>{option}</li>
-            ))}
-          </ul>
-        </li>
-      ))}
-    </ol>
-  );
 }
 
 function ErrorBanner({ message }: { message: string }) {
@@ -103,6 +83,7 @@ export function Reader({
   // after it arrives and the learner never sees why nothing was written.
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ text: string; at: number } | null>(null);
 
   // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
   // the URL. `replace` (not `push`) so the back button leaves the lesson
@@ -296,11 +277,16 @@ export function Reader({
         )}
         {step.type === "check" &&
           (step.check && step.check.length > 0 ? (
-            <CheckQuestions questions={step.check} />
+            <QuestionSet
+              slug={slug}
+              stepId={step.id}
+              questions={step.check}
+              onExplain={(text) => setDraft({ text, at: Date.now() })}
+              onProgressChanged={() => void load()}
+            />
           ) : (
             <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-              Вопросы к этому шагу ещё не готовы — они появятся в следующем срезе. Пока проверь себя
-              сам и иди дальше.
+              Вопросы к этому шагу ещё не написаны — перегенерируй шаг или иди дальше.
             </p>
           ))}
         {step.type === "quiz" && (
@@ -359,7 +345,7 @@ export function Reader({
       </article>
 
       <aside className="lg:sticky lg:top-10 lg:h-[calc(100vh-5rem)]">
-        <ChatPanel slug={slug} stepId={step.id} onKept={() => void load()} />
+        <ChatPanel slug={slug} stepId={step.id} draft={draft} onKept={() => void load()} />
       </aside>
     </div>
   );
