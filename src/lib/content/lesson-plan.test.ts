@@ -51,6 +51,21 @@ describe("validatePlan", () => {
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/001-t/);
   });
 
+  // Из id собирается имя файла шага, уточнения и схемы, а /api/visual берёт
+  // его как сегмент — так что форму надо ловить в плане, а не в ридере.
+  it.each(["004-длина", "004.dlina", "../../../etc/passwd", "a/b", "004 dlina", ""])(
+    "ругается на id недопустимой формы: %s",
+    (id) => {
+      const bad = [...GOOD, step({ id, type: "theory" })];
+      expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/имя файла/);
+    },
+  );
+
+  it("не ругается на id вида 004-dlina", () => {
+    expect(validatePlan(GOOD, SOURCE)).toEqual([]);
+    expect(validatePlan([...GOOD, step({ id: "005_zachem-2", type: "theory" })], SOURCE)).toEqual([]);
+  });
+
   it("требует покрыть все функции упражнения", () => {
     const bad = GOOD.slice(0, 2);
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/matmul/);

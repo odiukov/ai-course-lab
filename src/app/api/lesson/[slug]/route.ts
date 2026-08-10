@@ -29,20 +29,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   // ходили бы за данными, которые уже лежат рядом.
   const progress = readLessonProgress(openProgressDb(config.dataDir), slug);
 
-  // visual_brief — задание рисовальщику, ридеру оно не нужно; вместо него
-  // едет факт «файл на диске есть». Отбрасывается тем же приёмом, что `body`
-  // в serializeStep (step-file.ts:48) — лишняя переменная в деструктуризации
-  // здесь не ошибка линта, а сложившийся в репо способ выкинуть поле.
-  const drawn = new Set(readGeneratedVisualIds(config.contentDir, slug, Object.keys(steps)));
+  // Спрашивается план, а не то, что лежит в steps: файл схемы принадлежит
+  // шагу, который её попросил, а не id, который однажды им был.
+  const drawn = new Set(readGeneratedVisualIds(config.contentDir, slug, plan?.steps ?? []));
 
   return Response.json({
     plan,
     stale: plan ? isStale(plan, source) : false,
     steps: Object.fromEntries(
-      Object.entries(steps).map(([id, step]) => {
-        const { visual_brief, ...rest } = step;
-        return [id, { ...rest, generatedVisual: drawn.has(id) }];
-      }),
+      Object.entries(steps).map(([id, step]) => [
+        id,
+        // visual_brief — задание рисовальщику, ридеру оно не нужно; вместо
+        // него едет факт «файл на диске есть». Затирается в undefined, а не
+        // выбрасывается деструктуризацией: JSON.stringify undefined-поля
+        // опускает, и лишней неиспользуемой переменной не появляется.
+        { ...step, visual_brief: undefined, generatedVisual: drawn.has(id) },
+      ]),
     ),
     clarifications: Object.fromEntries(readLessonClarifications(config.contentDir, slug)),
     progress: {

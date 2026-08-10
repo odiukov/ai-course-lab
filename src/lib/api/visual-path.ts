@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { lessonPaths } from "../content/paths";
+import { lessonPaths, SAFE_SEGMENT } from "../content/paths";
 
 export type VisualPathResolution =
   | { ok: true; path: string }
@@ -54,13 +54,6 @@ export function resolveVisualPath(sourceDir: string, rel: string): VisualPathRes
 
   return { ok: true, path: canonicalTarget };
 }
-
-// Slug урока и id шага — сегменты имени файла, не пути. Плоский набор
-// символов, никаких точек: `..`, `a/b` и `a\b` отсекаются до обращения к
-// диску. Проверка не косметическая — план это сгенерированный файл, который
-// написала модель, так что `../../../etc/passwd` в поле id — реалистичный
-// вход, а lessonPaths послушно соберёт из него путь.
-const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 /**
  * То же, что resolveVisualPath, но для схем, которые проект нарисовал сам:

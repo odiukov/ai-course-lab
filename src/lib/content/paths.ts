@@ -24,6 +24,20 @@ export function repoRelative(target: string, root: string = process.cwd()): stri
   return rel.split(path.sep).join("/");
 }
 
+/**
+ * Slug урока и id шага — сегменты имени файла, не пути. Плоский набор
+ * символов, никаких точек: `..`, `a/b` и `a\b` отсекаются до обращения к
+ * диску. Проверка не косметическая — план это сгенерированный файл, который
+ * написала модель, так что `../../../etc/passwd` в поле id — реалистичный
+ * вход, а lessonPaths послушно соберёт из него путь.
+ *
+ * Живёт рядом с lessonPaths, а не у читающей стороны, потому что путь из id
+ * собирается здесь, и опираться на одно правило должны оба конца: раздача
+ * (resolveGeneratedVisualPath) и запись (drawVisual). Форму id стережёт
+ * validatePlan — до того, как план ляжет на диск.
+ */
+export const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
 export function lessonPaths(contentDir: string, slug: string): LessonPaths {
   const dir = path.join(contentDir, "lessons", slug);
   const stepsDir = path.join(dir, "steps");
