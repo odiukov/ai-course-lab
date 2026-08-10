@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readWrittenFunctions } from "./written-functions";
+import { readWrittenFunctions, parseTopLevelFunctions, isFunctionImplemented } from "./written-functions";
 
 function makeSource(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "written-"));
@@ -127,5 +127,53 @@ def adamw_step(
 `;
     const dir = makeSource({ "learning-exercises/p01-l02-beta/exercise.py": source });
     expect(readWrittenFunctions(dir).map((w) => w.fn)).toEqual(["fetch_data"]);
+  });
+});
+
+describe("parseTopLevelFunctions — границы блоков", () => {
+  it("отдаёт 1-based строки начала и конца каждой функции", () => {
+    const source = [
+      "import math",          // 1
+      "",                     // 2
+      "def first(a):",        // 3
+      "    return a + 1",     // 4
+      "",                     // 5
+      "",                     // 6
+      "def second(b):",       // 7
+      "    # комментарий",    // 8
+      "    return b",         // 9
+      "",                     // 10
+    ].join("\n");
+
+    const blocks = parseTopLevelFunctions(source);
+    expect(blocks.map((block) => [block.fn, block.startLine, block.endLine])).toEqual([
+      ["first", 3, 4],
+      ["second", 7, 9],
+    ]);
+  });
+
+  it("многострочная сигнатура: начало на def, конец на последней значимой строке", () => {
+    const source = [
+      "def wide(",            // 1
+      "    a,",               // 2
+      "    b,",               // 3
+      "):",                   // 4
+      '    """док."""',       // 5
+      "    return a * b",     // 6
+    ].join("\n");
+
+    const [block] = parseTopLevelFunctions(source);
+    expect([block.startLine, block.endLine]).toEqual([1, 6]);
+  });
+
+  it("код верхнего уровня после функции не попадает в её границы", () => {
+    const source = ["def only(a):", "    return a", "", "PRINTED = 1"].join("\n");
+    const [block] = parseTopLevelFunctions(source);
+    expect(block.endLine).toBe(2);
+  });
+
+  it("isFunctionImplemented экспортирован и отличает заготовку от кода", () => {
+    expect(isFunctionImplemented(["    raise NotImplementedError"])).toBe(false);
+    expect(isFunctionImplemented(['    """док."""', "    return 1"])).toBe(true);
   });
 });

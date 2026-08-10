@@ -14,6 +14,10 @@ export interface FunctionBlock {
   fn: string;
   params: string;
   body: string[];
+  /** 1-based line of the `def` keyword. */
+  startLine: number;
+  /** 1-based last non-empty line of the block, header included. */
+  endLine: number;
 }
 
 // Matches the start of a top-level `def`/`async def` header. The parameter
@@ -84,7 +88,13 @@ export function parseTopLevelFunctions(source: string): FunctionBlock[] {
     if (match) {
       if (current) blocks.push(current);
       const { params, endIndex } = readHeaderParams(lines, i);
-      current = { fn: match[1], params, body: [] };
+      current = {
+        fn: match[1],
+        params,
+        body: [],
+        startLine: i + 1,
+        endLine: endIndex + 1,
+      };
       i = endIndex + 1;
       continue;
     }
@@ -98,6 +108,9 @@ export function parseTopLevelFunctions(source: string): FunctionBlock[] {
       continue;
     }
     current.body.push(line);
+    // Пустые строки в конец блока не входят: между функциями их две по PEP 8,
+    // и включённые в границы они склеили бы сворачивание соседних функций.
+    if (line.trim().length > 0) current.endLine = i + 1;
     i++;
   }
 
@@ -116,7 +129,7 @@ function withoutDocstring(lines: string[]): string[] {
   return end === -1 ? [] : rest.slice(end + 1);
 }
 
-function isImplemented(body: string[]): boolean {
+export function isFunctionImplemented(body: string[]): boolean {
   const meaningful = body
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"));
@@ -150,7 +163,7 @@ export function readWrittenFunctions(sourceDir: string): WrittenFunction[] {
     if (!fs.existsSync(file)) continue;
     const source = fs.readFileSync(file, "utf8");
     for (const block of parseTopLevelFunctions(source)) {
-      if (!isImplemented(block.body)) continue;
+      if (!isFunctionImplemented(block.body)) continue;
       written.push({
         fn: block.fn,
         exerciseSlug,
