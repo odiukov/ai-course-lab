@@ -30,8 +30,19 @@ export function buildClarificationContext(opts: {
 }): string {
   const { contentDir, slug, steps, beforeStepId } = opts;
   const cutoff = steps.findIndex((step) => step.id === beforeStepId);
+  // Шаг не найден среди known steps — мы не можем определить границу
+  // "до текущего". По умолчанию (includeCurrent: false, генерация
+  // следующего шага) это нужно читать консервативно: раз граница не
+  // распознана, ни один шаг не считается надёжно "предыдущим", иначе в
+  // контекст генерации мог бы протечь материал по шагам, которых там быть
+  // не должно. С includeCurrent: true (чат) риск ниже — сохраняем прежнее
+  // поведение и берём весь известный список.
   const limit =
-    cutoff === -1 ? steps.length : cutoff + (opts.includeCurrent ? 1 : 0);
+    cutoff === -1
+      ? opts.includeCurrent
+        ? steps.length
+        : 0
+      : cutoff + (opts.includeCurrent ? 1 : 0);
 
   const byStep = readLessonClarifications(contentDir, slug);
   const entries: Entry[] = [];
@@ -50,13 +61,24 @@ export function buildClarificationContext(opts: {
   let used = 0;
   for (const entry of entries) {
     if (bullets.length >= MAX_QUESTIONS) break;
-    const key = entry.item.question.trim().toLowerCase();
+    // Ключ дедупликации схлопывает внутренние пробелы/переносы — только для
+    // сравнения, не для отображаемого текста — иначе один и тот же вопрос,
+    // набранный с лишним пробелом, съедал бы бюджет дважды.
+    const key = entry.item.question.trim().toLowerCase().replace(/\s+/g, " ");
     if (seen.has(key)) continue;
-    seen.add(key);
     const line = `- «${entry.item.question}» (шаг: ${entry.stepTitle})`;
-    if (used + line.length > MAX_QUESTIONS_CHARS) break;
+    // +1 — перенос строки, которым этот пункт будет отделён от следующей
+    // строки при итоговой сборке через join("\n"); без него бюджет считал
+    // только сами пункты и пропускал разделители между ними.
+    const cost = line.length + 1;
+    // Кандидат, который не влезает, пропускаем и пробуем следующий, а не
+    // останавливаем весь перебор — иначе один переразмеренный вопрос
+    // посередине списка (по свежести) обрезает всё, что старше него, даже
+    // если оно короче и продолжало бы влезать в бюджет.
+    if (used + cost > MAX_QUESTIONS_CHARS) continue;
+    seen.add(key);
     bullets.push(line);
-    used += line.length;
+    used += cost;
   }
 
   const newest = entries[0];

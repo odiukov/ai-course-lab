@@ -139,6 +139,82 @@ describe("buildClarificationContext", () => {
     expect(text.length).toBeLessThan(2500);
   });
 
+  it("пропускает не влезший кандидат вместо остановки всего перебора", () => {
+    const contentDir = tmpDir();
+    const smallStepTitle = "T";
+    const stepsForThisTest: StepMeta[] = [
+      { id: "001-t", type: "theory", title: smallStepTitle },
+    ];
+    // Длина пустого пункта списка при этом заголовке шага — точка отсчёта,
+    // от которой достраивается вопрос нужной длины, без ручного подсчёта
+    // кириллических символов.
+    const overhead = `- «» (шаг: ${smallStepTitle})`.length;
+    const targetLineLengths = [33, 983, 513, 17];
+    const askedMinutes = ["04", "03", "02", "01"];
+    targetLineLengths.forEach((targetLength, index) => {
+      const prefix = `Q${index}-`;
+      const question = prefix + "a".repeat(targetLength - overhead - prefix.length);
+      appendClarification(contentDir, SLUG, "001-t", {
+        askedAt: `2026-08-10T09:${askedMinutes[index]}:00.000Z`,
+        question,
+        answer: "ответ",
+      });
+    });
+
+    const text = buildClarificationContext({
+      contentDir,
+      slug: SLUG,
+      steps: stepsForThisTest,
+      beforeStepId: "001-t",
+      includeCurrent: true,
+    });
+
+    const bullets = text.split("\n").filter((line) => line.startsWith("- «"));
+    // 33 (Q0) и 983 (Q1) влезают, 513 (Q2) не влезает и должен быть
+    // пропущен, а не обрывать перебор — 17-символьный (Q3) идёт следом
+    // и явно влезает.
+    expect(bullets).toHaveLength(3);
+    expect(text).toContain("Q0-");
+    expect(text).toContain("Q1-");
+    expect(text).not.toContain("Q2-");
+    expect(text).toContain("Q3-");
+  });
+
+  it("на неизвестном beforeStepId без includeCurrent не тянет уточнения других шагов", () => {
+    const contentDir = tmpDir();
+    appendClarification(contentDir, SLUG, "001-t", {
+      askedAt: "2026-08-10T09:00:00.000Z",
+      question: "Вопрос по существующему шагу",
+      answer: "Ответ",
+    });
+
+    const text = buildClarificationContext({
+      contentDir,
+      slug: SLUG,
+      steps: STEPS,
+      beforeStepId: "999-unknown-step",
+    });
+    expect(text).toBe(NO_CLARIFICATIONS);
+  });
+
+  it("на неизвестном beforeStepId с includeCurrent сохраняет прежнее поведение — полный список", () => {
+    const contentDir = tmpDir();
+    appendClarification(contentDir, SLUG, "001-t", {
+      askedAt: "2026-08-10T09:00:00.000Z",
+      question: "Вопрос по существующему шагу",
+      answer: "Ответ",
+    });
+
+    const text = buildClarificationContext({
+      contentDir,
+      slug: SLUG,
+      steps: STEPS,
+      beforeStepId: "999-unknown-step",
+      includeCurrent: true,
+    });
+    expect(text).toContain("Вопрос по существующему шагу");
+  });
+
   it("остаётся в пределах потолка даже на двухстах уточнениях по тысяче символов в каждом поле", () => {
     const contentDir = tmpDir();
     for (let i = 0; i < 200; i += 1) {
