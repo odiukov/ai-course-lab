@@ -120,7 +120,11 @@ export function readExerciseFile(sourceDir: string, ref: LessonRef): ExerciseFil
     file,
     relPath: repoRelative(file),
     code,
-    mtimeMs: Math.round(fs.statSync(file).mtimeMs),
+    // Без округления: mtimeMs — это предусловие записи, и на файловой системе
+    // с наносекундными метками две записи в одну и ту же округлённую
+    // миллисекунду дали бы равные значения, а отложенный PUT прошёл бы
+    // проверку и затёр чужую правку.
+    mtimeMs: fs.statSync(file).mtimeMs,
     functions: describeFunctions(code),
     createdFromTemplate,
   };
@@ -130,7 +134,7 @@ export function exerciseMtimeMs(sourceDir: string, ref: LessonRef): number | nul
   const found = findExercise(sourceDir, ref);
   if (!found) return null;
   const file = exerciseFilePath(sourceDir, found.dir);
-  return fs.existsSync(file) ? Math.round(fs.statSync(file).mtimeMs) : null;
+  return fs.existsSync(file) ? fs.statSync(file).mtimeMs : null;
 }
 
 export interface ExerciseWrite {
@@ -174,7 +178,7 @@ export function writeExerciseCode(
   const file = exerciseFilePath(sourceDir, found.dir);
   writeAtomically(file, code);
   return {
-    mtimeMs: Math.round(fs.statSync(file).mtimeMs),
+    mtimeMs: fs.statSync(file).mtimeMs,
     functions: describeFunctions(code),
   };
 }
@@ -201,7 +205,7 @@ export function writeExerciseCodeIfUnchanged(
   // Файла нет — затирать нечего, и отказ был бы вредным: так выглядит первое
   // сохранение упражнения, чей exercise.py кто-то успел удалить.
   if (fs.existsSync(file)) {
-    const actual = Math.round(fs.statSync(file).mtimeMs);
+    const actual = fs.statSync(file).mtimeMs;
     if (actual !== expectedMtimeMs) {
       const current = fs.readFileSync(file, "utf8");
       return {

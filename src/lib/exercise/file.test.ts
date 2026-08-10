@@ -188,6 +188,29 @@ describe("writeExerciseCodeIfUnchanged", () => {
     expect(fs.readFileSync(target, "utf8")).toBe(outside);
   });
 
+  // Метки времени на APFS наносекундные, и три записи подряд укладываются в
+  // одну и ту же округлённую миллисекунду. Пока mtimeMs округлялся, такие
+  // записи сравнивались как равные, и отложенный PUT проходил предусловие,
+  // хотя файл на диске уже был другим.
+  it("доли миллисекунды не теряются: округлённый mtime — это расхождение", () => {
+    const { sourceDir, dir, file } = prepared();
+    const target = path.join(dir, "exercise.py");
+    const seconds = Math.floor(Date.now() / 1000);
+    fs.utimesSync(target, seconds, seconds + 0.0004);
+
+    const exact = exerciseMtimeMs(sourceDir, ref)!;
+    expect(exact).not.toBe(Math.round(exact));
+    expect(exact).toBe(seconds * 1000 + 0.4);
+
+    const stale = writeExerciseCodeIfUnchanged(sourceDir, ref, "# черновик\n", Math.round(exact));
+    expect("conflict" in stale).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe(file.code);
+
+    // А с точным значением та же запись проходит.
+    const fresh = writeExerciseCodeIfUnchanged(sourceDir, ref, "# черновик\n", exact);
+    expect("conflict" in fresh).toBe(false);
+  });
+
   it("если файла нет вовсе, затирать нечего — пишет", () => {
     const { sourceDir, dir, file } = prepared();
     fs.rmSync(path.join(dir, "exercise.py"));
