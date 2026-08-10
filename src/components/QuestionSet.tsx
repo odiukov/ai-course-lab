@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchJson } from "@/lib/api/fetch-json";
 
 interface PublicQuestion {
   question: string;
@@ -53,18 +54,15 @@ export function QuestionSet({
     const isCurrent = () =>
       currentStepRef.current.slug === startedFor.slug && currentStepRef.current.stepId === startedFor.stepId;
 
-    const response = await fetch(
-      `/api/lesson/${slug}/quiz?stepId=${encodeURIComponent(stepId)}`,
-    );
+    const result = await fetchJson<{
+      attempts: { questionIndex: number; answerIndex: number; correct: boolean }[];
+    }>(`/api/lesson/${slug}/quiz?stepId=${encodeURIComponent(stepId)}`);
     if (!isCurrent()) return;
-    if (!response.ok) {
-      setError("Не удалось загрузить прошлые попытки");
+    if (!result.ok) {
+      setError(`Не удалось загрузить прошлые попытки: ${result.error}`);
       return;
     }
-    const { attempts } = (await response.json()) as {
-      attempts: { questionIndex: number; answerIndex: number; correct: boolean }[];
-    };
-    if (!isCurrent()) return;
+    const { attempts } = result.data;
 
     setChosen(Object.fromEntries(attempts.map((item) => [item.questionIndex, item.answerIndex])));
     setVerdicts(
@@ -99,30 +97,27 @@ export function QuestionSet({
       setError(null);
       setChosen((current) => ({ ...current, [questionIndex]: answerIndex }));
 
-      const response = await fetch(`/api/lesson/${slug}/quiz`, {
+      const result = await fetchJson<{
+        correct?: boolean;
+        correctIndex?: number;
+        explanation?: string;
+      }>(`/api/lesson/${slug}/quiz`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ stepId, questionIndex, answerIndex }),
       });
       if (!isCurrent()) return;
 
-      const json = (await response.json()) as {
-        correct?: boolean;
-        correctIndex?: number;
-        explanation?: string;
-        error?: string;
-      };
-      if (!isCurrent()) return;
-
-      if (!response.ok || json.correct === undefined) {
-        setError(json.error ?? "Не удалось проверить ответ");
+      if (!result.ok || result.data.correct === undefined) {
+        setError(result.ok ? "Сервер не сказал, верно ли это" : result.error);
         return;
       }
 
+      const json = result.data;
       setVerdicts((current) => ({
         ...current,
         [questionIndex]: {
-          correct: json.correct!,
+          correct: json.correct === true,
           correctIndex: json.correctIndex ?? -1,
           explanation: json.explanation ?? "",
           answerIndex,

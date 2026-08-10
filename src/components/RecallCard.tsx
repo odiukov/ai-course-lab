@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchJson } from "@/lib/api/fetch-json";
 
 interface Previous {
   fn: string;
@@ -19,44 +20,84 @@ export function RecallCard({
   onInserted: () => void;
 }) {
   const [previous, setPrevious] = useState<Previous | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  // Две отдельные строки: «уже на месте» — это спокойная реплика, а не красная
+  // ошибка, и путать их нельзя.
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [inserted, setInserted] = useState(false);
+  const [inserting, setInserting] = useState(false);
+
+  // Всегда функция, которая показана сейчас — не та, для которой был начат
+  // конкретный запрос. Карточка переживает переход между recall-шагами, и без
+  // этой сверки медленный ответ по прошлой функции мог оказаться на экране,
+  // пока кнопка отправляет уже другую. Тот же приём, что в ExercisePanel и
+  // QuestionSet.
+  const currentRef = useRef({ slug, fn });
+  useEffect(() => {
+    currentRef.current = { slug, fn };
+  }, [slug, fn]);
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/lesson/${slug}/recall?fn=${encodeURIComponent(fn)}`);
-    if (!response.ok) {
-      setMessage(((await response.json()) as { error?: string }).error ?? "Прошлый код не найден");
+    const startedFor = { slug, fn };
+    const isCurrent = () =>
+      currentRef.current.slug === startedFor.slug && currentRef.current.fn === startedFor.fn;
+
+    const result = await fetchJson<Previous>(
+      `/api/lesson/${slug}/recall?fn=${encodeURIComponent(fn)}`,
+    );
+    if (!isCurrent()) return;
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
-    setPrevious((await response.json()) as Previous);
+    setPrevious(result.data);
   }, [fn, slug]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- поиск прошлой реализации функции
     setPrevious(null);
     setInserted(false);
-    setMessage(null);
+    setInserting(false);
+    setNote(null);
+    setError(null);
     void load();
   }, [load]);
 
   const insert = useCallback(async () => {
-    const response = await fetch(`/api/lesson/${slug}/recall`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ fn }),
-    });
-    if (!response.ok) {
-      setMessage(((await response.json()) as { error?: string }).error ?? "Не удалось вставить код");
-      return;
+    const startedFor = { slug, fn };
+    const isCurrent = () =>
+      currentRef.current.slug === startedFor.slug && currentRef.current.fn === startedFor.fn;
+
+    setInserting(true);
+    setNote(null);
+    setError(null);
+    try {
+      const result = await fetchJson<{ changed: boolean }>(`/api/lesson/${slug}/recall`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fn }),
+      });
+      if (!isCurrent()) return;
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setInserted(true);
+      // «Ничего не изменилось» — это тоже успех: код уже стоит на месте, и
+      // сообщать об ошибке здесь было бы неправдой.
+      if (!result.data.changed) {
+        setNote("Этот код уже стоит в упражнении — менять нечего.");
+      }
+      onInserted();
+    } finally {
+      if (isCurrent()) setInserting(false);
     }
-    setInserted(true);
-    onInserted();
   }, [fn, onInserted, slug]);
 
   if (!previous) {
     return (
       <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-        {message ?? "Ищу твой прошлый код…"}
+        {error ?? "Ищу твой прошлый код…"}
       </p>
     );
   }
@@ -72,12 +113,13 @@ export function RecallCard({
       </pre>
       <button
         onClick={() => void insert()}
-        disabled={inserted}
+        disabled={inserted || inserting}
         className="rounded border border-emerald-600 px-3 py-1 text-sm text-emerald-700 disabled:opacity-40 dark:text-emerald-400"
       >
-        {inserted ? "вставлено в упражнение" : "Взять как есть"}
+        {inserted ? "вставлено в упражнение" : inserting ? "вставляю…" : "Взять как есть"}
       </button>
-      {message && <p className="text-sm text-rose-700 dark:text-rose-400">{message}</p>}
+      {note && <p className="text-sm text-slate-600 dark:text-slate-300">{note}</p>}
+      {error && <p className="text-sm text-rose-700 dark:text-rose-400">{error}</p>}
     </section>
   );
 }
