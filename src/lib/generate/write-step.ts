@@ -1,8 +1,17 @@
+import matter from "gray-matter";
+import { z } from "zod";
 import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
 import { buildClarificationContext } from "../content/clarification-context";
 import type { LessonPlan } from "../content/lesson-plan";
-import { readStep, writeStep, type Step, type StepMeta } from "../content/step-file";
+import {
+  checkSchema,
+  readStep,
+  writeStep,
+  type CheckQuestion,
+  type Step,
+  type StepMeta,
+} from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
 import type { GenerateDeps } from "./plan-lesson";
 
@@ -89,6 +98,45 @@ export function stripEnclosingFence(body: string): string {
   return inner.join("\n").trim();
 }
 
+const checkListSchema = z.array(checkSchema).min(1);
+
+export interface StepReply {
+  /** Вопросы шага-проверки, если агент их прислал и они правильной формы. */
+  check?: CheckQuestion[];
+  body: string;
+}
+
+/**
+ * Разбирает ответ агента на шаг.
+ *
+ * Для всех типов, кроме `check`, это просто тело в markdown. У шага-проверки
+ * ответ начинается с frontmatter, в котором лежат вопросы (см. prompts/
+ * write-step.md): рисует их приложение из `check`, а не тело шага.
+ *
+ * `expectCheck` — не украшение: тело шага имеет право начинаться с `---`
+ * (горизонтальная линия), и разбирать frontmatter там, где его быть не должно,
+ * означало бы иногда съедать начало текста.
+ */
+export function parseStepReply(reply: string, expectCheck: boolean): StepReply {
+  const text = stripEnclosingFence(reply);
+  if (!expectCheck || !text.trimStart().startsWith("---")) return { body: text };
+
+  let parsed: matter.GrayMatterFile<string>;
+  try {
+    parsed = matter(text.trimStart());
+  } catch {
+    // Сломанный YAML: тело сохранить всё равно нужно, а вопросов нет — и
+    // вызывающий об этом узнает по отсутствию check.
+    return { body: text };
+  }
+
+  const questions = checkListSchema.safeParse((parsed.data as { check?: unknown }).check);
+  return {
+    check: questions.success ? questions.data : undefined,
+    body: parsed.content.replace(/^\n+/, "").replace(/\s+$/, ""),
+  };
+}
+
 function neighbourSummary(plan: LessonPlan, index: number): string {
   return plan.steps
     .slice(Math.max(0, index - 2), index + 2)
@@ -112,6 +160,11 @@ export async function ensureSteps(opts: {
   const window = plan.steps.slice(fromIndex, fromIndex + count);
   const excerpts = resolveStepExcerpts(source, plan.steps);
   const written: string[] = [];
+  // Шаги-проверки, у которых так и не получилось добыть вопросы. Такой шаг не
+  // пишется совсем: на экране это «Ниже — несколько коротких вопросов» и сразу
+  // под ним «Вопросы к этому шагу ещё не написаны», то есть пустой экран, где
+  // должна была быть проверка понимания.
+  const withoutQuestions: string[] = [];
 
   for (const [offset, meta] of window.entries()) {
     if (readStep(contentDir, plan.slug, meta.id)) continue;
@@ -130,10 +183,41 @@ export async function ensureSteps(opts: {
       }),
     });
 
-    const body = stripEnclosingFence(await deps.run(prompt, onEvent));
-    const step: Step = { ...meta, body };
+    const expectCheck = meta.type === "check";
+    let reply = parseStepReply(await deps.run(prompt, onEvent), expectCheck);
+
+    // Одна повторная попытка: чаще всего агент просто написал тело и забыл про
+    // frontmatter, и прямое напоминание это исправляет. Второй промах — уже не
+    // случайность, и молча писать пустую проверку нельзя.
+    if (expectCheck && !reply.check) {
+      onEvent({
+        type: "text",
+        text: `Шаг ${meta.id}: вопросов в ответе нет, прошу ещё раз`,
+      });
+      reply = parseStepReply(
+        await deps.run(
+          `${prompt}\n\nПредыдущая попытка не дала ни одного вопроса: frontmatter с полем check отсутствовал или был не той формы. Начни ответ строкой --- и полем check, как показано выше, и только потом пиши тело шага.`,
+          onEvent,
+        ),
+        true,
+      );
+    }
+    if (expectCheck && !reply.check) {
+      withoutQuestions.push(meta.id);
+      continue;
+    }
+
+    const step: Step = { ...meta, body: reply.body };
+    if (reply.check) step.check = reply.check;
     writeStep(contentDir, plan.slug, step);
     written.push(meta.id);
+  }
+
+  if (withoutQuestions.length > 0) {
+    throw new Error(
+      `Не удалось получить вопросы для шагов-проверок: ${withoutQuestions.join(", ")}. ` +
+        `Эти шаги не записаны${written.length > 0 ? `; записаны: ${written.join(", ")}` : ""}. Попробуй сгенерировать их ещё раз.`,
+    );
   }
 
   return written;

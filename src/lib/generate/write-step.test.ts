@@ -8,7 +8,13 @@ import { readStep } from "../content/step-file";
 import { appendClarification } from "../content/clarifications";
 import type { StepMeta } from "../content/step-file";
 import type { LessonPlan } from "../content/lesson-plan";
-import { ensureSteps, excerptForStep, resolveStepExcerpts, stripEnclosingFence } from "./write-step";
+import {
+  ensureSteps,
+  excerptForStep,
+  parseStepReply,
+  resolveStepExcerpts,
+  stripEnclosingFence,
+} from "./write-step";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -251,5 +257,141 @@ describe("ensureSteps", () => {
     await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
 
     expect(run.mock.calls[0][0] as string).toContain("Что такое строка матрицы?");
+  });
+});
+
+const CHECK_PLAN: LessonPlan = {
+  ...PLAN,
+  steps: [{ id: "005-check", type: "check", title: "Проверка: формы" }],
+};
+
+const CHECK_REPLY = [
+  "---",
+  "check:",
+  '  - question: "Какие формы состыкуются?"',
+  "    options:",
+  '      - "2x3 и 3x2"',
+  '      - "2x3 и 2x3"',
+  "    correct: 0",
+  '    explanation: "Внутренние размерности должны совпасть."',
+  "---",
+  "",
+  "Тело шага-проверки.",
+].join("\n");
+
+describe("parseStepReply", () => {
+  it("достаёт вопросы из frontmatter, тело — отдельно", () => {
+    const reply = parseStepReply(CHECK_REPLY, true);
+    expect(reply.body).toBe("Тело шага-проверки.");
+    expect(reply.check).toEqual([
+      {
+        question: "Какие формы состыкуются?",
+        options: ["2x3 и 3x2", "2x3 и 2x3"],
+        correct: 0,
+        explanation: "Внутренние размерности должны совпасть.",
+      },
+    ]);
+  });
+
+  it("для шага не типа check frontmatter не разбирается: --- в теле — это линия", () => {
+    const body = ["Первая мысль.", "", "---", "", "Вторая мысль."].join("\n");
+    expect(parseStepReply(body, false)).toEqual({ body });
+  });
+
+  it("ответ без frontmatter даёт тело и никаких вопросов", () => {
+    expect(parseStepReply("Просто тело.", true)).toEqual({ body: "Просто тело." });
+  });
+
+  it("вопросы не той формы отбрасываются, тело остаётся", () => {
+    const reply = parseStepReply(
+      ["---", "check:", '  - question: "Без вариантов"', "---", "", "Тело."].join("\n"),
+      true,
+    );
+    expect(reply.check).toBeUndefined();
+    expect(reply.body).toBe("Тело.");
+  });
+
+  it("пустой список вопросов — это отсутствие вопросов", () => {
+    expect(parseStepReply(["---", "check: []", "---", "", "Тело."].join("\n"), true).check).toBeUndefined();
+  });
+
+  it("обёртка из ```markdown снимается и здесь", () => {
+    expect(parseStepReply(`\`\`\`markdown\n${CHECK_REPLY}\n\`\`\``, true).check).toHaveLength(1);
+  });
+});
+
+describe("ensureSteps и шаги-проверки", () => {
+  it("вопросы из ответа агента попадают в файл шага", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue(CHECK_REPLY);
+    await ensureSteps({ contentDir, source: SOURCE, plan: CHECK_PLAN, fromIndex: 0, deps: { run } });
+
+    const step = readStep(contentDir, CHECK_PLAN.slug, "005-check")!;
+    expect(step.check).toHaveLength(1);
+    expect(step.check![0].correct).toBe(0);
+    expect(step.body).toBe("Тело шага-проверки.");
+  });
+
+  it("промпт объясняет, как прислать вопросы", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue(CHECK_REPLY);
+    await ensureSteps({ contentDir, source: SOURCE, plan: CHECK_PLAN, fromIndex: 0, deps: { run } });
+    expect(run.mock.calls[0][0] as string).toContain("check:");
+  });
+
+  it("ответ без вопросов даёт одну повторную попытку", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValueOnce("Тело без вопросов.").mockResolvedValueOnce(CHECK_REPLY);
+
+    const ids = await ensureSteps({
+      contentDir,
+      source: SOURCE,
+      plan: CHECK_PLAN,
+      fromIndex: 0,
+      deps: { run },
+    });
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1][0] as string).toContain("не дала ни одного вопроса");
+    expect(ids).toEqual(["005-check"]);
+    expect(readStep(contentDir, CHECK_PLAN.slug, "005-check")?.check).toHaveLength(1);
+  });
+
+  it("два промаха подряд — шаг не записан, и об этом сказано", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело без вопросов.");
+
+    await expect(
+      ensureSteps({ contentDir, source: SOURCE, plan: CHECK_PLAN, fromIndex: 0, deps: { run } }),
+    ).rejects.toThrow(/005-check/);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    // Главное: пустая проверка не легла на диск как готовый шаг.
+    expect(readStep(contentDir, CHECK_PLAN.slug, "005-check")).toBeNull();
+  });
+
+  it("остальные шаги окна всё равно записаны и названы в ошибке", async () => {
+    const contentDir = tmpDir();
+    const plan: LessonPlan = {
+      ...PLAN,
+      steps: [
+        { id: "001-t", type: "theory", title: "Зачем" },
+        { id: "002-check", type: "check", title: "Проверка" },
+      ],
+    };
+    const run = vi.fn().mockResolvedValue("Тело без вопросов.");
+
+    await expect(
+      ensureSteps({ contentDir, source: SOURCE, plan, fromIndex: 0, deps: { run } }),
+    ).rejects.toThrow(/записаны: 001-t/);
+    expect(readStep(contentDir, plan.slug, "001-t")).not.toBeNull();
+  });
+
+  it("шаг не типа check вопросов не получает и повторов не вызывает", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело.");
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 0, count: 1, deps: { run } });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(readStep(contentDir, PLAN.slug, "001-t")?.check).toBeUndefined();
   });
 });

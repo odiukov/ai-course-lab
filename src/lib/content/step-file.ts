@@ -7,7 +7,9 @@ import { lessonPaths } from "./paths";
 export const STEP_TYPES = ["theory", "visual", "check", "code", "recall", "quiz"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
-const checkSchema = z.object({
+// Экспортируется, потому что этой же схемой проверяется ответ агента при
+// генерации check-шага: форма вопроса должна быть описана один раз.
+export const checkSchema = z.object({
   question: z.string(),
   options: z.array(z.string()),
   correct: z.number(),
