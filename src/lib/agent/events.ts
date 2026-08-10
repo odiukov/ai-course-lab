@@ -10,9 +10,23 @@ export interface Adapter {
   parseLine(line: string): AgentEvent[];
 }
 
+/**
+ * The agent's answer: the LAST non-empty `done`, falling back to the
+ * concatenated streamed text.
+ *
+ * Last, not first. `claude` emits exactly one result line so the difference is
+ * invisible there, but the codex adapter emits a `done` per completed agent
+ * message and a multi-turn `codex exec` run emits several. Taking the first
+ * one returns "let me look at the lesson" instead of the plan, extractJsonBlock
+ * then finds no JSON, and the generation burns its retry and fails even though
+ * the model answered correctly.
+ */
 export function collectText(events: AgentEvent[]): string {
-  const done = events.find((event) => event.type === "done");
-  if (done && done.type === "done" && done.text.trim()) return done.text;
+  const done = events
+    .filter((event): event is Extract<AgentEvent, { type: "done" }> => event.type === "done")
+    .filter((event) => event.text.trim())
+    .at(-1);
+  if (done) return done.text;
   return events
     .filter((event): event is Extract<AgentEvent, { type: "text" }> => event.type === "text")
     .map((event) => event.text)

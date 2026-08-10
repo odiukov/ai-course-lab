@@ -38,6 +38,36 @@ describe.each([
   });
 });
 
+describe("collectText", () => {
+  it("берёт последний непустой done, а не первый", () => {
+    // Многоходовой `codex exec` шлёт по done на каждое завершённое сообщение
+    // агента. Первое — «сейчас посмотрю урок», последнее — собственно ответ.
+    const events: AgentEvent[] = [
+      { type: "done", text: "Сейчас посмотрю урок." },
+      { type: "done", text: "Ещё думаю." },
+      { type: "done", text: '```json\n[{"id":"001-a"}]\n```' },
+    ];
+    expect(collectText(events)).toContain('"001-a"');
+  });
+
+  it("пропускает пустые done и берёт последний осмысленный", () => {
+    const events: AgentEvent[] = [
+      { type: "done", text: "первый" },
+      { type: "done", text: "второй" },
+      { type: "done", text: "   " },
+    ];
+    expect(collectText(events)).toBe("второй");
+  });
+
+  it("без done склеивает текстовые события", () => {
+    const events: AgentEvent[] = [
+      { type: "text", text: "часть 1 " },
+      { type: "text", text: "часть 2" },
+    ];
+    expect(collectText(events)).toBe("часть 1 часть 2");
+  });
+});
+
 describe("распознавание лимита", () => {
   it("помечает сообщение про лимит отдельным типом", () => {
     const events = claudeAdapter.parseLine(
