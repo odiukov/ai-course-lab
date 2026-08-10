@@ -7,7 +7,7 @@ import { readLessonSource } from "../source/lesson-source";
 import { readStep } from "../content/step-file";
 import type { StepMeta } from "../content/step-file";
 import type { LessonPlan } from "../content/lesson-plan";
-import { ensureSteps, excerptForStep, resolveStepExcerpts } from "./write-step";
+import { ensureSteps, excerptForStep, resolveStepExcerpts, stripEnclosingFence } from "./write-step";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -118,7 +118,55 @@ describe("excerptForStep", () => {
   });
 });
 
+describe("stripEnclosingFence", () => {
+  it("снимает ```markdown, обёрнутый вокруг всего ответа", () => {
+    const body = ["```markdown", "# Заголовок", "", "Текст.", "```"].join("\n");
+    expect(stripEnclosingFence(body)).toBe("# Заголовок\n\nТекст.");
+  });
+
+  it("снимает внешнюю обёртку, но сохраняет блоки кода внутри", () => {
+    const body = [
+      "```markdown",
+      "Вот пример:",
+      "",
+      "```python",
+      "print(1)",
+      "```",
+      "",
+      "Готово.",
+      "```",
+    ].join("\n");
+    const out = stripEnclosingFence(body);
+    expect(out.startsWith("Вот пример:")).toBe(true);
+    expect(out).toContain("```python");
+    expect(out).toContain("print(1)");
+    expect(out.endsWith("Готово.")).toBe(true);
+  });
+
+  it("не трогает обычное тело без обёртки", () => {
+    const body = "Просто текст.\n\n```python\nprint(1)\n```\n\nи ещё текст.";
+    expect(stripEnclosingFence(body)).toBe(body);
+  });
+
+  it("не трогает тело, которое начинается и кончается блоком кода", () => {
+    const body = ["```python", "print(1)", "```", "", "Текст.", "", "```python", "print(2)", "```"].join("\n");
+    expect(stripEnclosingFence(body)).toBe(body);
+  });
+
+  it("не снимает ничего, если закрывающего забора нет", () => {
+    const body = "```markdown\nТекст без закрытия.";
+    expect(stripEnclosingFence(body)).toBe(body);
+  });
+});
+
 describe("ensureSteps", () => {
+  it("снимает обёртку из ```markdown перед записью на диск", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("```markdown\n# Заголовок\n\nТело шага.\n```");
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 0, count: 1, deps: { run } });
+    expect(readStep(contentDir, PLAN.slug, "001-t")?.body).toBe("# Заголовок\n\nТело шага.");
+  });
+
   it("генерит окно из трёх шагов", async () => {
     const contentDir = tmpDir();
     const run = vi.fn().mockResolvedValue("Тело шага.");

@@ -57,6 +57,37 @@ export function resolveStepExcerpts(source: LessonSource, steps: StepMeta[]): Ma
   return excerpts;
 }
 
+const FENCE_OPEN = /^(`{3,})(?:markdown|md)?\s*$/i;
+
+/**
+ * Removes a code fence that wraps the WHOLE reply.
+ *
+ * Agents sometimes answer "here is the markdown" by putting the entire body
+ * inside a ```markdown fence; written verbatim, the step then renders as one
+ * monospace block instead of prose (020-identity.md and 027-broadcasting.md
+ * were committed that way).
+ *
+ * Deliberately conservative, because a body may legitimately start with a code
+ * block: the opening fence must carry no language or `markdown`/`md`, the last
+ * line must close it, and the fence lines in between must come in pairs — so
+ * a body whose own first and last blocks are fenced code is left alone.
+ */
+export function stripEnclosingFence(body: string): string {
+  const trimmed = body.trim();
+  const lines = trimmed.split("\n");
+  if (lines.length < 2) return trimmed;
+
+  const open = FENCE_OPEN.exec(lines[0].trim());
+  if (!open) return trimmed;
+  if (!new RegExp(`^\`{${open[1].length},}$`).test(lines[lines.length - 1].trim())) return trimmed;
+
+  const inner = lines.slice(1, -1);
+  const innerFences = inner.filter((line) => /^`{3,}/.test(line.trim())).length;
+  if (innerFences % 2 !== 0) return trimmed;
+
+  return inner.join("\n").trim();
+}
+
 function neighbourSummary(plan: LessonPlan, index: number): string {
   return plan.steps
     .slice(Math.max(0, index - 2), index + 2)
@@ -92,7 +123,7 @@ export async function ensureSteps(opts: {
       source_excerpt: excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor),
     });
 
-    const body = (await deps.run(prompt, onEvent)).trim();
+    const body = stripEnclosingFence(await deps.run(prompt, onEvent));
     const step: Step = { ...meta, body };
     writeStep(contentDir, plan.slug, step);
     written.push(meta.id);
