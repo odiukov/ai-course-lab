@@ -18,12 +18,16 @@ export const claudeAdapter: Adapter = {
   // `--strict-mcp-config` with no --mcp-config leaves "mcp_servers":[] so no
   // MCP server can add tools back. The spec requires an agent that returns
   // text only and physically cannot touch the course.
+  // `--include-partial-messages` is what makes the chat answer appear as it is
+  // written. Without it claude emits one `assistant` line carrying the finished
+  // message, so the panel sat empty and then printed everything at once.
   args: (prompt) => [
     "-p",
     prompt,
     "--output-format",
     "stream-json",
     "--verbose",
+    "--include-partial-messages",
     "--tools",
     "",
     "--strict-mcp-config",
@@ -32,12 +36,19 @@ export const claudeAdapter: Adapter = {
     const data = safeJson(line);
     if (!data) return [];
 
-    if (data.type === "assistant") {
-      const message = data.message as { content?: { type: string; text?: string }[] } | undefined;
-      const chunks = (message?.content ?? [])
-        .filter((part) => part.type === "text" && part.text)
-        .map((part): AgentEvent => ({ type: "text", text: part.text as string }));
-      return chunks;
+    // Text comes only from the deltas (recorded in claude-partial-stream.jsonl:
+    // "гот" + "ово"). The `assistant` line repeats the same text complete, and
+    // emitting both would print every answer twice in a UI that concatenates
+    // text events. `thinking_delta` is skipped: it is not the answer.
+    if (data.type === "stream_event") {
+      const event = data.event as
+        | { type?: string; delta?: { type?: string; text?: string } }
+        | undefined;
+      if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        const text = event.delta.text ?? "";
+        return text ? [{ type: "text", text } as AgentEvent] : [];
+      }
+      return [];
     }
 
     if (data.type === "result") {

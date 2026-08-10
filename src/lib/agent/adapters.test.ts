@@ -38,6 +38,24 @@ describe.each([
   });
 });
 
+describe("claude, поток с частичными сообщениями", () => {
+  // Записано настоящим `claude ... --include-partial-messages`; выкинуты только
+  // строки хуков SessionStart — они про машину, где шла запись, а не про формат.
+  it("собирает ответ из дельт и не задваивает его строкой assistant", () => {
+    const events = replay(claudeAdapter, "claude-partial-stream.jsonl");
+    const streamed = events
+      .filter((event): event is Extract<AgentEvent, { type: "text" }> => event.type === "text")
+      .map((event) => event.text);
+
+    expect(streamed).toEqual(["гот", "ово"]);
+    expect(streamed.join("")).toBe(collectText(events));
+  });
+
+  it("просит у CLI частичные сообщения, иначе ответ появляется целиком", () => {
+    expect(claudeAdapter.args("привет")).toContain("--include-partial-messages");
+  });
+});
+
 describe("ограничение инструментов", () => {
   it("claude запускается без единого инструмента и без чужих MCP", () => {
     const args = claudeAdapter.args("привет");
