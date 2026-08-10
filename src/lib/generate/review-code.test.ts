@@ -24,13 +24,20 @@ const request = {
 
 describe("formatTests", () => {
   it("говорит счётом, а не процентами", () => {
-    expect(formatTests({ passed: 3, total: 3, warning: null })).toBe("3 из 3 зелёные");
+    expect(formatTests({ passed: 3, failed: 0, filtered: true, warning: null })).toBe(
+      "зелёных: 3, упавших: 0. гонялся только набор этой функции",
+    );
+  });
+
+  it("не выдумывает полного покрытия, когда гонялся весь файл", () => {
+    const text = formatTests({ passed: 17, failed: 0, filtered: false, warning: null });
+    expect(text).toContain("прогнан весь файл упражнения");
   });
 
   it("предупреждение о неточном фильтре доезжает до промпта", () => {
-    expect(formatTests({ passed: 17, total: 17, warning: "Фильтр -k foo не выбрал" })).toContain(
-      "Фильтр -k foo",
-    );
+    expect(
+      formatTests({ passed: 17, failed: 0, filtered: false, warning: "Фильтр -k foo не выбрал" }),
+    ).toContain("Фильтр -k foo");
   });
 });
 

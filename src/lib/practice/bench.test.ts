@@ -43,4 +43,18 @@ describe("runBench", () => {
       name: "PracticeError",
     });
   });
+
+  it("отмена запроса прерывает замер, а не ждёт двухминутного таймаута", async () => {
+    process.env.FAKE_BENCH_MODE = "hang";
+    const controller = new AbortController();
+    const promise = runBench({ dir: process.cwd(), python: FAKE, signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "PracticeError", kind: "timeout" });
+  });
+
+  it("уже отменённый сигнал не спавнит интерпретатор вовсе", async () => {
+    await expect(
+      runBench({ dir: process.cwd(), python: FAKE, signal: AbortSignal.abort() }),
+    ).rejects.toMatchObject({ name: "PracticeError" });
+  });
 });

@@ -47,28 +47,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
 
+  // В try — только прогон: он единственный ломается из-за окружения и только
+  // он имеет право ответить 503 «проверь PYTHON». Записи в базу вынесены
+  // наружу: упавший SQLite — это не «нет питона», и называть учащемуся не ту
+  // причину нельзя.
+  let result;
   try {
-    const result = await runTests({
+    result = await runTests({
       dir: exercise.dir,
       fn: step.exercise_fn,
+      // Остальные функции упражнения: из них собирается выражение -k, которое
+      // не тянет в прогон тесты ещё не написанных функций.
+      functions: exercise.functions.map((item) => item.fn),
       python: config.python,
     });
-
-    const green = isPassingRun(result);
-    const db = openProgressDb(config.dataDir);
-    recordTestRun(db, slug, stepId, step.exercise_fn, {
-      passed: result.passed,
-      failed: result.failed + result.errors,
-      firstFailure: result.failures[0]?.decisive ?? null,
-    });
-    if (green) markStepPassed(db, slug, stepId);
-    else markStepFailed(db, slug, stepId);
-
-    return Response.json({ result, state: green ? "passed" : "failed" });
   } catch (error) {
     const kind = error instanceof PracticeError ? error.kind : "output";
     // 503, а не 500: сломано окружение, а не запрос. Клиент по этому коду
     // рисует баннер «редактор работает, тесты нет», а не «ошибка сервера».
     return Response.json({ error: (error as Error).message, kind }, { status: 503 });
   }
+
+  const green = isPassingRun(result);
+  const db = openProgressDb(config.dataDir);
+  recordTestRun(db, slug, stepId, step.exercise_fn, {
+    passed: result.passed,
+    failed: result.failed + result.errors,
+    firstFailure: result.failures[0]?.decisive ?? null,
+    filtered: result.filtered,
+    warning: result.warning,
+  });
+  if (green) markStepPassed(db, slug, stepId);
+  else markStepFailed(db, slug, stepId);
+
+  return Response.json({ result, state: green ? "passed" : "failed" });
 }

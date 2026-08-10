@@ -21,9 +21,22 @@ function truncate(text: string, limit = MAX_CODE_CHARS): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
-export function formatTests(result: { passed: number; total: number; warning: string | null }): string {
-  const base = `${result.passed} из ${result.total} зелёные`;
-  return result.warning ? `${base}. ${result.warning}` : base;
+// Ровно то, что известно о прогоне из его записи в базе: сколько тестов
+// прошло, сколько упало и что именно гонялось. Общего числа собранных тестов в
+// записи нет, поэтому раньше вызывающий подставлял total = passed — и агент
+// получал «17 из 17 зелёные» даже там, где половина тестов не отбиралась.
+export function formatTests(result: {
+  passed: number;
+  failed: number;
+  filtered: boolean;
+  warning: string | null;
+}): string {
+  const scope = result.filtered
+    ? "гонялся только набор этой функции"
+    : "прогнан весь файл упражнения, а не только эта функция";
+  return [`зелёных: ${result.passed}, упавших: ${result.failed}`, scope, result.warning]
+    .filter((part) => Boolean(part))
+    .join(". ");
 }
 
 export function formatMetrics(row: BenchReport["functions"][number] | undefined): string {

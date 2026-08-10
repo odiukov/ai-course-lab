@@ -59,7 +59,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const deps = defaultDeps(config, { signal: request.signal });
 
   return sseStream(async (send) => {
-    const report = await runBench({ dir: exercise.dir, fn, python: config.python });
+    // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без
+    // сигнала закрытая вкладка оставляет python молотить до двух минут.
+    const report = await runBench({
+      dir: exercise.dir,
+      fn,
+      python: config.python,
+      signal: request.signal,
+    });
     send("bench", report);
 
     const text = await reviewCode({
@@ -69,7 +76,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         fn,
         mineCode,
         solutionCode,
-        tests: formatTests({ passed: run.passed, total: run.passed, warning: null }),
+        // Числа и охват — из записи прогона, а не выдуманные: подстановка
+        // total = passed рассказывала агенту о полном покрытии, которого не было.
+        tests: formatTests({
+          passed: run.passed,
+          failed: run.failed,
+          filtered: run.filtered,
+          warning: run.warning,
+        }),
         metrics: formatMetrics(report.functions.find((item) => item.fn === fn)),
         ruff: formatRuff(report.ruff, fn),
       },

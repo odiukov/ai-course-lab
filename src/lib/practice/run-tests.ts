@@ -10,8 +10,39 @@ export const TESTS_TIMEOUT_MS = 60_000;
 export interface RunTestsOptions {
   dir: string;
   fn?: string;
+  /**
+   * Все функции верхнего уровня этого упражнения — из describeFunctions.
+   * Нужны, чтобы фильтр -k выбрал набор именно `fn`, а не всё, в чьё имя
+   * подстрокой попало имя функции.
+   */
+  functions?: string[];
   python?: string;
   timeoutMs?: number;
+}
+
+/**
+ * Собирает выражение для `pytest -k`.
+ *
+ * `-k` сравнивает подстроку с целым идентификатором теста, поэтому одного
+ * имени функции мало: на уроке про матрицы `-k identity` выбирает ещё и
+ * `test_matmul_by_identity_changes_nothing`, `test_trace_of_identity_is_size`,
+ * `test_identity_is_symmetric` — тесты, которые зовут функции, не написанные
+ * к этому шагу, и красят шаг в красный за чужую заготовку. Обратный случай не
+ * лучше: `-k is_symmetric` выбирает ОДИН `test_identity_is_symmetric`, а
+ * `test_symmetric_true/false` не гоняет вовсе — и шаг получает «1 из 1
+ * зелёные» на непроверенном коде.
+ *
+ * Поэтому выражение — это «имя функции И НЕ любое из остальных имён этого же
+ * упражнения». Имена, которые сами являются подстрокой `fn`
+ * (`matmul` внутри `matmul_fast`), из отрицания выкидываются: иначе они
+ * обнулили бы весь отбор. Если после такой фильтрации в отборе не осталось
+ * ни одного теста, runTests честно гоняет весь файл с предупреждением — это
+ * лучше, чем зелёный вердикт по одному случайно совпавшему тесту.
+ */
+export function buildTestFilter(fn: string, functions: string[] = []): string {
+  const others = [...new Set(functions)].filter((name) => name !== fn && !fn.includes(name));
+  if (others.length === 0) return fn;
+  return `${fn} and not (${others.join(" or ")})`;
 }
 
 export interface TestRunResult extends TestOutcome {
@@ -29,18 +60,16 @@ interface RawRun {
   xml: string | null;
 }
 
-function spawnPytest(opts: {
+function spawnOnce(opts: {
   python: string;
   dir: string;
-  fn?: string;
+  filter?: string;
+  junit: string;
   timeoutMs: number;
 }): Promise<RawRun> {
-  const junit = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), "lab-junit-")),
-    "report.xml",
-  );
+  const junit = opts.junit;
   const args = ["-m", "pytest", "-q", "--no-header", "--junit-xml", junit];
-  if (opts.fn) args.push("-k", opts.fn);
+  if (opts.filter) args.push("-k", opts.filter);
 
   return new Promise((resolve, reject) => {
     const child = spawn(opts.python, args, { cwd: opts.dir, stdio: ["ignore", "pipe", "pipe"] });
@@ -89,6 +118,22 @@ function spawnPytest(opts: {
   });
 }
 
+// Каталог под junit-отчёт живёт ровно один прогон: без finally за вечер в
+// /tmp остаётся по каталогу lab-junit-* на каждое нажатие «Прогнать тесты».
+async function spawnPytest(opts: {
+  python: string;
+  dir: string;
+  filter?: string;
+  timeoutMs: number;
+}): Promise<RawRun> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lab-junit-"));
+  try {
+    return await spawnOnce({ ...opts, junit: path.join(tmp, "report.xml") });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 function toOutcome(run: RawRun, python: string): TestOutcome {
   if (run.xml === null) {
     // Ни отчёта, ни тестов: интерпретатор не дошёл до прогона. Единственный
@@ -109,20 +154,21 @@ function toOutcome(run: RawRun, python: string): TestOutcome {
 export async function runTests(options: RunTestsOptions): Promise<TestRunResult> {
   const python = options.python ?? "python3";
   const timeoutMs = options.timeoutMs ?? TESTS_TIMEOUT_MS;
-  const describe = (fn?: string) =>
-    `${python} -m pytest -q --no-header${fn ? ` -k ${fn}` : ""}`;
+  const describe = (filter?: string) =>
+    `${python} -m pytest -q --no-header${filter ? ` -k "${filter}"` : ""}`;
+  const filter = options.fn ? buildTestFilter(options.fn, options.functions) : undefined;
 
   const first = toOutcome(
-    await spawnPytest({ python, dir: options.dir, fn: options.fn, timeoutMs }),
+    await spawnPytest({ python, dir: options.dir, filter, timeoutMs }),
     python,
   );
 
-  if (!options.fn || first.total > 0) {
+  if (!filter || first.total > 0) {
     return {
       ...first,
-      filtered: Boolean(options.fn),
+      filtered: Boolean(filter),
       warning: null,
-      command: describe(options.fn),
+      command: describe(filter),
       stdout: "",
     };
   }

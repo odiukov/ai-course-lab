@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS test_runs (
   passed        INTEGER NOT NULL,
   failed        INTEGER NOT NULL,
   first_failure TEXT,
+  filtered      INTEGER NOT NULL DEFAULT 1 CHECK (filtered IN (0, 1)),
+  warning       TEXT,
   created_at    TEXT NOT NULL
 );
 
@@ -77,6 +79,29 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_i
 // никакой конкуренции между процессами, которую нужно было бы разруливать.
 const connections = new Map<string, DatabaseSync>();
 
+// Колонки, добавленные к таблице ПОСЛЕ того, как база уже существовала на
+// диске: `CREATE TABLE IF NOT EXISTS` для такой базы ничего не делает, и без
+// этого шага прогон падал бы на «no such column». Механизм версий схемы для
+// локальной однопользовательской базы был бы дороже задачи — достаточно
+// «добавь колонку, если её ещё нет», а список колонок в CREATE TABLE выше
+// остаётся правдой для новой базы.
+const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
+  {
+    table: "test_runs",
+    column: "filtered",
+    definition: "INTEGER NOT NULL DEFAULT 1 CHECK (filtered IN (0, 1))",
+  },
+  { table: "test_runs", column: "warning", definition: "TEXT" },
+];
+
+function migrate(db: DatabaseSync): void {
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const existing = queryAll<{ name: string }>(db, `PRAGMA table_info(${table})`);
+    if (existing.some((row) => row.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 export function openProgressDb(dataDir: string): DatabaseSync {
   const file = path.join(path.resolve(dataDir), "progress.db");
   const existing = connections.get(file);
@@ -87,6 +112,7 @@ export function openProgressDb(dataDir: string): DatabaseSync {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  migrate(db);
   connections.set(file, db);
   return db;
 }

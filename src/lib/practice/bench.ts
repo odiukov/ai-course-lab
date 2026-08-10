@@ -58,6 +58,12 @@ export function runBench(options: {
   fn?: string;
   python?: string;
   timeoutMs?: number;
+  /**
+   * Сигнал запроса. Замер прогоняет код учащегося тысячами повторов, и без
+   * сигнала закрытая вкладка оставляла бы python молотить до самого таймаута
+   * (до двух минут) уже никому не нужный результат.
+   */
+  signal?: AbortSignal;
 }): Promise<BenchReport> {
   const python = options.python ?? "python3";
   const timeoutMs = options.timeoutMs ?? BENCH_TIMEOUT_MS;
@@ -65,18 +71,39 @@ export function runBench(options: {
   if (options.fn) args.push("--fn", options.fn);
 
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new PracticeError("Замер отменён: запрос закрыт", "timeout"));
+      return;
+    }
+
     const child = spawn(python, args, { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
 
+    const onAbort = () => {
+      if (settled) return;
+      settle();
+      child.kill("SIGKILL");
+      reject(new PracticeError("Замер отменён: запрос закрыт", "timeout"));
+    };
+
+    // Один выход из всех развилок: снять таймер и перестать слушать сигнал,
+    // иначе на каждый замер остаётся живой listener у сигнала запроса.
+    function settle(): void {
+      settled = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+    }
+
     const timer = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      settle();
       child.kill("SIGKILL");
       reject(new PracticeError("Замер не уложился в таймаут и был прерван", "timeout"));
     }, timeoutMs);
     timer.unref?.();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
 
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
@@ -87,15 +114,13 @@ export function runBench(options: {
 
     child.on("error", (error) => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timer);
+      settle();
       reject(new PracticeError(`Не удалось запустить ${python}: ${error.message}`, "spawn"));
     });
 
     child.on("close", () => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timer);
+      settle();
       try {
         resolve(parseBenchOutput(stdout));
       } catch (error) {

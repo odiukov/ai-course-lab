@@ -3,9 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PracticeError } from "./errors";
-import { runTests } from "./run-tests";
+import { buildTestFilter, runTests } from "./run-tests";
 
 const FAKE = path.join(process.cwd(), "tests/fixtures/practice/fake-python.mjs");
+
+// Функции настоящего упражнения урока 02 в том порядке, в котором их отдаёт
+// describeFunctions, — и порядок шагов, в котором учащийся их пишет.
+const LESSON02 = ["transpose", "matmul", "identity", "trace", "is_symmetric", "hadamard"];
 
 function makeDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-tests-"));
@@ -13,15 +17,98 @@ function makeDir(): string {
   return dir;
 }
 
+// Гоняет подделку интерпретатора на настоящих именах тестов урока 02 и
+// отдаёт имена, которые выражение -k отобрало на ПЕРВОМ прогоне (второй, если
+// он был, — это уже откат на весь файл).
+async function selection(fn: string) {
+  process.env.FAKE_PYTHON_MODE = "lesson02";
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lab-select-")), "selected.txt");
+  process.env.FAKE_PYTHON_SELECTED = log;
+  const result = await runTests({ dir: makeDir(), fn, functions: LESSON02, python: FAKE });
+  // Одна строка на прогон, каждая заканчивается \n — поэтому последний,
+  // пустой, элемент split отбрасывается, а строка пустого отбора остаётся.
+  const runs = fs
+    .readFileSync(log, "utf8")
+    .split("\n")
+    .slice(0, -1)
+    .map((line) => line.split(",").filter((name) => name.length > 0));
+  return { result, first: runs[0] ?? [], runs };
+}
+
 afterEach(() => {
   delete process.env.FAKE_PYTHON_MODE;
+  delete process.env.FAKE_PYTHON_SELECTED;
+});
+
+describe("buildTestFilter", () => {
+  it("без соседних функций фильтр — просто имя", () => {
+    expect(buildTestFilter("transpose", ["transpose"])).toBe("transpose");
+    expect(buildTestFilter("transpose")).toBe("transpose");
+  });
+
+  it("отрицает все остальные функции упражнения", () => {
+    expect(buildTestFilter("hadamard", LESSON02)).toBe(
+      "hadamard and not (transpose or matmul or identity or trace or is_symmetric)",
+    );
+  });
+
+  it("не отрицает имя, которое само является подстрокой нужного", () => {
+    // Иначе `matmul` в отрицании обнулил бы отбор для `matmul_fast` целиком.
+    expect(buildTestFilter("matmul_fast", ["matmul", "matmul_fast"])).toBe("matmul_fast");
+  });
+});
+
+describe("runTests: отбор на настоящих именах тестов урока 02", () => {
+  it("hadamard не тянет за собой тест, который зовёт ещё не написанный matmul", async () => {
+    const { result, first } = await selection("hadamard");
+    expect(first).toEqual([
+      "test_hadamard_scales_elementwise",
+      "test_hadamard_with_zero_mask_zeroes_everything",
+    ]);
+    expect(first).not.toContain("test_hadamard_differs_from_matmul");
+    expect(result).toMatchObject({ total: 2, passed: 2, filtered: true, warning: null });
+  });
+
+  it("identity не тянет тесты matmul, trace и симметрии", async () => {
+    const { result, first } = await selection("identity");
+    expect(first).toEqual(["test_identity_shape_and_content", "test_identity_of_one"]);
+    expect(result).toMatchObject({ total: 2, filtered: true, warning: null });
+  });
+
+  it("is_symmetric: ни одного своего теста — весь файл и предупреждение, а не ложное «1 из 1»", async () => {
+    // test_symmetric_true/false не содержат `is_symmetric`, а единственное
+    // совпадение — test_identity_is_symmetric — отрезано отрицанием identity.
+    const { result, runs } = await selection("is_symmetric");
+    expect(runs[0]).toEqual([]);
+    expect(result.filtered).toBe(false);
+    expect(result.warning).toContain("is_symmetric");
+    expect(result.total).toBe(17);
+  });
+
+  it("transpose отбирает все три своих теста", async () => {
+    const { first } = await selection("transpose");
+    expect(first).toEqual([
+      "test_transpose_rectangular",
+      "test_transpose_twice_returns_original",
+      "test_transpose_returns_lists_not_tuples",
+    ]);
+  });
+
+  it("matmul не гоняет тест, которому нужна ещё не написанная identity", async () => {
+    const { first } = await selection("matmul");
+    expect(first).toEqual([
+      "test_matmul_row_by_column",
+      "test_matmul_shapes_2x3_by_3x2",
+      "test_matmul_is_not_commutative",
+    ]);
+  });
 });
 
 describe("runTests", () => {
   it("зелёный прогон: считает пройденные и не выдумывает предупреждений", async () => {
     const result = await runTests({ dir: makeDir(), fn: "transpose", python: FAKE });
     expect(result).toMatchObject({ total: 2, passed: 2, failed: 0, filtered: true, warning: null });
-    expect(result.command).toContain("-k transpose");
+    expect(result.command).toContain('-k "transpose"');
   });
 
   it("красный прогон: отдаёт первый упавший с решающей строкой", async () => {
