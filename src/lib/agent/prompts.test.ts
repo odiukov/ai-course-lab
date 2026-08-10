@@ -64,3 +64,19 @@ describe("renderPrompt — explain", () => {
     ).toThrow(/question/);
   });
 });
+
+describe("renderPrompt — review-code", () => {
+  it("review-code рендерится со всеми переменными", () => {
+    const rendered = renderPrompt("review-code", {
+      lesson_title: "Урок",
+      step_title: "Шаг",
+      fn: "transpose",
+      mine_code: "pass",
+      solution_code: "pass",
+      tests: "3 из 3",
+      metrics: "строк: 1 / 1",
+      ruff: "чисто",
+    });
+    expect(rendered).toContain("Функция: transpose");
+  });
+});
