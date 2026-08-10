@@ -88,7 +88,9 @@ export function Reader({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ text: string; at: number } | null>(null);
   // Меняется после вставки прошлого кода на recall-шаге, чтобы ExercisePanel
-  // ниже перечитал файл с диска — вставленный код пришёл не из редактора.
+  // ниже досохранил набранное и перечитал файл с диска — вставленный код
+  // пришёл не из редактора. Именно проп, а не `key`: перемонтирование панели
+  // теряло несохранённый черновик и сообщение о расхождении вместе с ним.
   const [reloadEditor, setReloadEditor] = useState(0);
 
   // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
@@ -296,7 +298,7 @@ export function Reader({
             />
             <PracticeStatus />
             <ExercisePanel
-              key={`${step.id}-${reloadEditor}`}
+              reloadToken={reloadEditor}
               slug={slug}
               stepId={step.id}
               fn={step.exercise_fn}

@@ -57,17 +57,34 @@ interface Verdict {
 
 type SaveState = "saved" | "saving" | "failed";
 
+// Расхождение: файл на диске изменился мимо редактора (правка из IDE, вставка
+// прошлого кода на recall-шаге), и записывать поверх нельзя. Держим ОБА текста
+// — и тот, что на диске, и черновик учащегося на момент расхождения, — потому
+// что решать, чей код остаётся, должен он, а не панель.
+interface Conflict {
+  disk: { code: string; mtimeMs: number; functions: ExerciseFunction[] };
+  draft: string;
+}
+
 export function ExercisePanel({
   slug,
   stepId,
   fn,
   lspUrl,
+  reloadToken = 0,
   onProgressChanged,
 }: {
   slug: string;
   stepId: string;
   fn: string;
   lspUrl: string | null;
+  /**
+   * Растёт, когда файл упражнения изменили мимо редактора (кнопка «Взять как
+   * есть» на recall-шаге). Панель на это досохраняет набранное и перечитывает
+   * файл — но не размонтируется: размонтирование съедало и черновик, и
+   * сообщение о расхождении.
+   */
+  reloadToken?: number;
   onProgressChanged: () => void;
 }) {
   const [data, setData] = useState<ExerciseData | null>(null);
@@ -80,6 +97,7 @@ export function ExercisePanel({
   const [reviewDone, setReviewDone] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<Conflict | null>(null);
 
   // Текст, который точно лежит на диске, и mtime этого файла — то, с чем
   // сервер сверяет предусловие записи.
@@ -170,6 +188,7 @@ export function ExercisePanel({
         savedCodeRef.current = text;
         mtimeRef.current = result.data.mtimeMs;
         setData((current) => (current ? { ...current, functions: result.data.functions } : current));
+        setConflict(null);
         if (latestCodeRef.current === text) {
           setSaveState("saved");
           saveErrorRef.current = null;
@@ -179,20 +198,18 @@ export function ExercisePanel({
 
       const current = (result.data as { current?: ExerciseData } | null)?.current;
       if (result.status === 409 && current) {
-        savedCodeRef.current = current.code;
-        latestCodeRef.current = current.code;
-        mtimeRef.current = current.mtimeMs;
-        setCode(current.code);
-        setData((existing) =>
-          existing
-            ? { ...existing, code: current.code, mtimeMs: current.mtimeMs, functions: current.functions }
-            : existing,
-        );
-        setSaveState("saved");
-        saveErrorRef.current = "Файл на диске изменился, редактор перечитал его.";
-        setError(
-          "Файл упражнения изменился на диске (правка из IDE или вставка прошлого кода) — редактор перечитал его. Проверь код и нажми ещё раз.",
-        );
+        // Текст учащегося НЕ подменяется содержимым файла. Раньше здесь стоял
+        // setCode(current.code): он доезжал до model.setValue, а тот стирает
+        // стек отмены — набранное исчезало без следа, и Ctrl+Z его не возвращал.
+        // Теперь черновик остаётся в редакторе, а расхождение показывается
+        // плашкой с двумя выходами: записать своё поверх или взять версию с
+        // диска (её вставка идёт правкой, так что отмена работает).
+        //
+        // mtimeRef намеренно остаётся прежним: пока учащийся не решил, чей код
+        // остаётся, ни одно автосохранение не имеет права записать файл.
+        setConflict({ disk: current, draft: text });
+        setSaveState("failed");
+        saveErrorRef.current = "Файл на диске изменился — реши, чей код оставить.";
         return "conflict";
       }
 
@@ -248,6 +265,40 @@ export function ExercisePanel({
   const flushRef = useRef(flush);
   flushRef.current = flush;
 
+  // Учащийся выбрал свой код: предусловие сдвигается на то, что сейчас на
+  // диске, и обычная запись дописывает черновик поверх.
+  const overwriteWithDraft = useCallback(() => {
+    if (!conflict) return;
+    mtimeRef.current = conflict.disk.mtimeMs;
+    setSaveState("saving");
+    void flush();
+  }, [conflict, flush]);
+
+  // Учащийся выбрал версию с диска. Она приезжает в редактор пропом `code`, а
+  // CodeEditor применяет её правкой модели — поэтому черновик возвращается
+  // через Ctrl+Z. Плашка остаётся на экране: из неё текст черновика можно ещё
+  // и скопировать.
+  const takeDiskVersion = useCallback(() => {
+    if (!conflict) return;
+    savedCodeRef.current = conflict.disk.code;
+    latestCodeRef.current = conflict.disk.code;
+    mtimeRef.current = conflict.disk.mtimeMs;
+    setCode(conflict.disk.code);
+    setData((existing) =>
+      existing
+        ? {
+            ...existing,
+            code: conflict.disk.code,
+            mtimeMs: conflict.disk.mtimeMs,
+            functions: conflict.disk.functions,
+          }
+        : existing,
+    );
+    setSaveState("saved");
+    saveErrorRef.current = null;
+    setError(null);
+  }, [conflict]);
+
   // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
   // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
   // проверит не тот код, который человек видит.
@@ -266,10 +317,22 @@ export function ExercisePanel({
     };
   }, [code, data, flush]);
 
-  // Уход с шага, remount после вставки recall и закрытая вкладка не должны
-  // стоить учащемуся последней секунды набора: раньше размонтирование только
-  // снимало таймер, и набранное пропадало, пока заголовок обещал «сохраняю…».
+  // Уход с шага и закрытая вкладка не должны стоить учащемуся последней
+  // секунды набора: раньше размонтирование только снимало таймер, и набранное
+  // пропадало, пока заголовок обещал «сохраняю…».
   useEffect(() => () => void flushRef.current(), []);
+
+  // Вставка прошлого кода на recall-шаге меняет файл мимо редактора. Раньше
+  // reader перемонтировал панель целиком, и черновик исчезал молча: flush из
+  // размонтирования получал 409, а setError попадал уже в мёртвый компонент.
+  // Теперь панель живая — сначала досохраняем набранное, потом перечитываем
+  // файл, и если запись упёрлась в расхождение, учащийся видит плашку.
+  const mountedTokenRef = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadToken === mountedTokenRef.current) return;
+    mountedTokenRef.current = reloadToken;
+    void flushRef.current().then(() => load());
+  }, [reloadToken, load]);
 
   useEffect(() => {
     const onPageHide = () => {
@@ -495,6 +558,52 @@ export function ExercisePanel({
         onChange={setCode}
         onLspError={setError}
       />
+
+      {conflict && (
+        <div
+          role="alert"
+          className="space-y-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <p className="font-medium">Файл упражнения изменился на диске.</p>
+          <p>
+            Так бывает, когда правку внёс редактор в IDE или когда ты нажал «Взять как есть» на
+            шаге-напоминании. Твой текст остался в редакторе и никуда не пропал, но на диск он
+            пока не записан — реши, чей код остаётся.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={overwriteWithDraft}
+              className="rounded bg-amber-700 px-3 py-1 text-xs text-white"
+            >
+              Записать мой код поверх
+            </button>
+            <button
+              onClick={takeDiskVersion}
+              className="rounded border border-amber-700 px-3 py-1 text-xs"
+            >
+              Взять версию с диска
+            </button>
+            <button onClick={() => setConflict(null)} className="px-2 py-1 text-xs underline">
+              скрыть
+            </button>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-xs">Версия с диска</summary>
+            <pre className="mt-1 max-h-48 overflow-auto rounded bg-white/60 p-2 text-xs dark:bg-black/30">
+              <code>{conflict.disk.code}</code>
+            </pre>
+          </details>
+          <details>
+            <summary className="cursor-pointer text-xs">Мой текст на момент расхождения</summary>
+            <pre className="mt-1 max-h-48 overflow-auto rounded bg-white/60 p-2 text-xs dark:bg-black/30">
+              <code>{conflict.draft}</code>
+            </pre>
+          </details>
+          <p className="text-xs">
+            Возьмёшь версию с диска — свой текст вернёшь через Ctrl+Z или скопируешь отсюда.
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <button

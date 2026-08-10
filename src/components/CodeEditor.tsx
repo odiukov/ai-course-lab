@@ -316,10 +316,18 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
   // Внешняя правка (IDE или кнопка «взять как есть») приезжает пропом: модель
   // обновляется, только если текст действительно другой, иначе каждый ререндер
   // сбрасывал бы курсор в начало файла.
+  //
+  // Не setValue: он стирает стек отмены, и текст, который учащийся набрал до
+  // приезда внешней правки, уже нельзя вернуть через Ctrl+Z. Та же полная
+  // замена, но обычной правкой модели, отмену сохраняет — pushStackElement
+  // перед ней делает её отдельным шагом отмены, а не продолжением набора.
   useEffect(() => {
     const editor = editorRef.current;
     const model = editor?.getModel();
-    if (model && model.getValue() !== code) model.setValue(code);
+    if (!model || model.getValue() === code) return;
+    model.pushStackElement();
+    model.pushEditOperations([], [{ range: model.getFullModelRange(), text: code }], () => null);
+    model.pushStackElement();
   }, [code]);
 
   // Своя функция развёрнута и подсвечена, чужие свёрнуты и приглушены.
