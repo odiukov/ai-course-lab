@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
 import path from "node:path";
 import { claudeAdapter } from "./claude-adapter";
 import type { Adapter, AgentEvent } from "./events";
-import { AgentRunError, queueDepth, runAgent, runQueued } from "./runner";
+import { AgentRunError, agentScratchDir, queueDepth, runAgent, runQueued } from "./runner";
 
 const FAKE = path.resolve(__dirname, "../../../tests/fixtures/agent/fake-agent.mjs");
 
@@ -102,6 +103,24 @@ describe("runAgent", () => {
     await expect(stuck).rejects.toMatchObject({ kind: "timeout" });
     await expect(next).resolves.toBe("часть 1 часть 2");
     expect(queueDepth()).toBe(0);
+  });
+});
+
+describe("рабочая директория агента", () => {
+  it("по умолчанию агент стоит не в репозитории, а в пустой служебной папке", async () => {
+    // Печатает свой process.cwd() в поле result — то есть то, что раннер
+    // реально передал дочернему процессу.
+    const cwdAdapter: Adapter = {
+      command: process.execPath,
+      args: () => ["-e", "console.log(JSON.stringify({type:'result',result:process.cwd()}))"],
+      parseLine: claudeAdapter.parseLine,
+    };
+
+    const cwd = await runAgent({ adapter: cwdAdapter, prompt: "ok" }, () => {});
+
+    expect(fs.realpathSync(cwd)).toBe(fs.realpathSync(agentScratchDir()));
+    expect(fs.realpathSync(cwd).startsWith(fs.realpathSync(process.cwd()))).toBe(false);
+    expect(fs.readdirSync(cwd)).toEqual([]);
   });
 });
 

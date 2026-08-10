@@ -13,7 +13,21 @@ import { isLimitMessage, safeJson, type Adapter, type AgentEvent } from "./event
 //   {"type":"result","subtype":"success","is_error":false,"result":"...", ...}
 export const claudeAdapter: Adapter = {
   command: "claude",
-  args: (prompt) => ["-p", prompt, "--output-format", "stream-json", "--verbose"],
+  // `--tools ""` disables every built-in tool (verified against claude 2.1.226:
+  // the `system`/`init` line comes back with "tools":[]), and
+  // `--strict-mcp-config` with no --mcp-config leaves "mcp_servers":[] so no
+  // MCP server can add tools back. The spec requires an agent that returns
+  // text only and physically cannot touch the course.
+  args: (prompt) => [
+    "-p",
+    prompt,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--tools",
+    "",
+    "--strict-mcp-config",
+  ],
   parseLine(line) {
     const data = safeJson(line);
     if (!data) return [];

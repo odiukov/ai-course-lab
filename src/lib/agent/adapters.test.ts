@@ -38,6 +38,28 @@ describe.each([
   });
 });
 
+describe("ограничение инструментов", () => {
+  it("claude запускается без единого инструмента и без чужих MCP", () => {
+    const args = claudeAdapter.args("привет");
+    // Проверено на claude 2.1.226: строка init приходит с "tools":[] и
+    // "mcp_servers":[].
+    expect(args).toContain("--tools");
+    expect(args[args.indexOf("--tools") + 1]).toBe("");
+    expect(args).toContain("--strict-mcp-config");
+  });
+
+  it("codex запускается в песочнице только на чтение", () => {
+    const args = codexAdapter.args("привет");
+    // У codex-cli 0.147.0 нет флага, отключающего инструменты; read-only —
+    // самое сильное, что есть.
+    expect(args).toContain("-s");
+    expect(args[args.indexOf("-s") + 1]).toBe("read-only");
+    expect(args).toContain("--skip-git-repo-check");
+    // Промпт остаётся последним позиционным аргументом.
+    expect(args.at(-1)).toBe("привет");
+  });
+});
+
 describe("collectText", () => {
   it("берёт последний непустой done, а не первый", () => {
     // Многоходовой `codex exec` шлёт по done на каждое завершённое сообщение

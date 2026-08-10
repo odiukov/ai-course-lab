@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import readline from "node:readline";
 import { collectText, type Adapter, type AgentEvent } from "./events";
 import { enqueue, queueDepth } from "./queue";
@@ -45,6 +48,21 @@ function excerpt(line: string): string {
   return line.length > LINE_EXCERPT_LIMIT ? `${line.slice(0, LINE_EXCERPT_LIMIT)}…` : line;
 }
 
+/**
+ * An empty directory outside the repository, used as the agent's cwd.
+ *
+ * Spawned with an undefined cwd the agent inherited the dev server's working
+ * directory — this repository, with the whole course in it. The prompts
+ * interpolate lesson bodies verbatim and this curriculum contains lessons
+ * about prompt injection, so the agent must not be standing in the course
+ * while it reads them.
+ */
+export function agentScratchDir(): string {
+  const dir = path.join(os.tmpdir(), "ai-course-lab-agent");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -55,7 +73,7 @@ export function runAgent(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(opts.adapter.command, opts.adapter.args(opts.prompt), {
-      cwd: opts.cwd,
+      cwd: opts.cwd ?? agentScratchDir(),
       signal: opts.signal,
       stdio: ["ignore", "pipe", "pipe"],
     });

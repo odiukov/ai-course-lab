@@ -12,7 +12,12 @@ import { isLimitMessage, safeJson, type Adapter } from "./events";
 // verified against real data.
 export const codexAdapter: Adapter = {
   command: "codex",
-  args: (prompt) => ["exec", "--json", prompt],
+  // codex-cli 0.147.0 has NO flag that disables tools: `codex exec --help`
+  // offers only sandbox policies. `-s read-only` is therefore the strongest
+  // restriction available — the agent may still read and run commands, but it
+  // cannot write anywhere. `--skip-git-repo-check` is required because the
+  // runner spawns it in a scratch directory that is not a git repository.
+  args: (prompt) => ["exec", "--json", "-s", "read-only", "--skip-git-repo-check", prompt],
   parseLine(line) {
     const data = safeJson(line);
     if (!data) return [];
