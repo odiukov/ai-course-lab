@@ -7,6 +7,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { Clarifications } from "@/components/Clarifications";
 import { ExercisePanel } from "@/components/ExercisePanel";
 import { QuestionSet } from "@/components/QuestionSet";
+import { RecallCard } from "@/components/RecallCard";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -85,6 +86,9 @@ export function Reader({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ text: string; at: number } | null>(null);
+  // Меняется после вставки прошлого кода на recall-шаге, чтобы ExercisePanel
+  // ниже перечитал файл с диска — вставленный код пришёл не из редактора.
+  const [reloadEditor, setReloadEditor] = useState(0);
 
   // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
   // the URL. `replace` (not `push`) so the back button leaves the lesson
@@ -280,9 +284,21 @@ export function Reader({
           />
         )}
         {step.type === "recall" && step.exercise_fn && (
-          <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-            Ты уже писал эту функцию в одном из прошлых уроков — <code>{step.exercise_fn}</code>.
-          </p>
+          <>
+            <RecallCard
+              slug={slug}
+              fn={step.exercise_fn}
+              onInserted={() => setReloadEditor((value) => value + 1)}
+            />
+            <ExercisePanel
+              key={`${step.id}-${reloadEditor}`}
+              slug={slug}
+              stepId={step.id}
+              fn={step.exercise_fn}
+              lspUrl={lspUrl}
+              onProgressChanged={() => void load()}
+            />
+          </>
         )}
         {step.type === "check" &&
           (step.check && step.check.length > 0 ? (
