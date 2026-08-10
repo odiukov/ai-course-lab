@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { lessonPaths } from "../content/paths";
 
 export type VisualPathResolution =
   | { ok: true; path: string }
@@ -33,6 +34,56 @@ function isContained(root: string, target: string): boolean {
 export function resolveVisualPath(sourceDir: string, rel: string): VisualPathResolution {
   const root = path.join(sourceDir, "learning-visuals");
   const target = path.resolve(sourceDir, rel);
+
+  if (!isContained(root, target) || !target.endsWith(".html")) {
+    return { ok: false, reason: "forbidden" };
+  }
+  if (!fs.existsSync(target)) {
+    return { ok: false, reason: "not-found" };
+  }
+
+  const canonicalRoot = fs.realpathSync(root);
+  const canonicalTarget = fs.realpathSync(target);
+  if (
+    !isContained(canonicalRoot, canonicalTarget) ||
+    !canonicalTarget.endsWith(".html") ||
+    !fs.statSync(canonicalTarget).isFile()
+  ) {
+    return { ok: false, reason: "forbidden" };
+  }
+
+  return { ok: true, path: canonicalTarget };
+}
+
+// Slug урока и id шага — сегменты имени файла, не пути. Плоский набор
+// символов, никаких точек: `..`, `a/b` и `a\b` отсекаются до обращения к
+// диску. Проверка не косметическая — план это сгенерированный файл, который
+// написала модель, так что `../../../etc/passwd` в поле id — реалистичный
+// вход, а lessonPaths послушно соберёт из него путь.
+const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * То же, что resolveVisualPath, но для схем, которые проект нарисовал сам:
+ * они лежат в `<contentDir>/lessons/<slug>/visuals/<stepId>.html`.
+ *
+ * Проверки повторяются полностью, а не сокращаются на «путь же собран нами»:
+ * симлинк внутри visuals/ ведёт куда угодно, а fs.readFileSync его пройдёт.
+ * Поэтому после existsSync оба конца канонизируются через realpathSync, и
+ * containment, расширение и «это обычный файл» перепроверяются на
+ * канонических путях.
+ */
+export function resolveGeneratedVisualPath(
+  contentDir: string,
+  slug: string,
+  stepId: string,
+): VisualPathResolution {
+  if (!SAFE_SEGMENT.test(slug) || !SAFE_SEGMENT.test(stepId)) {
+    return { ok: false, reason: "forbidden" };
+  }
+
+  const paths = lessonPaths(contentDir, slug);
+  const root = paths.visualsDir;
+  const target = paths.visualFile(stepId);
 
   if (!isContained(root, target) || !target.endsWith(".html")) {
     return { ok: false, reason: "forbidden" };
