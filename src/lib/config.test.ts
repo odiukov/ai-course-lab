@@ -12,10 +12,22 @@ describe("loadConfig", () => {
     expect(cfg.sourceDir.endsWith("source")).toBe(true);
   });
 
-  it("падает, если COURSE_REPO указывает не на директорию", () => {
-    expect(() =>
-      loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv),
-    ).toThrow(/не найдена/);
+  // Изменено осознанно: раньше здесь ожидался throw. Спека обещает, что
+  // чтение уже импортированных уроков не зависит от старого репозитория, а
+  // loadConfig зовётся на каждом читающем маршруте — переехавший каталог
+  // ронял всё приложение целиком. Отказ остался там, где он уместен: в
+  // scripts/import-lesson.mjs.
+  it("не падает, если COURSE_REPO переехал — импорт просто становится недоступен", () => {
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv);
+    expect(cfg.courseRepo).toBeNull();
+    expect(cfg.sourceDir.endsWith("source")).toBe(true);
+  });
+
+  it("не принимает файл вместо директории", () => {
+    const file = path.join(FIXTURE, "phases/01-math-foundations/01-alpha/docs/en.md");
+    expect(
+      loadConfig({ NODE_ENV: "test", COURSE_REPO: file } as NodeJS.ProcessEnv).courseRepo,
+    ).toBeNull();
   });
 
   it("принимает существующий COURSE_REPO", () => {
