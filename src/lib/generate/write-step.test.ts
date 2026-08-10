@@ -5,6 +5,7 @@ import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
 import { readStep } from "../content/step-file";
+import { appendClarification } from "../content/clarifications";
 import type { StepMeta } from "../content/step-file";
 import type { LessonPlan } from "../content/lesson-plan";
 import { ensureSteps, excerptForStep, resolveStepExcerpts, stripEnclosingFence } from "./write-step";
@@ -236,5 +237,19 @@ describe("ensureSteps", () => {
       fn: "transpose",
       changes: "теперь принимает матрицу NxM",
     });
+  });
+
+  it("кладёт в промпт вопросы, заданные на предыдущих шагах", async () => {
+    const contentDir = tmpDir();
+    appendClarification(contentDir, PLAN.slug, "001-t", {
+      askedAt: "2026-08-10T09:00:00.000Z",
+      question: "Что такое строка матрицы?",
+      answer: "Горизонтальный ряд чисел.",
+    });
+
+    const run = vi.fn().mockResolvedValue("Тело.");
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
+
+    expect(run.mock.calls[0][0] as string).toContain("Что такое строка матрицы?");
   });
 });

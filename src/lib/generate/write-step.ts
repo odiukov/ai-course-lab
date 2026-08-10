@@ -1,5 +1,6 @@
 import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
+import { buildClarificationContext } from "../content/clarification-context";
 import type { LessonPlan } from "../content/lesson-plan";
 import { readStep, writeStep, type Step, type StepMeta } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
@@ -121,6 +122,12 @@ export async function ensureSteps(opts: {
       step_type: meta.type,
       neighbours: neighbourSummary(plan, fromIndex + offset),
       source_excerpt: excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor),
+      clarifications: buildClarificationContext({
+        contentDir,
+        slug: plan.slug,
+        steps: plan.steps,
+        beforeStepId: meta.id,
+      }),
     });
 
     const body = stripEnclosingFence(await deps.run(prompt, onEvent));
