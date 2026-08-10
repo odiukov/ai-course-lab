@@ -110,6 +110,52 @@ export function readLessonProgress(db: DatabaseSync, slug: string): LessonProgre
   };
 }
 
+// Зелёный прогон и полностью верный квиз — единственное, что ставит passed.
+// read_at при этом сохраняется, если уже был: «прочитан» и «пройден» — разные
+// события, и время первого не переписывается временем второго.
+export function markStepPassed(
+  db: DatabaseSync,
+  slug: string,
+  stepId: string,
+  now: string = new Date().toISOString(),
+): void {
+  execute(
+    db,
+    `INSERT INTO step_state (lesson_slug, step_id, state, opened_at, read_at)
+     VALUES (?, ?, 'passed', ?, ?)
+     ON CONFLICT (lesson_slug, step_id) DO UPDATE SET
+       state = 'passed',
+       opened_at = COALESCE(step_state.opened_at, excluded.opened_at),
+       read_at = COALESCE(step_state.read_at, excluded.read_at)`,
+    slug,
+    stepId,
+    now,
+    now,
+  );
+}
+
+// failed ставится безусловно, в том числе после passed: если прогон снова
+// красный, значит файл снова красный, и полоска урока не должна утверждать
+// обратное. read_at не трогается — прочитанным шаг быть не перестал.
+export function markStepFailed(
+  db: DatabaseSync,
+  slug: string,
+  stepId: string,
+  now: string = new Date().toISOString(),
+): void {
+  execute(
+    db,
+    `INSERT INTO step_state (lesson_slug, step_id, state, opened_at, read_at)
+     VALUES (?, ?, 'failed', ?, NULL)
+     ON CONFLICT (lesson_slug, step_id) DO UPDATE SET
+       state = 'failed',
+       opened_at = COALESCE(step_state.opened_at, excluded.opened_at)`,
+    slug,
+    stepId,
+    now,
+  );
+}
+
 export function readLessonReadCounts(db: DatabaseSync): Map<string, number> {
   const rows = queryAll<{ lesson_slug: string; n: number }>(
     db,

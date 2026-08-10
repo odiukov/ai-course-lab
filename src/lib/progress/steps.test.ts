@@ -5,7 +5,9 @@ import path from "node:path";
 import type { StepMeta } from "../content/step-file";
 import { execute, openProgressDb } from "./db";
 import {
+  markStepFailed,
   markStepOpened,
+  markStepPassed,
   markStepRead,
   readLessonProgress,
   readLessonReadCounts,
@@ -211,5 +213,38 @@ describe("readLessonReadCounts", () => {
     const counts = readLessonReadCounts(db);
     expect(counts.get(SLUG)).toBe(2);
     expect(counts.get("02-ml-fundamentals__01-gamma")).toBe(1);
+  });
+});
+
+describe("markStepPassed / markStepFailed", () => {
+  it("passed перебивает read и попадает в счётчик прочитанных", () => {
+    const db = freshDb();
+    markStepRead(db, "l1", "012-transpose");
+    markStepPassed(db, "l1", "012-transpose");
+    const progress = readLessonProgress(db, "l1");
+    expect(progress.steps[0].state).toBe("passed");
+    expect(progress.readStepIds).toContain("012-transpose");
+  });
+
+  it("failed виден и в счётчик прочитанных не попадает", () => {
+    const db = freshDb();
+    markStepFailed(db, "l1", "012-transpose");
+    const progress = readLessonProgress(db, "l1");
+    expect(progress.steps[0].state).toBe("failed");
+    expect(progress.readStepIds).toEqual([]);
+  });
+
+  it("красный прогон после зелёного возвращает шаг в failed — файл действительно красный", () => {
+    const db = freshDb();
+    markStepPassed(db, "l1", "012-transpose");
+    markStepFailed(db, "l1", "012-transpose");
+    expect(readLessonProgress(db, "l1").steps[0].state).toBe("failed");
+  });
+
+  it("passed не затирает уже записанное read_at", () => {
+    const db = freshDb();
+    markStepRead(db, "l1", "012-transpose", "2026-08-10T10:00:00.000Z");
+    markStepPassed(db, "l1", "012-transpose", "2026-08-10T11:00:00.000Z");
+    expect(readLessonProgress(db, "l1").steps[0].readAt).toBe("2026-08-10T10:00:00.000Z");
   });
 });
