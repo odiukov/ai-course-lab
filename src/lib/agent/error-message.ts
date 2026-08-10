@@ -11,6 +11,10 @@ export function errorStatus(kind: string | undefined, message: string): string {
       return "Упёрлись в лимит подписки — генерация приостановлена.";
     case "spawn":
       return "Агент не найден на сервере — читать урок можно, но дописать его пока нельзя.";
+    case "timeout":
+      return "Агент не ответил вовремя — запуск прерван. Попробуй ещё раз.";
+    case "aborted":
+      return "Генерация отменена.";
     default:
       return `Ошибка: ${message}`;
   }

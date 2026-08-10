@@ -20,7 +20,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
 
   const config = loadConfig();
-  const deps = defaultDeps(config);
+  // The request's signal, so closing the tab kills the child and frees the
+  // serial queue instead of wedging every later generation.
+  const deps = defaultDeps(config, { signal: request.signal });
 
   return sseStream(async (send) => {
     const ref = findLesson(config.sourceDir, slug);

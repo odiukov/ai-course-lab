@@ -10,9 +10,24 @@ export interface RunOptions {
   prompt: string;
   cwd?: string;
   signal?: AbortSignal;
+  /** Hard cap on one run. 0 disables it. Defaults to DEFAULT_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
-export type AgentRunErrorKind = "limit" | "agent" | "spawn" | "exit" | "parse" | "aborted";
+// A wedged CLI used to hold the serial queue for the lifetime of the dev
+// server: no timeout anywhere, so every later generation in every tab waited
+// on it. Ten minutes is far above a real plan generation (minutes at worst)
+// and far below "until you restart".
+export const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+
+export type AgentRunErrorKind =
+  | "limit"
+  | "agent"
+  | "spawn"
+  | "exit"
+  | "parse"
+  | "aborted"
+  | "timeout";
 
 export class AgentRunError extends Error {
   kind: AgentRunErrorKind;
@@ -50,15 +65,34 @@ export function runAgent(
     let stderr = "";
     let settled = false;
 
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            // Kill first, settle second: the promise must not resolve while a
+            // wedged child is still holding the queue.
+            child.kill("SIGKILL");
+            settleReject(
+              new AgentRunError(
+                `${opts.adapter.command} не ответил за ${Math.round(timeoutMs / 1000)} с — запуск прерван`,
+                "timeout",
+              ),
+            );
+          }, timeoutMs)
+        : null;
+    timer?.unref?.();
+
     function settleResolve(text: string) {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       resolve(text);
     }
 
     function settleReject(error: AgentRunError) {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
       reject(error);
     }
 

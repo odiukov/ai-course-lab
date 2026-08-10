@@ -12,6 +12,12 @@ describe("errorStatus", () => {
     expect(text).toMatch(/читать урок/);
   });
 
+  it("про таймаут говорит, что запуск прерван, и зовёт повторить", () => {
+    const text = errorStatus("timeout", "claude не ответил за 600 с — запуск прерван");
+    expect(text).toMatch(/не ответил вовремя/);
+    expect(text).toMatch(/Попробуй ещё раз/);
+  });
+
   it("для прочих видов показывает сообщение как есть", () => {
     expect(errorStatus("agent", "агент вернул мусор")).toBe("Ошибка: агент вернул мусор");
     expect(errorStatus(undefined, "без вида")).toBe("Ошибка: без вида");

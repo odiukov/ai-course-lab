@@ -72,6 +72,37 @@ describe("runAgent", () => {
     expect(error.kind).toBe("aborted");
     expect(error.message).not.toMatch(/не удалось запустить/i);
   });
+
+  it("обрывает зависший запуск по таймауту и убивает процесс", async () => {
+    const events: AgentEvent[] = [];
+    const promise = runAgent(
+      { adapter: fakeAdapter, prompt: "HANG", timeoutMs: 150 },
+      (e) => events.push(e),
+    );
+
+    let caught: unknown;
+    try {
+      await promise;
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AgentRunError);
+    expect((caught as AgentRunError).kind).toBe("timeout");
+    expect((caught as AgentRunError).message).toMatch(/не ответил/i);
+    // До зависания агент успел что-то сказать — значит процесс действительно
+    // жил и был оборван, а не упал на запуске.
+    expect(events.some((e) => e.type === "text")).toBe(true);
+  });
+
+  it("зависший запуск не держит очередь: следующий доходит до конца", async () => {
+    const stuck = runQueued({ adapter: fakeAdapter, prompt: "HANG", timeoutMs: 150 }, () => {});
+    const next = runQueued({ adapter: fakeAdapter, prompt: "ok" }, () => {});
+
+    await expect(stuck).rejects.toMatchObject({ kind: "timeout" });
+    await expect(next).resolves.toBe("часть 1 часть 2");
+    expect(queueDepth()).toBe(0);
+  });
 });
 
 describe("runQueued", () => {

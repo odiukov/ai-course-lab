@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sseStream } from "./sse";
+import { sseStream, type SendEvent } from "./sse";
 
 async function readAll(response: Response): Promise<string> {
   return await response.text();
@@ -35,6 +35,33 @@ describe("sseStream", () => {
     expect(body).toContain("event: error");
     expect(body).toContain('"message":"упёрлись в лимит"');
     expect(body).toContain('"kind":"limit"');
+  });
+
+  it("не падает, если писать после того, как клиент отвалился", async () => {
+    // Ровно сценарий закрытой вкладки: контроллер уже закрыт, а обработчик
+    // ещё шлёт прогресс, потом падает, и sseStream шлёт error и close.
+    let sendAfterClose: SendEvent | null = null;
+    const response = sseStream(async (send) => {
+      sendAfterClose = send;
+      send("progress", { text: "до отмены" });
+      throw new Error("агент упал уже после отключения клиента");
+    });
+
+    await response.body!.cancel();
+    // Обработчик успел или не успел — в любом случае повторная запись после
+    // закрытия не должна выбрасывать.
+    expect(() => sendAfterClose?.("progress", { text: "после отмены" })).not.toThrow();
+  });
+
+  it("повторный send после закрытия потока молчит, а не выбрасывает", async () => {
+    let captured: SendEvent | null = null;
+    const response = sseStream(async (send) => {
+      captured = send;
+      send("done", { ids: [] });
+    });
+    await readAll(response);
+
+    expect(() => captured?.("progress", { text: "поздно" })).not.toThrow();
   });
 
   it("не добавляет kind для обычной ошибки без этого поля", async () => {

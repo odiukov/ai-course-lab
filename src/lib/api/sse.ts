@@ -4,9 +4,21 @@ export function sseStream(handler: (send: SendEvent) => Promise<void>): Response
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      // Once the client disconnects, the controller is closed and every
+      // enqueue throws. Unguarded, that turned one abandoned request into
+      // three throws: enqueue in `send`, `send` again from the catch, and
+      // `close` in the finally — an unhandled rejection each time.
+      let closed = false;
+
       const send: SendEvent = (event, data) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+        }
       };
+
       try {
         await handler(send);
       } catch (error) {
@@ -16,7 +28,14 @@ export function sseStream(handler: (send: SendEvent) => Promise<void>): Response
           ...(typeof kind === "string" ? { kind } : {}),
         });
       } finally {
-        controller.close();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // Already closed by the runtime after the client went away.
+          }
+        }
       }
     },
   });
