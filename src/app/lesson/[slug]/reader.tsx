@@ -20,6 +20,7 @@ interface StepData {
   type: "theory" | "visual" | "check" | "code" | "recall" | "quiz";
   title: string;
   visual?: string;
+  generatedVisual?: boolean;
   exercise_fn?: string;
   check?: CheckQuestion[];
   body: string;
@@ -270,7 +271,15 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
 
         <h1 className="text-2xl font-semibold">{step.title}</h1>
         <StepBody body={step.body} />
-        {step.visual && <VisualFrame path={step.visual} />}
+        {step.visual && (
+          <VisualFrame src={`/api/visual?path=${encodeURIComponent(step.visual)}`} title={step.visual} />
+        )}
+        {step.generatedVisual && (
+          <VisualFrame
+            src={`/api/visual?lesson=${encodeURIComponent(slug)}&step=${encodeURIComponent(step.id)}`}
+            title={step.title}
+          />
+        )}
         {step.type === "code" && step.exercise_fn && (
           <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
             Здесь будет редактор для функции <code>{step.exercise_fn}</code> — план 3.

@@ -55,6 +55,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       onEvent: (event) => {
         if (event.type === "text") send("progress", { stage: "steps", text: event.text });
       },
+      // Не throw: провал схемы не должен рвать поток и отменять уже
+      // написанные шаги. sseStream шлёт "error" только из catch, поэтому
+      // кадр отправляется здесь руками — ридер уже умеет его показывать и
+      // продолжать чтение.
+      onVisualError: (stepId, problem) =>
+        send("error", { message: `Схему для шага ${stepId} нарисовать не удалось: ${problem}` }),
     });
 
     send("done", { ids });

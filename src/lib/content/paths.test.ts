@@ -31,4 +31,13 @@ describe("lessonPaths", () => {
       path.resolve("/repo/content/lessons/01-a__02-b/clarifications/003-x.md"),
     );
   });
+
+  it("кладёт сгенерированные схемы в visuals рядом со steps", () => {
+    const paths = lessonPaths("/content", "01-math-foundations__02-beta");
+
+    expect(paths.visualsDir).toBe(
+      path.join("/content", "lessons", "01-math-foundations__02-beta", "visuals"),
+    );
+    expect(paths.visualFile("004-dlina")).toBe(path.join(paths.visualsDir, "004-dlina.html"));
+  });
 });

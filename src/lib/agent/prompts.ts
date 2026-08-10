@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export type PromptName = "plan-lesson" | "write-step" | "explain";
+export type PromptName = "plan-lesson" | "write-step" | "explain" | "draw-visual";
 
 export function renderPrompt(name: PromptName, vars: Record<string, string>): string {
   const file = path.join(process.cwd(), "prompts", `${name}.md`);
