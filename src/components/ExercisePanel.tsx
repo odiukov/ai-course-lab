@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BenchTable } from "@/components/BenchTable";
 import { CodeEditor } from "@/components/CodeEditor";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -80,12 +80,20 @@ export function ExercisePanel({
   // дебаунса просто выходит — а закончившийся save() сам перезапускается,
   // если текст успел уйти дальше.
   const savingRef = useRef(false);
+  // Всегда шаг/функция, которые сейчас показаны — не то, для чего был начат
+  // конкретный запрос. runTests/runReview сверяются с этим перед тем, как
+  // применить свой результат: если учащийся уже ушёл на другой шаг, ответ
+  // запроса, начатого для прежней функции, отбрасывается целиком.
+  const currentStepRef = useRef({ stepId, fn });
+  currentStepRef.current = { stepId, fn };
 
   // Шесть code-шагов урока делят один и тот же файл упражнения, поэтому
   // сам файл (`data`/`code`) переживает переход между шагами и не
   // перезапрашивается — но вердикт, замер и разбор относились к прежней
   // функции и не должны просвечивать на новом шаге, пока тесты не прогнаны
-  // заново.
+  // заново. running/reviewing тоже сбрасываются здесь: иначе кнопка нового
+  // шага осталась бы заблокированной, пока не придёт (и будет отброшен)
+  // ответ, начатый ещё для прежней функции.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- сброс производного состояния прежнего шага
     setResult(null);
@@ -93,6 +101,8 @@ export function ExercisePanel({
     setReview("");
     setReviewDone(false);
     setError(null);
+    setRunning(false);
+    setReviewing(false);
   }, [stepId, fn]);
 
   const load = useCallback(async () => {
@@ -173,6 +183,7 @@ export function ExercisePanel({
   }, [code, load, slug]);
 
   const runTests = useCallback(async () => {
+    const startedFor = { stepId, fn };
     setRunning(true);
     setError(null);
     setBench(null);
@@ -182,22 +193,34 @@ export function ExercisePanel({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ stepId }),
     });
-    setRunning(false);
 
     const json = (await response.json()) as {
       result?: TestResult;
       error?: string;
       kind?: PracticeErrorKind;
     };
+
+    // Пока запрос летел, учащийся мог уйти на другой шаг — тогда этот ответ
+    // принадлежит функции, которую здесь больше не показывают, и не должен
+    // перезаписать состояние (в том числе кнопку) уже другого шага.
+    const stillCurrent =
+      currentStepRef.current.stepId === startedFor.stepId && currentStepRef.current.fn === startedFor.fn;
+    if (!stillCurrent) return;
+
+    setRunning(false);
     if (!response.ok || !json.result) {
       setError(practiceErrorStatus(json.kind, json.error ?? "неизвестно"));
       return;
     }
     setResult(json.result);
     onProgressChanged();
-  }, [onProgressChanged, slug, stepId]);
+  }, [onProgressChanged, slug, stepId, fn]);
 
   const runReview = useCallback(async () => {
+    const startedFor = { stepId, fn };
+    const isCurrent = () =>
+      currentStepRef.current.stepId === startedFor.stepId && currentStepRef.current.fn === startedFor.fn;
+
     setReviewing(true);
     setError(null);
     setReview("");
@@ -208,10 +231,17 @@ export function ExercisePanel({
       body: JSON.stringify({ stepId }),
     });
 
+    // Учащийся мог уже уйти на другой шаг, пока заголовки ответа летели —
+    // тогда весь этот поток относится к прежней функции и не должен трогать
+    // состояние нового шага.
+    if (!isCurrent()) return;
+
     if (!response.ok || !response.body) {
       const json = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(json.error ?? "Разбор недоступен");
-      setReviewing(false);
+      if (isCurrent()) {
+        setError(json.error ?? "Разбор недоступен");
+        setReviewing(false);
+      }
       return;
     }
 
@@ -223,6 +253,9 @@ export function ExercisePanel({
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      // Та же проверка на каждый принятый кусок потока: поздний токен из
+      // разбора прежней функции не должен просочиться в панель новой.
+      if (!isCurrent()) return;
       buffer += decoder.decode(value, { stream: true });
       const { frames, rest } = parseSseFrames(buffer);
       buffer = rest;
@@ -247,15 +280,28 @@ export function ExercisePanel({
       }
     }
 
+    if (!isCurrent()) return;
     setReviewing(false);
     onProgressChanged();
-  }, [onProgressChanged, slug, stepId]);
+  }, [onProgressChanged, slug, stepId, fn]);
+
+  // Мемоизируем по числам, а не по объекту функции: сервер отдаёт свежий
+  // (структурно тот же, но новый по ссылке) массив functions после каждого
+  // успешного автосохранения, и без этого focus получал бы новую ссылку на
+  // каждое такое сохранение — а CodeEditor реагирует на неё сменой позиции
+  // курсора. Если реальные startLine/endLine не изменились, старая ссылка
+  // остаётся в силе.
+  const focusFn = data?.functions.find((item) => item.fn === fn);
+  const focusRange = useMemo(
+    () => (focusFn ? { startLine: focusFn.startLine, endLine: focusFn.endLine } : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- нужны именно числа, не ссылка на focusFn
+    [focusFn?.startLine, focusFn?.endLine],
+  );
 
   if (!data) {
     return <p className="text-sm text-slate-400">{error ?? "Открываю упражнение…"}</p>;
   }
 
-  const focus = data.functions.find((item) => item.fn === fn);
   const green = result !== null && result.failed === 0 && result.errors === 0 && result.total > 0;
 
   return (
@@ -270,7 +316,7 @@ export function ExercisePanel({
       <CodeEditor
         file={data.file}
         code={code}
-        focus={focus ? { startLine: focus.startLine, endLine: focus.endLine } : undefined}
+        focus={focusRange}
         lspUrl={lspUrl}
         onChange={setCode}
         onLspError={(message) =>

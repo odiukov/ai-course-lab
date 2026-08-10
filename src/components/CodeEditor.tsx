@@ -52,15 +52,24 @@ function applyFocus(
   const model = editor.getModel();
   if (!model) return;
 
+  // Свёртка и затемнение остаются идемпотентными — они всегда пересчитаны, —
+  // но курсор двигаем только если он и так не внутри нужной функции. Без
+  // этой проверки любой повторный вызов (а он приходит на каждое изменение
+  // объекта focus, включая логически то же самое) выкидывал бы курсор в
+  // строку 1 функции прямо во время набора текста.
+  const position = editor.getPosition();
+  const caretInside =
+    position !== null && position.lineNumber >= focus.startLine && position.lineNumber <= focus.endLine;
+
   void editor
     .getAction("editor.foldAll")
     ?.run()
     .then(() => {
-      editor.setPosition({ lineNumber: focus.startLine, column: 1 });
+      if (!caretInside) editor.setPosition({ lineNumber: focus.startLine, column: 1 });
       return editor.getAction("editor.unfold")?.run();
     })
     .then(() => {
-      editor.revealLineNearTop(focus.startLine);
+      if (!caretInside) editor.revealLineNearTop(focus.startLine);
     });
 
   const total = model.getLineCount();
