@@ -86,6 +86,20 @@ describe("serializeClarification / parseClarifications", () => {
     expect(parsed).toEqual([spaced]);
   });
 
+  it("нормализует пробелы и переносы по краям вопроса, но не внутри него", () => {
+    // Вопрос приходит из поля ввода чата: обрезка пробельных символов по
+    // краям — осознанная нормализация ввода, а не потеря данных. Внутренние
+    // пробелы и переносы строк при этом переживают круг без потерь (см.
+    // тесты выше) — это и есть дефект, который был исправлен.
+    const untrimmed: Clarification = {
+      askedAt: "2026-08-10T17:00:00.000Z",
+      question: "\n  Что такое ранг?\t\n",
+      answer: "Ответ.",
+    };
+    const parsed = parseClarifications(serializeClarification(untrimmed));
+    expect(parsed).toEqual([{ ...untrimmed, question: "Что такое ранг?" }]);
+  });
+
   it("игнорирует текст до первого маркера", () => {
     const file = `Ручная заметка сверху.\n\n${serializeClarification(ONE)}`;
     expect(parseClarifications(file)).toEqual([ONE]);
