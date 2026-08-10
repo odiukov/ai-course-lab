@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { LessonRef } from "./catalog";
-import { pad2, visualPrefixes } from "./visual-naming";
+import { findExerciseDir, visualPrefixes } from "./naming";
+import { parseTopLevelFunctions } from "./written-functions";
 
 const quizSchema = z.object({
   questions: z.array(
@@ -67,15 +68,18 @@ function readVisuals(courseRepo: string, ref: LessonRef): string[] {
 
 function readExercise(courseRepo: string, ref: LessonRef): ExerciseInfo | null {
   const root = path.join(courseRepo, "learning-exercises");
-  if (!fs.existsSync(root)) return null;
-  const prefix = `p${pad2(ref.phaseNumber)}-l${pad2(ref.lessonNumber)}-`;
-  const found = fs.readdirSync(root).find((name) => name.startsWith(prefix));
+  const found = findExerciseDir(root, ref);
   if (!found) return null;
   const dir = path.join(root, found);
   const template = path.join(dir, "exercise.template.py");
   if (!fs.existsSync(template)) return null;
-  const functions = [...fs.readFileSync(template, "utf8").matchAll(/^def ([a-z][a-z0-9_]*)\(/gm)]
-    .map((match) => match[1]);
+  // Shares the balanced-paren header parser with the written-functions
+  // registry. The old single-line regex here dropped every function whose
+  // signature spans several lines, so the plan prompt never saw it and the
+  // validator's coverage rule never demanded a step for it.
+  const functions = parseTopLevelFunctions(fs.readFileSync(template, "utf8")).map(
+    (block) => block.fn,
+  );
   return { slug: found, dir, functions };
 }
 

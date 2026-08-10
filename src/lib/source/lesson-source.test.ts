@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { findLesson } from "./catalog";
 import { readLessonSource } from "./lesson-source";
@@ -58,7 +60,37 @@ describe("readLessonSource", () => {
     expect(ex.functions).toEqual(["transpose", "matmul"]);
   });
 
+  it("видит многострочную сигнатуру и async def, не теряя соседей", () => {
+    // p02-l01-gamma повторяет форму реальных шаблонов (adamw_step в p03-l06,
+    // yolo_loss в p04-l06, nsa_attention в p10-l17): заголовок разложен на
+    // несколько строк. Плюс async def — его прежний однострочный regex
+    // `^def name\(` не находил вовсе.
+    const ex = source("02-ml-fundamentals__01-gamma").exercise!;
+    expect(ex.slug).toBe("p02-l01-gamma");
+    expect(ex.functions).toEqual(["warmup", "gamma_step", "fetch_batch", "cooldown"]);
+  });
+
   it("отдаёт null, если упражнения нет", () => {
     expect(source("01-math-foundations__01-alpha").exercise).toBeNull();
+  });
+
+  it("падает, а не берёт первый попавшийся, если под префикс попали два каталога", () => {
+    // Тот же запрет, что и в импортёре: раньше здесь стоял .find(), который
+    // молча выбирал первый каталог по алфавиту.
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "course-"));
+    const ref = {
+      slug: "01-ambiguous__01-dup",
+      phaseDir: "01-ambiguous",
+      lessonDir: "01-dup",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Dup",
+    };
+    fs.mkdirSync(path.join(repo, "phases", ref.phaseDir, ref.lessonDir, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "phases", ref.phaseDir, ref.lessonDir, "docs", "en.md"), "text");
+    fs.mkdirSync(path.join(repo, "learning-exercises", "p01-l01-foo"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "learning-exercises", "p01-l01-bar"), { recursive: true });
+
+    expect(() => readLessonSource(repo, ref)).toThrow(/Неоднозначное совпадение/);
   });
 });

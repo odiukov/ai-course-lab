@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readCatalog, type PhaseRef } from "./catalog";
+import { parseExerciseSlug } from "./naming";
 
 export interface WrittenFunction {
   fn: string;
@@ -9,7 +10,7 @@ export interface WrittenFunction {
   signature: string;
 }
 
-interface FunctionBlock {
+export interface FunctionBlock {
   fn: string;
   params: string;
   body: string[];
@@ -59,7 +60,14 @@ function readHeaderParams(lines: string[], startIndex: number): { params: string
   return { params: collected.join(" ").replace(/\s+/g, " ").trim(), endIndex: lines.length - 1 };
 }
 
-function parseTopLevelFunctions(source: string): FunctionBlock[] {
+/**
+ * Every top-level `def`/`async def` in a Python file, with its parameter text
+ * and body lines. The single header parser for the whole app: a naive
+ * single-line `^def name\(` regex misses the 16 real `exercise.template.py`
+ * files whose signature spans several lines (adamw_step, yolo_loss,
+ * nsa_attention among them) and swallows the function before them.
+ */
+export function parseTopLevelFunctions(source: string): FunctionBlock[] {
   const lines = source.split("\n");
   const blocks: FunctionBlock[] = [];
   let current: FunctionBlock | null = null;
@@ -115,10 +123,9 @@ function isImplemented(body: string[]): boolean {
 }
 
 function lessonSlugFor(catalog: PhaseRef[], exerciseSlug: string): string | null {
-  const match = /^p(\d{2})-l(\d{2})-/.exec(exerciseSlug);
-  if (!match) return null;
-  const phaseNumber = Number(match[1]);
-  const lessonNumber = Number(match[2]);
+  const parsed = parseExerciseSlug(exerciseSlug);
+  if (!parsed) return null;
+  const { phaseNumber, lessonNumber } = parsed;
   for (const phase of catalog) {
     if (phase.number !== phaseNumber) continue;
     const lesson = phase.lessons.find((item) => item.lessonNumber === lessonNumber);
