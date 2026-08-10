@@ -164,6 +164,14 @@ export function Reader({
     if (openedStepId) postProgress(openedStepId, "opened");
   }, [openedStepId, postProgress]);
 
+  // Черновик из «Объясни» относится к вопросу прежнего шага — на новом шаге
+  // ему в чате взяться не с чего, иначе непонятое на шаге A могло бы уйти в
+  // историю шага B под его stepId.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- черновик привязан к прежнему шагу и не переживает переход
+    setDraft(null);
+  }, [openedStepId]);
+
   const generate = useCallback(
     async (from: number) => {
       setError(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StepBody } from "@/components/StepBody";
 import { errorStatus } from "@/lib/agent/error-message";
 import { parseSseFrames } from "@/lib/api/sse-client";
@@ -29,11 +29,29 @@ export function ChatPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Всегда самое свежее значение поля — читается из эффекта подстановки без
+  // того, чтобы держать `question` в его зависимостях (иначе подстановка
+  // срабатывала бы на каждое нажатие клавиши).
+  const questionRef = useRef(question);
+  questionRef.current = question;
+  // Текст последнего черновика, который сюда действительно подставили —
+  // нужен, чтобы отличить «поле не тронули после подстановки» от «ученик
+  // печатает что-то своё».
+  const lastDraftTextRef = useRef<string | null>(null);
+
   // Кнопка «Объясни» из блока вопросов подставляет готовый текст в это же поле.
   // Ключ по `at`, а не по тексту: два одинаковых нажатия должны сработать оба.
+  // Подстановка перетирает поле только если оно пустое или всё ещё содержит
+  // предыдущий черновик слово в слово — если ученик уже печатает свой вопрос,
+  // «Объясни» его не трогает.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- подстановка текста из блока вопросов
-    if (draft) setQuestion(draft.text);
+    if (!draft) return;
+    const current = questionRef.current;
+    const emptyOrUntouched = current.trim() === "" || current === lastDraftTextRef.current;
+    if (emptyOrUntouched) {
+      setQuestion(draft.text);
+      lastDraftTextRef.current = draft.text;
+    }
   }, [draft]);
 
   const load = useCallback(async () => {
@@ -46,6 +64,11 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the saved chat of the current step
     setStreaming("");
     setError(null);
+    // Черновик из «Объясни» тоже принадлежит прежнему шагу — реальный сброс
+    // самого пропа `draft` делает ридер, а здесь просто не тащим его текст в
+    // историю нового шага, набранную под другим stepId.
+    setQuestion("");
+    lastDraftTextRef.current = null;
     void load();
   }, [load]);
 

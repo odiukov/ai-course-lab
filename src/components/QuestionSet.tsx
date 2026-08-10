@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface PublicQuestion {
   question: string;
@@ -31,17 +31,41 @@ export function QuestionSet({
   const [chosen, setChosen] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
 
+  // Всегда шаг, который сейчас показан — не тот, для которого был начат
+  // конкретный запрос. restore()/answer() сверяются с этим перед тем, как
+  // применить свой результат: если учащийся уже ушёл на другой check-шаг
+  // (или на третий, пока второй ещё восстанавливался), ответ запроса,
+  // начатого для прежнего шага, отбрасывается целиком — тот же приём, что и
+  // в ExercisePanel. Запись в ref сделана эффектом, а не прямо в теле
+  // рендера: коммит эффекта всегда успевает раньше, чем придёт любой сетевой
+  // ответ, а обновление ref во время рендера — то, чего сам React просит
+  // избегать.
+  const currentStepRef = useRef({ slug, stepId });
+  useEffect(() => {
+    currentStepRef.current = { slug, stepId };
+  }, [slug, stepId]);
+
   // Прошлые попытки восстанавливаются с сервера: перезагрузка страницы не
   // должна делать вид, что человек эти вопросы не видел. Ответ восстанавливается
   // без объяснения — его отдаёт только проверка.
   const restore = useCallback(async () => {
+    const startedFor = { slug, stepId };
+    const isCurrent = () =>
+      currentStepRef.current.slug === startedFor.slug && currentStepRef.current.stepId === startedFor.stepId;
+
     const response = await fetch(
       `/api/lesson/${slug}/quiz?stepId=${encodeURIComponent(stepId)}`,
     );
-    if (!response.ok) return;
+    if (!isCurrent()) return;
+    if (!response.ok) {
+      setError("Не удалось загрузить прошлые попытки");
+      return;
+    }
     const { attempts } = (await response.json()) as {
       attempts: { questionIndex: number; answerIndex: number; correct: boolean }[];
     };
+    if (!isCurrent()) return;
+
     setChosen(Object.fromEntries(attempts.map((item) => [item.questionIndex, item.answerIndex])));
     setVerdicts(
       Object.fromEntries(
@@ -62,11 +86,16 @@ export function QuestionSet({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- восстановление прошлых попыток шага
     setVerdicts({});
     setChosen({});
+    setError(null);
     void restore();
   }, [restore]);
 
   const answer = useCallback(
     async (questionIndex: number, answerIndex: number) => {
+      const startedFor = { slug, stepId };
+      const isCurrent = () =>
+        currentStepRef.current.slug === startedFor.slug && currentStepRef.current.stepId === startedFor.stepId;
+
       setError(null);
       setChosen((current) => ({ ...current, [questionIndex]: answerIndex }));
 
@@ -75,12 +104,16 @@ export function QuestionSet({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ stepId, questionIndex, answerIndex }),
       });
+      if (!isCurrent()) return;
+
       const json = (await response.json()) as {
         correct?: boolean;
         correctIndex?: number;
         explanation?: string;
         error?: string;
       };
+      if (!isCurrent()) return;
+
       if (!response.ok || json.correct === undefined) {
         setError(json.error ?? "Не удалось проверить ответ");
         return;
@@ -117,6 +150,7 @@ export function QuestionSet({
                   <li key={answerIndex}>
                     <button
                       onClick={() => void answer(questionIndex, answerIndex)}
+                      aria-pressed={picked}
                       className={`w-full rounded border px-3 py-2 text-left text-sm ${
                         isCorrect
                           ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950"
@@ -142,7 +176,13 @@ export function QuestionSet({
                   <button
                     onClick={() =>
                       onExplain(
-                        `Не понял вопрос: «${item.question}». Я выбрал «${item.options[verdict.answerIndex]}», а верный ответ — «${item.options[verdict.correctIndex]}». Объясни, почему.`,
+                        // После восстановления с сервера верный индекс неизвестен
+                        // (GET /quiz не присылает ключ ответа) — тогда вопрос в чат
+                        // формулируется без названия верного варианта, а не с
+                        // «undefined».
+                        verdict.correctIndex >= 0
+                          ? `Не понял вопрос: «${item.question}». Я выбрал «${item.options[verdict.answerIndex]}», а верный ответ — «${item.options[verdict.correctIndex]}». Объясни, почему.`
+                          : `Не понял вопрос: «${item.question}». Я выбрал «${item.options[verdict.answerIndex]}» — и ответил неверно. Объясни, почему мой ответ неверен.`,
                       )
                     }
                     className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
