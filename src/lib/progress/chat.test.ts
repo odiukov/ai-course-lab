@@ -60,11 +60,16 @@ describe("addChatMessage / readChatSession", () => {
     expect(findChatSession(db, SLUG, "нет-такого")).toBeNull();
   });
 
-  // Таймстамп сам по себе не гарантирует порядок: несколько записей,
-  // сделанных в один и тот же миллисекунд (или с явно одинаковым `now`,
-  // как здесь), должны вернуться в порядке вставки — потому что порядок
-  // держится на автоинкрементном id, а не на created_at.
-  it("сохраняет точный порядок вставки даже когда все реплики помечены одним и тем же моментом времени", () => {
+  // Осторожно: это НЕ доказательство того, что сортировка идёт по id, а не
+  // по created_at. SQLite сортирует стабильно, и без LIMIT (как здесь, через
+  // readChatSession) ORDER BY id, ORDER BY created_at при равных таймстампах
+  // и вообще без ORDER BY возвращают строки в одном и том же порядке —
+  // порядке скана по rowid. Тест ниже честно фиксирует наблюдаемое поведение
+  // readChatSession (реплики приходят в порядке вставки), но не различает,
+  // на каком столбце держится эта сортировка. Различающий тест — у
+  // recentHistory ниже: там ORDER BY … DESC LIMIT ? реально выбирает разные
+  // строки в зависимости от ключа сортировки при равных таймстампах.
+  it("readChatSession отдаёт реплики в порядке вставки даже при одинаковом таймстампе (не различает id/created_at — см. тест на recentHistory)", () => {
     const db = freshDb();
     const session = openChatSession(db, SLUG, "003-t");
     const sameInstant = "2026-08-10T12:00:00.000Z";
@@ -154,6 +159,31 @@ describe("recentHistory", () => {
     const history = recentHistory(db, session);
     expect(history.length).toBeLessThan(20);
     expect(history[history.length - 1].text).toBe("реплика 19");
+  });
+
+  // Это тот случай, где выбор ключа сортировки реально меняет результат:
+  // ORDER BY … DESC LIMIT ? выбирает, КАКИЕ строки попадут в ответ, а не
+  // только их порядок. При равных таймстампах сортировка по created_at
+  // (стабильная, поэтому равные значения остаются в порядке скана по
+  // rowid — то есть по возрастанию id) отдала бы LIMIT первых по id строк,
+  // то есть САМЫЕ СТАРЫЕ реплики — а не последние, как должно быть у
+  // истории для промпта. Больше сообщений, чем limit, все с одним now —
+  // так это отличимо от бага «сортируем по created_at вместо id».
+  it("при одинаковом таймстампе limit отбирает именно последние N вставленных, а не первые", () => {
+    const db = freshDb();
+    const session = openChatSession(db, SLUG, "003-t");
+    const sameInstant = "2026-08-10T12:00:00.000Z";
+    const total = 50;
+    const limit = 5;
+
+    for (let i = 0; i < total; i += 1) {
+      addChatMessage(db, session, i % 2 === 0 ? "user" : "assistant", `msg-${i}`, sameInstant);
+    }
+
+    const history = recentHistory(db, session, limit);
+    expect(history.map((message) => message.text)).toEqual(
+      Array.from({ length: limit }, (_, i) => `msg-${total - limit + i}`),
+    );
   });
 });
 
