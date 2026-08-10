@@ -37,10 +37,12 @@ interface RawFailure {
   "#text"?: string;
 }
 
+type RawFailureValue = RawFailure | string;
+
 interface RawCase {
   "@name"?: string;
-  failure?: RawFailure[];
-  error?: RawFailure[];
+  failure?: RawFailureValue[];
+  error?: RawFailureValue[];
   skipped?: unknown[];
 }
 
@@ -61,12 +63,21 @@ const parser = new XMLParser({
   isArray: (name) => ["testsuites", "testsuite", "testcase", "failure", "error", "skipped"].includes(name),
 });
 
-function toFailure(name: string, raw: RawFailure): TestFailure {
-  const text = String(raw["#text"] ?? "").slice(0, MAX_TEXT);
+function toFailure(name: string, raw: RawFailureValue): TestFailure {
+  // Если raw — просто строка (элемент без атрибутов вроде <failure>ImportError</failure>),
+  // используем её как текст; иначе достаём из объекта.
+  const text = typeof raw === "string"
+    ? String(raw).slice(0, MAX_TEXT)
+    : String(raw["#text"] ?? "").slice(0, MAX_TEXT);
+
+  const message = typeof raw === "string"
+    ? ""
+    : String(raw["@message"] ?? "").trim();
+
   return {
     name,
-    message: String(raw["@message"] ?? "").trim(),
-    decisive: decisiveLine(text || String(raw["@message"] ?? "")),
+    message,
+    decisive: decisiveLine(text || message),
     text,
   };
 }

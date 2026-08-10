@@ -41,11 +41,26 @@ describe("parseJunitXml", () => {
     expect(outcome).toMatchObject({ total: 1, errors: 1, failed: 0, passed: 0 });
     expect(outcome.failures[0].name).toBe("test_boom");
   });
+
+  it("обрабатывает <failure> без атрибутов — только текст", () => {
+    const attributeless =
+      '<?xml version="1.0"?><testsuites><testsuite tests="1"><testcase classname="t" name="test_noattr" time="0.0"><failure>TypeError: cannot add None to int</failure></testcase></testsuite></testsuites>';
+    const outcome = parseJunitXml(attributeless);
+    expect(outcome).toMatchObject({ total: 1, failed: 1, passed: 0 });
+    const failure = outcome.failures[0];
+    expect(failure.name).toBe("test_noattr");
+    expect(failure.text).toBe("TypeError: cannot add None to int");
+    expect(failure.decisive).toBe("TypeError: cannot add None to int");
+  });
 });
 
 describe("decisiveLine", () => {
   it("берёт последнюю строку с E — в ней pytest печатает суть", () => {
     expect(decisiveLine("foo\nE       assert 0 == 32\nbar")).toBe("E       assert 0 == 32");
+  });
+
+  it("когда несколько E-строк — берёт последнюю, не первую", () => {
+    expect(decisiveLine("E first candidate\nnoise\nE second candidate")).toBe("E second candidate");
   });
 
   it("без строк с E берёт последнюю значимую", () => {
