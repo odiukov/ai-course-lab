@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { lessonPaths } from "../content/paths";
 import type { StepMeta } from "../content/step-file";
+import type { GenerateDeps } from "./plan-lesson";
 import { drawVisual, stripHtmlFence, validateVisualHtml } from "./draw-visual";
 
 const SLUG = "01-math-foundations__02-beta";
@@ -20,7 +21,11 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "draw-visual-"));
 }
 
-function call(contentDir: string, run: ReturnType<typeof vi.fn>, meta: StepMeta = META) {
+// Параметр типизирован самим контрактом зависимости, а не `ReturnType<typeof
+// vi.fn>`: последний резолвится в свой constraint без call signature, и
+// `deps: { run }` перестаёт проверяться (TS2322 ломал `tsc --noEmit`, хотя
+// vitest и eslint молчали).
+function call(contentDir: string, run: GenerateDeps["run"], meta: StepMeta = META) {
   return drawVisual({
     contentDir,
     slug: SLUG,
