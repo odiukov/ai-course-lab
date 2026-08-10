@@ -2,12 +2,17 @@ import Link from "next/link";
 import { loadConfig } from "@/lib/config";
 import { readMergedCatalog } from "@/lib/source/merged-catalog";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
+import { openProgressDb } from "@/lib/progress/db";
+import { readLessonReadCounts } from "@/lib/progress/steps";
 
 export const dynamic = "force-dynamic";
 
 export default function CatalogPage() {
   const config = loadConfig();
   const phases = readMergedCatalog(config.sourceDir, config.courseRepo);
+  // Каталог — серверный компонент, поэтому читает базу напрямую: один запрос на
+  // всю страницу вместо эндпоинта и похода за каждой строкой.
+  const readCounts = readLessonReadCounts(openProgressDb(config.dataDir));
 
   return (
     <main className="mx-auto max-w-3xl">
@@ -47,7 +52,7 @@ export default function CatalogPage() {
                     <span>{lesson.title}</span>
                     {plan && (
                       <span className="ml-auto text-xs text-emerald-600 dark:text-emerald-400">
-                        {plan.steps.length} шагов
+                        {readCounts.get(lesson.slug) ?? 0} из {plan.steps.length} шагов
                       </span>
                     )}
                   </Link>
