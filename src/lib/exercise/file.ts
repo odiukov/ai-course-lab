@@ -44,9 +44,10 @@ export function describeFunctions(code: string): ExerciseFunction[] {
   }));
 }
 
-// Единственная точка, которая пишет в exercise.py. Проверка вместо доверия
-// вызывающему: путь собирается из slug урока, а slug приходит из адреса, и
-// каталог упражнения обязан лежать внутри source/learning-exercises.
+// Единственная точка, которая собирает путь к exercise.py — и для чтения, и
+// для записи. Проверка вместо доверия вызывающему: путь строится из slug
+// урока, slug приходит из адреса, и каталог упражнения обязан лежать внутри
+// source/learning-exercises.
 function exerciseFilePath(sourceDir: string, dir: string): string {
   const root = path.resolve(sourceDir, "learning-exercises");
   const file = path.resolve(dir, "exercise.py");
@@ -96,15 +97,40 @@ export function readExerciseFile(sourceDir: string, ref: LessonRef): ExerciseFil
 export function exerciseMtimeMs(sourceDir: string, ref: LessonRef): number | null {
   const found = findExercise(sourceDir, ref);
   if (!found) return null;
-  const file = path.join(found.dir, "exercise.py");
+  const file = exerciseFilePath(sourceDir, found.dir);
   return fs.existsSync(file) ? Math.round(fs.statSync(file).mtimeMs) : null;
+}
+
+export interface ExerciseWrite {
+  mtimeMs: number;
+  functions: ExerciseFunction[];
+}
+
+export interface ExerciseConflict {
+  /** Файл на диске изменился с тех пор, как клиент его последний раз видел. */
+  conflict: { code: string; mtimeMs: number; functions: ExerciseFunction[] };
+}
+
+// Запись через соседний временный файл и переименование: rename в пределах
+// одной файловой системы атомарен, поэтому упавший на середине процесс не
+// может оставить обрезанное решение — на диске либо прежний файл целиком,
+// либо новый целиком.
+function writeAtomically(file: string, code: string): void {
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, code, "utf8");
+    fs.renameSync(tmp, file);
+  } catch (error) {
+    fs.rmSync(tmp, { force: true });
+    throw error;
+  }
 }
 
 export function writeExerciseCode(
   sourceDir: string,
   ref: LessonRef,
   code: string,
-): { mtimeMs: number; functions: ExerciseFunction[] } {
+): ExerciseWrite {
   const found = findExercise(sourceDir, ref);
   if (!found) throw new Error(`У урока ${ref.slug} нет упражнения`);
   if (code.trim().length === 0) {
@@ -114,11 +140,45 @@ export function writeExerciseCode(
   }
 
   const file = exerciseFilePath(sourceDir, found.dir);
-  fs.writeFileSync(file, code, "utf8");
+  writeAtomically(file, code);
   return {
     mtimeMs: Math.round(fs.statSync(file).mtimeMs),
     functions: describeFunctions(code),
   };
+}
+
+/**
+ * Пишет код, только если файл на диске всё ещё тот, который клиент видел в
+ * последний раз (`expectedMtimeMs` — mtime из предыдущего ответа сервера).
+ *
+ * Без этой проверки отложенный PUT из редактора затирал и вставку прошлого
+ * кода через POST /recall, и правку из IDE, приехавшую в промежутке, — и при
+ * этом отвечал «сохранено». Расхождение отдаётся вызывающему вместе с
+ * актуальным содержимым файла, чтобы клиент перечитал файл, а не затёр его.
+ */
+export function writeExerciseCodeIfUnchanged(
+  sourceDir: string,
+  ref: LessonRef,
+  code: string,
+  expectedMtimeMs: number,
+): ExerciseWrite | ExerciseConflict {
+  const found = findExercise(sourceDir, ref);
+  if (!found) throw new Error(`У урока ${ref.slug} нет упражнения`);
+
+  const file = exerciseFilePath(sourceDir, found.dir);
+  // Файла нет — затирать нечего, и отказ был бы вредным: так выглядит первое
+  // сохранение упражнения, чей exercise.py кто-то успел удалить.
+  if (fs.existsSync(file)) {
+    const actual = Math.round(fs.statSync(file).mtimeMs);
+    if (actual !== expectedMtimeMs) {
+      const current = fs.readFileSync(file, "utf8");
+      return {
+        conflict: { code: current, mtimeMs: actual, functions: describeFunctions(current) },
+      };
+    }
+  }
+
+  return writeExerciseCode(sourceDir, ref, code);
 }
 
 export function extractFunction(code: string, fn: string): string | null {

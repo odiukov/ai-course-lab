@@ -1,9 +1,15 @@
 import { loadConfig } from "@/lib/config";
-import { exerciseMtimeMs, readExerciseFile, writeExerciseCode } from "@/lib/exercise/file";
+import {
+  exerciseMtimeMs,
+  readExerciseFile,
+  writeExerciseCodeIfUnchanged,
+} from "@/lib/exercise/file";
 import { findLesson } from "@/lib/source/catalog";
 
 interface PutBody {
   code?: unknown;
+  /** mtime файла, каким его видел клиент, — защита от затирания чужой правки. */
+  mtimeMs?: unknown;
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -33,6 +39,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ slug
   const { slug } = await params;
   const body = (await request.json().catch(() => ({}))) as PutBody;
   const code = typeof body.code === "string" ? body.code : null;
+  const expectedMtimeMs =
+    typeof body.mtimeMs === "number" && Number.isFinite(body.mtimeMs) ? body.mtimeMs : null;
 
   if (code === null) {
     return Response.json({ error: "Не передано поле code" }, { status: 400 });
@@ -40,13 +48,29 @@ export async function PUT(request: Request, { params }: { params: Promise<{ slug
   if (code.trim().length === 0) {
     return Response.json({ error: "Пустой код — запись отклонена" }, { status: 400 });
   }
+  if (expectedMtimeMs === null) {
+    return Response.json({ error: "Не передано поле mtimeMs" }, { status: 400 });
+  }
 
   const config = loadConfig();
   const ref = findLesson(config.sourceDir, slug);
   if (!ref) return Response.json({ error: "Урок не найден" }, { status: 404 });
 
   try {
-    return Response.json(writeExerciseCode(config.sourceDir, ref, code));
+    const result = writeExerciseCodeIfUnchanged(config.sourceDir, ref, code, expectedMtimeMs);
+    // 409 с актуальным содержимым: файл на диске успел измениться (вставка
+    // прошлого кода, правка из IDE), и клиент должен перечитать его, а не
+    // затереть своим черновиком, получив в ответ «сохранено».
+    if ("conflict" in result) {
+      return Response.json(
+        {
+          error: "Файл упражнения изменился на диске — редактор перечитает его",
+          current: result.conflict,
+        },
+        { status: 409 },
+      );
+    }
+    return Response.json(result);
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 400 });
   }

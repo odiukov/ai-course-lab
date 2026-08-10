@@ -5,11 +5,14 @@ import path from "node:path";
 import type { LessonRef } from "@/lib/source/catalog";
 import {
   describeFunctions,
+  exerciseMtimeMs,
   extractFunction,
   findExercise,
+  readExerciseCodeBySlug,
   readExerciseFile,
   replaceFunction,
   writeExerciseCode,
+  writeExerciseCodeIfUnchanged,
 } from "./file";
 
 const ref: LessonRef = {
@@ -104,6 +107,90 @@ describe("writeExerciseCode", () => {
     const { sourceDir } = makeSource();
     readExerciseFile(sourceDir, ref);
     expect(() => writeExerciseCode(sourceDir, ref, "   \n")).toThrow(/пуст/i);
+  });
+
+  it("не оставляет после себя временного файла", () => {
+    const { sourceDir, dir } = makeSource();
+    readExerciseFile(sourceDir, ref);
+    writeExerciseCode(sourceDir, ref, `${TEMPLATE}\n# ещё\n`);
+    expect(fs.readdirSync(dir).filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+});
+
+describe("writeExerciseCodeIfUnchanged", () => {
+  function prepared() {
+    const { sourceDir, dir } = makeSource();
+    const file = readExerciseFile(sourceDir, ref)!;
+    return { sourceDir, dir, file };
+  }
+
+  it("пишет, когда файл на диске тот же, что видел клиент", () => {
+    const { sourceDir, dir, file } = prepared();
+    const result = writeExerciseCodeIfUnchanged(sourceDir, ref, `${TEMPLATE}\n# правка\n`, file.mtimeMs);
+
+    expect("conflict" in result).toBe(false);
+    expect(fs.readFileSync(path.join(dir, "exercise.py"), "utf8")).toContain("# правка");
+  });
+
+  it("на изменившийся файл отдаёт расхождение с актуальным содержимым и не пишет", () => {
+    const { sourceDir, dir, file } = prepared();
+    const target = path.join(dir, "exercise.py");
+    // Так выглядит вставка прошлого кода через POST /recall или правка из IDE,
+    // приехавшая между набором текста и отложенным сохранением.
+    const outside = `${TEMPLATE}\n# правка из IDE\n`;
+    fs.writeFileSync(target, outside, "utf8");
+    fs.utimesSync(target, new Date(), new Date(file.mtimeMs + 5000));
+
+    const result = writeExerciseCodeIfUnchanged(sourceDir, ref, "# черновик из браузера\n", file.mtimeMs);
+
+    expect("conflict" in result).toBe(true);
+    if (!("conflict" in result)) throw new Error("ожидалось расхождение");
+    expect(result.conflict.code).toBe(outside);
+    expect(result.conflict.mtimeMs).not.toBe(file.mtimeMs);
+    // Главное: черновик браузера НЕ затёр чужую правку.
+    expect(fs.readFileSync(target, "utf8")).toBe(outside);
+  });
+
+  it("если файла нет вовсе, затирать нечего — пишет", () => {
+    const { sourceDir, dir, file } = prepared();
+    fs.rmSync(path.join(dir, "exercise.py"));
+    const result = writeExerciseCodeIfUnchanged(sourceDir, ref, TEMPLATE, file.mtimeMs);
+    expect("conflict" in result).toBe(false);
+  });
+});
+
+// Slug приходит из адреса, поэтому путь обязан быть проверен, а не собран
+// доверчиво: ../ в имени каталога упражнения не должен выводить за
+// source/learning-exercises ни на чтении, ни на записи.
+describe("защита от выхода за learning-exercises", () => {
+  it("readExerciseCodeBySlug отказывается читать файл выше корня", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-escape-"));
+    fs.mkdirSync(path.join(sourceDir, "learning-exercises"), { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "exercise.py"), "секрет\n", "utf8");
+
+    expect(() => readExerciseCodeBySlug(sourceDir, "..")).toThrow(/вне source\/learning-exercises/);
+    expect(() => readExerciseCodeBySlug(sourceDir, "../../etc")).toThrow(
+      /вне source\/learning-exercises/,
+    );
+  });
+
+  it("обычный slug проходит проверку", () => {
+    const { sourceDir } = makeSource();
+    readExerciseFile(sourceDir, ref);
+    expect(readExerciseCodeBySlug(sourceDir, "p01-l02-beta")).toBe(TEMPLATE);
+  });
+});
+
+describe("exerciseMtimeMs", () => {
+  it("отдаёт то же время, что и readExerciseFile", () => {
+    const { sourceDir } = makeSource();
+    const file = readExerciseFile(sourceDir, ref)!;
+    expect(exerciseMtimeMs(sourceDir, ref)).toBe(file.mtimeMs);
+  });
+
+  it("без упражнения — null", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-empty-"));
+    expect(exerciseMtimeMs(sourceDir, ref)).toBeNull();
   });
 });
 

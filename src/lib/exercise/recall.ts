@@ -43,25 +43,34 @@ export function findPreviousImplementation(
 }
 
 /**
- * Вставляет прошлую реализацию на место заготовки в упражнении текущего
- * урока и пишет результат на диск. Отдаёт `{ error }`, если у урока нет
- * упражнения или в нём вообще нет функции `fn` — заменять там нечего, и
- * возвращать успех при неизменившемся файле было бы ложью учащемуся.
+ * Вставляет прошлую реализацию на место заготовки в упражнении текущего урока
+ * и пишет результат на диск.
+ *
+ * `{ error }` — только там, где вставлять действительно некуда: у урока нет
+ * упражнения или в его exercise.py нет функции `fn`. «Замена не изменила
+ * текст» ошибкой НЕ считается: так выглядит повторный заход на тот же
+ * recall-шаг, где прошлый код уже стоит на месте. Раньше эти два случая были
+ * склеены сравнением строк, и вторая кнопка «Взять как есть» отвечала «в
+ * упражнении этого урока нет функции X» под карточкой, показывающей эту самую
+ * функцию.
  */
 export function insertPreviousImplementation(
   sourceDir: string,
   ref: LessonRef,
   fn: string,
   previous: PreviousImplementation,
-): { code: string; functions: ExerciseFunction[] } | { error: string } {
+): { code: string; functions: ExerciseFunction[]; changed: boolean } | { error: string } {
   const exercise = readExerciseFile(sourceDir, ref);
   if (!exercise) return { error: "У урока нет упражнения" };
-
-  const code = replaceFunction(exercise.code, fn, previous.code);
-  if (code === exercise.code) {
+  if (!exercise.functions.some((item) => item.fn === fn)) {
     return { error: `В упражнении этого урока нет функции ${fn} — вставить некуда` };
   }
 
+  const code = replaceFunction(exercise.code, fn, previous.code);
+  if (code === exercise.code) {
+    return { code, functions: exercise.functions, changed: false };
+  }
+
   const written = writeExerciseCode(sourceDir, ref, code);
-  return { code, functions: written.functions };
+  return { code, functions: written.functions, changed: true };
 }

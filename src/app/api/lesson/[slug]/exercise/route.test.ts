@@ -30,4 +30,10 @@ describe("PUT /api/lesson/[slug]/exercise — валидация", () => {
     const response = await PUT(makeRequest("{не json"), params);
     expect(response.status).toBe(400);
   });
+
+  it("без mtimeMs отвечает 400: без него запись затирает чужую правку молча", async () => {
+    const response = await PUT(makeRequest(JSON.stringify({ code: "x = 1\n" })), params);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("mtimeMs");
+  });
 });

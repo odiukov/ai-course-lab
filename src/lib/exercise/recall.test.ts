@@ -96,6 +96,22 @@ describe("insertPreviousImplementation", () => {
     expect(result.functions).toEqual([
       { fn: "softmax", signature: "softmax(xs)", startLine: 1, endLine: 3, implemented: true },
     ]);
+    expect(result.changed).toBe(true);
     expect(fs.readFileSync(gammaFile, "utf8")).toBe(result.code);
+  });
+
+  it("повторная вставка того же кода — успех «уже на месте», а не «функции нет»", () => {
+    const sourceDir = makeSource();
+    const previous = findPreviousImplementation(sourceDir, "softmax", "p10-l01-gamma")!;
+    insertPreviousImplementation(sourceDir, gammaRef, "softmax", previous);
+
+    // Так выглядит возврат на тот же recall-шаг и второе нажатие «Взять как
+    // есть»: текст в файле уже совпадает с прошлой реализацией.
+    const again = insertPreviousImplementation(sourceDir, gammaRef, "softmax", previous);
+
+    expect("error" in again).toBe(false);
+    if ("error" in again) throw new Error("unreachable");
+    expect(again.changed).toBe(false);
+    expect(again.code).toContain("sum(xs) or 1");
   });
 });
