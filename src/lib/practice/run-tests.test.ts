@@ -63,7 +63,12 @@ describe("runTests", () => {
 
   it("PracticeError несёт человеческое сообщение по-русски", async () => {
     process.env.FAKE_PYTHON_MODE = "missing-pytest";
-    const error = await runTests({ dir: makeDir(), python: FAKE }).catch((e) => e as PracticeError);
-    expect(error.message).toMatch(/pytest/i);
+    try {
+      await runTests({ dir: makeDir(), python: FAKE });
+      throw new Error("ожидался reject от runTests");
+    } catch (e) {
+      const error = e as PracticeError;
+      expect(error.message).toMatch(/pytest/i);
+    }
   });
 });

@@ -43,11 +43,18 @@ describe("loadConfig", () => {
   });
 
   it("python и lspPort берутся из окружения с разумными значениями по умолчанию", () => {
-    expect(loadConfig({}).python).toBe("python3");
-    expect(loadConfig({}).lspPort).toBe(3001);
-    expect(loadConfig({ PYTHON: " /usr/bin/python3.12 " }).python).toBe("/usr/bin/python3.12");
-    expect(loadConfig({ LSP_PORT: "4010" }).lspPort).toBe(4010);
+    expect(loadConfig({} as NodeJS.ProcessEnv).python).toBe("python3");
+    expect(loadConfig({} as NodeJS.ProcessEnv).lspPort).toBe(3001);
+    expect(
+      loadConfig({ NODE_ENV: "test", PYTHON: " /usr/bin/python3.12 " } as NodeJS.ProcessEnv)
+        .python,
+    ).toBe("/usr/bin/python3.12");
+    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "4010" } as NodeJS.ProcessEnv).lspPort).toBe(
+      4010,
+    );
     // Мусор в LSP_PORT не должен превращаться в NaN и рушить мост на старте.
-    expect(loadConfig({ LSP_PORT: "порт" }).lspPort).toBe(3001);
+    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "порт" } as NodeJS.ProcessEnv).lspPort).toBe(
+      3001,
+    );
   });
 });
