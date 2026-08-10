@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type * as Monaco from "monaco-editor";
 import { LspClient } from "@/lib/lsp/client";
 import {
@@ -32,16 +32,74 @@ function fileUri(file: string): string {
 // автокомплита на каждое нажатие.
 let providersRegistered = false;
 
+// Провайдеры регистрируются один раз на весь язык и живут дольше любого
+// конкретного редактора. Если бы они замыкали ref конкретного монтажа,
+// после его размонтирования этот ref навсегда стал бы null, и все
+// последующие редакторы получали бы пустые подсказки. Реестр по URI
+// документа — это то, что провайдер спрашивает заново при каждом запросе,
+// а не то, что он запомнил при регистрации.
+const lspClients = new Map<string, LspClient>();
+
+function clientForModel(model: Monaco.editor.ITextModel): LspClient | undefined {
+  return lspClients.get(model.uri.toString());
+}
+
+function applyFocus(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  decorations: Monaco.editor.IEditorDecorationsCollection,
+  focus: { startLine: number; endLine: number },
+): void {
+  const model = editor.getModel();
+  if (!model) return;
+
+  void editor
+    .getAction("editor.foldAll")
+    ?.run()
+    .then(() => {
+      editor.setPosition({ lineNumber: focus.startLine, column: 1 });
+      return editor.getAction("editor.unfold")?.run();
+    })
+    .then(() => {
+      editor.revealLineNearTop(focus.startLine);
+    });
+
+  const total = model.getLineCount();
+  const outside: Monaco.editor.IModelDeltaDecoration[] = [];
+  if (focus.startLine > 1) {
+    outside.push({
+      range: { startLineNumber: 1, startColumn: 1, endLineNumber: focus.startLine - 1, endColumn: 1 },
+      options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
+    });
+  }
+  if (focus.endLine < total) {
+    outside.push({
+      range: { startLineNumber: focus.endLine + 1, startColumn: 1, endLineNumber: total, endColumn: 1 },
+      options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
+    });
+  }
+  decorations.set(outside);
+}
+
 export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: CodeEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const clientRef = useRef<LspClient | null>(null);
+  const docKeyRef = useRef<string | null>(null);
   const versionRef = useRef(1);
   const decorationsRef = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
+  const changeListenerRef = useRef<Monaco.IDisposable | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  // Редактор монтируется асинхронно (динамический импорт monaco), поэтому в
+  // момент первого рендера editorRef.current ещё null. Без этого флага
+  // эффект свёртки, зависящий только от focus, никогда не перезапустится для
+  // того случая, когда focus уже пришёл на первый рендер и больше не
+  // меняется — а это самый частый случай: шаг открывается сразу с известной
+  // функцией.
+  const [editorReady, setEditorReady] = useState(false);
 
   // Один эффект на весь жизненный цикл редактора: Monaco нельзя пересоздавать
   // на каждый ререндер, а зависимость от code сделала бы ровно это.
@@ -66,6 +124,7 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       const model =
         monaco.editor.getModel(uri) ?? monaco.editor.createModel(code, "python", uri);
       if (model.getValue() !== code) model.setValue(code);
+      docKeyRef.current = model.uri.toString();
 
       const editor = monaco.editor.create(host.current, {
         model,
@@ -81,8 +140,13 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       });
       editorRef.current = editor;
       decorationsRef.current = editor.createDecorationsCollection();
+      setEditorReady(true);
 
-      model.onDidChangeContent(() => {
+      // Модель переживает размонтирование (её держит кэш monaco.editor.getModel
+      // по URI), поэтому слушатель нужно снять явно в cleanup — иначе повторный
+      // монтаж того же файла копит слушателей, и каждый старый всё равно зовёт
+      // onChange своего уже мёртвого экземпляра на каждое нажатие.
+      changeListenerRef.current = model.onDidChangeContent(() => {
         const text = model.getValue();
         onChangeRef.current(text);
         clientRef.current?.didChange(fileUri(file), text, ++versionRef.current);
@@ -92,6 +156,7 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
 
       const client = new LspClient({ url: lspUrl });
       clientRef.current = client;
+      lspClients.set(docKeyRef.current, client);
       client.onDiagnostics((params) => {
         if (!monaco || params.uri !== fileUri(file)) return;
         monaco.editor.setModelMarkers(
@@ -119,7 +184,7 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
         monaco.languages.registerCompletionItemProvider("python", {
           triggerCharacters: [".", "(", ","],
           provideCompletionItems: async (textModel, position) => {
-            const current = clientRef.current;
+            const current = clientForModel(textModel);
             if (!current) return { suggestions: [] };
             const result = await current.request("textDocument/completion", {
               textDocument: { uri: textModel.uri.toString() },
@@ -137,7 +202,7 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
 
         monaco.languages.registerHoverProvider("python", {
           provideHover: async (textModel, position) => {
-            const current = clientRef.current;
+            const current = clientForModel(textModel);
             if (!current) return null;
             const result = await current.request("textDocument/hover", {
               textDocument: { uri: textModel.uri.toString() },
@@ -151,7 +216,7 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
         monaco.languages.registerSignatureHelpProvider("python", {
           signatureHelpTriggerCharacters: ["(", ","],
           provideSignatureHelp: async (textModel, position) => {
-            const current = clientRef.current;
+            const current = clientForModel(textModel);
             if (!current) return null;
             const result = await current.request("textDocument/signatureHelp", {
               textDocument: { uri: textModel.uri.toString() },
@@ -183,8 +248,22 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
 
     return () => {
       disposed = true;
-      clientRef.current?.dispose();
+      setEditorReady(false);
+
+      // Удаляем запись реестра только если она всё ещё наша: если для этого
+      // же файла успел смонтироваться второй редактор, его клиент уже
+      // перезаписал запись, и удалять её нельзя — иначе второй экземпляр
+      // останется без подсказок.
+      const key = docKeyRef.current;
+      const activeClient = clientRef.current;
+      if (key && activeClient && lspClients.get(key) === activeClient) {
+        lspClients.delete(key);
+      }
+
+      activeClient?.dispose();
       clientRef.current = null;
+      changeListenerRef.current?.dispose();
+      changeListenerRef.current = null;
       decorationsRef.current?.clear();
       decorationsRef.current = null;
       editorRef.current?.dispose();
@@ -203,39 +282,16 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
   }, [code]);
 
   // Своя функция развёрнута и подсвечена, чужие свёрнуты и приглушены.
+  // Зависимость от editorReady — не от одного focus — это то, что позволяет
+  // применить свёртку и в момент, когда focus меняется на уже смонтированном
+  // редакторе, и в момент, когда редактор только доехал, а focus был известен
+  // с самого первого рендера.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !focus) return;
-    const model = editor.getModel();
-    if (!model) return;
-
-    void editor
-      .getAction("editor.foldAll")
-      ?.run()
-      .then(() => {
-        editor.setPosition({ lineNumber: focus.startLine, column: 1 });
-        return editor.getAction("editor.unfold")?.run();
-      })
-      .then(() => {
-        editor.revealLineNearTop(focus.startLine);
-      });
-
-    const total = model.getLineCount();
-    const outside: Monaco.editor.IModelDeltaDecoration[] = [];
-    if (focus.startLine > 1) {
-      outside.push({
-        range: { startLineNumber: 1, startColumn: 1, endLineNumber: focus.startLine - 1, endColumn: 1 },
-        options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
-      });
-    }
-    if (focus.endLine < total) {
-      outside.push({
-        range: { startLineNumber: focus.endLine + 1, startColumn: 1, endLineNumber: total, endColumn: 1 },
-        options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
-      });
-    }
-    decorationsRef.current?.set(outside);
-  }, [focus]);
+    const decorations = decorationsRef.current;
+    if (!editor || !decorations || !focus) return;
+    applyFocus(editor, decorations, focus);
+  }, [focus, editorReady]);
 
   return (
     <div
