@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
+import { parseSseFrames } from "@/lib/api/sse-client";
 
 interface CheckQuestion {
   question: string;
@@ -22,6 +23,12 @@ interface StepData {
   body: string;
 }
 
+interface ClarificationData {
+  askedAt: string;
+  question: string;
+  answer: string;
+}
+
 interface LessonData {
   plan: { title: string; steps: { id: string; title: string }[] } | null;
   stale: boolean;
@@ -29,6 +36,8 @@ interface LessonData {
   // the middle of the plan would compact the array and put every later step
   // at the wrong position.
   steps: Record<string, StepData>;
+  clarifications: Record<string, ClarificationData[]>;
+  progress: { readStepIds: string[]; resumeStepId: string | null };
   source: { title: string };
 }
 
@@ -38,7 +47,7 @@ interface LessonData {
 // placeholder that pretends nothing was written.
 function CheckQuestions({ questions }: { questions: CheckQuestion[] }) {
   return (
-    <ol className="list-decimal space-y-4 rounded bg-slate-100 px-4 py-3 pl-8 text-sm">
+    <ol className="list-decimal space-y-4 rounded bg-slate-100 px-4 py-3 pl-8 text-sm dark:bg-slate-800">
       {questions.map((item, index) => (
         <li key={index} className="space-y-1">
           <p className="font-medium">{item.question}</p>
@@ -55,24 +64,28 @@ function CheckQuestions({ questions }: { questions: CheckQuestion[] }) {
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <p role="alert" className="rounded bg-red-50 px-3 py-2 text-sm text-red-800">
+    <p
+      role="alert"
+      className="rounded bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200"
+    >
       {message}
     </p>
   );
 }
 
-// Mirrors the guard the API applies to `from`: a non-negative integer only,
-// anything else (missing, negative, fractional, non-numeric) falls back to 0.
-function parseStepParam(value: string | null): number {
+// Mirrors the guard the API applies to `from`: a non-negative integer only.
+// Anything else (missing, negative, fractional, non-numeric) falls back to
+// `fallback` — the position the database recovered on the server.
+function parseStepParam(value: string | null, fallback: number): number {
   const parsed = Number(value);
-  return value !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+  return value !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-export function Reader({ slug }: { slug: string }) {
+export function Reader({ slug, initialIndex }: { slug: string; initialIndex: number }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [data, setData] = useState<LessonData | null>(null);
-  const [index, setIndex] = useState(() => parseStepParam(searchParams.get("step")));
+  const [index, setIndex] = useState(() => parseStepParam(searchParams.get("step"), initialIndex));
   // Two separate states on purpose. `status` is transient progress and is
   // cleared when the SSE loop ends; `error` outlives the loop, otherwise the
   // frame that reports "CLI not found" or "usage limit" is wiped one tick
@@ -90,6 +103,39 @@ export function Reader({ slug }: { slug: string }) {
       router.replace(`/lesson/${slug}?step=${clamped}`, { scroll: false });
     },
     [router, slug],
+  );
+
+  const postProgress = useCallback(
+    (stepId: string, event: "opened" | "read") => {
+      void fetch(`/api/lesson/${slug}/progress`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stepId, event }),
+      });
+    },
+    [slug],
+  );
+
+  // Отдельно от postProgress, потому что «открыт» пишется из эффекта на показ
+  // шага и не должен ничего перерисовывать, а «прочитан» двигает счётчик и
+  // полоску. Локальное состояние обновляется сразу, не дожидаясь ответа: это
+  // отражение уже сделанного шага, и ждать ради него сетевой круг незачем.
+  const markRead = useCallback(
+    (stepId: string) => {
+      setData((current) =>
+        current && !current.progress.readStepIds.includes(stepId)
+          ? {
+              ...current,
+              progress: {
+                ...current.progress,
+                readStepIds: [...current.progress.readStepIds, stepId],
+              },
+            }
+          : current,
+      );
+      postProgress(stepId, "read");
+    },
+    [postProgress],
   );
 
   const load = useCallback(async () => {
@@ -111,6 +157,21 @@ export function Reader({ slug }: { slug: string }) {
     void load();
   }, [load]);
 
+  // Адрес без ?step пришёл от «открой урок с того места, где я был»: позицию
+  // подставил сервер, и её надо дописать в адрес, иначе перезагрузка снова
+  // пойдёт спрашивать базу, а ссылкой на конкретный шаг поделиться нельзя.
+  const rawStep = searchParams.get("step");
+  useEffect(() => {
+    if (rawStep === null) router.replace(`/lesson/${slug}?step=${index}`, { scroll: false });
+  }, [index, rawStep, router, slug]);
+
+  // `opened` пишется на показ шага и нужен только для «где я остановился»:
+  // состояние `read` из него не следует, его ставит уход вперёд.
+  const openedStepId = data?.plan?.steps[index]?.id;
+  useEffect(() => {
+    if (openedStepId) postProgress(openedStepId, "opened");
+  }, [openedStepId, postProgress]);
+
   const generate = useCallback(
     async (from: number) => {
       setError(null);
@@ -124,15 +185,12 @@ export function Reader({ slug }: { slug: string }) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
+        const { frames, rest } = parseSseFrames(buffer);
+        buffer = rest;
         for (const frame of frames) {
-          const event = /^event: (.+)$/m.exec(frame)?.[1];
-          const payload = /^data: (.+)$/m.exec(frame)?.[1];
-          if (!event || !payload) continue;
-          const parsed = JSON.parse(payload) as { text?: string; message?: string; kind?: string };
-          if (event === "progress" && parsed.text) setStatus(parsed.text.slice(-120));
-          if (event === "error") setError(errorStatus(parsed.kind, parsed.message ?? ""));
+          const payload = frame.data as { text?: string; message?: string; kind?: string };
+          if (frame.event === "progress" && payload.text) setStatus(payload.text.slice(-120));
+          if (frame.event === "error") setError(errorStatus(payload.kind, payload.message ?? ""));
         }
       }
 
@@ -152,13 +210,20 @@ export function Reader({ slug }: { slug: string }) {
   const total = planSteps.length;
   const currentId = planSteps[index]?.id;
   const step = currentId ? data.steps[currentId] : undefined;
+  const readCount = data.progress.readStepIds.length;
+  const isLast = total > 0 && index + 1 >= total;
 
   if (!step) {
     return (
       <div className="space-y-4">
-        <Link href="/" className="text-sm text-slate-400 hover:text-slate-600">← к списку</Link>
+        <Link
+          href="/"
+          className="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+        >
+          ← к списку
+        </Link>
         <h1 className="text-2xl font-semibold">{data.source.title}</h1>
-        <p className="text-slate-600">
+        <p className="text-slate-600 dark:text-slate-300">
           {data.plan
             ? `Шаг ${index + 1} из ${total} ещё не написан.`
             : "Урок ещё не разобран на шаги."}
@@ -166,7 +231,7 @@ export function Reader({ slug }: { slug: string }) {
         <button
           disabled={status !== null}
           onClick={() => generate(index)}
-          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30"
+          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900"
         >
           {data.plan ? "Написать дальше" : "Разобрать урок"}
         </button>
@@ -179,14 +244,21 @@ export function Reader({ slug }: { slug: string }) {
   return (
     <article className="space-y-6">
       <div className="flex items-baseline justify-between text-sm text-slate-400">
-        <Link href="/" className="hover:text-slate-600">← к списку</Link>
+        <Link href="/" className="hover:text-slate-600 dark:hover:text-slate-200">← к списку</Link>
         <span>
-          {index + 1} / {total}
+          {index + 1} / {total} · прочитано {readCount}
         </span>
       </div>
 
+      <div className="h-1 w-full rounded bg-slate-100 dark:bg-slate-800">
+        <div
+          className="h-1 rounded bg-emerald-500 transition-all"
+          style={{ width: `${total === 0 ? 0 : Math.round((readCount / total) * 100)}%` }}
+        />
+      </div>
+
       {data.stale && (
-        <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           Исходный урок изменился с момента генерации.
         </p>
       )}
@@ -195,12 +267,12 @@ export function Reader({ slug }: { slug: string }) {
       <StepBody body={step.body} />
       {step.visual && <VisualFrame path={step.visual} />}
       {step.type === "code" && step.exercise_fn && (
-        <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+        <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
           Здесь будет редактор для функции <code>{step.exercise_fn}</code> — план 3.
         </p>
       )}
       {step.type === "recall" && step.exercise_fn && (
-        <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+        <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
           Ты уже писал эту функцию в одном из прошлых уроков — <code>{step.exercise_fn}</code>.
         </p>
       )}
@@ -208,13 +280,13 @@ export function Reader({ slug }: { slug: string }) {
         (step.check && step.check.length > 0 ? (
           <CheckQuestions questions={step.check} />
         ) : (
-          <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+          <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
             Вопросы к этому шагу ещё не готовы — они появятся в следующем срезе. Пока проверь себя
             сам и иди дальше.
           </p>
         ))}
       {step.type === "quiz" && (
-        <p className="rounded bg-slate-100 px-3 py-2 text-sm">
+        <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
           Итоговый квиз урока ещё не готов — он появится в следующем срезе.
         </p>
       )}
@@ -223,25 +295,43 @@ export function Reader({ slug }: { slug: string }) {
         <button
           disabled={index === 0}
           onClick={() => goTo(index - 1, total)}
-          className="rounded border px-4 py-2 disabled:opacity-30"
+          className="rounded border px-4 py-2 disabled:opacity-30 dark:border-slate-700"
         >
           Назад
         </button>
-        <button
-          disabled={status !== null}
-          onClick={() => {
-            const next = index + 1;
-            goTo(next, total);
-            // Keep three steps ahead written. Only asks the agent for work if
-            // something in that window is actually missing, so the last steps
-            // of a finished lesson don't fire a pointless request.
-            const ahead = planSteps.slice(next, next + 3);
-            if (ahead.some((meta) => !data.steps[meta.id])) void generate(next);
-          }}
-          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30"
-        >
-          Дальше
-        </button>
+        {isLast ? (
+          // У последнего шага «Дальше» некуда, но прочитанным его отметить
+          // надо — иначе урок навсегда остаётся с одним недочитанным шагом.
+          <button
+            disabled={status !== null}
+            onClick={() => {
+              markRead(step.id);
+              router.push("/");
+            }}
+            className="rounded bg-emerald-600 px-4 py-2 text-white disabled:opacity-30"
+          >
+            Закончить урок
+          </button>
+        ) : (
+          <button
+            disabled={status !== null}
+            onClick={() => {
+              // «Прочитан» — это механически «ушёл с него вперёд», без
+              // таймеров и глубины прокрутки.
+              markRead(step.id);
+              const next = index + 1;
+              goTo(next, total);
+              // Keep three steps ahead written. Only asks the agent for work if
+              // something in that window is actually missing, so the last steps
+              // of a finished lesson don't fire a pointless request.
+              const ahead = planSteps.slice(next, next + 3);
+              if (ahead.some((meta) => !data.steps[meta.id])) void generate(next);
+            }}
+            className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900"
+          >
+            Дальше
+          </button>
+        )}
         {status && <span className="self-center text-sm text-slate-400">{status}</span>}
       </div>
 
