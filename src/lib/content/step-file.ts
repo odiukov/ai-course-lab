@@ -9,12 +9,23 @@ export type StepType = (typeof STEP_TYPES)[number];
 
 // Экспортируется, потому что этой же схемой проверяется ответ агента при
 // генерации check-шага: форма вопроса должна быть описана один раз.
-export const checkSchema = z.object({
-  question: z.string(),
-  options: z.array(z.string()),
-  correct: z.number(),
-  explanation: z.string().default(""),
-});
+export const checkSchema = z
+  .object({
+    question: z.string(),
+    // Вопрос с одним вариантом проверять нечем: выбирать не из чего.
+    options: z.array(z.string()).min(2, "У вопроса должно быть минимум два варианта"),
+    correct: z.number(),
+    explanation: z.string().default(""),
+  })
+  // Индекс правильного ответа обязан указывать НА вариант. Без этой проверки
+  // сгенерированный вопрос с correct вне списка спокойно попадал в файл шага, а
+  // пройти такой шаг было нельзя никогда: сервер сравнивал ответ с вариантом,
+  // которого нет, и любой ответ считался неверным.
+  .refine(
+    (item) =>
+      Number.isInteger(item.correct) && item.correct >= 0 && item.correct < item.options.length,
+    { message: "Индекс правильного ответа вне списка вариантов", path: ["correct"] },
+  );
 
 export type CheckQuestion = z.infer<typeof checkSchema>;
 
