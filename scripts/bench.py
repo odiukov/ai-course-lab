@@ -10,6 +10,8 @@
 
 import argparse
 import ast
+import contextlib
+import copy
 import importlib.util
 import json
 import statistics
@@ -93,24 +95,37 @@ def load(path, name):
 
 
 def bench(fn, args, budget=0.04):
-    """Медиана времени одного вызова в микросекундах. None, если падает."""
+    """Медиана времени одного вызова в микросекундах. None, если падает.
+
+    args копируются перед каждым вызовом: функция, которая мутирует свои
+    аргументы (например transpose, делающий M.pop()), не должна портить
+    данные для следующего вызова и обрушивать весь замер по IndexError
+    где-то в середине цикла повторов.
+    """
     if fn is None or args is None:
         return None
     try:
-        fn(*args)
+        fn(*copy.deepcopy(args))
     except Exception:
         return None
-    t0 = time.perf_counter()
-    fn(*args)
-    single = time.perf_counter() - t0
-    reps = max(1, min(5000, int(budget / single) if single > 0 else 5000))
-    samples = []
-    for _ in range(3):
+    try:
         t0 = time.perf_counter()
-        for _ in range(reps):
-            fn(*args)
-        samples.append((time.perf_counter() - t0) / reps * 1e6)
-    return round(statistics.median(samples), 2)
+        fn(*copy.deepcopy(args))
+        single = time.perf_counter() - t0
+        reps = max(1, min(5000, int(budget / single) if single > 0 else 5000))
+        samples = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            for _ in range(reps):
+                fn(*copy.deepcopy(args))
+            samples.append((time.perf_counter() - t0) / reps * 1e6)
+        return round(statistics.median(samples), 2)
+    except Exception:
+        # Прогрев (строкой выше) прошёл, но где-то в цикле повторов
+        # мутация аргументов всё же добралась до состояния, которое падает
+        # (например, второй M.pop() на укороченном списке). Функция не
+        # замерена — это status: "unknown", а не крах всего отчёта.
+        return None
 
 
 def status(ratio):
@@ -131,9 +146,17 @@ def run_ruff(path):
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {"available": False, "findings": []}
 
+    # ruff печатает валидный JSON на stdout и когда находок нет (пустой
+    # массив), и когда код завершения не 0 (нашёл проблемы — это код 1,
+    # а не сбой). Различать «сломан» от «нашёл findings» нужно по тому,
+    # разобрался ли stdout вообще, а не по коду возврата: пустой или не-JSON
+    # stdout — это сломанный uvx/ruff, а не «чисто».
     try:
-        raw = json.loads(proc.stdout or "[]")
+        raw = json.loads(proc.stdout) if proc.stdout.strip() else None
     except json.JSONDecodeError:
+        raw = None
+
+    if raw is None:
         return {"available": False, "findings": []}
 
     findings = [
@@ -145,6 +168,48 @@ def run_ruff(path):
         for item in raw
     ]
     return {"available": True, "findings": findings}
+
+
+def build_report(lesson_dir, mine_path, ref_path, only_fn):
+    """Считает всё, что уходит в JSON. Может бросить исключение — ловит вызывающий."""
+    mine_metrics, ref_metrics = measure(mine_path), measure(ref_path)
+
+    # load() выполняет exercise.py/solution.py/bench.py как модули верхнего
+    # уровня, а bench() дальше вызывает их функции много раз подряд. Любой
+    # print() внутри учебного кода — на уровне модуля или внутри самой
+    # функции — иначе окажется на stdout раньше нашего единственного JSON и
+    # сломает разбор отчёта. Глушим весь этот участок в stderr и печатаем
+    # результат уже после выхода из блока.
+    with contextlib.redirect_stdout(sys.stderr):
+        sys.path.insert(0, str(lesson_dir))
+        mine_mod, ref_mod = load(mine_path, "_mine"), load(ref_path, "_ref")
+
+        bench_file = lesson_dir / "bench.py"
+        bench_spec = load(bench_file, "_bench").BENCH if bench_file.exists() else {}
+
+        functions = []
+        for name, ref_stats in ref_metrics.items():
+            if only_fn and name != only_fn:
+                continue
+            call_args = bench_spec.get(name)
+            t_mine = bench(getattr(mine_mod, name, None), call_args)
+            t_ref = bench(getattr(ref_mod, name, None), call_args)
+            ratio = round(t_mine / t_ref, 3) if (t_mine and t_ref) else None
+            my_stats = mine_metrics.get(name)
+            functions.append({
+                "fn": name,
+                "written": t_mine is not None,
+                "mine": {**my_stats, "us": t_mine} if my_stats else None,
+                "ref": {**ref_stats, "us": t_ref},
+                "ratio": ratio,
+                "status": status(ratio),
+            })
+
+    return {
+        "exercise": lesson_dir.name,
+        "functions": functions,
+        "ruff": run_ruff(mine_path),
+    }
 
 
 def main():
@@ -161,36 +226,18 @@ def main():
             print(json.dumps({"error": f"нет файла {path}"}), file=sys.stderr)
             sys.exit(2)
 
-    mine_metrics, ref_metrics = measure(mine_path), measure(ref_path)
-    sys.path.insert(0, str(lesson_dir))
-    mine_mod, ref_mod = load(mine_path, "_mine"), load(ref_path, "_ref")
+    try:
+        report = build_report(lesson_dir, mine_path, ref_path, args.fn)
+    except Exception as error:
+        # Самое частое состояние exercise.py — недописанная функция, то есть
+        # синтаксическая ошибка. ast.parse или exec_module на таком файле
+        # кидают исключение, и без этого перехвата скрипт падал бы трейсбеком
+        # без единой строки JSON. Отдаём ту же форму ошибки, что и на
+        # отсутствующий файл: JSON в stderr, ненулевой код возврата.
+        print(json.dumps({"error": f"не удалось разобрать код: {error}"}), file=sys.stderr)
+        sys.exit(2)
 
-    bench_file = lesson_dir / "bench.py"
-    bench_spec = load(bench_file, "_bench").BENCH if bench_file.exists() else {}
-
-    functions = []
-    for name, ref_stats in ref_metrics.items():
-        if args.fn and name != args.fn:
-            continue
-        call_args = bench_spec.get(name)
-        t_mine = bench(getattr(mine_mod, name, None), call_args)
-        t_ref = bench(getattr(ref_mod, name, None), call_args)
-        ratio = round(t_mine / t_ref, 3) if (t_mine and t_ref) else None
-        my_stats = mine_metrics.get(name)
-        functions.append({
-            "fn": name,
-            "written": t_mine is not None,
-            "mine": {**my_stats, "us": t_mine} if my_stats else None,
-            "ref": {**ref_stats, "us": t_ref},
-            "ratio": ratio,
-            "status": status(ratio),
-        })
-
-    print(json.dumps({
-        "exercise": lesson_dir.name,
-        "functions": functions,
-        "ruff": run_ruff(mine_path),
-    }, ensure_ascii=False))
+    print(json.dumps(report, ensure_ascii=False))
 
 
 if __name__ == "__main__":
