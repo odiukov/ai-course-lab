@@ -15,7 +15,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   // ?meta=1 — то, чем редактор опрашивает файл на внешние правки: только время
   // изменения, без пересылки всего файла каждые две секунды.
   if (new URL(request.url).searchParams.get("meta") === "1") {
-    return Response.json({ mtimeMs: exerciseMtimeMs(config.sourceDir, ref) });
+    const mtimeMs = exerciseMtimeMs(config.sourceDir, ref);
+    if (mtimeMs === null) {
+      return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
+    }
+    return Response.json({ mtimeMs });
   }
 
   const file = readExerciseFile(config.sourceDir, ref);
