@@ -1,5 +1,6 @@
 import { loadConfig } from "@/lib/config";
 import { readLessonClarifications } from "@/lib/content/clarifications";
+import { readGeneratedVisualIds } from "@/lib/content/generated-visuals";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStepsById } from "@/lib/content/step-file";
 import { openProgressDb } from "@/lib/progress/db";
@@ -28,10 +29,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   // ходили бы за данными, которые уже лежат рядом.
   const progress = readLessonProgress(openProgressDb(config.dataDir), slug);
 
+  // visual_brief — задание рисовальщику, ридеру оно не нужно; вместо него
+  // едет факт «файл на диске есть». Отбрасывается тем же приёмом, что `body`
+  // в serializeStep (step-file.ts:48) — лишняя переменная в деструктуризации
+  // здесь не ошибка линта, а сложившийся в репо способ выкинуть поле.
+  const drawn = new Set(readGeneratedVisualIds(config.contentDir, slug, Object.keys(steps)));
+
   return Response.json({
     plan,
     stale: plan ? isStale(plan, source) : false,
-    steps,
+    steps: Object.fromEntries(
+      Object.entries(steps).map(([id, step]) => {
+        const { visual_brief, ...rest } = step;
+        return [id, { ...rest, generatedVisual: drawn.has(id) }];
+      }),
+    ),
     clarifications: Object.fromEntries(readLessonClarifications(config.contentDir, slug)),
     progress: {
       readStepIds: progress.readStepIds,
