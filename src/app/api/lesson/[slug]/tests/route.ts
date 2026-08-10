@@ -1,6 +1,6 @@
 import { loadConfig } from "@/lib/config";
 import { readStep } from "@/lib/content/step-file";
-import { readExerciseFile } from "@/lib/exercise/file";
+import { readCanonicalFunctions, readExerciseFile } from "@/lib/exercise/file";
 import { PracticeError } from "@/lib/practice/errors";
 import { runTests } from "@/lib/practice/run-tests";
 import { openProgressDb } from "@/lib/progress/db";
@@ -57,8 +57,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       dir: exercise.dir,
       fn: step.exercise_fn,
       // Остальные функции упражнения: из них собирается выражение -k, которое
-      // не тянет в прогон тесты ещё не написанных функций.
-      functions: exercise.functions.map((item) => item.fn),
+      // не тянет в прогон тесты ещё не написанных функций. Состав берётся из
+      // шаблона, а НЕ из файла учащегося: вспомогательная функция, которую он
+      // написал себе сам, попала бы в отрицание и молча отрезала настоящий
+      // тест шага (`def shape(M)` рядом с identity убивал
+      // test_identity_shape_and_content).
+      functions: readCanonicalFunctions(config.sourceDir, ref),
       python: config.python,
     });
   } catch (error) {

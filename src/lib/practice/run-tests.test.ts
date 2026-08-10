@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  describeFunctions,
+  readCanonicalFunctions,
+  readExerciseCodeBySlug,
+} from "@/lib/exercise/file";
+import type { LessonRef } from "@/lib/source/catalog";
 import { PracticeError } from "./errors";
 import { buildTestFilter, runTests } from "./run-tests";
 
@@ -10,6 +16,15 @@ const FAKE = path.join(process.cwd(), "tests/fixtures/practice/fake-python.mjs")
 // Функции настоящего упражнения урока 02 в том порядке, в котором их отдаёт
 // describeFunctions, — и порядок шагов, в котором учащийся их пишет.
 const LESSON02 = ["transpose", "matmul", "identity", "trace", "is_symmetric", "hadamard"];
+
+const LESSON02_REF: LessonRef = {
+  slug: "01-math__02-matrices",
+  phaseDir: "01-math",
+  lessonDir: "02-matrices",
+  phaseNumber: 1,
+  lessonNumber: 2,
+  title: "Матрицы",
+};
 
 function makeDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-tests-"));
@@ -20,11 +35,11 @@ function makeDir(): string {
 // Гоняет подделку интерпретатора на настоящих именах тестов урока 02 и
 // отдаёт имена, которые выражение -k отобрало на ПЕРВОМ прогоне (второй, если
 // он был, — это уже откат на весь файл).
-async function selection(fn: string) {
+async function selection(fn: string, functions: string[] = LESSON02) {
   process.env.FAKE_PYTHON_MODE = "lesson02";
   const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lab-select-")), "selected.txt");
   process.env.FAKE_PYTHON_SELECTED = log;
-  const result = await runTests({ dir: makeDir(), fn, functions: LESSON02, python: FAKE });
+  const result = await runTests({ dir: makeDir(), fn, functions, python: FAKE });
   // Одна строка на прогон, каждая заканчивается \n — поэтому последний,
   // пустой, элемент split отбрасывается, а строка пустого отбора остаётся.
   const runs = fs
@@ -101,6 +116,49 @@ describe("runTests: отбор на настоящих именах тестов
       "test_matmul_shapes_2x3_by_3x2",
       "test_matmul_is_not_commutative",
     ]);
+  });
+});
+
+// Откуда берётся список «остальных функций» — не деталь реализации, а разница
+// между честным прогоном и ложным зелёным. Список собирается из шаблона
+// упражнения (readCanonicalFunctions), потому что учащийся в свой exercise.py
+// дописывает вспомогательные функции, и они не должны попадать в отрицание -k.
+describe("состав упражнения для фильтра берётся из шаблона, а не из файла учащегося", () => {
+  function makeLesson02Source(): string {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-canon-"));
+    const dir = path.join(sourceDir, "learning-exercises", "p01-l02-matrices");
+    fs.mkdirSync(dir, { recursive: true });
+    const template = LESSON02.map((fn) => `def ${fn}(M):\n    raise NotImplementedError\n`).join("\n\n");
+    fs.writeFileSync(path.join(dir, "exercise.template.py"), `${template}\n`, "utf8");
+    // Так выглядит файл учащегося на шаге identity: три функции написаны, и
+    // рядом лежит его собственная вспомогательная `shape`.
+    const solved = `${LESSON02.map((fn) => `def ${fn}(M):\n    return shape(M)\n`).join("\n\n")}\n\ndef shape(M):\n    return len(M), len(M[0])\n`;
+    fs.writeFileSync(path.join(dir, "exercise.py"), solved, "utf8");
+    return sourceDir;
+  }
+
+  it("вспомогательная `shape` учащегося не отрезает test_identity_shape_and_content", async () => {
+    const sourceDir = makeLesson02Source();
+    const canonical = readCanonicalFunctions(sourceDir, LESSON02_REF);
+    expect(canonical).toEqual(LESSON02);
+
+    const { result, first } = await selection("identity", canonical);
+    expect(first).toEqual(["test_identity_shape_and_content", "test_identity_of_one"]);
+    expect(result).toMatchObject({ total: 2, passed: 2, filtered: true, warning: null });
+  });
+
+  it("состав из живого файла дал бы ложное «1 из 1 зелёные»", async () => {
+    const sourceDir = makeLesson02Source();
+    const live = describeFunctions(readExerciseCodeBySlug(sourceDir, "p01-l02-matrices")!).map(
+      (item) => item.fn,
+    );
+    expect(live).toContain("shape");
+
+    const { result, first } = await selection("identity", live);
+    // Ровно тот дефект: настоящий тест шага отрезан отрицанием `shape`, а
+    // прогон при этом выглядит зелёным и отфильтрованным, без предупреждения.
+    expect(first).not.toContain("test_identity_shape_and_content");
+    expect(result).toMatchObject({ total: 1, passed: 1, filtered: true, warning: null });
   });
 });
 

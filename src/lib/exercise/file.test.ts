@@ -8,6 +8,7 @@ import {
   exerciseMtimeMs,
   extractFunction,
   findExercise,
+  readCanonicalFunctions,
   readExerciseCodeBySlug,
   readExerciseFile,
   replaceFunction,
@@ -85,6 +86,42 @@ describe("readExerciseFile", () => {
       { fn: "transpose", signature: "transpose(M)", startLine: 4, endLine: 6, implemented: false },
       { fn: "matmul", signature: "matmul(A, B)", startLine: 9, endLine: 10, implemented: false },
     ]);
+  });
+});
+
+describe("readCanonicalFunctions", () => {
+  it("берёт состав из шаблона, а не из файла учащегося", () => {
+    const { sourceDir, dir } = makeSource();
+    readExerciseFile(sourceDir, ref);
+    // Учащийся дописал себе вспомогательную функцию: в каноническом составе
+    // упражнения её быть не должно.
+    fs.writeFileSync(
+      path.join(dir, "exercise.py"),
+      `${TEMPLATE}\n\ndef shape(M):\n    return len(M), len(M[0])\n`,
+      "utf8",
+    );
+
+    expect(readCanonicalFunctions(sourceDir, ref)).toEqual(["transpose", "matmul"]);
+    // Для сравнения: живой файл дал бы лишнее имя — то самое, что попадало в
+    // отрицание фильтра -k.
+    expect(describeFunctions(fs.readFileSync(path.join(dir, "exercise.py"), "utf8")).map((f) => f.fn))
+      .toEqual(["transpose", "matmul", "shape"]);
+  });
+
+  it("без шаблона берёт состав из решения", () => {
+    const { sourceDir, dir } = makeSource();
+    fs.rmSync(path.join(dir, "exercise.template.py"));
+    fs.writeFileSync(
+      path.join(dir, "solution.py"),
+      "def transpose(M):\n    return M\n\n\ndef matmul(A, B):\n    return A\n",
+      "utf8",
+    );
+    expect(readCanonicalFunctions(sourceDir, ref)).toEqual(["transpose", "matmul"]);
+  });
+
+  it("без упражнения — пустой список, а не имена из чужого файла", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-empty-"));
+    expect(readCanonicalFunctions(sourceDir, ref)).toEqual([]);
   });
 });
 

@@ -34,6 +34,38 @@ export function findExercise(
   return { slug: found, dir: path.join(root, found) };
 }
 
+/**
+ * Канонический список функций упражнения — имена из `exercise.template.py`
+ * (а если шаблона нет, из `solution.py`).
+ *
+ * Отдельно от describeFunctions, и это не украшение. Выражение `pytest -k`
+ * собирается как «имя функции шага И НЕ остальные функции упражнения», и если
+ * «остальные» брать из ТЕКУЩЕГО exercise.py, то любая вспомогательная функция
+ * учащегося попадает в отрицание. Учащийся написал себе `def shape(M)` — и
+ * фильтр шага identity превращается в `identity and not (… or shape or …)`,
+ * который отрезает настоящий `test_identity_shape_and_content`. Остаётся один
+ * тест, панель говорит «1 из 1 зелёные», шаг записывается пройденным, а его
+ * собственные тесты не гонялись вовсе.
+ *
+ * Шаблон и решение учащийся не редактирует, поэтому их список функций — это
+ * то, что упражнение действительно требует написать.
+ */
+export function readCanonicalFunctions(sourceDir: string, ref: LessonRef): string[] {
+  const found = findExercise(sourceDir, ref);
+  if (!found) return [];
+  for (const name of ["exercise.template.py", "solution.py"]) {
+    const file = path.join(found.dir, name);
+    if (!fs.existsSync(file)) continue;
+    const names = parseTopLevelFunctions(fs.readFileSync(file, "utf8")).map((block) => block.fn);
+    if (names.length > 0) return names;
+  }
+  // Ни шаблона, ни решения: врать про канонический состав нельзя, а взять его
+  // из файла учащегося — это ровно та ошибка, от которой здесь защита. Пустой
+  // список означает фильтр из одного имени: он может собрать лишние тесты
+  // (шаг покраснеет), но не может отрезать свои собственные.
+  return [];
+}
+
 export function describeFunctions(code: string): ExerciseFunction[] {
   return parseTopLevelFunctions(code).map((block) => ({
     fn: block.fn,
