@@ -10,6 +10,10 @@ import { practiceErrorStatus, type PracticeErrorKind } from "@/lib/practice/erro
 
 const SAVE_DELAY_MS = 1000;
 const WATCH_INTERVAL_MS = 2000;
+// Виды ошибок практики (бенч/тесты/спавн), которые бенч-раунд разбора тоже
+// может прислать через SSE — их нужно вести через practiceErrorStatus, а не
+// через общий errorStatus чата/генерации.
+const PRACTICE_ERROR_KINDS: PracticeErrorKind[] = ["spawn", "timeout", "python", "output"];
 
 interface ExerciseFunction {
   fn: string;
@@ -61,11 +65,35 @@ export function ExercisePanel({
   const [result, setResult] = useState<TestResult | null>(null);
   const [bench, setBench] = useState<BenchReport | null>(null);
   const [review, setReview] = useState("");
+  const [reviewDone, setReviewDone] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const savedCodeRef = useRef("");
   const mtimeRef = useRef(0);
+  // Всегда самый свежий текст редактора — читается из отложенного save(),
+  // который может завершиться уже после того, как ученик успел напечатать
+  // ещё, и не должен подхватить устаревшее замыкание.
+  const latestCodeRef = useRef(code);
+  latestCodeRef.current = code;
+  // Не больше одного PUT в полёте: пока предыдущий не ответил, новый таймер
+  // дебаунса просто выходит — а закончившийся save() сам перезапускается,
+  // если текст успел уйти дальше.
+  const savingRef = useRef(false);
+
+  // Шесть code-шагов урока делят один и тот же файл упражнения, поэтому
+  // сам файл (`data`/`code`) переживает переход между шагами и не
+  // перезапрашивается — но вердикт, замер и разбор относились к прежней
+  // функции и не должны просвечивать на новом шаге, пока тесты не прогнаны
+  // заново.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- сброс производного состояния прежнего шага
+    setResult(null);
+    setBench(null);
+    setReview("");
+    setReviewDone(false);
+    setError(null);
+  }, [stepId, fn]);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/lesson/${slug}/exercise`);
@@ -86,30 +114,49 @@ export function ExercisePanel({
     void load();
   }, [load]);
 
-  // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
-  // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
-  // проверит не тот код, который человек видит.
-  useEffect(() => {
-    if (!data || code === savedCodeRef.current) return;
-    setSaved(false);
-    const timer = setTimeout(async () => {
+  // Сохраняет latestCodeRef.current, а не какой-то захваченный аргумент: пока
+  // предыдущий save() ждал ответа, ученик мог напечатать ещё, и именно эта
+  // самая свежая версия должна попасть в файл. Не более одного PUT в полёте
+  // (savingRef) — если ответ пришёл на текст, который уже не последний, он
+  // не двигает savedCodeRef/mtimeRef назад, а save() перезапускает себя сразу,
+  // без нового ожидания дебаунса.
+  const save = useCallback(async () => {
+    if (savingRef.current) return;
+    const toSave = latestCodeRef.current;
+    if (toSave === savedCodeRef.current) return;
+    savingRef.current = true;
+    try {
       const response = await fetch(`/api/lesson/${slug}/exercise`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: toSave }),
       });
       if (!response.ok) {
         setError(((await response.json()) as { error?: string }).error ?? "Не удалось сохранить файл");
         return;
       }
       const json = (await response.json()) as { mtimeMs: number; functions: ExerciseFunction[] };
-      savedCodeRef.current = code;
-      mtimeRef.current = json.mtimeMs;
-      setSaved(true);
-      setData((current) => (current ? { ...current, functions: json.functions } : current));
-    }, SAVE_DELAY_MS);
+      if (toSave === latestCodeRef.current) {
+        savedCodeRef.current = toSave;
+        mtimeRef.current = json.mtimeMs;
+        setSaved(true);
+        setData((current) => (current ? { ...current, functions: json.functions } : current));
+      }
+    } finally {
+      savingRef.current = false;
+    }
+    if (latestCodeRef.current !== savedCodeRef.current) void save();
+  }, [slug]);
+
+  // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
+  // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
+  // проверит не тот код, который человек видит.
+  useEffect(() => {
+    if (!data || code === savedCodeRef.current) return;
+    setSaved(false);
+    const timer = setTimeout(() => void save(), SAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [code, data, slug]);
+  }, [code, data, save]);
 
   // Правка из IDE подтягивается сама. Только когда в браузере нет
   // несохранённых изменений: иначе внешний файл перезаписал бы то, что человек
@@ -154,6 +201,7 @@ export function ExercisePanel({
     setReviewing(true);
     setError(null);
     setReview("");
+    setReviewDone(false);
     const response = await fetch(`/api/lesson/${slug}/review`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -184,10 +232,14 @@ export function ExercisePanel({
           collected += (frame.data as { text: string }).text;
           setReview(collected);
         }
+        // Сервер пишет разбор в чат шага (`addChatMessage`) только после этого
+        // кадра — до него текст на экране существует лишь в браузере, и
+        // перезагрузка страницы его потеряет.
+        if (frame.event === "done") setReviewDone(true);
         if (frame.event === "error") {
           const payload = frame.data as { kind?: string; message?: string };
           setError(
-            payload.kind === "spawn" || payload.kind === "python" || payload.kind === "timeout"
+            PRACTICE_ERROR_KINDS.includes(payload.kind as PracticeErrorKind)
               ? practiceErrorStatus(payload.kind as PracticeErrorKind, payload.message ?? "")
               : errorStatus(payload.kind, payload.message ?? ""),
           );
@@ -274,7 +326,9 @@ export function ExercisePanel({
           <p className="mb-1 text-xs uppercase text-slate-400">разбор</p>
           <p className="whitespace-pre-wrap">{review}</p>
           <p className="mt-2 text-xs text-slate-400">
-            Разбор сохранён в чате этого шага — он останется в истории урока.
+            {reviewDone
+              ? "Разбор сохранён в чате этого шага — он останется в истории урока."
+              : "Разбор ещё пишется — не перезагружай страницу, иначе он не сохранится."}
           </p>
         </div>
       )}
