@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
 import { Clarifications } from "@/components/Clarifications";
 import { ExercisePanel } from "@/components/ExercisePanel";
+import { PracticeStatus } from "@/components/PracticeStatus";
 import { QuestionSet } from "@/components/QuestionSet";
 import { RecallCard } from "@/components/RecallCard";
 import { StepBody } from "@/components/StepBody";
@@ -275,13 +276,16 @@ export function Reader({
         <StepBody body={step.body} />
         {step.visual && <VisualFrame path={step.visual} />}
         {step.type === "code" && step.exercise_fn && (
-          <ExercisePanel
-            slug={slug}
-            stepId={step.id}
-            fn={step.exercise_fn}
-            lspUrl={lspUrl}
-            onProgressChanged={() => void load()}
-          />
+          <>
+            <PracticeStatus />
+            <ExercisePanel
+              slug={slug}
+              stepId={step.id}
+              fn={step.exercise_fn}
+              lspUrl={lspUrl}
+              onProgressChanged={() => void load()}
+            />
+          </>
         )}
         {step.type === "recall" && step.exercise_fn && (
           <>
@@ -290,6 +294,7 @@ export function Reader({
               fn={step.exercise_fn}
               onInserted={() => setReloadEditor((value) => value + 1)}
             />
+            <PracticeStatus />
             <ExercisePanel
               key={`${step.id}-${reloadEditor}`}
               slug={slug}
