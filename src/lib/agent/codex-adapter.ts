@@ -12,12 +12,33 @@ import { isLimitMessage, safeJson, type Adapter } from "./events";
 // verified against real data.
 export const codexAdapter: Adapter = {
   command: "codex",
-  // codex-cli 0.147.0 has NO flag that disables tools: `codex exec --help`
-  // offers only sandbox policies. `-s read-only` is therefore the strongest
-  // restriction available — the agent may still read and run commands, but it
-  // cannot write anywhere. `--skip-git-repo-check` is required because the
-  // runner spawns it in a scratch directory that is not a git repository.
-  args: (prompt) => ["exec", "--json", "-s", "read-only", "--skip-git-repo-check", prompt],
+  // `--disable <feature>` turns a tool surface off (verified against codex-cli
+  // 0.147.0: `codex features list` reports shell_tool, browser_use and
+  // computer_use as stable and on by default, an unknown name is rejected with
+  // "Unknown feature flag", and a real run with all three disabled still
+  // answers and still emits the item.completed shape parsed below). The shell
+  // is the one that matters — the spec requires an agent that returns text
+  // only and physically cannot touch the course; the browser and computer
+  // surfaces go with it because they are the other ways out of the process.
+  //
+  // `-s read-only` stays as the second line of defence in case a later codex
+  // build reaches a shell by some other path. `--skip-git-repo-check` is
+  // required because the runner spawns it in a scratch directory that is not a
+  // git repository.
+  args: (prompt) => [
+    "exec",
+    "--json",
+    "--disable",
+    "shell_tool",
+    "--disable",
+    "browser_use",
+    "--disable",
+    "computer_use",
+    "-s",
+    "read-only",
+    "--skip-git-repo-check",
+    prompt,
+  ],
   parseLine(line) {
     const data = safeJson(line);
     if (!data) return [];

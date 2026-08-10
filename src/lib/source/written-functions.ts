@@ -62,10 +62,15 @@ function readHeaderParams(lines: string[], startIndex: number): { params: string
 
 /**
  * Every top-level `def`/`async def` in a Python file, with its parameter text
- * and body lines. The single header parser for the whole app: a naive
- * single-line `^def name\(` regex misses the 16 real `exercise.template.py`
- * files whose signature spans several lines (adamw_step, yolo_loss,
- * nsa_attention among them) and swallows the function before them.
+ * and body lines. The single header parser for the whole app.
+ *
+ * Multi-line signatures are why this is a parser and not a regex. Counted over
+ * the course as it stands: 63 of 376 `exercise.template.py` files carry 90
+ * headers whose parameter list does not close on the `def` line (yolo_loss,
+ * best_pool_factor, run_pso among them), and a pattern demanding the closing
+ * `)` there reads their parameters as truncated and their remaining header
+ * lines as body. `async def` is accepted as well, though no template uses it
+ * today.
  */
 export function parseTopLevelFunctions(source: string): FunctionBlock[] {
   const lines = source.split("\n");

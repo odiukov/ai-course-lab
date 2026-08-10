@@ -48,10 +48,13 @@ describe("ограничение инструментов", () => {
     expect(args).toContain("--strict-mcp-config");
   });
 
-  it("codex запускается в песочнице только на чтение", () => {
+  it("codex запускается без шелла, браузера и компьютера", () => {
     const args = codexAdapter.args("привет");
-    // У codex-cli 0.147.0 нет флага, отключающего инструменты; read-only —
-    // самое сильное, что есть.
+    // Проверено на codex-cli 0.147.0: эти три фичи стабильны и включены по
+    // умолчанию, а живой запуск со всеми тремя выключенными всё равно отвечает.
+    const disabled = args.filter((_, i) => args[i - 1] === "--disable");
+    expect(disabled).toEqual(["shell_tool", "browser_use", "computer_use"]);
+    // Песочница остаётся вторым рубежом, а не единственным.
     expect(args).toContain("-s");
     expect(args[args.indexOf("-s") + 1]).toBe("read-only");
     expect(args).toContain("--skip-git-repo-check");
