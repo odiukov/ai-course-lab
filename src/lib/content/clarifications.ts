@@ -14,15 +14,58 @@ const MARKER_LINE = /^<!-- clarification: (.+?) -->\s*$/;
 // строку, неотличимую от разделителя блоков. Такая строка сдвигается на один
 // пробел вправо: регулярка привязана к началу строки и перестаёт срабатывать,
 // а в отрисованном markdown комментарий как был невидим, так и остался.
+//
+// Чтобы это было обратимо, а не однонаправленной порчей текста, экранируем
+// заодно и любую строку, которая уже сама начинается с пробела — «экранируем
+// экранирование». Тогда расшифровка («если строка начинается с пробела —
+// снять ровно один») — биекция для любого входа, включая ответ, где маркер
+// встречается несколько раз или уже есть строки с ведущими пробелами.
+function escapeAnswerLine(line: string): string {
+  return line.startsWith(" ") || MARKER_LINE.test(line) ? ` ${line}` : line;
+}
+
+function unescapeAnswerLine(line: string): string {
+  return line.startsWith(" ") ? line.slice(1) : line;
+}
+
 function neutralizeMarkers(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => (MARKER_LINE.test(line) ? ` ${line}` : line))
-    .join("\n");
+  return text.split("\n").map(escapeAnswerLine).join("\n");
+}
+
+// Вопрос живёт на одной строке заголовка, но пользователь может ввести
+// вопрос из нескольких строк или с повторяющимися пробелами — оба должны
+// пережить круг без потерь. Переносим строку и обратный слэш в escape-
+// последовательности (в этом порядке важен только сам факт экранирования
+// обратного слэша первым — иначе "\n", появившийся из экранирования
+// реального слэша, было бы не отличить от экранированного переноса строки).
+function encodeQuestion(question: string): string {
+  return question.trim().replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+}
+
+function decodeQuestion(line: string): string {
+  let out = "";
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === "\\" && i + 1 < line.length) {
+      const next = line[i + 1];
+      if (next === "n") {
+        out += "\n";
+        i += 1;
+        continue;
+      }
+      if (next === "\\") {
+        out += "\\";
+        i += 1;
+        continue;
+      }
+    }
+    out += char;
+  }
+  return out;
 }
 
 export function serializeClarification(item: Clarification): string {
-  const question = item.question.replace(/\s+/g, " ").trim();
+  const question = encodeQuestion(item.question);
   const answer = neutralizeMarkers(item.answer.trim());
   return `<!-- clarification: ${item.askedAt} -->\n## ${question}\n\n${answer}\n`;
 }
@@ -35,9 +78,10 @@ export function parseClarifications(markdown: string): Clarification[] {
   const flush = () => {
     if (askedAt === null) return;
     const [head, ...rest] = collected;
-    const question = (head ?? "").replace(/^#+\s*/, "").trim();
+    const question = decodeQuestion((head ?? "").replace(/^#+\s*/, "").trim());
     if (question.length > 0) {
-      out.push({ askedAt, question, answer: rest.join("\n").trim() });
+      const answer = rest.map(unescapeAnswerLine).join("\n").trim();
+      out.push({ askedAt, question, answer });
     }
     askedAt = null;
     collected = [];

@@ -52,7 +52,7 @@ describe("serializeClarification / parseClarifications", () => {
     expect(parsed[0].answer).toContain("## Ещё пример");
   });
 
-  it("обезвреживает маркер, попавший внутрь ответа", () => {
+  it("обезвреживает маркер, попавший внутрь ответа, и восстанавливает ответ посимвольно", () => {
     const evil: Clarification = {
       askedAt: "2026-08-10T12:00:00.000Z",
       question: "Что будет, если написать маркер?",
@@ -61,6 +61,29 @@ describe("serializeClarification / parseClarifications", () => {
     const parsed = parseClarifications(serializeClarification(evil));
     expect(parsed).toHaveLength(1);
     expect(parsed[0].askedAt).toBe("2026-08-10T12:00:00.000Z");
+    // Полный круг: обезвреженный маркер внутри ответа должен вернуться
+    // ровно тем же текстом, а не с оставшимся служебным пробелом.
+    expect(parsed[0]).toEqual(evil);
+  });
+
+  it("сохраняет многострочный вопрос без потерь", () => {
+    const multiline: Clarification = {
+      askedAt: "2026-08-10T15:00:00.000Z",
+      question: "Первая строка вопроса\nвторая строка вопроса",
+      answer: "Ответ на многострочный вопрос.",
+    };
+    const parsed = parseClarifications(serializeClarification(multiline));
+    expect(parsed).toEqual([multiline]);
+  });
+
+  it("сохраняет повторяющиеся пробелы внутри вопроса без потерь", () => {
+    const spaced: Clarification = {
+      askedAt: "2026-08-10T16:00:00.000Z",
+      question: "Вопрос  с   двумя и тремя пробелами подряд?",
+      answer: "Ответ.",
+    };
+    const parsed = parseClarifications(serializeClarification(spaced));
+    expect(parsed).toEqual([spaced]);
   });
 
   it("игнорирует текст до первого маркера", () => {
