@@ -60,12 +60,33 @@ sockets.on("connection", (socket: WebSocket) => {
     if (socket.readyState === socket.OPEN) socket.close(1011, `pyright вышел с кодом ${code}`);
   });
 
+  // Без этого listener'а EPIPE (запись в stdin уже мёртвого pyright'а) валит
+  // весь процесс моста необработанным исключением — а с ним ложится только
+  // это одно соединение, что и есть требование.
+  child.stdin.on("error", (error) => {
+    console.error(`[pyright] stdin умер: ${error.message}`);
+    socket.close();
+  });
+
   socket.on("message", (data) => {
+    // Дочерний процесс мог уже умереть (или его stdin закрылся) в промежутке
+    // между уходом старого сообщения и приходом нового — 'close' ещё не
+    // долетел. Пишем только если писать реально можно, а не наперегонки с
+    // обработчиком ошибки выше.
+    if (child.exitCode !== null || child.killed || !child.stdin.writable) return;
     try {
       child.stdin.write(encodeFrame(JSON.parse(String(data))));
     } catch {
       console.error("[pyright] сообщение от браузера не разобралось как JSON — пропущено");
     }
+  });
+
+  // Тот же класс проблемы с другой стороны: резкий обрыв соединения браузером
+  // (ECONNRESET, без штатного close) тоже эмиттит 'error' на сокете. Без
+  // listener'а это тоже необработанное исключение. Дальше делает своё дело
+  // обычный 'close' — WebSocket эмиттит его и после ошибки.
+  socket.on("error", (error) => {
+    console.error(`[bridge] сокет клиента упал: ${error.message}`);
   });
 
   // Один клиент — один сервер: закрытая вкладка убивает процесс, иначе за
@@ -82,13 +103,10 @@ http1.listen(port, "127.0.0.1", () => {
 
 // Мост тоже может умереть не через закрытие сокета — Ctrl+C или
 // `npm run dev`, который останавливает оба процесса сразу. В обоих случаях
-// оставшихся pyright'ов надо прибить, а не оставить сиротами.
-function killChildrenAndExit() {
-  for (const child of children) child.kill();
-  process.exit(0);
-}
+// оставшихся pyright'ов надо прибить, а не оставить сиротами. Убивает их
+// только 'exit' — сигналам достаточно попросить процесс завершиться.
 process.on("exit", () => {
   for (const child of children) child.kill();
 });
-process.on("SIGINT", killChildrenAndExit);
-process.on("SIGTERM", killChildrenAndExit);
+process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => process.exit(0));
