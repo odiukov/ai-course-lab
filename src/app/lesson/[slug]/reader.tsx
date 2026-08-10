@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
+import { Clarifications } from "@/components/Clarifications";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -294,6 +295,8 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
             Итоговый квиз урока ещё не готов — он появится в следующем срезе.
           </p>
         )}
+
+        <Clarifications items={data.clarifications[step.id] ?? []} />
 
         <div className="flex gap-3 pt-4">
           <button
