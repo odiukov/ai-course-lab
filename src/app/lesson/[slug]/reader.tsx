@@ -203,7 +203,7 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
     [slug, load],
   );
 
-  if (!data) return <p className="text-slate-400">Загружаю…</p>;
+  if (!data) return <p className="text-slate-500 dark:text-slate-400">Загружаю…</p>;
 
   // `index` is a PLAN position throughout: it is what ?step= carries, what the
   // "N / total" counter shows and what the generate endpoint receives as
@@ -223,7 +223,7 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
       <div className="max-w-3xl space-y-4">
         <Link
           href="/"
-          className="text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
         >
           ← к списку
         </Link>
@@ -240,7 +240,7 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
         >
           {data.plan ? "Написать дальше" : "Разобрать урок"}
         </button>
-        {status && <p className="text-sm text-slate-400">{status}</p>}
+        {status && <p className="text-sm text-slate-500 dark:text-slate-400">{status}</p>}
         {error && <ErrorBanner message={error} />}
       </div>
     );
@@ -249,7 +249,7 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
       <article className="space-y-6">
-        <div className="flex items-baseline justify-between text-sm text-slate-400">
+        <div className="flex items-baseline justify-between text-sm text-slate-500 dark:text-slate-400">
           <Link href="/" className="hover:text-slate-600 dark:hover:text-slate-200">← к списку</Link>
           <span>
             {index + 1} / {total} · прочитано {readCount}
@@ -348,7 +348,7 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
               Дальше
             </button>
           )}
-          {status && <span className="self-center text-sm text-slate-400">{status}</span>}
+          {status && <span className="self-center text-sm text-slate-500 dark:text-slate-400">{status}</span>}
         </div>
 
         {error && <ErrorBanner message={error} />}
