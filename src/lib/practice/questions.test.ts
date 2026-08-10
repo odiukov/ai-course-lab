@@ -7,6 +7,7 @@ import {
   gradeAnswer,
   stepQuestions,
   toPublicQuestions,
+  toPublicStep,
 } from "./questions";
 
 const source = {
@@ -94,5 +95,34 @@ describe("allAnsweredCorrectly", () => {
       [1, { correct: false }],
     ]);
     expect(allAnsweredCorrectly(questions, latest)).toBe(false);
+  });
+});
+
+describe("toPublicStep", () => {
+  const checkStep: Step = {
+    id: "005-check",
+    type: "check",
+    title: "Проверка",
+    body: "Тело.",
+    check: [
+      { question: "Длина [6, 8]?", options: ["7", "10"], correct: 1, explanation: "36 + 64 = 100." },
+    ],
+  };
+
+  it("снимает верный ответ и объяснение: их знает только сервер", () => {
+    const publicStep = toPublicStep(checkStep);
+    expect(publicStep.check).toEqual([{ question: "Длина [6, 8]?", options: ["7", "10"] }]);
+    expect(JSON.stringify(publicStep)).not.toContain("correct");
+    expect(JSON.stringify(publicStep)).not.toContain("36 + 64");
+  });
+
+  it("остальные поля шага остаются на месте", () => {
+    expect(toPublicStep(checkStep)).toMatchObject({ id: "005-check", type: "check", body: "Тело." });
+  });
+
+  it("шаг без вопросов проходит как есть и поля check не приобретает", () => {
+    const step: Step = { id: "001-t", type: "theory", title: "Зачем", body: "Тело." };
+    expect(toPublicStep(step)).toEqual(step);
+    expect("check" in toPublicStep(step)).toBe(false);
   });
 });

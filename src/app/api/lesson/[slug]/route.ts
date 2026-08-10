@@ -2,7 +2,7 @@ import { loadConfig } from "@/lib/config";
 import { readLessonClarifications } from "@/lib/content/clarifications";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStepsById } from "@/lib/content/step-file";
-import { finalQuizQuestions, toPublicQuestions } from "@/lib/practice/questions";
+import { finalQuizQuestions, toPublicQuestions, toPublicStep } from "@/lib/practice/questions";
 import { openProgressDb } from "@/lib/progress/db";
 import { readLessonProgress } from "@/lib/progress/steps";
 import { findLesson } from "@/lib/source/catalog";
@@ -32,7 +32,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   return Response.json({
     plan,
     stale: plan ? isStale(plan, source) : false,
-    steps,
+    // Верные ответы check-шагов остаются на сервере — ровно по той же причине,
+    // что и ответы итогового квиза ниже.
+    steps: Object.fromEntries(
+      Object.entries(steps).map(([id, step]) => [id, toPublicStep(step)]),
+    ),
     // Правильные ответы итогового квиза наружу не уходят: проверяет сервер.
     quiz: toPublicQuestions(finalQuizQuestions(source)),
     clarifications: Object.fromEntries(readLessonClarifications(config.contentDir, slug)),

@@ -41,6 +41,21 @@ export function toPublicQuestions(questions: GradableQuestion[]): PublicQuestion
   return questions.map((item) => ({ question: item.question, options: item.options }));
 }
 
+export type PublicStep = Omit<Step, "check"> & { check?: PublicQuestion[] };
+
+/**
+ * Шаг в том виде, в каком его можно отдать браузеру: без правильных ответов и
+ * объяснений check-шага. Проверяет сервер, и ключ ответа в теле ответа API
+ * делал бы эту проверку декорацией.
+ *
+ * Пока генерация не умела писать вопросы, у check-шагов не было ключа —
+ * утекать было нечему, и урок отдавался целиком.
+ */
+export function toPublicStep(step: Step): PublicStep {
+  const { check, ...rest } = step;
+  return check ? { ...rest, check: toPublicQuestions(check) } : rest;
+}
+
 export function gradeAnswer(
   questions: GradableQuestion[],
   questionIndex: number,
