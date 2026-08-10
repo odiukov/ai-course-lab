@@ -33,6 +33,13 @@ export class LspClient {
   private diagnosticsHandlers: ((params: { uri: string; diagnostics: unknown[] }) => void)[] = [];
   private timeoutMs: number;
   private disposed = false;
+  // Соединения больше нет. В отличие от disposed это не наше решение, а факт:
+  // мост умер или сокет упал. Без такого флага после смерти моста каждое
+  // нажатие клавиши складывало полную копию документа в очередь, которой
+  // некуда деться, а каждый hover и автокомплит молча выжидал свои 15 секунд
+  // таймаута, прежде чем отвалиться.
+  private closed = false;
+  private closeHandlers: ((reason: string) => void)[] = [];
 
   constructor(options: { url: string; factory?: SocketFactory; timeoutMs?: number }) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
@@ -45,13 +52,27 @@ export class LspClient {
     });
     this.socket.addEventListener("message", (event) => this.receive(event.data));
     this.socket.addEventListener("close", () => {
-      this.open = false;
-      this.failAll("Соединение с pyright закрыто");
+      this.markClosed("Соединение с pyright закрыто");
     });
   }
 
   onDiagnostics(handler: (params: { uri: string; diagnostics: unknown[] }) => void): void {
     this.diagnosticsHandlers.push(handler);
+  }
+
+  /**
+   * Зовётся один раз, когда соединение пропало не по нашей воле. Редактор по
+   * этому событию говорит учащемуся, что Pyright ушёл: иначе пропажа типов и
+   * автокомплита выглядит как «просто перестало работать», а плашка здоровья
+   * спрашивает мост всего один раз при монтировании.
+   */
+  onClose(handler: (reason: string) => void): void {
+    this.closeHandlers.push(handler);
+  }
+
+  /** Соединения нет: ни отправлять, ни ждать ответа больше нет смысла. */
+  get isClosed(): boolean {
+    return this.closed || this.disposed;
   }
 
   async start(options: { rootUri: string; folderName: string }): Promise<void> {
@@ -89,7 +110,9 @@ export class LspClient {
   }
 
   request<T>(method: string, params: unknown): Promise<T> {
-    if (this.disposed) return Promise.reject(new Error("Клиент pyright уже закрыт"));
+    // Отказ сразу, а не через 15 секунд таймаута: отвечать на этот запрос
+    // некому, и провайдер Monaco должен узнать об этом немедленно.
+    if (this.isClosed) return Promise.reject(new Error("Клиент pyright уже закрыт"));
     const id = this.nextId++;
 
     return new Promise<T>((resolve, reject) => {
@@ -109,6 +132,7 @@ export class LspClient {
   dispose(): void {
     this.disposed = true;
     this.open = false;
+    this.queue = [];
     this.failAll("Клиент pyright закрыт");
     this.socket.close();
   }
@@ -122,8 +146,9 @@ export class LspClient {
   // повторяться где-то ещё.
   private send(message: unknown): void {
     // Закрытому клиенту некому отдавать сообщения — копить их в очереди
-    // означало бы просто растить память без всякого получателя.
-    if (this.disposed) return;
+    // означало бы просто растить память без всякого получателя. Очередь имеет
+    // смысл ровно в одном состоянии: сокет ещё открывается.
+    if (this.isClosed) return;
 
     const text = JSON.stringify(message);
     if (!this.open) {
@@ -137,8 +162,20 @@ export class LspClient {
       // Настоящий WebSocket синхронно бросает InvalidStateError, если сокет
       // уже мёртв, а мы об этом ещё не узнали через событие close — редактор
       // не должен падать от нажатия клавиши. Считаем это тем же обрывом.
-      this.open = false;
-      this.failAll("Соединение с pyright закрыто");
+      this.markClosed("Соединение с pyright закрыто");
+    }
+  }
+
+  // Единственный переход в «соединения больше нет»: гасит очередь (её теперь
+  // никто не отправит), отклоняет всё ожидающее и один раз сообщает наверх.
+  private markClosed(reason: string): void {
+    this.open = false;
+    this.queue = [];
+    const first = !this.closed;
+    this.closed = true;
+    this.failAll(reason);
+    if (first && !this.disposed) {
+      for (const handler of this.closeHandlers) handler(reason);
     }
   }
 

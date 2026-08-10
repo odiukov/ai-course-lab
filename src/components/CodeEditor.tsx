@@ -16,15 +16,19 @@ export interface CodeEditorProps {
   /** Абсолютный путь файла: из него собирается file://-URI для pyright. */
   file: string;
   code: string;
-  /** Функция текущего шага: подсвечена, остальные свёрнуты. */
-  focus?: { startLine: number; endLine: number };
+  /**
+   * Функция текущего шага: подсвечена, остальные свёрнуты.
+   *
+   * `name` здесь обязателен и несёт всю смысловую нагрузку: строки съезжают от
+   * любой правки в файле (и приезжают заново после каждого автосохранения), а
+   * сворачивать и двигать курсор нужно только когда шаг действительно сменил
+   * функцию.
+   */
+  focus?: { name: string; startLine: number; endLine: number };
   lspUrl: string | null;
   onChange: (code: string) => void;
+  /** Готовая фраза для плашки: что с языковым сервером и что при этом работает. */
   onLspError: (message: string) => void;
-}
-
-function fileUri(file: string): string {
-  return `file://${file.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 // Регистрация провайдеров — на язык, а не на редактор: Monaco держит их
@@ -44,33 +48,33 @@ function clientForModel(model: Monaco.editor.ITextModel): LspClient | undefined 
   return lspClients.get(model.uri.toString());
 }
 
-function applyFocus(
+// Ставит курсор в начало функции шага и сворачивает всё остальное.
+//
+// Одно действие «свернуть всё, кроме выделенного» вместо foldAll + один
+// unfold: второй вариант оставлял свёрнутыми собственные if/for учащегося
+// внутри его же функции, потому что unfold разворачивает ровно один уровень
+// под курсором. foldAllExcept не трогает ни то, что содержит выделение, ни то,
+// что лежит внутри него.
+function revealFunction(
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  focus: { startLine: number },
+): void {
+  editor.setPosition({ lineNumber: focus.startLine, column: 1 });
+  void editor
+    .getAction("editor.foldAllExcept")
+    ?.run()
+    .then(() => editor.revealLineNearTop(focus.startLine));
+}
+
+// Затемнение чужих строк. Дешёвое и идемпотентное, поэтому пересчитывается на
+// каждый сдвиг строк — в отличие от свёртки и курсора.
+function dimOutside(
   editor: Monaco.editor.IStandaloneCodeEditor,
   decorations: Monaco.editor.IEditorDecorationsCollection,
   focus: { startLine: number; endLine: number },
 ): void {
   const model = editor.getModel();
   if (!model) return;
-
-  // Свёртка и затемнение остаются идемпотентными — они всегда пересчитаны, —
-  // но курсор двигаем только если он и так не внутри нужной функции. Без
-  // этой проверки любой повторный вызов (а он приходит на каждое изменение
-  // объекта focus, включая логически то же самое) выкидывал бы курсор в
-  // строку 1 функции прямо во время набора текста.
-  const position = editor.getPosition();
-  const caretInside =
-    position !== null && position.lineNumber >= focus.startLine && position.lineNumber <= focus.endLine;
-
-  void editor
-    .getAction("editor.foldAll")
-    ?.run()
-    .then(() => {
-      if (!caretInside) editor.setPosition({ lineNumber: focus.startLine, column: 1 });
-      return editor.getAction("editor.unfold")?.run();
-    })
-    .then(() => {
-      if (!caretInside) editor.revealLineNearTop(focus.startLine);
-    });
 
   const total = model.getLineCount();
   const outside: Monaco.editor.IModelDeltaDecoration[] = [];
@@ -97,6 +101,9 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
   const versionRef = useRef(1);
   const decorationsRef = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
   const changeListenerRef = useRef<Monaco.IDisposable | null>(null);
+  // Имя функции, под которую файл уже свёрнут: пока оно не изменилось, курсор
+  // и свёртку трогать нельзя.
+  const focusedNameRef = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -129,11 +136,18 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       monaco = await import("monaco-editor");
       if (disposed || !host.current) return;
 
-      const uri = monaco.Uri.parse(fileUri(file));
+      // URI документа считается ОДИН раз и дальше используется везде —
+      // в didOpen/didChange, в сверке диагностик и в реестре клиентов, откуда
+      // его берут провайдеры (`model.uri.toString()`). Раньше он писался двумя
+      // способами: собранный руками `file://` + encodeURIComponent и
+      // нормализованный Monaco. Для пути с `! ' ( ) *` они расходились, и
+      // автокомплит молча отдавал пустоту — провайдер не находил клиента.
+      const uri = monaco.Uri.file(file);
       const model =
         monaco.editor.getModel(uri) ?? monaco.editor.createModel(code, "python", uri);
       if (model.getValue() !== code) model.setValue(code);
-      docKeyRef.current = model.uri.toString();
+      const docUri = model.uri.toString();
+      docKeyRef.current = docUri;
 
       const editor = monaco.editor.create(host.current, {
         model,
@@ -158,16 +172,23 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       changeListenerRef.current = model.onDidChangeContent(() => {
         const text = model.getValue();
         onChangeRef.current(text);
-        clientRef.current?.didChange(fileUri(file), text, ++versionRef.current);
+        clientRef.current?.didChange(docUri, text, ++versionRef.current);
       });
 
       if (!lspUrl) return;
 
       const client = new LspClient({ url: lspUrl });
       clientRef.current = client;
-      lspClients.set(docKeyRef.current, client);
+      lspClients.set(docUri, client);
+      // Мост может умереть посреди урока (перезапуск npm run dev, упавший
+      // pyright). Плашка здоровья спрашивает его один раз при монтировании,
+      // поэтому сказать об этом может только сам клиент.
+      client.onClose((reason) => {
+        if (disposed) return;
+        onLspError(`Pyright отключился: ${reason}. Редактор работает как обычный, без типов и автокомплита.`);
+      });
       client.onDiagnostics((params) => {
-        if (!monaco || params.uri !== fileUri(file)) return;
+        if (!monaco || params.uri !== docUri) return;
         monaco.editor.setModelMarkers(
           model,
           "pyright",
@@ -204,6 +225,12 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
                 ...item,
                 kind: item.kind as Monaco.languages.CompletionItemKind,
                 range: item.range as Monaco.IRange,
+                // Строка import из авто-импорта pyright: без неё вставляется
+                // голое имя, и следующий прогон падает не по вине учащегося.
+                additionalTextEdits: item.additionalTextEdits?.map((edit) => ({
+                  range: edit.range as Monaco.IRange,
+                  text: edit.text,
+                })),
               })),
             };
           },
@@ -242,14 +269,16 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       try {
         const root = file.slice(0, file.lastIndexOf("/"));
         await client.start({
-          rootUri: fileUri(root),
+          rootUri: monaco.Uri.file(root).toString(),
           folderName: root.slice(root.lastIndexOf("/") + 1),
         });
-        client.didOpen(fileUri(file), model.getValue(), versionRef.current);
+        client.didOpen(docUri, model.getValue(), versionRef.current);
       } catch (error) {
         // Редактор остаётся рабочим без языкового сервера — так записано в
-        // таблице ошибок спеки. Наверх уходит причина для плашки.
-        onLspError((error as Error).message);
+        // таблице ошибок спеки. Наверх уходит готовая фраза для плашки.
+        onLspError(
+          `Pyright не поднялся: ${(error as Error).message}. Редактор работает как обычный, без типов и автокомплита.`,
+        );
       }
     }
 
@@ -277,6 +306,9 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       decorationsRef.current = null;
       editorRef.current?.dispose();
       editorRef.current = null;
+      // Новый редактор обязан свернуть файл заново, даже если функция шага та
+      // же самая: свёртка живёт в конкретном экземпляре, а не в модели.
+      focusedNameRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- редактор монтируется один раз на файл
   }, [file, lspUrl]);
@@ -291,6 +323,13 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
   }, [code]);
 
   // Своя функция развёрнута и подсвечена, чужие свёрнуты и приглушены.
+  //
+  // Затемнение пересчитывается на каждое изменение границ — оно идемпотентное
+  // и ничего не двигает. Свёртка и курсор — только когда сменилась ФУНКЦИЯ
+  // шага: границы приезжают заново после каждого автосохранения, и раньше
+  // правка в transpose уводила курсор через секунду после набора, потому что у
+  // matmul сдвинулись номера строк.
+  //
   // Зависимость от editorReady — не от одного focus — это то, что позволяет
   // применить свёртку и в момент, когда focus меняется на уже смонтированном
   // редакторе, и в момент, когда редактор только доехал, а focus был известен
@@ -299,7 +338,11 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
     const editor = editorRef.current;
     const decorations = decorationsRef.current;
     if (!editor || !decorations || !focus) return;
-    applyFocus(editor, decorations, focus);
+
+    dimOutside(editor, decorations, focus);
+    if (focusedNameRef.current === focus.name) return;
+    focusedNameRef.current = focus.name;
+    revealFunction(editor, focus);
   }, [focus, editorReady]);
 
   return (

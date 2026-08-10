@@ -155,4 +155,65 @@ describe("LspClient", () => {
     expect(socket.sent).toEqual([]);
     await expect(pending).rejects.toThrow(/закрыто/);
   });
+
+  describe("после смерти моста", () => {
+    it("запрос отклоняется сразу, а не через таймаут в 15 секунд", async () => {
+      vi.useFakeTimers();
+      const { socket, client } = makeClient(15_000);
+      socket.fire("open");
+      socket.fire("close");
+
+      // Без всякого прокручивания таймеров: ответа ждать не от кого.
+      await expect(client.request("textDocument/hover", {})).rejects.toThrow(/закрыт/);
+      vi.useRealTimers();
+    });
+
+    it("очередь не растёт: копии документа не копятся без получателя", () => {
+      const { socket, client } = makeClient();
+      socket.fire("open");
+      socket.fire("close");
+
+      for (let i = 0; i < 50; i += 1) {
+        client.didChange("file:///tmp/p/exercise.py", "x".repeat(1000), i);
+      }
+      expect(client.isClosed).toBe(true);
+
+      // Даже если сокет вдруг «откроется» снова, отправлять нечего.
+      socket.fire("open");
+      expect(socket.sent).toEqual([]);
+    });
+
+    it("обрыв сообщается наверх один раз, а своё закрытие молчит", () => {
+      const { socket, client } = makeClient();
+      const reasons: string[] = [];
+      client.onClose((reason) => reasons.push(reason));
+      socket.fire("open");
+
+      socket.fire("close");
+      socket.fire("close");
+      expect(reasons).toHaveLength(1);
+      expect(reasons[0]).toMatch(/pyright/i);
+
+      const own = makeClient();
+      const ownReasons: string[] = [];
+      own.client.onClose((reason) => ownReasons.push(reason));
+      own.socket.fire("open");
+      own.client.dispose();
+      // Наше собственное закрытие — не пропажа сервера, и говорить о нём
+      // учащемуся нечего.
+      expect(ownReasons).toEqual([]);
+    });
+
+    it("падение socket.send тоже переводит клиента в закрытое состояние", async () => {
+      const { socket, client } = makeClient();
+      const reasons: string[] = [];
+      client.onClose((reason) => reasons.push(reason));
+      socket.fire("open");
+      socket.sendThrows = true;
+
+      await expect(client.request("textDocument/hover", {})).rejects.toThrow(/закрыто/);
+      expect(client.isClosed).toBe(true);
+      expect(reasons).toHaveLength(1);
+    });
+  });
 });

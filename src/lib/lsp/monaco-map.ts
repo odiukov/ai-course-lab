@@ -29,6 +29,11 @@ export interface MonacoMarker extends MonacoRange {
   source: string;
 }
 
+export interface MonacoTextEdit {
+  range: MonacoRange;
+  text: string;
+}
+
 export interface MonacoCompletion {
   label: string;
   insertText: string;
@@ -36,6 +41,19 @@ export interface MonacoCompletion {
   detail: string;
   documentation: string;
   range: MonacoRange;
+  /**
+   * Правки за пределами вставляемого слова. У pyright это строка `import`, без
+   * которой автодополнение по авто-импорту вставляет одно голое имя — и
+   * следующий прогон тестов падает по причине, которой учащийся не создавал.
+   */
+  additionalTextEdits?: MonacoTextEdit[];
+  /**
+   * Порядок и фильтр, назначенные сервером. Pyright задаёт их специально,
+   * чтобы `__dunder__` уезжали в конец списка; без них `np.` предлагает
+   * `__class__` раньше `array`.
+   */
+  sortText?: string;
+  filterText?: string;
 }
 
 // MarkerSeverity в Monaco: Hint 1, Info 2, Warning 4, Error 8. Числа, а не
@@ -61,7 +79,9 @@ const COMPLETION_KIND: Record<number, number> = {
   12: 13, // Value
   13: 15, // Enum
   14: 17, // Keyword
-  15: 27, // Snippet
+  // Snippet в установленной версии Monaco — 28, а 27 это Tool. Таблица
+  // проверяется тестом против настоящего enum, чтобы не разъехаться снова.
+  15: 28, // Snippet
   16: 19, // Color
   17: 20, // File
   18: 21, // Reference
@@ -106,6 +126,20 @@ interface RawCompletion {
   detail?: unknown;
   documentation?: unknown;
   textEdit?: { range?: LspRange; newText?: string };
+  additionalTextEdits?: { range?: LspRange; newText?: unknown }[];
+  sortText?: unknown;
+  filterText?: unknown;
+}
+
+// Правки вне вставляемого слова. Пропускаем только те, у которых есть и
+// диапазон, и текст: правка без диапазона — это не «вставить в начало файла»,
+// это испорченный ответ, и применять её нельзя.
+function toAdditionalEdits(raw: RawCompletion["additionalTextEdits"]): MonacoTextEdit[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const edits = raw
+    .filter((edit) => edit?.range !== undefined && typeof edit.newText === "string")
+    .map((edit) => ({ range: toMonacoRange(edit.range as LspRange), text: String(edit.newText) }));
+  return edits.length > 0 ? edits : undefined;
 }
 
 function documentationText(value: unknown): string {
@@ -137,6 +171,9 @@ export function toCompletionItems(result: unknown, fallbackRange: MonacoRange): 
       detail: typeof item.detail === "string" ? item.detail : "",
       documentation: documentationText(item.documentation),
       range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : fallbackRange,
+      additionalTextEdits: toAdditionalEdits(item.additionalTextEdits),
+      sortText: typeof item.sortText === "string" ? item.sortText : undefined,
+      filterText: typeof item.filterText === "string" ? item.filterText : undefined,
     }));
 }
 

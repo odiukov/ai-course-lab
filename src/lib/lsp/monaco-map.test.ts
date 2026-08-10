@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+// Только enum'ы: этот файл Monaco сгенерирован, не тянет за собой ни DOM, ни
+// воркеров, и его можно импортировать в node-окружении теста.
+import { CompletionItemKind } from "monaco-editor/editor/common/standalone/standaloneEnums.js";
 import { hoverMarkdown, toCompletionItems, toCompletionKind, toMarker, toSignatureHelp } from "./monaco-map";
 
 const range = { startLineNumber: 2, startColumn: 5, endLineNumber: 2, endColumn: 9 };
@@ -54,6 +57,45 @@ describe("toCompletionKind", () => {
     expect(toCompletionKind(999)).toBe(18);
     expect(toCompletionKind(undefined)).toBe(18);
   });
+
+  // Таблица сверяется с НАСТОЯЩИМ enum установленной версии Monaco, а не с
+  // числами, однажды переписанными из документации: именно так Snippet оказался
+  // 27, тогда как 27 в этой версии — Tool, а Snippet — 28. Без такой проверки
+  // расхождение заметить нечем.
+  it("каждый вид совпадает с одноимённым значением enum Monaco", () => {
+    // Порядок LSP CompletionItemKind: 1..25.
+    const lspKinds = [
+      "Text",
+      "Method",
+      "Function",
+      "Constructor",
+      "Field",
+      "Variable",
+      "Class",
+      "Interface",
+      "Module",
+      "Property",
+      "Unit",
+      "Value",
+      "Enum",
+      "Keyword",
+      "Snippet",
+      "Color",
+      "File",
+      "Reference",
+      "Folder",
+      "EnumMember",
+      "Constant",
+      "Struct",
+      "Event",
+      "Operator",
+      "TypeParameter",
+    ] as const;
+
+    for (const [index, name] of lspKinds.entries()) {
+      expect(toCompletionKind(index + 1), `LSP ${name}`).toBe(CompletionItemKind[name]);
+    }
+  });
 });
 
 describe("toCompletionItems", () => {
@@ -89,6 +131,60 @@ describe("toCompletionItems", () => {
 
   it("мусор вместо ответа даёт пустой список", () => {
     expect(toCompletionItems(null, range)).toEqual([]);
+  });
+
+  // Без этого автодополнение по авто-импорту вставляло одно имя без строки
+  // import, и следующий прогон тестов падал по причине, которой учащийся не
+  // создавал.
+  it("правки авто-импорта доезжают до Monaco с пересчитанными диапазонами", () => {
+    const [item] = toCompletionItems(
+      {
+        items: [
+          {
+            label: "array",
+            kind: 3,
+            additionalTextEdits: [
+              {
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+                newText: "import numpy as np\n",
+              },
+            ],
+          },
+        ],
+      },
+      range,
+    );
+    expect(item.additionalTextEdits).toEqual([
+      {
+        range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        text: "import numpy as np\n",
+      },
+    ]);
+  });
+
+  it("правка без диапазона отбрасывается, а не применяется в начало файла", () => {
+    const [item] = toCompletionItems(
+      { items: [{ label: "array", additionalTextEdits: [{ newText: "import numpy\n" }] }] },
+      range,
+    );
+    expect(item.additionalTextEdits).toBeUndefined();
+  });
+
+  // Pyright задаёт sortText так, чтобы __dunder__ уезжали в конец: без
+  // передачи этих полей `np.` предлагал `__class__` раньше `array`.
+  it("sortText и filterText передаются как есть", () => {
+    const [item] = toCompletionItems(
+      { items: [{ label: "__class__", sortText: "zz__class__", filterText: "__class__" }] },
+      range,
+    );
+    expect(item.sortText).toBe("zz__class__");
+    expect(item.filterText).toBe("__class__");
+  });
+
+  it("без sortText поле не выдумывается", () => {
+    const [item] = toCompletionItems({ items: [{ label: "array" }] }, range);
+    expect(item.sortText).toBeUndefined();
+    expect(item.filterText).toBeUndefined();
   });
 });
 
