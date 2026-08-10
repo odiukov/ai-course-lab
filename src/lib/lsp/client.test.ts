@@ -1,12 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LspClient, type LspSocket } from "./client";
 
 class FakeSocket implements LspSocket {
   sent: unknown[] = [];
   closed = false;
+  // Позволяет смоделировать InvalidStateError настоящего WebSocket: запись в
+  // уже мёртвый сокет бросает синхронно, раньше, чем долетит событие close.
+  sendThrows = false;
   private handlers = new Map<string, ((event: { data?: unknown }) => void)[]>();
 
   send(data: string) {
+    if (this.sendThrows) throw new Error("сокет не в состоянии OPEN");
     this.sent.push(JSON.parse(data));
   }
   close() {
@@ -28,6 +32,14 @@ function makeClient(timeoutMs = 1000) {
   const client = new LspClient({ url: "ws://test", factory: () => socket, timeoutMs });
   return { socket, client };
 }
+
+// Гарантия на случай, если проверка внутри теста с фейковыми таймерами
+// когда-нибудь упадёт раньше vi.useRealTimers(): afterEach срабатывает
+// независимо от исхода теста, так что реальные таймеры не утекут в
+// соседние тесты этого файла.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("LspClient", () => {
   it("до открытия соединения сообщения ждут, а не теряются", async () => {
@@ -69,7 +81,6 @@ describe("LspClient", () => {
     const pending = client.request("textDocument/hover", {});
     vi.advanceTimersByTime(60);
     await expect(pending).rejects.toThrow(/не ответил/);
-    vi.useRealTimers();
   });
 
   it("publishDiagnostics уходит подписчику", () => {
@@ -83,6 +94,15 @@ describe("LspClient", () => {
       params: { uri: "file:///tmp/p/exercise.py", diagnostics: [{ message: "боль" }] },
     });
     expect(seen).toEqual([{ uri: "file:///tmp/p/exercise.py", diagnostics: [{ message: "боль" }] }]);
+  });
+
+  it("publishDiagnostics без params не долетает до подписчика", () => {
+    const { socket, client } = makeClient();
+    const seen: unknown[] = [];
+    client.onDiagnostics((params) => seen.push(params));
+    socket.fire("open");
+    socket.reply({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics" });
+    expect(seen).toEqual([]);
   });
 
   it("didOpen и didChange уходят уведомлениями, без id", () => {
@@ -104,5 +124,35 @@ describe("LspClient", () => {
     client.dispose();
     expect(socket.closed).toBe(true);
     await expect(pending).rejects.toThrow(/закрыт/);
+  });
+
+  it("didChange после обрыва соединения не бросает и не уходит в сокет", () => {
+    const { socket, client } = makeClient();
+    socket.fire("open");
+    socket.fire("close");
+    const before = socket.sent.length;
+
+    expect(() => client.didChange("file:///tmp/p/exercise.py", "pass\n", 2)).not.toThrow();
+    expect(socket.sent.length).toBe(before);
+  });
+
+  it("didChange после dispose не бросает и не уходит в сокет", () => {
+    const { socket, client } = makeClient();
+    socket.fire("open");
+    client.dispose();
+    const before = socket.sent.length;
+
+    expect(() => client.didChange("file:///tmp/p/exercise.py", "pass\n", 2)).not.toThrow();
+    expect(socket.sent.length).toBe(before);
+  });
+
+  it("синхронный бросок из socket.send не долетает до вызывающего и рвёт висящие запросы", async () => {
+    const { socket, client } = makeClient();
+    socket.fire("open");
+    socket.sendThrows = true;
+
+    const pending = client.request("textDocument/hover", {});
+    expect(socket.sent).toEqual([]);
+    await expect(pending).rejects.toThrow(/закрыто/);
   });
 });

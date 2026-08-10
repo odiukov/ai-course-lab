@@ -44,7 +44,10 @@ export class LspClient {
       this.queue = [];
     });
     this.socket.addEventListener("message", (event) => this.receive(event.data));
-    this.socket.addEventListener("close", () => this.failAll("Соединение с pyright закрыто"));
+    this.socket.addEventListener("close", () => {
+      this.open = false;
+      this.failAll("Соединение с pyright закрыто");
+    });
   }
 
   onDiagnostics(handler: (params: { uri: string; diagnostics: unknown[] }) => void): void {
@@ -105,6 +108,7 @@ export class LspClient {
 
   dispose(): void {
     this.disposed = true;
+    this.open = false;
     this.failAll("Клиент pyright закрыт");
     this.socket.close();
   }
@@ -114,11 +118,28 @@ export class LspClient {
   }
 
   // Единственное место, где сообщение либо уходит в сокет, либо ждёт своего
-  // открытия в очереди — эта развилка не должна повторяться где-то ещё.
+  // открытия в очереди, либо тихо теряется — эта развилка не должна
+  // повторяться где-то ещё.
   private send(message: unknown): void {
+    // Закрытому клиенту некому отдавать сообщения — копить их в очереди
+    // означало бы просто растить память без всякого получателя.
+    if (this.disposed) return;
+
     const text = JSON.stringify(message);
-    if (this.open) this.socket.send(text);
-    else this.queue.push(text);
+    if (!this.open) {
+      this.queue.push(text);
+      return;
+    }
+
+    try {
+      this.socket.send(text);
+    } catch {
+      // Настоящий WebSocket синхронно бросает InvalidStateError, если сокет
+      // уже мёртв, а мы об этом ещё не узнали через событие close — редактор
+      // не должен падать от нажатия клавиши. Считаем это тем же обрывом.
+      this.open = false;
+      this.failAll("Соединение с pyright закрыто");
+    }
   }
 
   private receive(data: unknown): void {
@@ -130,7 +151,8 @@ export class LspClient {
     }
 
     if (message.method === "textDocument/publishDiagnostics") {
-      const params = message.params as { uri: string; diagnostics: unknown[] };
+      const params = message.params as { uri: string; diagnostics: unknown[] } | undefined;
+      if (!params) return;
       for (const handler of this.diagnosticsHandlers) handler(params);
       return;
     }
