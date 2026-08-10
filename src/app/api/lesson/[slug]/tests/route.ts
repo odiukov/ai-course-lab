@@ -12,6 +12,15 @@ interface Body {
   stepId?: unknown;
 }
 
+// Зелёный прогон требует хотя бы одного реального прохода, а не просто
+// отсутствия падений: если все собранные тесты пропущены (skip), pytest
+// отдаёт failed=0 и errors=0, но passed тоже 0 — никто ничего не проверил, и
+// шаг помечать passed нельзя. Частично пропущенный прогон с хотя бы одним
+// настоящим passed и без падений всё ещё зелёный — skip не считается провалом.
+export function isPassingRun(result: { passed: number; failed: number; errors: number }): boolean {
+  return result.failed === 0 && result.errors === 0 && result.passed > 0;
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const body = (await request.json().catch(() => ({}))) as Body;
@@ -45,7 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       python: config.python,
     });
 
-    const green = result.failed === 0 && result.errors === 0 && result.total > 0;
+    const green = isPassingRun(result);
     const db = openProgressDb(config.dataDir);
     recordTestRun(db, slug, stepId, step.exercise_fn, {
       passed: result.passed,
