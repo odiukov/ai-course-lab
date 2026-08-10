@@ -79,6 +79,22 @@ export function validatePlan(
     if (step.visual && !visuals.has(step.visual)) {
       errors.push(`Шаг ${step.id}: визуализация ${step.visual} не найдена в уроке`);
     }
+
+    if (step.type !== "visual") {
+      if (step.visual_brief) {
+        errors.push(
+          `Шаг ${step.id}: visual_brief у шага типа ${step.type} — такую схему никто не покажет`,
+        );
+      }
+      continue;
+    }
+
+    if (step.visual && step.visual_brief) {
+      errors.push(`Шаг ${step.id}: заданы и visual, и visual_brief — нужно ровно одно`);
+    }
+    if (!step.visual && !step.visual_brief) {
+      errors.push(`Шаг ${step.id}: у visual-шага нет ни visual, ни visual_brief`);
+    }
   }
 
   return errors;

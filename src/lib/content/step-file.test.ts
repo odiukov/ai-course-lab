@@ -48,6 +48,21 @@ check:
     const step = parseStep(md);
     expect(step.check?.[0].correct).toBe(1);
   });
+
+  it("отклоняет пустой visual_brief", () => {
+    const markdown = [
+      "---",
+      "id: 001-v",
+      "type: visual",
+      "title: Схема",
+      'visual_brief: ""',
+      "---",
+      "",
+      "Текст.",
+    ].join("\n");
+
+    expect(() => parseStep(markdown)).toThrow();
+  });
 });
 
 describe("serializeStep", () => {

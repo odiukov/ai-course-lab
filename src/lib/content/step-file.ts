@@ -22,6 +22,10 @@ export const stepMetaSchema = z.object({
   title: z.string().min(1),
   source_anchor: z.string().optional(),
   visual: z.string().optional(),
+  // Заявка на схему, которой в курсе нет: одна фраза о том, что показать.
+  // min(1) не для красоты — пустой бриф хуже отсутствующего, потому что
+  // запускает рисовальщика без задания.
+  visual_brief: z.string().min(1).optional(),
   exercise_fn: z.string().optional(),
   check: z.array(checkSchema).optional(),
   baseline: z
