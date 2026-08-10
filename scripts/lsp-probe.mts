@@ -8,11 +8,16 @@ import path from "node:path";
 import WebSocket from "ws";
 
 const port = Number(process.env.LSP_PORT ?? 3001) || 3001;
+const appPort = Number(process.env.PORT ?? 3000) || 3000;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lsp-probe-"));
 const file = path.join(dir, "exercise.py");
 fs.writeFileSync(file, "def transpose(M):\n    return unknown_name(M)\n", "utf8");
 
-const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+// Origin проставлен явно: мост пускает только страницу приложения (см. договор
+// о доступе в scripts/lsp-bridge.mts), а у node-клиента своего Origin нет.
+const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
+  headers: { origin: `http://127.0.0.1:${appPort}` },
+});
 const send = (message: unknown) => socket.send(JSON.stringify(message));
 const timer = setTimeout(() => {
   console.error("Диагностики не пришли за 20 с");
