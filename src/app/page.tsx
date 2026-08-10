@@ -10,11 +10,11 @@ export default function CatalogPage() {
   const phases = readMergedCatalog(config.sourceDir, config.courseRepo);
 
   return (
-    <main>
+    <main className="mx-auto max-w-3xl">
       <h1 className="mb-8 text-3xl font-semibold">Курс</h1>
       {phases.map((phase) => (
         <section key={phase.dir} className="mb-8">
-          <h2 className="mb-3 text-lg font-medium text-slate-500">
+          <h2 className="mb-3 text-lg font-medium text-slate-500 dark:text-slate-400">
             Фаза {phase.number}. {phase.title}
           </h2>
           <ul className="space-y-1">
@@ -41,12 +41,12 @@ export default function CatalogPage() {
                 <li key={lesson.slug}>
                   <Link
                     href={`/lesson/${lesson.slug}`}
-                    className="flex items-baseline gap-2 rounded px-2 py-1 hover:bg-slate-100"
+                    className="flex items-baseline gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <span className="tabular-nums text-slate-400">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
                     {plan && (
-                      <span className="ml-auto text-xs text-emerald-600">
+                      <span className="ml-auto text-xs text-emerald-600 dark:text-emerald-400">
                         {plan.steps.length} шагов
                       </span>
                     )}
