@@ -7,6 +7,10 @@ export interface Config {
   contentDir: string;
   dataDir: string;
   agent: "claude" | "codex";
+  /** Интерпретатор для pytest и замера. */
+  python: string;
+  /** Порт моста pyright-langserver. */
+  lspPort: number;
 }
 
 export function isDirectory(candidate: string): boolean {
@@ -33,5 +37,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     contentDir: path.join(root, "content"),
     dataDir: path.join(root, "data"),
     agent: env.AGENT === "codex" ? "codex" : "claude",
+    python: env.PYTHON?.trim() || "python3",
+    lspPort: Number.isInteger(Number(env.LSP_PORT)) && Number(env.LSP_PORT) > 0
+      ? Number(env.LSP_PORT)
+      : 3001,
   };
 }
