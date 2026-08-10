@@ -56,6 +56,17 @@ function exerciseFilePath(sourceDir: string, dir: string): string {
   return file;
 }
 
+// Читает код упражнения по его slug'у (каталогу под learning-exercises), а
+// не по LessonRef — recall ищет прошлую реализацию по всему курсу и знает
+// только exerciseSlug из readWrittenFunctions. В отличие от readExerciseFile,
+// шаблон здесь не разворачивается: урок, у которого exercise.py ещё не
+// создан, для recall — просто «ничего не найдено», а не повод его завести.
+export function readExerciseCodeBySlug(sourceDir: string, exerciseSlug: string): string | null {
+  const dir = path.join(sourceDir, "learning-exercises", exerciseSlug);
+  const file = exerciseFilePath(sourceDir, dir);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+}
+
 export function readExerciseFile(sourceDir: string, ref: LessonRef): ExerciseFile | null {
   const found = findExercise(sourceDir, ref);
   if (!found) return null;

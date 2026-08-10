@@ -1,7 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
+import type { LessonRef } from "../source/catalog";
 import { readWrittenFunctions } from "../source/written-functions";
-import { extractFunction } from "./file";
+import {
+  extractFunction,
+  readExerciseCodeBySlug,
+  readExerciseFile,
+  replaceFunction,
+  writeExerciseCode,
+  type ExerciseFunction,
+} from "./file";
 
 export interface PreviousImplementation {
   fn: string;
@@ -23,9 +29,9 @@ export function findPreviousImplementation(
   const latest = candidates.at(-1);
   if (!latest) return null;
 
-  const file = path.join(sourceDir, "learning-exercises", latest.exerciseSlug, "exercise.py");
-  if (!fs.existsSync(file)) return null;
-  const code = extractFunction(fs.readFileSync(file, "utf8"), fn);
+  const source = readExerciseCodeBySlug(sourceDir, latest.exerciseSlug);
+  if (!source) return null;
+  const code = extractFunction(source, fn);
   if (!code) return null;
 
   return {
@@ -34,4 +40,28 @@ export function findPreviousImplementation(
     lessonSlug: latest.lessonSlug,
     code,
   };
+}
+
+/**
+ * Вставляет прошлую реализацию на место заготовки в упражнении текущего
+ * урока и пишет результат на диск. Отдаёт `{ error }`, если у урока нет
+ * упражнения или в нём вообще нет функции `fn` — заменять там нечего, и
+ * возвращать успех при неизменившемся файле было бы ложью учащемуся.
+ */
+export function insertPreviousImplementation(
+  sourceDir: string,
+  ref: LessonRef,
+  fn: string,
+  previous: PreviousImplementation,
+): { code: string; functions: ExerciseFunction[] } | { error: string } {
+  const exercise = readExerciseFile(sourceDir, ref);
+  if (!exercise) return { error: "У урока нет упражнения" };
+
+  const code = replaceFunction(exercise.code, fn, previous.code);
+  if (code === exercise.code) {
+    return { error: `В упражнении этого урока нет функции ${fn} — вставить некуда` };
+  }
+
+  const written = writeExerciseCode(sourceDir, ref, code);
+  return { code, functions: written.functions };
 }

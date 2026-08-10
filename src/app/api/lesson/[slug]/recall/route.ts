@@ -1,6 +1,6 @@
 import { loadConfig } from "@/lib/config";
-import { findExercise, readExerciseFile, replaceFunction, writeExerciseCode } from "@/lib/exercise/file";
-import { findPreviousImplementation } from "@/lib/exercise/recall";
+import { findExercise } from "@/lib/exercise/file";
+import { findPreviousImplementation, insertPreviousImplementation } from "@/lib/exercise/recall";
 import { findLesson } from "@/lib/source/catalog";
 
 interface Body {
@@ -41,12 +41,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
 
   const { config, ref, previous } = resolved;
-  const exercise = readExerciseFile(config.sourceDir, ref);
-  if (!exercise) return Response.json({ error: "У урока нет упражнения" }, { status: 404 });
-
   // Прошлый код встаёт на место заготовки: спека прямо говорит, что дальше он
-  // используется как есть, а не переписывается заново.
-  const code = replaceFunction(exercise.code, fn, previous.code);
-  const written = writeExerciseCode(config.sourceDir, ref, code);
-  return Response.json({ code, functions: written.functions });
+  // используется как есть, а не переписывается заново. Если в упражнении
+  // этого урока функции нет вовсе, insertPreviousImplementation отдаёт
+  // ошибку — файл не тронут, и отвечать 200 в этом случае нельзя.
+  const result = insertPreviousImplementation(config.sourceDir, ref, fn, previous);
+  if ("error" in result) return Response.json({ error: result.error }, { status: 404 });
+  return Response.json(result);
 }
