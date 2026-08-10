@@ -40,6 +40,7 @@ interface LessonData {
   // the middle of the plan would compact the array and put every later step
   // at the wrong position.
   steps: Record<string, StepData>;
+  quiz: { question: string; options: string[] }[];
   clarifications: Record<string, ClarificationData[]>;
   progress: { readStepIds: string[]; resumeStepId: string | null };
   source: { title: string };
@@ -297,11 +298,25 @@ export function Reader({
               Вопросы к этому шагу ещё не написаны — перегенерируй шаг или иди дальше.
             </p>
           ))}
-        {step.type === "quiz" && (
-          <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-            Итоговый квиз урока ещё не готов — он появится в следующем срезе.
-          </p>
-        )}
+        {step.type === "quiz" &&
+          (data.quiz.length > 0 ? (
+            <>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Итоговый квиз урока. Вопросы из курса — они по-английски, как в исходнике.
+              </p>
+              <QuestionSet
+                slug={slug}
+                stepId={step.id}
+                questions={data.quiz}
+                onExplain={(text) => setDraft({ text, at: Date.now() })}
+                onProgressChanged={() => void load()}
+              />
+            </>
+          ) : (
+            <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
+              У этого урока нет quiz.json — итогового квиза не будет.
+            </p>
+          ))}
 
         <Clarifications items={data.clarifications[step.id] ?? []} />
 
