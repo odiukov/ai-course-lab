@@ -6,6 +6,15 @@ import {
   type VisualPathResolution,
 } from "@/lib/api/visual-path";
 
+// Схема — это HTML со своим скриптом, и браузер исполняет его с правами
+// нашего origin: `sandbox="allow-scripts"` на iframe сеть не режет, а открытая
+// прямой ссылкой схема вообще не в iframe. Поэтому запрет ходить наружу едет
+// заголовком: `default-src 'none'` закрывает fetch, import(), @import, url()
+// и картинки, а разрешено ровно то, без чего схема не нарисуется, — свои
+// инлайновые стили и скрипт. Заголовок один на оба пространства имён: и
+// пришедшие с курсом схемы, и наши исполняются в браузере одинаково.
+const CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
+
 // Два пространства имён вместо одного смешанного: `?path=` адресует то, что
 // пришло с курсом, `?lesson=&step=` — то, что нарисовали мы. Иначе резолвер
 // не смог бы отличить одно от другого по одной строке.
@@ -36,6 +45,9 @@ export async function GET(request: Request) {
   }
 
   return new Response(fs.readFileSync(resolved.path, "utf8"), {
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": CSP,
+    },
   });
 }
