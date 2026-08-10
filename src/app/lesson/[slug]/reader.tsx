@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
 import { Clarifications } from "@/components/Clarifications";
+import { ExercisePanel } from "@/components/ExercisePanel";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -83,7 +84,15 @@ function parseStepParam(value: string | null, fallback: number): number {
   return value !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-export function Reader({ slug, initialIndex }: { slug: string; initialIndex: number }) {
+export function Reader({
+  slug,
+  initialIndex,
+  lspUrl,
+}: {
+  slug: string;
+  initialIndex: number;
+  lspUrl: string | null;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [data, setData] = useState<LessonData | null>(null);
@@ -272,9 +281,13 @@ export function Reader({ slug, initialIndex }: { slug: string; initialIndex: num
         <StepBody body={step.body} />
         {step.visual && <VisualFrame path={step.visual} />}
         {step.type === "code" && step.exercise_fn && (
-          <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-            Здесь будет редактор для функции <code>{step.exercise_fn}</code> — план 3.
-          </p>
+          <ExercisePanel
+            slug={slug}
+            stepId={step.id}
+            fn={step.exercise_fn}
+            lspUrl={lspUrl}
+            onProgressChanged={() => void load()}
+          />
         )}
         {step.type === "recall" && step.exercise_fn && (
           <p className="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">

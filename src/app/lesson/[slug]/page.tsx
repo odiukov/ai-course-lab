@@ -18,10 +18,11 @@ export default async function LessonPage({ params }: { params: Promise<{ slug: s
   const initialIndex = plan
     ? resumeIndex(readLessonProgress(openProgressDb(config.dataDir), slug), plan.steps)
     : 0;
+  const lspUrl = `ws://127.0.0.1:${config.lspPort}`;
 
   return (
     <Suspense fallback={<p className="text-slate-400">Загружаю…</p>}>
-      <Reader slug={slug} initialIndex={initialIndex} />
+      <Reader slug={slug} initialIndex={initialIndex} lspUrl={lspUrl} />
     </Suspense>
   );
 }
