@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type SqlParam = string | number | null;
 
-// Пять таблиц, а не четыре из спеки: сессии чата разложены на chat_sessions и
+// Таблиц больше, чем в спеке: сессии чата разложены на chat_sessions и
 // chat_messages. Складывать реплики в одну колонку JSON-ом означает лишиться
 // возможности пометить одну конкретную реплику как «оставленную в теории» и
 // достать последние N сообщений запросом, а именно это и нужно чату.
@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   text       TEXT NOT NULL,
   created_at TEXT NOT NULL,
   kept       INTEGER NOT NULL DEFAULT 0 CHECK (kept IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_step_state_lesson ON step_state (lesson_slug);

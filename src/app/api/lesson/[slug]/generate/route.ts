@@ -4,6 +4,8 @@ import { loadConfig } from "@/lib/config";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { generateLessonPlan } from "@/lib/generate/plan-lesson";
 import { ensureSteps } from "@/lib/generate/write-step";
+import { openProgressDb } from "@/lib/progress/db";
+import { readAgent } from "@/lib/progress/settings";
 import { findLesson } from "@/lib/source/catalog";
 import { readLessonSource } from "@/lib/source/lesson-source";
 import { readWrittenFunctions } from "@/lib/source/written-functions";
@@ -22,7 +24,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const config = loadConfig();
   // The request's signal, so closing the tab kills the child and frees the
   // serial queue instead of wedging every later generation.
-  const deps = defaultDeps(config, { signal: request.signal });
+  const deps = defaultDeps(config, {
+    signal: request.signal,
+    agent: readAgent(openProgressDb(config.dataDir), config.agent),
+  });
 
   return sseStream(async (send) => {
     const ref = findLesson(config.sourceDir, slug);

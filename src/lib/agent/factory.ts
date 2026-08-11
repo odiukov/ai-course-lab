@@ -1,5 +1,6 @@
 import type { Config } from "../config";
 import type { GenerateDeps } from "../generate/plan-lesson";
+import type { AgentName } from "../progress/settings";
 import { claudeAdapter } from "./claude-adapter";
 import { codexAdapter } from "./codex-adapter";
 import { runQueued } from "./runner";
@@ -12,10 +13,16 @@ export interface DepsOptions {
    */
   signal?: AbortSignal;
   timeoutMs?: number;
+  /**
+   * Агент, выбранный в интерфейсе. Без него берётся AGENT из окружения:
+   * маршрут, который про выбор не знает, продолжает работать как раньше.
+   */
+  agent?: AgentName;
 }
 
 export function defaultDeps(config: Config, options: DepsOptions = {}): GenerateDeps {
-  const adapter = config.agent === "codex" ? codexAdapter : claudeAdapter;
+  const agent = options.agent ?? config.agent;
+  const adapter = agent === "codex" ? codexAdapter : claudeAdapter;
   return {
     run: (prompt, onEvent) =>
       runQueued(

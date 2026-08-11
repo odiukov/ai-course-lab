@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AgentPicker } from "@/components/AgentPicker";
 import { StepBody } from "@/components/StepBody";
 import { errorStatus } from "@/lib/agent/error-message";
 import { parseSseFrames } from "@/lib/api/sse-client";
@@ -152,9 +153,12 @@ export function ChatPanel({
 
   return (
     <section className="flex h-full flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
-      <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
-        Спросить про этот шаг
-      </h2>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
+          Спросить про этот шаг
+        </h2>
+        <AgentPicker />
+      </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto">
         {messages.length === 0 && !streaming && (

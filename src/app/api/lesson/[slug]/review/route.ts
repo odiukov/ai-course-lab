@@ -10,6 +10,7 @@ import { formatMetrics, formatRuff, formatTests, reviewCode } from "@/lib/genera
 import { runBench } from "@/lib/practice/bench";
 import { addChatMessage, openChatSession } from "@/lib/progress/chat";
 import { openProgressDb } from "@/lib/progress/db";
+import { readAgent } from "@/lib/progress/settings";
 import { lastTestRun } from "@/lib/progress/tests";
 import { findLesson } from "@/lib/source/catalog";
 
@@ -56,7 +57,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const mineCode = extractFunction(exercise.code, step.exercise_fn) ?? exercise.code;
   const fn = step.exercise_fn;
 
-  const deps = defaultDeps(config, { signal: request.signal });
+  const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
   return sseStream(async (send) => {
     // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без

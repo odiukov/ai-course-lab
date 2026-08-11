@@ -5,6 +5,7 @@ import { readMergedCatalog } from "@/lib/source/merged-catalog";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { openProgressDb } from "@/lib/progress/db";
 import { readLessonReadCounts } from "@/lib/progress/steps";
+import { AgentPicker } from "@/components/AgentPicker";
 import ImportButton from "@/components/ImportButton";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,10 @@ export default function CatalogPage() {
 
   return (
     <main className="mx-auto max-w-3xl">
-      <h1 className="mb-8 text-3xl font-semibold">Курс</h1>
+      <div className="mb-8 flex items-baseline justify-between">
+        <h1 className="text-3xl font-semibold">Курс</h1>
+        <AgentPicker />
+      </div>
       {phases.map((phase) => (
         <section key={phase.dir} className="mb-8">
           <h2 className="mb-3 text-lg font-medium text-slate-500 dark:text-slate-400">

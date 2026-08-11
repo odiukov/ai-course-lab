@@ -13,6 +13,7 @@ import {
   recentHistory,
 } from "@/lib/progress/chat";
 import { openProgressDb } from "@/lib/progress/db";
+import { readAgent } from "@/lib/progress/settings";
 
 const MAX_QUESTION = 2000;
 
@@ -65,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const db = openProgressDb(config.dataDir);
   // Same signal as generation: a closed tab kills the child instead of leaving
   // the serial queue wedged for every later request.
-  const deps = defaultDeps(config, { signal: request.signal });
+  const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
   return sseStream(async (send) => {
     const sessionId = openChatSession(db, slug, stepId);
