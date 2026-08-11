@@ -1,9 +1,11 @@
+import path from "node:path";
 import Link from "next/link";
-import { loadConfig } from "@/lib/config";
+import { isDirectory, loadConfig } from "@/lib/config";
 import { readMergedCatalog } from "@/lib/source/merged-catalog";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { openProgressDb } from "@/lib/progress/db";
 import { readLessonReadCounts } from "@/lib/progress/steps";
+import ImportButton from "@/components/ImportButton";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,9 @@ export default function CatalogPage() {
   // Каталог — серверный компонент, поэтому читает базу напрямую: один запрос на
   // всю страницу вместо эндпоинта и похода за каждой строкой.
   const readCounts = readLessonReadCounts(openProgressDb(config.dataDir));
+  // Первый клик без кэша клонирует курс целиком — кнопке нужно сказать об
+  // этом словами, иначе долгое молчание читается как зависание.
+  const firstRun = !isDirectory(path.join(config.upstreamDir, ".git"));
 
   return (
     <main className="mx-auto max-w-3xl">
@@ -33,20 +38,19 @@ export default function CatalogPage() {
                   <li
                     key={lesson.slug}
                     className="flex items-baseline gap-2 px-2 py-1 text-slate-500 dark:text-slate-400"
-                    title={`npm run import -- ${lesson.slug}`}
                   >
                     <span className="tabular-nums">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
-                    <span className="ml-auto text-xs">не импортирован</span>
+                    <ImportButton slug={lesson.slug} imported={false} firstRun={firstRun} />
                   </li>
                 );
               }
 
               return (
-                <li key={lesson.slug}>
+                <li key={lesson.slug} className="flex items-baseline gap-2 pr-2">
                   <Link
                     href={`/lesson/${lesson.slug}`}
-                    className="flex items-baseline gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    className="flex flex-1 items-baseline gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <span className="tabular-nums text-slate-500 dark:text-slate-400">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
@@ -56,6 +60,7 @@ export default function CatalogPage() {
                       </span>
                     )}
                   </Link>
+                  <ImportButton slug={lesson.slug} imported firstRun={firstRun} />
                 </li>
               );
             })}
