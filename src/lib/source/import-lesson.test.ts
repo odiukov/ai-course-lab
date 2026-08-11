@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { findLesson } from "./catalog";
-import { diffLesson, importLesson, isImported, isLearnerOwned } from "./import-lesson";
+import { diffLesson, importLesson, isImported, isLearnerOwned, lessonFiles } from "./import-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 
@@ -228,5 +228,63 @@ describe("diffLesson", () => {
     );
 
     expect(diffLesson(courseRepo, sourceDir, ref)).toEqual({ added: 0, changed: 0 });
+  });
+});
+
+describe("lessonFiles — несколько репозиториев", () => {
+  // Ровно та поломка, ради которой список репозиториев и появился: в
+  // рут-репозитории курса нет ни learning-exercises/, ни learning-visuals/ —
+  // они есть только в форке. Импорт из одного апстрима оставлял урок без
+  // упражнения, и план получался вообще без code-шагов.
+  function upstreamWithoutPractice(): string {
+    const repo = tmp();
+    const docs = path.join(repo, "phases", "01-math-foundations", "02-beta", "docs");
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, "en.md"), "свежий текст из апстрима", "utf8");
+    return repo;
+  }
+
+  it("текст берёт из первого репозитория, упражнение — из того, где оно есть", () => {
+    const upstream = upstreamWithoutPractice();
+    const files = lessonFiles([upstream, COURSE], beta());
+
+    const fromUpstream = files.filter((f) => f.repo === upstream).map((f) => path.relative(f.repo, f.abs));
+    const fromFork = files.filter((f) => f.repo === COURSE).map((f) => path.relative(f.repo, f.abs));
+
+    expect(fromUpstream).toContain("phases/01-math-foundations/02-beta/docs/en.md");
+    expect(fromFork.some((rel) => rel.startsWith("learning-exercises/"))).toBe(true);
+    expect(fromUpstream.some((rel) => rel.startsWith("learning-exercises/"))).toBe(false);
+  });
+
+  it("импорт из двух репозиториев приносит и текст, и упражнение", () => {
+    const upstream = upstreamWithoutPractice();
+    const sourceDir = tmp();
+
+    importLesson([upstream, COURSE], sourceDir, beta());
+
+    expect(
+      fs.readFileSync(path.join(sourceDir, "phases/01-math-foundations/02-beta/docs/en.md"), "utf8"),
+    ).toBe("свежий текст из апстрима");
+    expect(
+      fs.existsSync(path.join(sourceDir, "learning-exercises/p01-l02-beta/exercise.template.py")),
+    ).toBe(true);
+  });
+
+  it("один репозиторий строкой работает как раньше", () => {
+    const sourceDir = tmp();
+    const result = importLesson(COURSE, sourceDir, beta());
+    expect(result.copied.length).toBeGreaterThan(0);
+  });
+
+  it("дубликат в списке не удваивает файлы", () => {
+    const single = lessonFiles(COURSE, beta()).length;
+    expect(lessonFiles([COURSE, COURSE], beta())).toHaveLength(single);
+  });
+
+  it("diffLesson тоже смотрит в оба репозитория", () => {
+    const upstream = upstreamWithoutPractice();
+    const sourceDir = tmp();
+    importLesson([upstream, COURSE], sourceDir, beta());
+    expect(diffLesson([upstream, COURSE], sourceDir, beta())).toEqual({ added: 0, changed: 0 });
   });
 });

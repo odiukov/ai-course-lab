@@ -24,6 +24,12 @@ export default function CatalogPage() {
   // Первый клик без кэша клонирует курс целиком — кнопке нужно сказать об
   // этом словами, иначе долгое молчание читается как зависание.
   const firstRun = !hasClone(config.upstreamDir);
+  // Те же два источника, что у импорта: упражнения и визуализации живут только
+  // в форке, и без него строка обещала бы «обновлять нечего» там, где кнопка
+  // на самом деле принесёт файлы.
+  const repos = [config.courseRepo, config.localCourseRepo].filter(
+    (repo): repo is string => repo !== null,
+  );
 
   return (
     <main className="mx-auto max-w-3xl">
@@ -68,9 +74,10 @@ export default function CatalogPage() {
               // даты коммита. Кэш апстрима — shallow-клон в один коммит, и
               // «когда трогали папку урока» из него не достать; к тому же
               // ответ по файлам учитывает и правки, сделанные в source/ руками.
-              const diff = config.courseRepo
-                ? diffLesson(config.courseRepo, config.sourceDir, lesson)
-                : { added: 0, changed: 0 };
+              const diff =
+                repos.length > 0
+                  ? diffLesson(repos, config.sourceDir, lesson)
+                  : { added: 0, changed: 0 };
               const behind = diff.added + diff.changed;
               const importedAt = importDates.get(lesson.slug);
 

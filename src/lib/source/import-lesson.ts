@@ -74,42 +74,74 @@ export function isImported(sourceDir: string, ref: LessonRef): boolean {
   return fs.existsSync(path.join(sourceDir, "phases", ref.phaseDir, ref.lessonDir, "docs"));
 }
 
+export interface LessonFile {
+  /** Репозиторий, от которого считается относительный путь файла. */
+  repo: string;
+  abs: string;
+}
+
 /**
- * Абсолютные пути всех файлов курса, относящихся к уроку.
+ * Материал урока и репозиторий, из которого взята каждая его часть.
+ *
+ * Репозиториев несколько, потому что курс не лежит в одном месте. Тексты и
+ * переводы живут в рут-репозитории и там же обновляются, а `learning-exercises`
+ * и `learning-visuals` есть только в форке — их завёл владелец лабы, в апстриме
+ * этих каталогов нет вовсе. Правило простое и не требует настройки: каждая
+ * группа берётся из ПЕРВОГО репозитория списка, где она вообще есть. Если
+ * апстрим когда-нибудь заведёт упражнения, они начнут выигрывать сами.
  *
  * Одно место, где живёт ответ «из чего состоит урок»: и импорт, и подсчёт
  * «есть ли что обновлять» обязаны понимать состав одинаково, иначе строка
  * каталога обещала бы одно, а кнопка приносила другое.
  */
-export function lessonFiles(courseRepo: string, ref: LessonRef): string[] {
-  const files: string[] = [];
+export function lessonFiles(repos: string | string[], ref: LessonRef): LessonFile[] {
+  const list = (Array.isArray(repos) ? repos : [repos]).filter(
+    (repo, index, all) => repo && all.indexOf(repo) === index,
+  );
+  const files: LessonFile[] = [];
 
-  const tree = (relDir: string) => {
-    const abs = path.join(courseRepo, relDir);
-    if (fs.existsSync(abs)) files.push(...walk(abs));
+  // Первый репозиторий, у которого этот каталог есть. Пустой каталог — это
+  // «группы здесь нет», а не «группа пустая»: незачем считать источником репо,
+  // из которого не приедет ни файла.
+  const pick = (relDir: string): LessonFile[] | null => {
+    for (const repo of list) {
+      const abs = path.join(repo, relDir);
+      if (!fs.existsSync(abs)) continue;
+      const found = walk(abs);
+      if (found.length > 0) return found.map((file) => ({ repo, abs: file }));
+    }
+    return null;
   };
 
-  tree(path.join("phases", ref.phaseDir, ref.lessonDir));
-  tree(path.join("i18n", "ru", "phases", ref.phaseDir, ref.lessonDir));
+  files.push(...(pick(path.join("phases", ref.phaseDir, ref.lessonDir)) ?? []));
+  files.push(...(pick(path.join("i18n", "ru", "phases", ref.phaseDir, ref.lessonDir)) ?? []));
 
-  const visualsDir = path.join(courseRepo, "learning-visuals");
-  if (fs.existsSync(visualsDir)) {
+  for (const repo of list) {
+    const visualsDir = path.join(repo, "learning-visuals");
+    if (!fs.existsSync(visualsDir)) continue;
     const prefixes = visualPrefixes(ref);
-    for (const name of fs.readdirSync(visualsDir)) {
-      if (name.endsWith(".html") && prefixes.some((prefix) => name.startsWith(prefix))) {
-        files.push(path.join(visualsDir, name));
-      }
+    const matched = fs
+      .readdirSync(visualsDir)
+      .filter((name) => name.endsWith(".html") && prefixes.some((prefix) => name.startsWith(prefix)))
+      .map((name) => ({ repo, abs: path.join(visualsDir, name) }));
+    if (matched.length > 0) {
+      files.push(...matched);
+      break;
     }
   }
 
-  const found = findExerciseDir(path.join(courseRepo, "learning-exercises"), ref);
-  if (found) tree(path.join("learning-exercises", found));
+  for (const repo of list) {
+    const found = findExerciseDir(path.join(repo, "learning-exercises"), ref);
+    if (!found) continue;
+    files.push(...(pick(path.join("learning-exercises", found)) ?? []));
+    break;
+  }
 
   return files;
 }
 
 export function importLesson(
-  courseRepo: string,
+  repos: string | string[],
   sourceDir: string,
   ref: LessonRef,
   options: ImportOptions = {},
@@ -117,8 +149,8 @@ export function importLesson(
   const overwrite = options.overwrite ?? false;
   const result: ImportResult = { slug: ref.slug, copied: [], updated: [], kept: [] };
 
-  for (const abs of lessonFiles(courseRepo, ref)) {
-    copyFile(courseRepo, sourceDir, abs, result, overwrite);
+  for (const { repo, abs } of lessonFiles(repos, ref)) {
+    copyFile(repo, sourceDir, abs, result, overwrite);
   }
 
   return result;
@@ -142,11 +174,15 @@ export interface LessonDiff {
  * fetch может принести ещё что-то, поэтому ноль здесь — это «в известной
  * копии курса нового нет», а не «жать бессмысленно».
  */
-export function diffLesson(courseRepo: string, sourceDir: string, ref: LessonRef): LessonDiff {
+export function diffLesson(
+  repos: string | string[],
+  sourceDir: string,
+  ref: LessonRef,
+): LessonDiff {
   const diff: LessonDiff = { added: 0, changed: 0 };
 
-  for (const abs of lessonFiles(courseRepo, ref)) {
-    const rel = path.relative(courseRepo, abs);
+  for (const { repo, abs } of lessonFiles(repos, ref)) {
+    const rel = path.relative(repo, abs);
     const target = path.join(sourceDir, rel);
 
     if (!fs.existsSync(target)) {

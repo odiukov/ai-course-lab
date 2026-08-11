@@ -64,8 +64,21 @@ export function runImport(config: Config, slug: string, deps: ImportDeps = {}): 
   const ref = findLesson(repo, slug);
   if (!ref) return { status: 404, error: "Урок не найден" };
 
+  // Считается ДО импорта: после него isImported всегда true, и режим у
+  // первого импорта оказался бы «реимпорт».
   const overwrite = isImported(config.sourceDir, ref);
-  const result = importLesson(repo, config.sourceDir, ref, { overwrite });
+
+  // Оба репозитория, а не один. Тексты и переводы приезжают из апстрима, но
+  // learning-exercises/ и learning-visuals/ есть только в форке — в
+  // рут-репозитории таких каталогов нет вовсе. Импорт из одного апстрима
+  // молча оставлял урок без упражнения, а планировщик тогда получал
+  // «(нет упражнения)» и строил урок вообще без code-шагов.
+  const result = importLesson(
+    [repo, config.localCourseRepo].filter((item): item is string => item !== null),
+    config.sourceDir,
+    ref,
+    { overwrite },
+  );
 
   return {
     slug,
