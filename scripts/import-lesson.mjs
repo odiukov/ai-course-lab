@@ -35,5 +35,8 @@ if (!ref) {
 }
 
 const result = importLesson(resolvedRepo, path.resolve("source"), ref);
-console.log(`${slug}: скопировано ${result.copied.length}, пропущено ${result.skipped.length}`);
+console.log(
+  `${slug}: создано ${result.copied.length}, обновлено ${result.updated.length}, оставлено ${result.kept.length}`,
+);
 for (const rel of result.copied) console.log(`  + ${rel}`);
+for (const rel of result.updated) console.log(`  ~ ${rel}`);

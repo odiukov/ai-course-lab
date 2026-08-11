@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { findLesson } from "./catalog";
-import { importLesson, isImported } from "./import-lesson";
+import { importLesson, isImported, isLearnerOwned } from "./import-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 
@@ -62,7 +62,7 @@ describe("importLesson", () => {
     expect(visuals).toEqual(["learning-visuals/p02-l01-gamma.html"]);
   });
 
-  it("не перетирает уже импортированные файлы", () => {
+  it("без overwrite не перетирает уже импортированные файлы", () => {
     const sourceDir = tmp();
     importLesson(COURSE, sourceDir, beta());
     const mine = path.join(sourceDir, "phases/01-math-foundations/02-beta/docs/en.md");
@@ -71,7 +71,71 @@ describe("importLesson", () => {
     const again = importLesson(COURSE, sourceDir, beta());
     expect(fs.readFileSync(mine, "utf8")).toBe("мой правленый текст");
     expect(again.copied).toEqual([]);
-    expect(again.skipped.length).toBeGreaterThan(5);
+    expect(again.updated).toEqual([]);
+    expect(again.kept.length).toBeGreaterThan(5);
+  });
+
+  it("с overwrite возвращает расходящийся файл к версии курса", () => {
+    const sourceDir = tmp();
+    importLesson(COURSE, sourceDir, beta());
+    const rel = "phases/01-math-foundations/02-beta/docs/en.md";
+    const mine = path.join(sourceDir, rel);
+    fs.writeFileSync(mine, "устаревший текст", "utf8");
+
+    const again = importLesson(COURSE, sourceDir, beta(), { overwrite: true });
+
+    expect(fs.readFileSync(mine, "utf8")).toBe(fs.readFileSync(path.join(COURSE, rel), "utf8"));
+    expect(again.updated).toContain(rel);
+    expect(again.copied).toEqual([]);
+  });
+
+  // Единственный файл в наборе, который создаёт лаба и пишет учащийся.
+  // Перезапись стёрла бы решение без возможности отката.
+  //
+  // Курс здесь собирается свой, а не берётся COURSE: в общей фикстуре
+  // exercise.py нет, а класть его туда на время теста — значит показывать
+  // чужой файл параллельно идущим тестам других файлов.
+  it("с overwrite не трогает exercise.py учащегося", () => {
+    const courseRepo = tmp();
+    const ref = {
+      slug: "01-solo__01-owned",
+      phaseDir: "01-solo",
+      lessonDir: "01-owned",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Owned",
+    };
+    const docs = path.join(courseRepo, "phases", ref.phaseDir, ref.lessonDir, "docs");
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, "en.md"), "текст урока", "utf8");
+    const exercises = path.join(courseRepo, "learning-exercises", "p01-l01-owned");
+    fs.mkdirSync(exercises, { recursive: true });
+    fs.writeFileSync(path.join(exercises, "exercise.template.py"), "def solve():\n    pass\n", "utf8");
+    fs.writeFileSync(path.join(exercises, "exercise.py"), "def solve():\n    pass\n", "utf8");
+
+    const sourceDir = tmp();
+    importLesson(courseRepo, sourceDir, ref);
+
+    const rel = path.join("learning-exercises", "p01-l01-owned", "exercise.py");
+    const mine = path.join(sourceDir, rel);
+    fs.writeFileSync(mine, "def solve():\n    return 42\n", "utf8");
+
+    const again = importLesson(courseRepo, sourceDir, ref, { overwrite: true });
+
+    expect(fs.readFileSync(mine, "utf8")).toBe("def solve():\n    return 42\n");
+    expect(again.updated).not.toContain(rel);
+    expect(again.kept).toContain(rel);
+  });
+
+  it("совпавший байт-в-байт файл не считается обновлённым", () => {
+    const sourceDir = tmp();
+    importLesson(COURSE, sourceDir, beta());
+
+    const again = importLesson(COURSE, sourceDir, beta(), { overwrite: true });
+
+    expect(again.updated).toEqual([]);
+    expect(again.copied).toEqual([]);
+    expect(again.kept.length).toBeGreaterThan(5);
   });
 
   it("падает, а не угадывает, если под префикс попадают два каталога упражнения", () => {
@@ -99,5 +163,14 @@ describe("isImported", () => {
     expect(isImported(sourceDir, beta())).toBe(false);
     importLesson(COURSE, sourceDir, beta());
     expect(isImported(sourceDir, beta())).toBe(true);
+  });
+});
+
+describe("isLearnerOwned", () => {
+  it("узнаёт exercise.py учащегося и только его", () => {
+    expect(isLearnerOwned("learning-exercises/p01-l02-beta/exercise.py")).toBe(true);
+    expect(isLearnerOwned("learning-exercises/p01-l02-beta/exercise.template.py")).toBe(false);
+    expect(isLearnerOwned("learning-exercises/p01-l02-beta/tests/exercise.py")).toBe(false);
+    expect(isLearnerOwned("phases/01-math-foundations/02-beta/docs/exercise.py")).toBe(false);
   });
 });
