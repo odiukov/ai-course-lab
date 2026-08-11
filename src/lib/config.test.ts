@@ -11,6 +11,7 @@ describe("loadConfig", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
     const cfg = loadConfig({} as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBeNull();
+    expect(cfg.localCourseRepo).toBeNull();
     expect(path.isAbsolute(cfg.sourceDir)).toBe(true);
     expect(cfg.sourceDir.endsWith("source")).toBe(true);
   });
@@ -24,15 +25,16 @@ describe("loadConfig", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
     const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBeNull();
+    expect(cfg.localCourseRepo).toBeNull();
     expect(cfg.sourceDir.endsWith("source")).toBe(true);
   });
 
   it("не принимает файл вместо директории", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
     const file = path.join(FIXTURE, "phases/01-math-foundations/01-alpha/docs/en.md");
-    expect(
-      loadConfig({ NODE_ENV: "test", COURSE_REPO: file } as NodeJS.ProcessEnv, tempRoot).courseRepo,
-    ).toBeNull();
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: file } as NodeJS.ProcessEnv, tempRoot);
+    expect(cfg.courseRepo).toBeNull();
+    expect(cfg.localCourseRepo).toBeNull();
   });
 
   it("принимает существующий COURSE_REPO", () => {
@@ -47,6 +49,9 @@ describe("loadConfig", () => {
     fs.mkdirSync(path.join(cacheDir, "phases"), { recursive: true });
     const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBe(cacheDir);
+    // localCourseRepo не схлопывается кэшем — иначе runImport, откатываясь
+    // на него после переструктурирования апстрима, откатывался бы на тот же кэш.
+    expect(cfg.localCourseRepo).toBe(FIXTURE);
   });
 
   it("агент по умолчанию claude, AGENT=codex переключает", () => {

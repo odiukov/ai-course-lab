@@ -48,7 +48,7 @@ export function runImport(config: Config, slug: string, deps: ImportDeps = {}): 
     // Клон может пройти без ошибок и всё же не дать курс: не тот UPSTREAM_BRANCH,
     // переструктуренный апстрим — тем же правилом, что и loadConfig, проверяем
     // наличие phases/, иначе падаем на COURSE_REPO.
-    repo = effectiveCourseRepo(upstream.dir, config.courseRepo);
+    repo = effectiveCourseRepo(upstream.dir, config.localCourseRepo);
     pull = { fetched: upstream.fetched, head: upstream.head, at: upstream.fetchedAt, error: upstream.error };
   } catch (error) {
     // Апстрим не развернулся. Если локальный курс есть — импортируем из него

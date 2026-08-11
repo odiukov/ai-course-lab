@@ -18,6 +18,7 @@ function config(overrides: Partial<Config> = {}): Config {
   return {
     sourceDir: tmp(),
     courseRepo: COURSE,
+    localCourseRepo: COURSE,
     upstreamDir: path.join(tmp(), "course-repo"),
     upstreamRemote: "https://example.invalid/course.git",
     upstreamBranch: "main",
@@ -81,6 +82,25 @@ describe("runImport", () => {
   // случае падает на COURSE_REPO — runImport должен вести себя так же.
   it("клон без phases/ — импорт идёт из COURSE_REPO, а не 404", () => {
     const cfg = config();
+    const emptyDir = tmp();
+    const ensure = () => ({ dir: emptyDir, head: "abc1234", fetched: true, fetchedAt: 1_000 });
+
+    const result = runImport(cfg, "01-math-foundations__02-beta", { ensure });
+
+    expect("status" in result).toBe(false);
+    expect("mode" in result && result.mode).toBe("import");
+    expect("copied" in result && result.copied).toBeGreaterThan(0);
+  });
+
+  // Стационарный случай: кэш уже когда-то выигрывал, и loadConfig отдал
+  // courseRepo === upstreamDir. Апстрим переструктурировался между
+  // запросами — если бы runImport откатывался через сам courseRepo, он
+  // сравнил бы upstreamDir с upstreamDir и ушёл бы в 404 вместо форка.
+  it("courseRepo уже схлопнут до апстрима, а апстрим переструктурировался — импорт идёт из localCourseRepo", () => {
+    const base = config();
+    // Так loadConfig и выглядит после первого удачного клона: courseRepo
+    // совпадает с upstreamDir, а не с фикстурой курса.
+    const cfg = { ...base, courseRepo: base.upstreamDir, localCourseRepo: COURSE };
     const emptyDir = tmp();
     const ensure = () => ({ dir: emptyDir, head: "abc1234", fetched: true, fetchedAt: 1_000 });
 

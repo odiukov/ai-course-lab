@@ -4,6 +4,18 @@ import path from "node:path";
 export interface Config {
   sourceDir: string;
   courseRepo: string | null;
+  /**
+   * Тот же COURSE_REPO, но без свёртки через effectiveCourseRepo — сырой
+   * путь к форку пользователя, даже если он сейчас не используется.
+   *
+   * courseRepo уже мог схлопнуться до upstreamDir (кэш выиграл), и тогда
+   * effectiveCourseRepo, вызванный ещё раз от courseRepo, сравнивает
+   * upstreamDir с upstreamDir — это не запасной вариант, а тавтология.
+   * runImport должен уметь откатиться на настоящий форк, когда апстрим
+   * переструктурировался между запросами, а для этого нужен путь, который
+   * ничего не схлопывало.
+   */
+  localCourseRepo: string | null;
   /** Каталог кэш-клона рут-репозитория. Может ещё не существовать. */
   upstreamDir: string;
   upstreamRemote: string;
@@ -53,6 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root: string = 
   return {
     sourceDir: path.join(root, "source"),
     courseRepo: effectiveCourseRepo(upstreamDir, courseRepo),
+    localCourseRepo: courseRepo,
     upstreamDir,
     upstreamRemote: env.UPSTREAM_REPO?.trim() || DEFAULT_UPSTREAM_REPO,
     upstreamBranch: env.UPSTREAM_BRANCH?.trim() || "main",
