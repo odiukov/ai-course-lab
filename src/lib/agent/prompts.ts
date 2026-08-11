@@ -6,7 +6,8 @@ export type PromptName =
   | "write-step"
   | "explain"
   | "review-code"
-  | "draw-visual";
+  | "draw-visual"
+  | "write-exercise";
 
 export function renderPrompt(name: PromptName, vars: Record<string, string>): string {
   const file = path.join(process.cwd(), "prompts", `${name}.md`);

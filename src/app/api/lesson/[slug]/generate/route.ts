@@ -4,7 +4,9 @@ import { loadConfig } from "@/lib/config";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { readPhaseOutlines } from "@/lib/content/phase-outlines";
 import { generateLessonPlan } from "@/lib/generate/plan-lesson";
+import { generateExercise } from "@/lib/generate/write-exercise";
 import { ensureSteps } from "@/lib/generate/write-step";
+import { runTests } from "@/lib/practice/run-tests";
 import { openProgressDb } from "@/lib/progress/db";
 import { readAgent } from "@/lib/progress/settings";
 import { findLesson } from "@/lib/source/catalog";
@@ -38,7 +40,37 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   return sseStream(async (send) => {
     const ref = findLesson(config.sourceDir, slug);
     if (!ref) throw new Error("Урок не найден");
-    const source = readLessonSource(config.sourceDir, ref);
+    let source = readLessonSource(config.sourceDir, ref);
+
+    // Упражнения есть не у каждого урока курса. Без него планировщик получает
+    // «(нет упражнения)» и строит урок вообще без code-шагов, то есть без
+    // практики — поэтому упражнение придумывается ДО плана, чтобы функции
+    // попали планировщику наравне с готовыми.
+    if (!source.exercise) {
+      send("progress", { stage: "exercise", text: "Придумываю упражнение к уроку" });
+      const made = await generateExercise({
+        sourceDir: config.sourceDir,
+        source,
+        deps,
+        written: readWrittenFunctions(config.sourceDir),
+        check: async (dir) => {
+          const outcome = await runTests({ dir, python: config.python });
+          if (outcome.passed > 0 && outcome.failed === 0 && outcome.errors === 0) return null;
+          const first = outcome.failures[0];
+          return first
+            ? `${first.name}: ${first.message}`
+            : `прошло ${outcome.passed}, упало ${outcome.failed}, ошибок ${outcome.errors}`;
+        },
+      });
+
+      if ("error" in made) {
+        // Не throw: урок без упражнения читается, а без текста — нет. Ошибка
+        // показывается тем же кадром, что и провал схемы, и разбор идёт дальше.
+        send("error", { message: `Упражнение к уроку не написалось: ${made.error}` });
+      } else {
+        source = readLessonSource(config.sourceDir, ref);
+      }
+    }
 
     let plan = readLessonPlan(config.contentDir, slug);
     if (!plan || isStale(plan, source)) {
