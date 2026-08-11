@@ -41,7 +41,7 @@ export default function CatalogPage() {
                   >
                     <span className="tabular-nums">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
-                    <ImportButton slug={lesson.slug} imported={false} firstRun={firstRun} />
+                    <ImportButton key="import" slug={lesson.slug} imported={false} firstRun={firstRun} />
                   </li>
                 );
               }
@@ -60,7 +60,7 @@ export default function CatalogPage() {
                       </span>
                     )}
                   </Link>
-                  <ImportButton slug={lesson.slug} imported firstRun={firstRun} />
+                  <ImportButton key="import" slug={lesson.slug} imported firstRun={firstRun} />
                 </li>
               );
             })}
