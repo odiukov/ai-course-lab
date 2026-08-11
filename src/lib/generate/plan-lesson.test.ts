@@ -5,7 +5,7 @@ import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
 import { readLessonPlan } from "../content/lesson-plan";
-import { MAX_STEPS, countWords, extractJsonBlock, generateLessonPlan, stepBudget } from "./plan-lesson";
+import { MAX_STEPS, MIN_STEPS, countWords, extractJsonBlock, generateLessonPlan, stepBudget } from "./plan-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -144,7 +144,7 @@ describe("generateLessonPlan", () => {
 
 describe("stepBudget", () => {
   it("короткий урок не растягивается до потолка", () => {
-    expect(stepBudget(600, 0)).toBe(15);
+    expect(stepBudget(600, 0)).toBe(9);
     expect(stepBudget(1200, 0)).toBeLessThan(MAX_STEPS);
   });
 
@@ -168,7 +168,7 @@ describe("stepBudget", () => {
   });
 
   it("не выходит за границы", () => {
-    expect(stepBudget(0, 0)).toBe(15);
+    expect(stepBudget(0, 0)).toBe(MIN_STEPS);
     expect(stepBudget(100000, 40)).toBe(MAX_STEPS);
   });
 });

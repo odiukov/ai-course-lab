@@ -191,3 +191,41 @@ describe("чтение и запись", () => {
     expect(isStale({ ...plan, sourceHash: "beef" }, SOURCE)).toBe(true);
   });
 });
+
+describe("validatePlan — ориентир по числу шагов", () => {
+  // Урок без упражнения: план из одной теории иначе спотыкался бы о правило
+  // «каждая функция получает свой code-шаг», а проверяем мы здесь длину.
+  const SOURCE_NO_EXERCISE = { ...SOURCE, exercise: null };
+
+  function steps(n: number): StepMeta[] {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `${String(i + 1).padStart(3, "0")}-t`,
+      type: "theory" as const,
+      title: `Шаг ${i + 1}`,
+    }));
+  }
+
+  it("без ориентира длину не проверяет", () => {
+    expect(validatePlan(steps(54), SOURCE_NO_EXERCISE)).toEqual([]);
+  });
+
+  it("попадание в ориентир и отклонение в пределах четверти проходят", () => {
+    expect(validatePlan(steps(40), SOURCE_NO_EXERCISE, [], 40)).toEqual([]);
+    expect(validatePlan(steps(50), SOURCE_NO_EXERCISE, [], 40)).toEqual([]);
+    expect(validatePlan(steps(30), SOURCE_NO_EXERCISE, [], 40)).toEqual([]);
+  });
+
+  // Настоящий случай: ориентир 40, планировщик прислал 54.
+  it("отвергает план, ушедший далеко за ориентир", () => {
+    const errors = validatePlan(steps(54), SOURCE_NO_EXERCISE, [], 40);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("54");
+    expect(errors[0]).toContain("40");
+    expect(errors[0]).toContain("больше");
+  });
+
+  it("слишком короткий план отвергается так же", () => {
+    const errors = validatePlan(steps(20), SOURCE_NO_EXERCISE, [], 40);
+    expect(errors[0]).toContain("меньше");
+  });
+});

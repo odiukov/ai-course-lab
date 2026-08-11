@@ -18,12 +18,36 @@ const planSchema = z.object({
 
 export type LessonPlan = z.infer<typeof planSchema>;
 
+/**
+ * На сколько плану разрешено разойтись с ориентиром.
+ *
+ * Промпт просит «примерно N шагов», и без проверки это читается как
+ * пожелание: при ориентире 40 приезжал план на 54. Четверть — это запас на
+ * честное суждение («мыслей в тексте правда больше»), после которого речь уже
+ * не о суждении, а о том, что ориентир не читали.
+ */
+const BUDGET_TOLERANCE = 0.25;
+
 export function validatePlan(
   steps: StepMeta[],
   source: LessonSource,
   written: WrittenFunction[] = [],
+  budget?: number,
 ): string[] {
   const errors: string[] = [];
+
+  if (budget && budget > 0) {
+    // Не меньше двух шагов запаса: на коротком уроке четверть — это один шаг,
+    // и проверка придиралась бы к разнице, которая ничего не значит.
+    const slack = Math.max(2, Math.round(budget * BUDGET_TOLERANCE));
+    if (Math.abs(steps.length - budget) > slack) {
+      const side = steps.length > budget ? "больше" : "меньше";
+      errors.push(
+        `В плане ${steps.length} шагов, а ориентир — ${budget} (допустимо ${budget - slack}-${budget + slack}). ` +
+          `Это заметно ${side}: пересмотри разбивку, а не подгоняй счёт.`,
+      );
+    }
+  }
 
   const seen = new Set<string>();
   for (const step of steps) {

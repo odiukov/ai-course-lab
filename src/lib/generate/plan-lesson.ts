@@ -71,7 +71,15 @@ export function extractJsonBlock(text: string): unknown {
   throw new Error("В ответе агента не найден корректный JSON");
 }
 
-export const MIN_STEPS = 15;
+/**
+ * Нижняя граница — защита от «урока» в один экран, а не требование объёма.
+ *
+ * Раньше здесь стояло 15, доставшихся от плоского диапазона в промпте. С
+ * бюджетом, посчитанным от содержания, такой пол вреден с другой стороны:
+ * исходнику на две сотни слов он предписывал пятнадцать экранов, то есть ровно
+ * то размазывание одной мысли, против которого весь этот счёт и заведён.
+ */
+export const MIN_STEPS = 5;
 
 /**
  * Потолок, который защищает от мегаурока, а не от подробности.
@@ -136,9 +144,10 @@ export async function generateLessonPlan(opts: {
 
   const written = opts.written ?? [];
   const functionCount = source.exercise?.functions.length ?? 0;
+  const budget = stepBudget(countWords(source.text), functionCount);
   const base = renderPrompt("plan-lesson", {
     other_lessons: formatPhaseOutlines(opts.outlines ?? []),
-    step_budget: String(stepBudget(countWords(source.text), functionCount)),
+    step_budget: String(budget),
     lesson_title: source.ref.title,
     source_text: source.text,
     functions: (source.exercise?.functions ?? []).map((fn) => `- ${fn}`).join("\n") || "(нет упражнения)",
@@ -171,7 +180,7 @@ export async function generateLessonPlan(opts: {
     if (!parsed.success) {
       lastErrors = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     } else {
-      lastErrors = validatePlan(parsed.data, source, written);
+      lastErrors = validatePlan(parsed.data, source, written, budget);
       if (lastErrors.length === 0) {
         const plan: LessonPlan = {
           slug: source.ref.slug,
