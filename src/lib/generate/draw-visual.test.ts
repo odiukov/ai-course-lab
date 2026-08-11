@@ -63,6 +63,25 @@ describe("validateVisualHtml", () => {
     expect(validateVisualHtml("<html><body><div>схема</div></body></html>")).toMatch(/svg/i);
   });
 
+  // Промпт требует считать геометрию в рантайме и не требует статического
+  // корня <svg>, поэтому агент законно строит схему целиком через
+  // createElementNS — в разметке тогда только пустой контейнер. Такие файлы
+  // рисуют не хуже прочих, а проверка на подстроку "<svg" их выбрасывала:
+  // отсюда «то нарисовалось, то нет» на соседних шагах одного урока.
+  it("пропускает схему, собранную скриптом через createElementNS", () => {
+    const html = `<!doctype html><html><body><div id="frame"></div><script>
+      var NS = "http://www.w3.org/2000/svg";
+      var svg = document.createElementNS(NS, "svg");
+      document.getElementById("frame").appendChild(svg);
+    </script></body></html>`;
+    expect(validateVisualHtml(html)).toBeNull();
+  });
+
+  it("одного упоминания пространства имён достаточно, регистр не важен", () => {
+    const html = '<html><body><script>var ns = "HTTP://WWW.W3.ORG/2000/SVG";</script></body></html>';
+    expect(validateVisualHtml(html)).toBeNull();
+  });
+
   it.each([
     '<svg></svg><script src="https://cdn.example.com/d3.js"></script>',
     "<svg></svg><script src='http://cdn.example.com/d3.js'></script>",

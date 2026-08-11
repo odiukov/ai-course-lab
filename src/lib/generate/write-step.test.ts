@@ -462,3 +462,71 @@ describe("ensureSteps и шаги-проверки", () => {
     expect(readStep(contentDir, PLAN.slug, "001-t")?.check).toBeUndefined();
   });
 });
+
+describe("ensureSteps — дорисовка пропавших схем", () => {
+  const WITH_VISUAL: LessonPlan = {
+    ...PLAN,
+    steps: [
+      { id: "001-t", type: "theory", title: "Зачем", visual_brief: "стрелка из (0,0) в (3,2)" },
+      ...PLAN.steps.slice(1),
+    ],
+  };
+
+  // Схема, у которой сорвалась генерация, не оставляет файла, а шаг остаётся
+  // на диске — и прежде генерация к нему больше не возвращалась. Урок навсегда
+  // оставался без картинки, вернуть её можно было только удалив шаг руками.
+  it("рисует схему шага, который уже написан, но остался без неё", async () => {
+    const contentDir = tmpDir();
+    // Во втором заходе шаг уже написан, поэтому единственный вызов агента —
+    // это рисование схемы.
+    const run = vi
+      .fn()
+      .mockResolvedValue('<!doctype html><html><body><svg viewBox="0 0 10 10"></svg></body></html>');
+
+    // Первый заход: шаг записан, схема провалилась.
+    const failing = vi.fn().mockResolvedValueOnce("Тело шага.").mockResolvedValue("извини, не могу");
+    const problems: string[] = [];
+    await ensureSteps({
+      contentDir,
+      source: SOURCE,
+      plan: WITH_VISUAL,
+      fromIndex: 0,
+      count: 1,
+      deps: { run: failing },
+      onVisualError: (_id, problem) => problems.push(problem),
+    });
+    expect(problems).toHaveLength(1);
+    const visual = path.join(contentDir, "lessons", PLAN.slug, "visuals", "001-t.html");
+    expect(fs.existsSync(visual)).toBe(false);
+
+    // Второй заход: шаг не переписывается, а схема дорисовывается.
+    const written = await ensureSteps({
+      contentDir,
+      source: SOURCE,
+      plan: WITH_VISUAL,
+      fromIndex: 0,
+      count: 1,
+      deps: { run },
+    });
+    expect(written).toEqual([]);
+    expect(fs.existsSync(visual)).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("не зовёт агента, когда схема уже на месте", async () => {
+    const contentDir = tmpDir();
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce("Тело шага.")
+      .mockResolvedValue('<!doctype html><html><body><svg viewBox="0 0 10 10"></svg></body></html>');
+    await ensureSteps({
+      contentDir, source: SOURCE, plan: WITH_VISUAL, fromIndex: 0, count: 1, deps: { run },
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+
+    await ensureSteps({
+      contentDir, source: SOURCE, plan: WITH_VISUAL, fromIndex: 0, count: 1, deps: { run },
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});

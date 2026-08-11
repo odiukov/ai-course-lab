@@ -180,11 +180,29 @@ export async function ensureSteps(opts: {
   const withoutQuestions: string[] = [];
 
   for (const [offset, meta] of window.entries()) {
-    if (readStep(contentDir, plan.slug, meta.id)) continue;
+    const excerpt = excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor);
+    const existing = readStep(contentDir, plan.slug, meta.id);
+
+    // Написанный шаг не переписывается, но схему ему добирают. Провал
+    // рисования не оставляет файла, а к написанному шагу цикл раньше не
+    // возвращался — и урок оставался без картинки навсегда, вернуть её можно
+    // было только удалив шаг руками. drawVisual сам молчит, когда брифа нет
+    // или файл уже на месте, так что лишнего вызова агента здесь не будет.
+    if (existing) {
+      const problem = await drawVisual({
+        contentDir,
+        slug: plan.slug,
+        meta,
+        body: existing.body,
+        sourceExcerpt: excerpt,
+        deps,
+        onEvent,
+      });
+      if (problem) onVisualError(meta.id, problem);
+      continue;
+    }
 
     onStep({ number: fromIndex + offset + 1, total: plan.steps.length, title: meta.title });
-
-    const excerpt = excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor);
 
     const prompt = renderPrompt("write-step", {
       lesson_title: plan.title,

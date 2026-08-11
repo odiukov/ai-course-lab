@@ -19,6 +19,17 @@ export function stripHtmlFence(reply: string): string {
 const EXTERNAL_REF = /(?:src|href)\s*=\s*["']?\s*(?:https?:)?\/\//i;
 
 /**
+ * Чем схема нарисована: корнем `<svg>` в разметке или сборкой в скрипте.
+ *
+ * Вторая форма — не поблажка. Промпт требует считать геометрию в рантайме и
+ * статического корня не требует, поэтому агент с полным правом строит схему
+ * через `document.createElementNS(NS, "svg")`, оставляя в разметке пустой
+ * контейнер. Строка пространства имён обязательна для createElementNS, так
+ * что её присутствие и есть признак «рисовать есть чем».
+ */
+const DRAWS_SVG = /<svg|http:\/\/www\.w3\.org\/2000\/svg/i;
+
+/**
  * Три проверки, ничего больше: ни разбора HTML, ни исполнения скрипта.
  *
  * Смысл схемы они не проверяют — за это отвечает требование считать
@@ -37,7 +48,7 @@ const EXTERNAL_REF = /(?:src|href)\s*=\s*["']?\s*(?:https?:)?\/\//i;
  */
 export function validateVisualHtml(html: string): string | null {
   if (!html.trim()) return "агент вернул пустой файл";
-  if (!/<svg/i.test(html)) return "в файле нет <svg>";
+  if (!DRAWS_SVG.test(html)) return "в файле нечем рисовать: ни <svg>, ни сборки схемы скриптом";
   if (EXTERNAL_REF.test(html)) return "файл тянет внешний ресурс";
   return null;
 }
