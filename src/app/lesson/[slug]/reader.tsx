@@ -198,7 +198,7 @@ export function Reader({
         buffer = rest;
         for (const frame of frames) {
           const payload = frame.data as { text?: string; message?: string; kind?: string };
-          if (frame.event === "progress" && payload.text) setStatus(payload.text.slice(-120));
+          if (frame.event === "progress" && payload.text) setStatus(payload.text.slice(0, 120));
           if (frame.event === "error") setError(errorStatus(payload.kind, payload.message ?? ""));
         }
       }

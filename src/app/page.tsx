@@ -48,7 +48,13 @@ export default function CatalogPage() {
                     {/* Один и тот же key в обеих ветках строки — чтобы после router.refresh()
                         React переиспользовал ту же кнопку, а не размонтировал её вместе со
                         сводкой «+N новых». */}
-                    <ImportButton key="import" slug={lesson.slug} imported={false} firstRun={firstRun} />
+                    <ImportButton
+                      key="import"
+                      slug={lesson.slug}
+                      imported={false}
+                      hasPlan={false}
+                      firstRun={firstRun}
+                    />
                   </li>
                 );
               }
@@ -67,7 +73,13 @@ export default function CatalogPage() {
                       </span>
                     )}
                   </Link>
-                  <ImportButton key="import" slug={lesson.slug} imported firstRun={firstRun} />
+                  <ImportButton
+                    key="import"
+                    slug={lesson.slug}
+                    imported
+                    hasPlan={plan !== null}
+                    firstRun={firstRun}
+                  />
                 </li>
               );
             })}

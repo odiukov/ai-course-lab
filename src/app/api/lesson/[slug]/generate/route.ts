@@ -22,10 +22,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
 
   const config = loadConfig();
-  // The request's signal, so closing the tab kills the child and frees the
-  // serial queue instead of wedging every later generation.
+  // Сигнала запроса здесь намеренно нет, в отличие от чата и разбора кода.
+  // Разбор урока — это десятки шагов, которые пишутся на диск по одному, и
+  // привязка агента к открытой вкладке означала, что уход с каталога убивает
+  // его на полуслове. От зависшего CLI страхует не сигнал, а таймаут в
+  // runner.ts, а брошенный поток SSE безопасен: sseStream после разрыва
+  // просто перестаёт писать.
   const deps = defaultDeps(config, {
-    signal: request.signal,
     agent: readAgent(openProgressDb(config.dataDir), config.agent),
   });
 
@@ -43,9 +46,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         source,
         deps,
         written,
-        onEvent: (event) => {
-          if (event.type === "text") send("progress", { stage: "plan", text: event.text });
-        },
       });
       send("plan", plan);
     }
@@ -57,9 +57,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       plan,
       fromIndex: from,
       deps,
-      onEvent: (event) => {
-        if (event.type === "text") send("progress", { stage: "steps", text: event.text });
-      },
+      // Прогресс — это «что пишется сейчас», а не поток текста от агента:
+      // его хвост обрывается посреди формулы и на экране читается как мусор.
+      onStep: ({ number, total, title }) =>
+        send("progress", { stage: "steps", text: `Пишу шаг ${number} из ${total}: ${title}` }),
       // Не throw: провал схемы не должен рвать поток и отменять уже
       // написанные шаги. sseStream шлёт "error" только из catch, поэтому
       // кадр отправляется здесь руками — ридер уже умеет его показывать и

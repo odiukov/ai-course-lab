@@ -154,10 +154,20 @@ export async function ensureSteps(opts: {
   count?: number;
   deps: GenerateDeps;
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Начало работы над очередным шагом.
+   *
+   * Отдельно от `onEvent`, потому что `onEvent` несёт поток текста от агента:
+   * его хвост — обрывок фразы посреди формулы, и в строке прогресса он
+   * читается как мусор. Здесь же известно, что именно пишется и сколько
+   * осталось.
+   */
+  onStep?: (info: { number: number; total: number; title: string }) => void;
   onVisualError?: (stepId: string, problem: string) => void;
 }): Promise<string[]> {
   const { contentDir, source, plan, fromIndex, deps } = opts;
   const onEvent = opts.onEvent ?? (() => {});
+  const onStep = opts.onStep ?? (() => {});
   const onVisualError = opts.onVisualError ?? (() => {});
   const count = opts.count ?? 3;
   const window = plan.steps.slice(fromIndex, fromIndex + count);
@@ -171,6 +181,8 @@ export async function ensureSteps(opts: {
 
   for (const [offset, meta] of window.entries()) {
     if (readStep(contentDir, plan.slug, meta.id)) continue;
+
+    onStep({ number: fromIndex + offset + 1, total: plan.steps.length, title: meta.title });
 
     const excerpt = excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor);
 
