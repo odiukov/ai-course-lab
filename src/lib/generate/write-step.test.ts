@@ -8,6 +8,7 @@ import { readStep } from "../content/step-file";
 import { appendClarification } from "../content/clarifications";
 import type { StepMeta } from "../content/step-file";
 import type { LessonPlan } from "../content/lesson-plan";
+import { lessonPaths } from "../content/paths";
 import {
   ensureSteps,
   excerptForStep,
@@ -257,6 +258,72 @@ describe("ensureSteps", () => {
     await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
 
     expect(run.mock.calls[0][0] as string).toContain("Что такое строка матрицы?");
+  });
+
+  const VISUAL_PLAN: LessonPlan = {
+    ...PLAN,
+    steps: [
+      {
+        id: "001-v",
+        type: "visual",
+        title: "Длина вектора",
+        visual_brief: "вектор [3, 4] как стрелка из (0,0)",
+      },
+    ],
+  };
+  const GOOD_SVG = '<!doctype html><html><body><svg viewBox="0 0 10 10"></svg></body></html>';
+
+  it("рисует схему шагу с visual_brief после того, как записал текст", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValueOnce("Тело шага.").mockResolvedValueOnce(GOOD_SVG);
+
+    await ensureSteps({ contentDir, source: SOURCE, plan: VISUAL_PLAN, fromIndex: 0, deps: { run } });
+
+    expect(readStep(contentDir, VISUAL_PLAN.slug, "001-v")?.body).toBe("Тело шага.");
+    expect(fs.readFileSync(lessonPaths(contentDir, VISUAL_PLAN.slug).visualFile("001-v"), "utf8")).toContain("<svg");
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("рисовальщик видит уже написанное тело шага", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValueOnce("Тело шага.").mockResolvedValueOnce(GOOD_SVG);
+
+    await ensureSteps({ contentDir, source: SOURCE, plan: VISUAL_PLAN, fromIndex: 0, deps: { run } });
+
+    expect(run.mock.calls[1][0] as string).toContain("Тело шага.");
+  });
+
+  it("оставляет шаг записанным, когда схема не прошла проверку", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValueOnce("Тело шага.").mockResolvedValueOnce("<html>нет схемы</html>");
+    const onVisualError = vi.fn();
+
+    const ids = await ensureSteps({
+      contentDir,
+      source: SOURCE,
+      plan: VISUAL_PLAN,
+      fromIndex: 0,
+      deps: { run },
+      onVisualError,
+    });
+
+    expect(ids).toEqual(["001-v"]);
+    expect(readStep(contentDir, VISUAL_PLAN.slug, "001-v")?.body).toBe("Тело шага.");
+    expect(fs.existsSync(lessonPaths(contentDir, VISUAL_PLAN.slug).visualFile("001-v"))).toBe(false);
+    expect(onVisualError).toHaveBeenCalledWith("001-v", expect.stringMatching(/svg/i));
+  });
+
+  it("не зовёт рисовальщика для шага с готовой визуализацией из курса", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело шага.");
+    const plan: LessonPlan = {
+      ...PLAN,
+      steps: [{ id: "001-v", type: "visual", title: "Готовая", visual: "learning-visuals/lesson-02-shapes.html" }],
+    };
+
+    await ensureSteps({ contentDir, source: SOURCE, plan, fromIndex: 0, deps: { run } });
+
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
 

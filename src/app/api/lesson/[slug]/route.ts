@@ -1,5 +1,6 @@
 import { loadConfig } from "@/lib/config";
 import { readLessonClarifications } from "@/lib/content/clarifications";
+import { readGeneratedVisualIds } from "@/lib/content/generated-visuals";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStepsById } from "@/lib/content/step-file";
 import { finalQuizQuestions, toPublicQuestions, toPublicStep } from "@/lib/practice/questions";
@@ -29,13 +30,29 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
   // ходили бы за данными, которые уже лежат рядом.
   const progress = readLessonProgress(openProgressDb(config.dataDir), slug);
 
+  // Спрашивается план, а не то, что лежит в steps: файл схемы принадлежит
+  // шагу, который её попросил, а не id, который однажды им был.
+  const drawn = new Set(readGeneratedVisualIds(config.contentDir, slug, plan?.steps ?? []));
+
   return Response.json({
     plan,
     stale: plan ? isStale(plan, source) : false,
-    // Верные ответы check-шагов остаются на сервере — ровно по той же причине,
-    // что и ответы итогового квиза ниже.
     steps: Object.fromEntries(
-      Object.entries(steps).map(([id, step]) => [id, toPublicStep(step)]),
+      Object.entries(steps).map(([id, step]) => [
+        id,
+        {
+          // Верные ответы check-шагов остаются на сервере — ровно по той же
+          // причине, что и ответы итогового квиза ниже: проверяет сервер, и
+          // ключ ответа в теле ответа API делал бы проверку декорацией.
+          ...toPublicStep(step),
+          // visual_brief — задание рисовальщику, ридеру оно не нужно; вместо
+          // него едет факт «файл на диске есть». Затирается в undefined, а не
+          // выбрасывается деструктуризацией: JSON.stringify undefined-поля
+          // опускает, и лишней неиспользуемой переменной не появляется.
+          visual_brief: undefined,
+          generatedVisual: drawn.has(id),
+        },
+      ]),
     ),
     // Правильные ответы итогового квиза наружу не уходят: проверяет сервер.
     quiz: toPublicQuestions(finalQuizQuestions(source)),

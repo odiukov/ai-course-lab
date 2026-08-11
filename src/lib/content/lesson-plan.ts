@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { LessonSource } from "../source/lesson-source";
 import type { WrittenFunction } from "../source/written-functions";
-import { lessonPaths } from "./paths";
+import { lessonPaths, SAFE_SEGMENT } from "./paths";
 import { stepMetaSchema, type StepMeta } from "./step-file";
 
 const planSchema = z.object({
@@ -27,6 +27,15 @@ export function validatePlan(
 
   const seen = new Set<string>();
   for (const step of steps) {
+    // Из id собираются имена файлов — шага, уточнения, схемы. Кириллица или
+    // точка в нём проходят до самого ридера и умирают там: файл записан,
+    // а /api/visual отклоняет сегмент и отдаёт пустой iframe. Форму гасим
+    // здесь, пока планировщику ещё можно вернуть ошибку на переделку.
+    if (!SAFE_SEGMENT.test(step.id)) {
+      errors.push(
+        `Шаг ${step.id}: id может состоять только из латиницы, цифр, дефиса и подчёркивания — из него собирается имя файла`,
+      );
+    }
     if (seen.has(step.id)) errors.push(`Дубликат id шага: ${step.id}`);
     seen.add(step.id);
   }
@@ -78,6 +87,22 @@ export function validatePlan(
   for (const step of steps) {
     if (step.visual && !visuals.has(step.visual)) {
       errors.push(`Шаг ${step.id}: визуализация ${step.visual} не найдена в уроке`);
+    }
+
+    if (step.type !== "visual") {
+      if (step.visual_brief) {
+        errors.push(
+          `Шаг ${step.id}: visual_brief у шага типа ${step.type} — такую схему никто не покажет`,
+        );
+      }
+      continue;
+    }
+
+    if (step.visual && step.visual_brief) {
+      errors.push(`Шаг ${step.id}: заданы и visual, и visual_brief — нужно ровно одно`);
+    }
+    if (!step.visual && !step.visual_brief) {
+      errors.push(`Шаг ${step.id}: у visual-шага нет ни visual, ни visual_brief`);
     }
   }
 

@@ -1,8 +1,9 @@
 ---
 id: 008-shapes-rule
-type: theory
+type: visual
 title: 'Правило стыковки: внутренние размерности'
 source_anchor: '### Why shapes matter'
+visual: learning-visuals/lesson-02-shapes.html
 ---
 
 Когда ты соберёшь свою первую нейросеть, самая частая ошибка будет не в логике, а в формах: PyTorch откажется умножать две таблицы чисел и напишет что-то вроде «size mismatch». Чтобы не гадать, достаточно одного правила — проверки стыковки.

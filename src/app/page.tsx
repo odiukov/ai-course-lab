@@ -32,7 +32,7 @@ export default function CatalogPage() {
                 return (
                   <li
                     key={lesson.slug}
-                    className="flex items-baseline gap-2 px-2 py-1 text-slate-400"
+                    className="flex items-baseline gap-2 px-2 py-1 text-slate-500 dark:text-slate-400"
                     title={`npm run import -- ${lesson.slug}`}
                   >
                     <span className="tabular-nums">{lesson.lessonNumber}</span>
@@ -48,7 +48,7 @@ export default function CatalogPage() {
                     href={`/lesson/${lesson.slug}`}
                     className="flex items-baseline gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
-                    <span className="tabular-nums text-slate-400">{lesson.lessonNumber}</span>
+                    <span className="tabular-nums text-slate-500 dark:text-slate-400">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
                     {plan && (
                       <span className="ml-auto text-xs text-emerald-600 dark:text-emerald-400">

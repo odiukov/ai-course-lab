@@ -13,6 +13,7 @@ import {
   type StepMeta,
 } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
+import { drawVisual } from "./draw-visual";
 import type { GenerateDeps } from "./plan-lesson";
 
 const MAX_EXCERPT = 6000;
@@ -153,9 +154,11 @@ export async function ensureSteps(opts: {
   count?: number;
   deps: GenerateDeps;
   onEvent?: (event: AgentEvent) => void;
+  onVisualError?: (stepId: string, problem: string) => void;
 }): Promise<string[]> {
   const { contentDir, source, plan, fromIndex, deps } = opts;
   const onEvent = opts.onEvent ?? (() => {});
+  const onVisualError = opts.onVisualError ?? (() => {});
   const count = opts.count ?? 3;
   const window = plan.steps.slice(fromIndex, fromIndex + count);
   const excerpts = resolveStepExcerpts(source, plan.steps);
@@ -169,12 +172,14 @@ export async function ensureSteps(opts: {
   for (const [offset, meta] of window.entries()) {
     if (readStep(contentDir, plan.slug, meta.id)) continue;
 
+    const excerpt = excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor);
+
     const prompt = renderPrompt("write-step", {
       lesson_title: plan.title,
       step_title: meta.title,
       step_type: meta.type,
       neighbours: neighbourSummary(plan, fromIndex + offset),
-      source_excerpt: excerpts.get(meta.id) ?? excerptForStep(source, meta.source_anchor),
+      source_excerpt: excerpt,
       clarifications: buildClarificationContext({
         contentDir,
         slug: plan.slug,
@@ -211,6 +216,22 @@ export async function ensureSteps(opts: {
     if (reply.check) step.check = reply.check;
     writeStep(contentDir, plan.slug, step);
     written.push(meta.id);
+
+    // Схема рисуется после текста, чтобы рисовальщик видел итоговое тело
+    // шага, а не только заголовок. Её провал шаг не отменяет: файл шага уже
+    // на диске, и без картинки он читается — в отличие от обратного случая.
+    const problem = await drawVisual({
+      contentDir,
+      slug: plan.slug,
+      meta,
+      // Тело шага, уже освобождённое от frontmatter шага-проверки: рисовальщик
+      // должен видеть ровно тот текст, который лёг на диск.
+      body: step.body,
+      sourceExcerpt: excerpt,
+      deps,
+      onEvent,
+    });
+    if (problem) onVisualError(meta.id, problem);
   }
 
   if (withoutQuestions.length > 0) {

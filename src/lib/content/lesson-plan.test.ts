@@ -51,6 +51,21 @@ describe("validatePlan", () => {
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/001-t/);
   });
 
+  // Из id собирается имя файла шага, уточнения и схемы, а /api/visual берёт
+  // его как сегмент — так что форму надо ловить в плане, а не в ридере.
+  it.each(["004-длина", "004.dlina", "../../../etc/passwd", "a/b", "004 dlina", ""])(
+    "ругается на id недопустимой формы: %s",
+    (id) => {
+      const bad = [...GOOD, step({ id, type: "theory" })];
+      expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/имя файла/);
+    },
+  );
+
+  it("не ругается на id вида 004-dlina", () => {
+    expect(validatePlan(GOOD, SOURCE)).toEqual([]);
+    expect(validatePlan([...GOOD, step({ id: "005_zachem-2", type: "theory" })], SOURCE)).toEqual([]);
+  });
+
   it("требует покрыть все функции упражнения", () => {
     const bad = GOOD.slice(0, 2);
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/matmul/);
@@ -59,6 +74,39 @@ describe("validatePlan", () => {
   it("ругается на visual вне списка визуализаций урока", () => {
     const bad = [...GOOD, step({ id: "006-v", type: "visual", visual: "learning-visuals/nope.html" })];
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/nope\.html/);
+  });
+
+  const VISUAL = "learning-visuals/lesson-02-shapes.html";
+
+  it("принимает visual-шаг с одним только путём", () => {
+    const plan = [...GOOD, step({ id: "005-v", type: "visual", visual: VISUAL })];
+    expect(validatePlan(plan, SOURCE)).toEqual([]);
+  });
+
+  it("принимает visual-шаг с одним только visual_brief", () => {
+    const plan = [
+      ...GOOD,
+      step({ id: "005-v", type: "visual", visual_brief: "Треугольник 3-4-5, катеты 3 и 4 подписаны" }),
+    ];
+    expect(validatePlan(plan, SOURCE)).toEqual([]);
+  });
+
+  it("ругается, когда заданы и visual, и visual_brief", () => {
+    const plan = [
+      ...GOOD,
+      step({ id: "005-v", type: "visual", visual: VISUAL, visual_brief: "то же самое" }),
+    ];
+    expect(validatePlan(plan, SOURCE).join(" ")).toMatch(/ровно одно/);
+  });
+
+  it("ругается на visual-шаг без пути и без брифа", () => {
+    const plan = [...GOOD, step({ id: "005-v", type: "visual" })];
+    expect(validatePlan(plan, SOURCE).join(" ")).toMatch(/ни visual, ни visual_brief/);
+  });
+
+  it("ругается на visual_brief у шага другого типа", () => {
+    const plan = [...GOOD, step({ id: "005-t", type: "theory", visual_brief: "схема" })];
+    expect(validatePlan(plan, SOURCE).join(" ")).toMatch(/никто не покажет/);
   });
 
   it("ругается, если все code-шаги свалены в конец после теории", () => {
