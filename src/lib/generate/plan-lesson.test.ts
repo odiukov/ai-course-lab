@@ -5,7 +5,7 @@ import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
 import { readLessonPlan } from "../content/lesson-plan";
-import { extractJsonBlock, generateLessonPlan } from "./plan-lesson";
+import { countWords, extractJsonBlock, generateLessonPlan, stepBudget } from "./plan-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -139,5 +139,37 @@ describe("generateLessonPlan", () => {
     });
     await generateLessonPlan({ contentDir, source: SOURCE, deps: { run }, onEvent: (e) => events.push(e) });
     expect(events).toEqual([{ type: "text", text: "генерирую..." }]);
+  });
+});
+
+describe("stepBudget", () => {
+  it("короткий урок не получает потолок в 40 шагов", () => {
+    expect(stepBudget(1200, 0)).toBe(15);
+    expect(stepBudget(2000, 0)).toBeLessThan(30);
+  });
+
+  // Цифры настоящих уроков: 2493 слова без упражнения и 2339 слов с шестью
+  // функциями. Раньше первый получал ровно 40 — потолок промпта.
+  it("даёт разумный ориентир на настоящих уроках", () => {
+    expect(stepBudget(2493, 0)).toBe(26);
+    expect(stepBudget(2339, 6)).toBe(30);
+  });
+
+  // Объём взят выше нижней границы: на коротком уроке разницу съедает клэмп,
+  // и проверка мерила бы его, а не вклад функций.
+  it("каждая функция упражнения добавляет шаг: их пропустить нельзя", () => {
+    expect(stepBudget(2000, 5) - stepBudget(2000, 0)).toBe(5);
+  });
+
+  it("не выходит за границы 15-40", () => {
+    expect(stepBudget(0, 0)).toBe(15);
+    expect(stepBudget(100000, 40)).toBe(40);
+  });
+});
+
+describe("countWords", () => {
+  it("считает слова, а не пробелы", () => {
+    expect(countWords("раз два  три\nчетыре")).toBe(4);
+    expect(countWords("   ")).toBe(0);
   });
 });

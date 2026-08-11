@@ -71,6 +71,31 @@ export function extractJsonBlock(text: string): unknown {
   throw new Error("В ответе агента не найден корректный JSON");
 }
 
+export const MIN_STEPS = 15;
+export const MAX_STEPS = 40;
+
+/** Слов в исходнике урока — грубо, по разделителям. */
+export function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Сколько примерно шагов заслуживает этот урок.
+ *
+ * Диапазон в промпте был плоский — «15-40» независимо от того, урок на 2500
+ * слов или на 1200, — и модель тянулась к верхней границе: урок на 2493 слова
+ * получил ровно 40 шагов, втрое разбухнув против исходника.
+ *
+ * Считается от того, из чего шаги и берутся: экран теории на каждые ~100 слов
+ * исходника, плюс по шагу на каждую функцию упражнения (их пропустить нельзя),
+ * плюс итоговый quiz. Это ориентир, а не закон: промпт разрешает отклониться,
+ * потому что число мыслей в тексте с числом слов связано, но не жёстко.
+ */
+export function stepBudget(wordCount: number, functionCount: number): number {
+  const theory = Math.round(wordCount / 100);
+  return Math.min(MAX_STEPS, Math.max(MIN_STEPS, theory + functionCount + 1));
+}
+
 export async function generateLessonPlan(opts: {
   contentDir: string;
   source: LessonSource;
@@ -87,8 +112,10 @@ export async function generateLessonPlan(opts: {
   const onEvent = opts.onEvent ?? (() => {});
 
   const written = opts.written ?? [];
+  const functionCount = source.exercise?.functions.length ?? 0;
   const base = renderPrompt("plan-lesson", {
     other_lessons: formatPhaseOutlines(opts.outlines ?? []),
+    step_budget: String(stepBudget(countWords(source.text), functionCount)),
     lesson_title: source.ref.title,
     source_text: source.text,
     functions: (source.exercise?.functions ?? []).map((fn) => `- ${fn}`).join("\n") || "(нет упражнения)",
