@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
-import { loadConfig } from "./config";
+import fs from "node:fs";
+import os from "node:os";
+import { effectiveCourseRepo, loadConfig } from "./config";
 
 const FIXTURE = path.resolve(__dirname, "../../tests/fixtures/course");
 
@@ -56,5 +58,47 @@ describe("loadConfig", () => {
     expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "порт" } as NodeJS.ProcessEnv).lspPort).toBe(
       3001,
     );
+  });
+
+  it("апстрим по умолчанию — рут-репозиторий и ветка main", () => {
+    const cfg = loadConfig({} as NodeJS.ProcessEnv);
+    expect(cfg.upstreamRemote).toBe("https://github.com/rohitg00/ai-engineering-from-scratch.git");
+    expect(cfg.upstreamBranch).toBe("main");
+    expect(cfg.upstreamDir.endsWith(path.join(".cache", "course-repo"))).toBe(true);
+  });
+
+  it("UPSTREAM_REPO и UPSTREAM_BRANCH переопределяют апстрим", () => {
+    const cfg = loadConfig({
+      NODE_ENV: "test",
+      UPSTREAM_REPO: "https://example.invalid/fork.git",
+      UPSTREAM_BRANCH: "trunk",
+    } as NodeJS.ProcessEnv);
+    expect(cfg.upstreamRemote).toBe("https://example.invalid/fork.git");
+    expect(cfg.upstreamBranch).toBe("trunk");
+  });
+});
+
+describe("effectiveCourseRepo", () => {
+  function cacheWithPhases(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cache-"));
+    fs.mkdirSync(path.join(dir, "phases"), { recursive: true });
+    return dir;
+  }
+
+  it("кэш-клон выигрывает у COURSE_REPO: он свежее по построению", () => {
+    const cache = cacheWithPhases();
+    expect(effectiveCourseRepo(cache, FIXTURE)).toBe(cache);
+  });
+
+  // Каталог кэша может существовать после оборванного клона. Пустая
+  // директория — не курс, и падать обратно на COURSE_REPO здесь правильнее,
+  // чем показать пустой каталог уроков.
+  it("кэш без phases/ игнорируется", () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), "cache-"));
+    expect(effectiveCourseRepo(empty, FIXTURE)).toBe(FIXTURE);
+  });
+
+  it("без кэша и без COURSE_REPO — null", () => {
+    expect(effectiveCourseRepo("/nope/nope", null)).toBeNull();
   });
 });

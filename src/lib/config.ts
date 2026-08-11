@@ -4,6 +4,10 @@ import path from "node:path";
 export interface Config {
   sourceDir: string;
   courseRepo: string | null;
+  /** Каталог кэш-клона рут-репозитория. Может ещё не существовать. */
+  upstreamDir: string;
+  upstreamRemote: string;
+  upstreamBranch: string;
   contentDir: string;
   dataDir: string;
   agent: "claude" | "codex";
@@ -15,6 +19,20 @@ export interface Config {
 
 export function isDirectory(candidate: string): boolean {
   return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory();
+}
+
+const DEFAULT_UPSTREAM_REPO = "https://github.com/rohitg00/ai-engineering-from-scratch.git";
+
+/**
+ * Откуда брать материал курса: кэш-клон рут-репозитория, если он развернут,
+ * иначе локальный COURSE_REPO.
+ *
+ * Кэш выигрывает не «потому что новее по времени», а потому что он ходит в
+ * рут-репозиторий, а COURSE_REPO — это форк, который обновляют руками.
+ */
+export function effectiveCourseRepo(upstreamDir: string, courseRepo: string | null): string | null {
+  if (isDirectory(path.join(upstreamDir, "phases"))) return upstreamDir;
+  return courseRepo;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -31,9 +49,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (isDirectory(resolved)) courseRepo = resolved;
   }
 
+  const upstreamDir = path.join(root, ".cache", "course-repo");
+
   return {
     sourceDir: path.join(root, "source"),
-    courseRepo,
+    courseRepo: effectiveCourseRepo(upstreamDir, courseRepo),
+    upstreamDir,
+    upstreamRemote: env.UPSTREAM_REPO?.trim() || DEFAULT_UPSTREAM_REPO,
+    upstreamBranch: env.UPSTREAM_BRANCH?.trim() || "main",
     contentDir: path.join(root, "content"),
     dataDir: path.join(root, "data"),
     agent: env.AGENT === "codex" ? "codex" : "claude",
