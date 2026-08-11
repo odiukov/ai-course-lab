@@ -8,7 +8,8 @@ const FIXTURE = path.resolve(__dirname, "../../tests/fixtures/course");
 
 describe("loadConfig", () => {
   it("работает без COURSE_REPO — импорт просто недоступен", () => {
-    const cfg = loadConfig({} as NodeJS.ProcessEnv);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    const cfg = loadConfig({} as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBeNull();
     expect(path.isAbsolute(cfg.sourceDir)).toBe(true);
     expect(cfg.sourceDir.endsWith("source")).toBe(true);
@@ -20,59 +21,74 @@ describe("loadConfig", () => {
   // ронял всё приложение целиком. Отказ остался там, где он уместен: в
   // scripts/import-lesson.mjs.
   it("не падает, если COURSE_REPO переехал — импорт просто становится недоступен", () => {
-    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: "/nope/nope" } as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBeNull();
     expect(cfg.sourceDir.endsWith("source")).toBe(true);
   });
 
   it("не принимает файл вместо директории", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
     const file = path.join(FIXTURE, "phases/01-math-foundations/01-alpha/docs/en.md");
     expect(
-      loadConfig({ NODE_ENV: "test", COURSE_REPO: file } as NodeJS.ProcessEnv).courseRepo,
+      loadConfig({ NODE_ENV: "test", COURSE_REPO: file } as NodeJS.ProcessEnv, tempRoot).courseRepo,
     ).toBeNull();
   });
 
   it("принимает существующий COURSE_REPO", () => {
-    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.courseRepo).toBe(FIXTURE);
   });
 
+  it("кэш выигрывает у COURSE_REPO: loadConfig возвращает его, даже когда COURSE_REPO существует", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    const cacheDir = path.join(tempRoot, ".cache", "course-repo");
+    fs.mkdirSync(path.join(cacheDir, "phases"), { recursive: true });
+    const cfg = loadConfig({ NODE_ENV: "test", COURSE_REPO: FIXTURE } as NodeJS.ProcessEnv, tempRoot);
+    expect(cfg.courseRepo).toBe(cacheDir);
+  });
+
   it("агент по умолчанию claude, AGENT=codex переключает", () => {
-    expect(loadConfig({} as NodeJS.ProcessEnv).agent).toBe("claude");
-    expect(loadConfig({ NODE_ENV: "test", AGENT: "codex" } as NodeJS.ProcessEnv).agent).toBe(
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    expect(loadConfig({} as NodeJS.ProcessEnv, tempRoot).agent).toBe("claude");
+    expect(loadConfig({ NODE_ENV: "test", AGENT: "codex" } as NodeJS.ProcessEnv, tempRoot).agent).toBe(
       "codex",
     );
   });
 
   it("python и lspPort берутся из окружения с разумными значениями по умолчанию", () => {
-    expect(loadConfig({} as NodeJS.ProcessEnv).python).toBe("python3");
-    expect(loadConfig({} as NodeJS.ProcessEnv).lspPort).toBe(3001);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    expect(loadConfig({} as NodeJS.ProcessEnv, tempRoot).python).toBe("python3");
+    expect(loadConfig({} as NodeJS.ProcessEnv, tempRoot).lspPort).toBe(3001);
     expect(
-      loadConfig({ NODE_ENV: "test", PYTHON: " /usr/bin/python3.12 " } as NodeJS.ProcessEnv)
+      loadConfig({ NODE_ENV: "test", PYTHON: " /usr/bin/python3.12 " } as NodeJS.ProcessEnv, tempRoot)
         .python,
     ).toBe("/usr/bin/python3.12");
-    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "4010" } as NodeJS.ProcessEnv).lspPort).toBe(
+    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "4010" } as NodeJS.ProcessEnv, tempRoot).lspPort).toBe(
       4010,
     );
     // Мусор в LSP_PORT не должен превращаться в NaN и рушить мост на старте.
-    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "порт" } as NodeJS.ProcessEnv).lspPort).toBe(
+    expect(loadConfig({ NODE_ENV: "test", LSP_PORT: "порт" } as NodeJS.ProcessEnv, tempRoot).lspPort).toBe(
       3001,
     );
   });
 
   it("апстрим по умолчанию — рут-репозиторий и ветка main", () => {
-    const cfg = loadConfig({} as NodeJS.ProcessEnv);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
+    const cfg = loadConfig({} as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.upstreamRemote).toBe("https://github.com/rohitg00/ai-engineering-from-scratch.git");
     expect(cfg.upstreamBranch).toBe("main");
     expect(cfg.upstreamDir.endsWith(path.join(".cache", "course-repo"))).toBe(true);
   });
 
   it("UPSTREAM_REPO и UPSTREAM_BRANCH переопределяют апстрим", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
     const cfg = loadConfig({
       NODE_ENV: "test",
       UPSTREAM_REPO: "https://example.invalid/fork.git",
       UPSTREAM_BRANCH: "trunk",
-    } as NodeJS.ProcessEnv);
+    } as NodeJS.ProcessEnv, tempRoot);
     expect(cfg.upstreamRemote).toBe("https://example.invalid/fork.git");
     expect(cfg.upstreamBranch).toBe("trunk");
   });

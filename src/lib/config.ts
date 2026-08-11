@@ -35,8 +35,7 @@ export function effectiveCourseRepo(upstreamDir: string, courseRepo: string | nu
   return courseRepo;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const root = process.cwd();
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, root: string = process.cwd()): Config {
 
   // A stale COURSE_REPO is treated exactly like an unset one: null, no throw.
   // loadConfig() runs on every read path (catalog page, lesson API, visual
