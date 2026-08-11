@@ -3,7 +3,10 @@ import { loadConfig } from "@/lib/config";
 import { hasClone } from "@/lib/source/upstream";
 import { readMergedCatalog } from "@/lib/source/merged-catalog";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
+import { plural, since } from "@/lib/content/since";
+import { diffLesson } from "@/lib/source/import-lesson";
 import { openProgressDb } from "@/lib/progress/db";
+import { readImportDates } from "@/lib/progress/imports";
 import { readLessonReadCounts } from "@/lib/progress/steps";
 import { AgentPicker } from "@/components/AgentPicker";
 import ImportButton from "@/components/ImportButton";
@@ -15,7 +18,9 @@ export default function CatalogPage() {
   const phases = readMergedCatalog(config.sourceDir, config.courseRepo);
   // Каталог — серверный компонент, поэтому читает базу напрямую: один запрос на
   // всю страницу вместо эндпоинта и похода за каждой строкой.
-  const readCounts = readLessonReadCounts(openProgressDb(config.dataDir));
+  const db = openProgressDb(config.dataDir);
+  const readCounts = readLessonReadCounts(db);
+  const importDates = readImportDates(db);
   // Первый клик без кэша клонирует курс целиком — кнопке нужно сказать об
   // этом словами, иначе долгое молчание читается как зависание.
   const firstRun = !hasClone(config.upstreamDir);
@@ -59,6 +64,16 @@ export default function CatalogPage() {
                 );
               }
 
+              // Насколько урок отстал от курса: сравнение содержимого, а не
+              // даты коммита. Кэш апстрима — shallow-клон в один коммит, и
+              // «когда трогали папку урока» из него не достать; к тому же
+              // ответ по файлам учитывает и правки, сделанные в source/ руками.
+              const diff = config.courseRepo
+                ? diffLesson(config.courseRepo, config.sourceDir, lesson)
+                : { added: 0, changed: 0 };
+              const behind = diff.added + diff.changed;
+              const importedAt = importDates.get(lesson.slug);
+
               return (
                 <li key={lesson.slug} className="flex items-baseline gap-2 pr-2">
                   <Link
@@ -67,11 +82,23 @@ export default function CatalogPage() {
                   >
                     <span className="tabular-nums text-slate-500 dark:text-slate-400">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
-                    {plan && (
-                      <span className="ml-auto text-xs text-emerald-600 dark:text-emerald-400">
-                        {readCounts.get(lesson.slug) ?? 0} из {plan.steps.length} шагов
-                      </span>
-                    )}
+                    <span className="ml-auto flex items-baseline gap-3 text-xs">
+                      {behind > 0 && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          обновится {behind} {plural(behind, "файл", "файла", "файлов")}
+                        </span>
+                      )}
+                      {importedAt && (
+                        <span className="text-slate-400 dark:text-slate-500">
+                          импортирован {since(importedAt)}
+                        </span>
+                      )}
+                      {plan && (
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          {readCounts.get(lesson.slug) ?? 0} из {plan.steps.length} шагов
+                        </span>
+                      )}
+                    </span>
                   </Link>
                   <ImportButton
                     key="import"

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { findLesson } from "./catalog";
-import { importLesson, isImported, isLearnerOwned } from "./import-lesson";
+import { diffLesson, importLesson, isImported, isLearnerOwned } from "./import-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 
@@ -172,5 +172,61 @@ describe("isLearnerOwned", () => {
     expect(isLearnerOwned("learning-exercises/p01-l02-beta/exercise.template.py")).toBe(false);
     expect(isLearnerOwned("learning-exercises/p01-l02-beta/tests/exercise.py")).toBe(false);
     expect(isLearnerOwned("phases/01-math-foundations/02-beta/docs/exercise.py")).toBe(false);
+  });
+});
+
+describe("diffLesson", () => {
+  it("до импорта считает все файлы урока новыми", () => {
+    const sourceDir = tmp();
+    const diff = diffLesson(COURSE, sourceDir, beta());
+    expect(diff.added).toBeGreaterThan(0);
+    expect(diff.changed).toBe(0);
+  });
+
+  it("сразу после импорта обновлять нечего", () => {
+    const sourceDir = tmp();
+    importLesson(COURSE, sourceDir, beta());
+    expect(diffLesson(COURSE, sourceDir, beta())).toEqual({ added: 0, changed: 0 });
+  });
+
+  it("разошедшийся файл считается за обновление", () => {
+    const sourceDir = tmp();
+    importLesson(COURSE, sourceDir, beta());
+    fs.writeFileSync(
+      path.join(sourceDir, "phases/01-math-foundations/02-beta/docs/en.md"),
+      "устаревший текст",
+      "utf8",
+    );
+    expect(diffLesson(COURSE, sourceDir, beta())).toEqual({ added: 0, changed: 1 });
+  });
+
+  // Решение учащегося реимпорт не трогает, поэтому обещать его обновление
+  // в строке каталога нельзя: обещанного файла кнопка не принесёт.
+  it("не считает обновлением exercise.py учащегося", () => {
+    const courseRepo = tmp();
+    const ref = {
+      slug: "01-solo__01-owned",
+      phaseDir: "01-solo",
+      lessonDir: "01-owned",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Owned",
+    };
+    const docs = path.join(courseRepo, "phases", ref.phaseDir, ref.lessonDir, "docs");
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, "en.md"), "текст урока", "utf8");
+    const exercises = path.join(courseRepo, "learning-exercises", "p01-l01-owned");
+    fs.mkdirSync(exercises, { recursive: true });
+    fs.writeFileSync(path.join(exercises, "exercise.py"), "def solve():\n    pass\n", "utf8");
+
+    const sourceDir = tmp();
+    importLesson(courseRepo, sourceDir, ref);
+    fs.writeFileSync(
+      path.join(sourceDir, "learning-exercises", "p01-l01-owned", "exercise.py"),
+      "def solve():\n    return 42\n",
+      "utf8",
+    );
+
+    expect(diffLesson(courseRepo, sourceDir, ref)).toEqual({ added: 0, changed: 0 });
   });
 });

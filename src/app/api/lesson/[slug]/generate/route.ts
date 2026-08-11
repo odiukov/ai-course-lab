@@ -12,7 +12,9 @@ import { readWrittenFunctions } from "@/lib/source/written-functions";
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const rawFrom = new URL(request.url).searchParams.get("from") ?? "0";
+  const search = new URL(request.url).searchParams;
+  const rawFrom = search.get("from") ?? "0";
+  const all = search.get("all") === "1";
   const from = Number(rawFrom);
   if (!Number.isInteger(from) || from < 0) {
     return Response.json(
@@ -56,6 +58,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       source,
       plan,
       fromIndex: from,
+      // `all=1` шлёт каталог: там разбор запускают один раз и уходят, поэтому
+      // окно из трёх шагов оставило бы урок недописанным до первого открытия.
+      // Ридер параметр не передаёт — ему хватает окна впереди читателя.
+      count: all ? plan.steps.length : undefined,
       deps,
       // Прогресс — это «что пишется сейчас», а не поток текста от агента:
       // его хвост обрывается посреди формулы и на экране читается как мусор.

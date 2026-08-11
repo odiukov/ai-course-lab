@@ -52,7 +52,10 @@ export default function ImportButton({ slug, imported, hasPlan, firstRun }: Prop
     setPhase("generating");
     setStatus("Разбираю урок…");
 
-    const response = await fetch(`/api/lesson/${slug}/generate?from=0`, { method: "POST" });
+    // `all=1`: из каталога урок разбирают целиком. Окно из трёх шагов, с
+    // которым работает ридер, оставило бы здесь урок недописанным — дописывать
+    // было бы некому, отсюда учащийся сразу уходит.
+    const response = await fetch(`/api/lesson/${slug}/generate?from=0&all=1`, { method: "POST" });
     if (!response.ok || !response.body) {
       setError("Разбор недоступен");
       return false;

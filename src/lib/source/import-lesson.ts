@@ -70,14 +70,42 @@ function copyFile(
   result.copied.push(rel);
 }
 
-function copyTree(courseRepo: string, sourceDir: string, relDir: string, result: ImportResult, overwrite: boolean): void {
-  const abs = path.join(courseRepo, relDir);
-  if (!fs.existsSync(abs)) return;
-  for (const file of walk(abs)) copyFile(courseRepo, sourceDir, file, result, overwrite);
-}
-
 export function isImported(sourceDir: string, ref: LessonRef): boolean {
   return fs.existsSync(path.join(sourceDir, "phases", ref.phaseDir, ref.lessonDir, "docs"));
+}
+
+/**
+ * Абсолютные пути всех файлов курса, относящихся к уроку.
+ *
+ * Одно место, где живёт ответ «из чего состоит урок»: и импорт, и подсчёт
+ * «есть ли что обновлять» обязаны понимать состав одинаково, иначе строка
+ * каталога обещала бы одно, а кнопка приносила другое.
+ */
+export function lessonFiles(courseRepo: string, ref: LessonRef): string[] {
+  const files: string[] = [];
+
+  const tree = (relDir: string) => {
+    const abs = path.join(courseRepo, relDir);
+    if (fs.existsSync(abs)) files.push(...walk(abs));
+  };
+
+  tree(path.join("phases", ref.phaseDir, ref.lessonDir));
+  tree(path.join("i18n", "ru", "phases", ref.phaseDir, ref.lessonDir));
+
+  const visualsDir = path.join(courseRepo, "learning-visuals");
+  if (fs.existsSync(visualsDir)) {
+    const prefixes = visualPrefixes(ref);
+    for (const name of fs.readdirSync(visualsDir)) {
+      if (name.endsWith(".html") && prefixes.some((prefix) => name.startsWith(prefix))) {
+        files.push(path.join(visualsDir, name));
+      }
+    }
+  }
+
+  const found = findExerciseDir(path.join(courseRepo, "learning-exercises"), ref);
+  if (found) tree(path.join("learning-exercises", found));
+
+  return files;
 }
 
 export function importLesson(
@@ -89,21 +117,45 @@ export function importLesson(
   const overwrite = options.overwrite ?? false;
   const result: ImportResult = { slug: ref.slug, copied: [], updated: [], kept: [] };
 
-  copyTree(courseRepo, sourceDir, path.join("phases", ref.phaseDir, ref.lessonDir), result, overwrite);
-  copyTree(courseRepo, sourceDir, path.join("i18n", "ru", "phases", ref.phaseDir, ref.lessonDir), result, overwrite);
-
-  const visualsDir = path.join(courseRepo, "learning-visuals");
-  if (fs.existsSync(visualsDir)) {
-    const prefixes = visualPrefixes(ref);
-    for (const name of fs.readdirSync(visualsDir)) {
-      if (name.endsWith(".html") && prefixes.some((prefix) => name.startsWith(prefix))) {
-        copyFile(courseRepo, sourceDir, path.join(visualsDir, name), result, overwrite);
-      }
-    }
+  for (const abs of lessonFiles(courseRepo, ref)) {
+    copyFile(courseRepo, sourceDir, abs, result, overwrite);
   }
 
-  const found = findExerciseDir(path.join(courseRepo, "learning-exercises"), ref);
-  if (found) copyTree(courseRepo, sourceDir, path.join("learning-exercises", found), result, overwrite);
-
   return result;
+}
+
+export interface LessonDiff {
+  /** Файлов, которых в source/ ещё нет. */
+  added: number;
+  /** Файлов, которые реимпорт перезаписал бы. */
+  changed: number;
+}
+
+/**
+ * Что принёс бы реимпорт прямо сейчас — без единой записи на диск.
+ *
+ * Отвечает на вопрос «стоит ли жать „Обновить“» точнее, чем дата коммита:
+ * учитывает и правки, сделанные в source/ руками, и молчит про урок, чью
+ * папку в курсе трогали, но ничего из импортируемого не изменили.
+ *
+ * Считается по кэшу апстрима в том виде, в каком он лежит на диске. Свежий
+ * fetch может принести ещё что-то, поэтому ноль здесь — это «в известной
+ * копии курса нового нет», а не «жать бессмысленно».
+ */
+export function diffLesson(courseRepo: string, sourceDir: string, ref: LessonRef): LessonDiff {
+  const diff: LessonDiff = { added: 0, changed: 0 };
+
+  for (const abs of lessonFiles(courseRepo, ref)) {
+    const rel = path.relative(courseRepo, abs);
+    const target = path.join(sourceDir, rel);
+
+    if (!fs.existsSync(target)) {
+      diff.added += 1;
+      continue;
+    }
+    if (isLearnerOwned(rel) || sameContent(abs, target)) continue;
+    diff.changed += 1;
+  }
+
+  return diff;
 }

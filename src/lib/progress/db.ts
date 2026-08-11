@@ -71,6 +71,11 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lesson_imports (
+  lesson_slug TEXT PRIMARY KEY,
+  imported_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_step_state_lesson ON step_state (lesson_slug);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_step ON chat_sessions (lesson_slug, step_id, id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, id);

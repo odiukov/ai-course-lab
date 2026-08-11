@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -209,6 +209,29 @@ export function Reader({
     [slug, load],
   );
 
+  /**
+   * Держит три шага впереди прочитанного, не дожидаясь клика.
+   *
+   * Раньше дозапрос уходил из обработчика «Дальше», и это было видно: шаг
+   * открывался пустым, а агент только начинал его писать. Здесь работа
+   * начинается, как только учащийся дошёл до шага, — то есть пока он читает
+   * текущий, следующие уже пишутся.
+   *
+   * `requestedRef` держит позицию, для которой дозапрос уже отправляли: без
+   * него `load()` в конце генерации обновил бы `data`, эффект перезапустился
+   * бы с той же дырой в окне (агент мог написать не всё) и ушёл бы в цикл.
+   */
+  const requestedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!data?.plan || status !== null || error) return;
+    const next = index + 1;
+    const ahead = data.plan.steps.slice(next, next + 3);
+    if (!ahead.some((meta) => !data.steps[meta.id])) return;
+    if (requestedRef.current === next) return;
+    requestedRef.current = next;
+    void generate(next);
+  }, [data, error, generate, index, status]);
+
   if (!data) return <p className="text-slate-500 dark:text-slate-400">Загружаю…</p>;
 
   // `index` is a PLAN position throughout: it is what ?step= carries, what the
@@ -380,13 +403,10 @@ export function Reader({
                 // «Прочитан» — это механически «ушёл с него вперёд», без
                 // таймеров и глубины прокрутки.
                 markRead(step.id);
-                const next = index + 1;
-                goTo(next, total);
-                // Keep three steps ahead written. Only asks the agent for work if
-                // something in that window is actually missing, so the last steps
-                // of a finished lesson don't fire a pointless request.
-                const ahead = planSteps.slice(next, next + 3);
-                if (ahead.some((meta) => !data.steps[meta.id])) void generate(next);
+                // Дозапрос недостающих шагов висит на эффекте выше и уходит
+                // сам, как только позиция сменилась, — кнопке остаётся только
+                // перевести читателя дальше.
+                goTo(index + 1, total);
               }}
               className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900"
             >
