@@ -5,7 +5,7 @@ import path from "node:path";
 import { findLesson } from "../source/catalog";
 import { readLessonSource } from "../source/lesson-source";
 import { readLessonPlan } from "../content/lesson-plan";
-import { countWords, extractJsonBlock, generateLessonPlan, stepBudget } from "./plan-lesson";
+import { MAX_STEPS, countWords, extractJsonBlock, generateLessonPlan, stepBudget } from "./plan-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
 const SOURCE = readLessonSource(COURSE, findLesson(COURSE, "01-math-foundations__02-beta")!);
@@ -143,16 +143,22 @@ describe("generateLessonPlan", () => {
 });
 
 describe("stepBudget", () => {
-  it("короткий урок не получает потолок в 40 шагов", () => {
-    expect(stepBudget(1200, 0)).toBe(15);
-    expect(stepBudget(2000, 0)).toBeLessThan(30);
+  it("короткий урок не растягивается до потолка", () => {
+    expect(stepBudget(600, 0)).toBe(15);
+    expect(stepBudget(1200, 0)).toBeLessThan(MAX_STEPS);
   });
 
-  // Цифры настоящих уроков: 2493 слова без упражнения и 2339 слов с шестью
-  // функциями. Раньше первый получал ровно 40 — потолок промпта.
-  it("даёт разумный ориентир на настоящих уроках", () => {
-    expect(stepBudget(2493, 0)).toBe(26);
-    expect(stepBudget(2339, 6)).toBe(30);
+  // Смысл ориентира — плотность разбора, а не попадание в число: вдвое
+  // длиннее исходник — вдвое больше экранов.
+  it("шаги растут пропорционально объёму исходника", () => {
+    expect(stepBudget(4000, 0) - stepBudget(2000, 0)).toBe(2000 / 80);
+  });
+
+  // Длинные уроки в курсе есть: 90-й процентиль — 2938 слов, максимум 5933.
+  // Прежний потолок в 40 обрезал их ровно там, где мыслей больше всего.
+  it("длинный урок разбирается подробно, а не обрезается", () => {
+    expect(stepBudget(2938, 8)).toBeGreaterThan(40);
+    expect(stepBudget(5933, 8)).toBe(MAX_STEPS);
   });
 
   // Объём взят выше нижней границы: на коротком уроке разницу съедает клэмп,
@@ -161,9 +167,9 @@ describe("stepBudget", () => {
     expect(stepBudget(2000, 5) - stepBudget(2000, 0)).toBe(5);
   });
 
-  it("не выходит за границы 15-40", () => {
+  it("не выходит за границы", () => {
     expect(stepBudget(0, 0)).toBe(15);
-    expect(stepBudget(100000, 40)).toBe(40);
+    expect(stepBudget(100000, 40)).toBe(MAX_STEPS);
   });
 });
 
