@@ -2,12 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { readLessonPlan } from "./lesson-plan";
 
+export interface OutlineStep {
+  title: string;
+  type: string;
+  /** Функция упражнения, если шаг её требует. */
+  fn?: string;
+}
+
 export interface LessonOutline {
   slug: string;
   /** Номер урока внутри фазы: по нему видно, что раньше, а что позже. */
   number: number;
   title: string;
-  stepTitles: string[];
+  steps: OutlineStep[];
 }
 
 const SLUG = /^(\d{2}-[^_]+)__(\d{2})-/;
@@ -45,7 +52,11 @@ export function readPhaseOutlines(contentDir: string, slug: string): LessonOutli
           slug: item.name,
           number: Number(item.match[2]),
           title: plan.title,
-          stepTitles: plan.steps.map((step) => step.title),
+          steps: plan.steps.map((step) => ({
+            title: step.title,
+            type: step.type,
+            ...(step.exercise_fn ? { fn: step.exercise_fn } : {}),
+          })),
         },
       ];
     })
@@ -55,14 +66,17 @@ export function readPhaseOutlines(contentDir: string, slug: string): LessonOutli
 /**
  * Оглавления в том виде, в каком их читает планировщик.
  *
- * Номер урока в заголовке — не украшение: по нему агент отличает «это уже
- * прошли, сошлись на него» от «это будет позже, не забирай себе».
+ * Номер урока и функции упражнения — не украшение. Номер говорит, что
+ * человек уже прошёл, а имя функции — где тема закреплена практикой: урок,
+ * в котором тему ПИШУТ руками, владеет ею вернее того, где её упомянули.
  */
 export function formatPhaseOutlines(outlines: LessonOutline[]): string {
   if (outlines.length === 0) return "(соседних разобранных уроков нет)";
   return outlines
     .map((outline) => {
-      const steps = outline.stepTitles.map((title) => `  - ${title}`).join("\n");
+      const steps = outline.steps
+        .map((step) => `  - ${step.title}${step.fn ? ` [пишут ${step.fn}]` : ""}`)
+        .join("\n");
       return `Урок ${outline.number}. ${outline.title}\n${steps}`;
     })
     .join("\n\n");

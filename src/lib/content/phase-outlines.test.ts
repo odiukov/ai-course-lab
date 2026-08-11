@@ -45,7 +45,7 @@ describe("readPhaseOutlines", () => {
 
     expect(outlines.map((o) => o.number)).toEqual([1, 3]);
     expect(outlines[0].title).toBe("Alpha");
-    expect(outlines[0].stepTitles).toEqual(["Вектор", "Длина"]);
+    expect(outlines[0].steps.map((s) => s.title)).toEqual(["Вектор", "Длина"]);
   });
 
   // Соседняя фаза — другой предмет; тащить её оглавление значит забивать
@@ -76,10 +76,32 @@ describe("formatPhaseOutlines", () => {
 
   it("номер урока попадает в текст: по нему видно, что раньше, а что позже", () => {
     const text = formatPhaseOutlines([
-      { slug: "01-math__01-alpha", number: 1, title: "Alpha", stepTitles: ["Вектор", "Длина"] },
+      {
+        slug: "01-math__01-alpha",
+        number: 1,
+        title: "Alpha",
+        steps: [
+          { title: "Вектор", type: "theory" },
+          { title: "Длина", type: "theory" },
+        ],
+      },
     ]);
     expect(text).toContain("Урок 1. Alpha");
     expect(text).toContain("  - Вектор");
     expect(text).toContain("  - Длина");
+  });
+
+  // Урок, в котором тему ПИШУТ руками, владеет ею вернее того, где её
+  // упомянули: планировщик должен видеть, чем тема закреплена.
+  it("помечает шаг, который закрепляет тему упражнением", () => {
+    const text = formatPhaseOutlines([
+      {
+        slug: "01-math__01-alpha",
+        number: 1,
+        title: "Alpha",
+        steps: [{ title: "Пишем dot", type: "code", fn: "dot" }],
+      },
+    ]);
+    expect(text).toContain("Пишем dot [пишут dot]");
   });
 });
