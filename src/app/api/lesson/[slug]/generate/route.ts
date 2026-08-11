@@ -2,6 +2,7 @@ import { defaultDeps } from "@/lib/agent/factory";
 import { sseStream } from "@/lib/api/sse";
 import { loadConfig } from "@/lib/config";
 import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
+import { readPhaseOutlines } from "@/lib/content/phase-outlines";
 import { generateLessonPlan } from "@/lib/generate/plan-lesson";
 import { ensureSteps } from "@/lib/generate/write-step";
 import { openProgressDb } from "@/lib/progress/db";
@@ -48,6 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         source,
         deps,
         written,
+        outlines: readPhaseOutlines(config.contentDir, slug),
       });
       send("plan", plan);
     }

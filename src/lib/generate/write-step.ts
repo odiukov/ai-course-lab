@@ -99,6 +99,35 @@ export function stripEnclosingFence(body: string): string {
   return inner.join("\n").trim();
 }
 
+/**
+ * Исходник диаграммы в теле шага.
+ *
+ * Приложение рисует markdown через react-markdown и ни один из этих языков не
+ * исполняет, поэтому блок доезжает до учащегося сырым текстом в рамке кода — и
+ * вдобавок вылезает за ширину колонки. Схема шагу и не нужна: её рисует шаг
+ * type: visual в отдельный файл.
+ *
+ * Ловится именно ЗАБОР с языком диаграммы. Блок ```python на code-шаге —
+ * законная часть урока и под правило не подпадает.
+ */
+const DIAGRAM_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*(mermaid|dot|graphviz|plantuml|puml|tikz)\b[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gim;
+
+export function hasDiagramSource(body: string): boolean {
+  DIAGRAM_FENCE.lastIndex = 0;
+  return DIAGRAM_FENCE.test(body);
+}
+
+/**
+ * Убирает блоки с исходниками диаграмм, оставляя остальной текст нетронутым.
+ *
+ * Сеть последней инстанции: правило в промпте — основной рычаг, но пропущенный
+ * им блок лучше вырезать, чем показать учащемуся `graph LR` в рамке. Текст без
+ * него читается: схема на visual-шаге всё равно есть отдельным файлом.
+ */
+export function stripDiagramFences(body: string): string {
+  return body.replace(DIAGRAM_FENCE, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 const checkListSchema = z.array(checkSchema).min(1);
 
 export interface StepReply {
@@ -242,7 +271,12 @@ export async function ensureSteps(opts: {
       continue;
     }
 
-    const step: Step = { ...meta, body: reply.body };
+    // Вырезается молча и без повторной попытки: блок с исходником диаграммы
+    // всегда лишний — схему шага рисует отдельный файл, — а второй заход к
+    // агенту стоил бы минуту ради текста, который и так не нужен.
+    const body = hasDiagramSource(reply.body) ? stripDiagramFences(reply.body) : reply.body;
+
+    const step: Step = { ...meta, body };
     if (reply.check) step.check = reply.check;
     writeStep(contentDir, plan.slug, step);
     written.push(meta.id);

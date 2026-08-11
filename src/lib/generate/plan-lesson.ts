@@ -3,6 +3,7 @@ import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
 import { validatePlan, writeLessonPlan, type LessonPlan } from "../content/lesson-plan";
 import { repoRelative } from "../content/paths";
+import { formatPhaseOutlines, type LessonOutline } from "../content/phase-outlines";
 import { stepMetaSchema } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
 import type { WrittenFunction } from "../source/written-functions";
@@ -75,6 +76,11 @@ export async function generateLessonPlan(opts: {
   source: LessonSource;
   deps: GenerateDeps;
   written?: WrittenFunction[];
+  /**
+   * Оглавления уже разобранных уроков той же фазы. Без них планировщик знает
+   * только свой урок и заново разбирает то, что сосед уже объяснил.
+   */
+  outlines?: LessonOutline[];
   onEvent?: (event: AgentEvent) => void;
 }): Promise<LessonPlan> {
   const { contentDir, source, deps } = opts;
@@ -82,6 +88,7 @@ export async function generateLessonPlan(opts: {
 
   const written = opts.written ?? [];
   const base = renderPrompt("plan-lesson", {
+    other_lessons: formatPhaseOutlines(opts.outlines ?? []),
     lesson_title: source.ref.title,
     source_text: source.text,
     functions: (source.exercise?.functions ?? []).map((fn) => `- ${fn}`).join("\n") || "(нет упражнения)",

@@ -11,6 +11,8 @@ import type { LessonPlan } from "../content/lesson-plan";
 import { lessonPaths } from "../content/paths";
 import {
   ensureSteps,
+  hasDiagramSource,
+  stripDiagramFences,
   excerptForStep,
   parseStepReply,
   resolveStepExcerpts,
@@ -528,5 +530,61 @@ describe("ensureSteps — дорисовка пропавших схем", () =>
       contentDir, source: SOURCE, plan: WITH_VISUAL, fromIndex: 0, count: 1, deps: { run },
     });
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("hasDiagramSource / stripDiagramFences", () => {
+  const MERMAID = [
+    "Дефицит ранга — когда пространство схлопывается.",
+    "",
+    "```mermaid",
+    "graph LR",
+    '  A1["квадрат"] -->|"матрица A"| A2["наклон"]',
+    "```",
+    "",
+    "Именно поэтому матрицу нельзя обратить.",
+  ].join("\n");
+
+  it("узнаёт забор с mermaid", () => {
+    expect(hasDiagramSource(MERMAID)).toBe(true);
+  });
+
+  it.each(["dot", "graphviz", "plantuml", "puml", "tikz"])("узнаёт забор с %s", (lang) => {
+    expect(hasDiagramSource(`текст\n\n\`\`\`${lang}\nA -> B\n\`\`\`\n`)).toBe(true);
+  });
+
+  // Код на code-шаге — законная часть урока, и вырезать его нельзя.
+  it("не трогает обычный блок кода", () => {
+    const python = "Пишем функцию:\n\n```python\ndef transpose(m):\n    ...\n```\n";
+    expect(hasDiagramSource(python)).toBe(false);
+    expect(stripDiagramFences(python)).toBe(python.trim());
+  });
+
+  it("вырезает диаграмму, оставляя текст вокруг", () => {
+    const cleaned = stripDiagramFences(MERMAID);
+    expect(cleaned).toContain("Дефицит ранга");
+    expect(cleaned).toContain("Именно поэтому");
+    expect(cleaned).not.toContain("graph LR");
+    expect(cleaned).not.toContain("```");
+  });
+
+  it("не оставляет после себя дыру из пустых строк", () => {
+    expect(stripDiagramFences(MERMAID)).not.toMatch(/\n{3,}/);
+  });
+});
+
+describe("ensureSteps — диаграмма в теле", () => {
+  it("не пускает исходник mermaid в файл шага", async () => {
+    const contentDir = tmpDir();
+    const run = vi
+      .fn()
+      .mockResolvedValue("Текст шага.\n\n```mermaid\ngraph LR\n  A --> B\n```\n\nХвост.");
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 0, count: 1, deps: { run } });
+
+    const body = readStep(contentDir, PLAN.slug, "001-t")?.body ?? "";
+    expect(body).toContain("Текст шага.");
+    expect(body).toContain("Хвост.");
+    expect(body).not.toContain("mermaid");
+    expect(body).not.toContain("graph LR");
   });
 });
