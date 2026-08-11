@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findLesson } from "./catalog";
+import { findLesson, type LessonRef } from "./catalog";
 import { diffLesson, importLesson, isImported, isLearnerOwned, lessonFiles } from "./import-lesson";
 
 const COURSE = path.resolve(__dirname, "../../../tests/fixtures/course");
@@ -123,8 +123,11 @@ describe("importLesson", () => {
     const again = importLesson(courseRepo, sourceDir, ref, { overwrite: true });
 
     expect(fs.readFileSync(mine, "utf8")).toBe("def solve():\n    return 42\n");
+    // Ни в одном списке: файл учащегося импорт вообще не рассматривает —
+    // ни как кандидата на перезапись, ни как «оставленный».
     expect(again.updated).not.toContain(rel);
-    expect(again.kept).toContain(rel);
+    expect(again.kept).not.toContain(rel);
+    expect(again.copied).not.toContain(rel);
   });
 
   it("совпавший байт-в-байт файл не считается обновлённым", () => {
@@ -221,11 +224,12 @@ describe("diffLesson", () => {
 
     const sourceDir = tmp();
     importLesson(courseRepo, sourceDir, ref);
-    fs.writeFileSync(
-      path.join(sourceDir, "learning-exercises", "p01-l01-owned", "exercise.py"),
-      "def solve():\n    return 42\n",
-      "utf8",
-    );
+
+    // Каталог заводится здесь, а не импортом: единственный файл упражнения в
+    // этом курсе — exercise.py, а его импорт не берёт вовсе.
+    const mine = path.join(sourceDir, "learning-exercises", "p01-l01-owned");
+    fs.mkdirSync(mine, { recursive: true });
+    fs.writeFileSync(path.join(mine, "exercise.py"), "def solve():\n    return 42\n", "utf8");
 
     expect(diffLesson(courseRepo, sourceDir, ref)).toEqual({ added: 0, changed: 0 });
   });
@@ -286,5 +290,66 @@ describe("lessonFiles — несколько репозиториев", () => {
     const sourceDir = tmp();
     importLesson([upstream, COURSE], sourceDir, beta());
     expect(diffLesson([upstream, COURSE], sourceDir, beta())).toEqual({ added: 0, changed: 0 });
+  });
+});
+
+describe("импорт не приносит решение из курса", () => {
+  function courseWithSolvedExercise(): { repo: string; ref: LessonRef } {
+    const repo = tmp();
+    const ref: LessonRef = {
+      slug: "01-solo__01-solved",
+      phaseDir: "01-solo",
+      lessonDir: "01-solved",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Solved",
+    };
+    const docs = path.join(repo, "phases", ref.phaseDir, ref.lessonDir, "docs");
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, "en.md"), "текст урока", "utf8");
+    const exercises = path.join(repo, "learning-exercises", "p01-l01-solved");
+    fs.mkdirSync(exercises, { recursive: true });
+    fs.writeFileSync(
+      path.join(exercises, "exercise.template.py"),
+      "def solve():\n    raise NotImplementedError\n",
+      "utf8",
+    );
+    // Чужое решение, лежащее в репозитории курса рядом с шаблоном.
+    fs.writeFileSync(path.join(exercises, "exercise.py"), "def solve():\n    return 42\n", "utf8");
+    return { repo, ref };
+  }
+
+  // Урок, приехавший с готовым exercise.py, читается как уже решённый:
+  // readWrittenFunctions видит функции написанными, и планировщик по своему
+  // правилу заменяет практику на recall.
+  it("exercise.py из курса не копируется, шаблон копируется", () => {
+    const { repo, ref } = courseWithSolvedExercise();
+    const sourceDir = tmp();
+
+    const result = importLesson(repo, sourceDir, ref);
+
+    expect(fs.existsSync(path.join(sourceDir, "learning-exercises/p01-l01-solved/exercise.py"))).toBe(false);
+    expect(
+      fs.existsSync(path.join(sourceDir, "learning-exercises/p01-l01-solved/exercise.template.py")),
+    ).toBe(true);
+    expect(result.copied).not.toContain(path.join("learning-exercises", "p01-l01-solved", "exercise.py"));
+  });
+
+  it("реимпорт тоже его не приносит", () => {
+    const { repo, ref } = courseWithSolvedExercise();
+    const sourceDir = tmp();
+    importLesson(repo, sourceDir, ref);
+
+    importLesson(repo, sourceDir, ref, { overwrite: true });
+
+    expect(fs.existsSync(path.join(sourceDir, "learning-exercises/p01-l01-solved/exercise.py"))).toBe(false);
+  });
+
+  // Строка каталога обещает ровно то, что принесёт кнопка.
+  it("diffLesson не считает его недостающим файлом", () => {
+    const { repo, ref } = courseWithSolvedExercise();
+    const sourceDir = tmp();
+    importLesson(repo, sourceDir, ref);
+    expect(diffLesson(repo, sourceDir, ref)).toEqual({ added: 0, changed: 0 });
   });
 });

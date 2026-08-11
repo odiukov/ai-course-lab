@@ -95,6 +95,23 @@ export interface LessonFile {
  * каталога обещала бы одно, а кнопка приносила другое.
  */
 export function lessonFiles(repos: string | string[], ref: LessonRef): LessonFile[] {
+  return collectLessonFiles(repos, ref).filter(
+    ({ repo, abs }) => !isLearnerOwned(path.relative(repo, abs)),
+  );
+}
+
+/**
+ * То же самое, но без отсева файлов учащегося.
+ *
+ * Отсев вынесен наружу, потому что он касается ИМПОРТА, а не состава урока:
+ * `exercise.py` в репозитории курса — это чьё-то решение, и приехать оно не
+ * должно ни при первом импорте, ни при реимпорте. Защита «не перезаписывать»
+ * тут не спасала: перезаписывать нечего, файл просто копировался как новый, и
+ * урок приезжал пред-решённым. Дальше readWrittenFunctions видел все функции
+ * написанными, а планировщик по своему правилу превращал практику в recall —
+ * урок из восьми задач терял семь.
+ */
+function collectLessonFiles(repos: string | string[], ref: LessonRef): LessonFile[] {
   const list = (Array.isArray(repos) ? repos : [repos]).filter(
     (repo, index, all) => repo && all.indexOf(repo) === index,
   );
