@@ -1,4 +1,4 @@
-import type { Config } from "@/lib/config";
+import { effectiveCourseRepo, type Config } from "@/lib/config";
 import { findLesson } from "./catalog";
 import { importLesson, isImported } from "./import-lesson";
 import { ensureUpstream, type UpstreamOptions, type UpstreamResult } from "./upstream";
@@ -45,7 +45,10 @@ export function runImport(config: Config, slug: string, deps: ImportDeps = {}): 
       branch: config.upstreamBranch,
       maxAgeMs: UPSTREAM_MAX_AGE_MS,
     });
-    repo = upstream.dir;
+    // Клон может пройти без ошибок и всё же не дать курс: не тот UPSTREAM_BRANCH,
+    // переструктуренный апстрим — тем же правилом, что и loadConfig, проверяем
+    // наличие phases/, иначе падаем на COURSE_REPO.
+    repo = effectiveCourseRepo(upstream.dir, config.courseRepo);
     pull = { fetched: upstream.fetched, head: upstream.head, at: upstream.fetchedAt, error: upstream.error };
   } catch (error) {
     // Апстрим не развернулся. Если локальный курс есть — импортируем из него
@@ -54,7 +57,8 @@ export function runImport(config: Config, slug: string, deps: ImportDeps = {}): 
   }
 
   if (!repo) {
-    return { status: 503, error: "Курс недоступен: нет ни кэша апстрима, ни COURSE_REPO" };
+    const reason = pull.error ? `: ${pull.error}` : "";
+    return { status: 503, error: `Курс недоступен: нет ни кэша апстрима, ни COURSE_REPO${reason}` };
   }
 
   const ref = findLesson(repo, slug);

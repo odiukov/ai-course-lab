@@ -1,6 +1,6 @@
-import path from "node:path";
 import Link from "next/link";
-import { isDirectory, loadConfig } from "@/lib/config";
+import { loadConfig } from "@/lib/config";
+import { hasClone } from "@/lib/source/upstream";
 import { readMergedCatalog } from "@/lib/source/merged-catalog";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { openProgressDb } from "@/lib/progress/db";
@@ -17,7 +17,7 @@ export default function CatalogPage() {
   const readCounts = readLessonReadCounts(openProgressDb(config.dataDir));
   // Первый клик без кэша клонирует курс целиком — кнопке нужно сказать об
   // этом словами, иначе долгое молчание читается как зависание.
-  const firstRun = !isDirectory(path.join(config.upstreamDir, ".git"));
+  const firstRun = !hasClone(config.upstreamDir);
 
   return (
     <main className="mx-auto max-w-3xl">
@@ -41,6 +41,9 @@ export default function CatalogPage() {
                   >
                     <span className="tabular-nums">{lesson.lessonNumber}</span>
                     <span>{lesson.title}</span>
+                    {/* Один и тот же key в обеих ветках строки — чтобы после router.refresh()
+                        React переиспользовал ту же кнопку, а не размонтировал её вместе со
+                        сводкой «+N новых». */}
                     <ImportButton key="import" slug={lesson.slug} imported={false} firstRun={firstRun} />
                   </li>
                 );
