@@ -1,0 +1,121 @@
+"""
+Интуиция линейной алгебры
+
+Реализуй функции ниже. Заготовки бросают NotImplementedError — удали
+строку raise и напиши код.
+
+Правила:
+  * сторонние библиотеки не использовать, только стандартная (math, random).
+    Смысл упражнения — собрать руками.
+  * файл test_exercise.py не трогай.
+  * эталон лежит в solution.py — открывай ПОСЛЕ своих зелёных тестов.
+
+Запуск:  ./learning-exercises/watch.sh p01-l01-linear-algebra-intuition
+Разбор:  /check-code p01-l01-linear-algebra-intuition
+"""
+
+import math
+
+
+def magnitude(v):
+    """Длина вектора.
+
+    magnitude([3, 4])     ->  5.0
+    magnitude([1, 1, 1])  ->  1.7320508...  (корень из 3)
+
+    Подсказка: возвести каждую компоненту в квадрат, сложить, взять корень.
+    """
+    return math.sqrt(sum(x * x for x in v))
+
+
+def dot(a, b):
+    """Скалярное произведение: перемножить попарно и сложить.
+
+    dot([1, 2, 3], [4, 5, 6])  ->  32
+    dot([2, 3], [3, -2])       ->  0     (перпендикулярны)
+    """
+    return sum(x * y for x, y in zip(a, b, strict=True))
+
+
+def cosine_similarity(a, b):
+    """Косинусная близость: скалярное произведение, очищенное от длин.
+
+    cosine_similarity([1, 0], [1, 0])   ->  1.0    (одно направление)
+    cosine_similarity([1, 0], [0, 1])   ->  0.0    (перпендикулярны)
+    cosine_similarity([1, 0], [-1, 0])  -> -1.0    (навстречу)
+
+    Важно: результат НЕ должен меняться, если удлинить любой вектор.
+    """
+    return dot(a, b) / (magnitude(a) * magnitude(b))
+
+
+def angle_between(a, b):
+    """Угол между векторами в ГРАДУСАХ.
+
+    angle_between([1, 0], [0, 1])   ->  90.0
+    angle_between([1, 0], [1, 1])   ->  45.0
+
+    Подсказка: math.acos даёт радианы, math.degrees переводит в градусы.
+    Осторожно: из-за ошибок округления косинус может выйти 1.0000000002 —
+    acos от такого падает. Подрежь значение в диапазон [-1, 1].
+    """
+    return math.degrees(math.acos(min(1, max(-1, cosine_similarity(a, b)))))
+
+
+def project(a, onto):
+    """Проекция вектора a на направление onto. Возвращает ВЕКТОР (список).
+
+    project([3, 4], [1, 0])  ->  [3.0, 0.0]
+    project([0, 5], [1, 0])  ->  [0.0, 0.0]
+
+    Формула: k = dot(a, onto) / dot(onto, onto), затем каждую компоненту
+    onto умножить на k.
+    """
+    k = dot(a, onto) / dot(onto, onto)
+    return [k * x for x in onto]
+
+
+def matvec(M, v):
+    """Умножение матрицы на вектор. Каждая СТРОКА даёт одну компоненту ответа.
+
+    matvec([[0, -1], [1, 0]], [3, 1])  ->  [-1, 3]     (поворот на 90°)
+    matvec([[2, 0], [0, 3]], [1, 1])   ->  [2, 3]      (растяжение)
+
+    Матрица может быть не квадратной: 2x3 на вектор из 3 чисел даёт 2 числа.
+    """
+    return [dot(row, v) for row in M]
+
+
+def is_invertible_2x2(M):
+    """Можно ли отменить преобразование? True/False, матрица 2x2.
+
+    is_invertible_2x2([[0, -1], [1, 0]])  ->  True    (поворот, ранг 2)
+    is_invertible_2x2([[1, 2], [2, 4]])   ->  False   (схлопывание, ранг 1)
+
+    Подсказка: определитель матрицы [[a, b], [c, d]] равен a*d - b*c.
+    Ноль определителя = схлопывание = отменить нельзя.
+    Числа дробные, поэтому сравнивай не с нулём, а с малым порогом 1e-9.
+    """
+    a, b = M[0]
+    c, d = M[1]
+    return abs(a * d - b * c) > 1e-9
+
+
+def most_similar_pair(vectors):
+    """Найти самую похожую пару. Вернуть кортеж индексов (i, j), где i < j.
+
+    Похожесть меряется cosine_similarity. Векторов всегда >= 2.
+
+    most_similar_pair([[1, 0], [0, 1], [0.9, 0.1]])  ->  (0, 2)
+
+    Это буквально то, как работает векторный поиск в RAG.
+    """
+    best_pair = (0, 1)
+    best_similarity = cosine_similarity(vectors[0], vectors[1])
+    for i in range(len(vectors)):
+        for j in range(i + 1, len(vectors)):
+            similarity = cosine_similarity(vectors[i], vectors[j])
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_pair = (i, j)
+    return best_pair
