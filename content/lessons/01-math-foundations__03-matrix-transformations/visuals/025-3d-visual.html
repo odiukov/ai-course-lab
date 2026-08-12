@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Точка на оси вращения не двигается</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c2530; --muted:#5a6875; --axis:#8d99a6;
+    --fix:#1d7a4d; --move:#b8442c; --grid:#dfe4ea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141a20; --fg:#e6ecf2; --muted:#9aa8b5; --axis:#5e6b78;
+      --fix:#4bd08a; --move:#ff8f70; --grid:#232c35;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:760px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);}
+  text{font-family:inherit;fill:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Точка (1, 0, 0): вокруг z — уезжает, вокруг x — стоит</h2>
+  <div id="slot"><noscript class="fallback">Поворот на 90° вокруг оси z переводит (1, 0, 0) в (0, 1, 0). Тот же поворот вокруг оси x оставляет точку в (1, 0, 0): она лежит на оси вращения.</noscript></div>
+</div>
+<script>
+(function(){
+  var slot = document.getElementById('slot');
+  try{
+    // ---- данные схемы ----
+    var P    = [1, 0, 0];   // исходная точка
+    var RZ   = [0, 1, 0];   // поворот на 90° вокруг z
+    var RX   = [1, 0, 0];   // поворот на 90° вокруг x
+    var AXL  = 1.55;        // длина луча оси в единицах данных
+    var PANEL_DX = 2.35;    // сдвиг правой панели, в тех же единицах
+
+    // ---- холст (литералы: только размеры) ----
+    var W = 700, H = 330;
+    var PAD = 9, FS = 13, FSS = 12, LW = 1.6, R = 5;
+
+    // ---- единственное отображение ----
+    var origin = {x: 150, y: 205}, scale = 74;
+    // изометрия: x вправо-вниз, y вправо-вверх, z вверх
+    function sx(p){ return origin.x + scale*(0.92*p[0] + 0.92*p[1]); }
+    function sy(p){ return origin.y + scale*(0.36*p[0] - 0.36*p[1] - 1.0*p[2]); }
+    function sh(p, d){ return [p[0]+d, p[1], p[2]]; }   // сдвиг панели по x-данных? нет:
+    // панельный сдвиг делаем отдельным вектором в данных, чтобы координата шла через sx/sy
+    function off(p, k){ return [p[0], p[1] - k, p[2]]; } // не используется
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H, preserveAspectRatio:'xMidYMid meet',
+                        role:'img','aria-label':'Точка на оси вращения не двигается'});
+
+    // сдвиг второй панели задаём как смещение в данных вдоль обеих горизонталей
+    function shift(p, k){ return [p[0]+k, p[1]+k, p[2]]; }
+
+    function line(a,b,cls,extra){
+      var o = {x1:sx(a),y1:sy(a),x2:sx(b),y2:sy(b),
+               stroke:cls,'stroke-width':LW,'stroke-linecap':'round'};
+      for(var k in (extra||{})) o[k]=extra[k];
+      svg.appendChild(el('line',o));
+    }
+    function label(p,t,dx,dy,anchor,fill,size){
+      var e = el('text',{x:sx(p)+dx, y:sy(p)+dy,'text-anchor':anchor,
+                         'font-size':size||FS, fill:fill||'var(--fg)'});
+      e.textContent=t; svg.appendChild(e);
+    }
+    function dot(p,fill){
+      svg.appendChild(el('circle',{cx:sx(p),cy:sy(p),r:R,fill:fill,
+        stroke:'var(--bg)','stroke-width':2}));
+    }
+    // наконечник: вершины тоже через sx/sy — строим в данных
+    function head(tip, from, color){
+      var vx = sx(tip)-sx(from), vy = sy(tip)-sy(from);
+      var L = Math.sqrt(vx*vx+vy*vy) || 1; vx/=L; vy/=L;
+      // точка отступа берётся в данных: 12% пути назад от вершины
+      var back = [tip[0]+(from[0]-tip[0])*0.16, tip[1]+(from[1]-tip[1])*0.16,
+                  tip[2]+(from[2]-tip[2])*0.16];
+      var bx = sx(back), by = sy(back);
+      var px = -vy, py = vx;
+      var wdt = Math.sqrt(Math.pow(sx(tip)-bx,2)+Math.pow(sy(tip)-by,2))*0.45;
+      svg.appendChild(el('polygon',{points:
+        sx(tip)+','+sy(tip)+' '+(bx+px*wdt)+','+(by+py*wdt)+' '+(bx-px*wdt)+','+(by-py*wdt),
+        fill:color}));
+    }
+    function axes(k, hi){
+      var O=shift([0,0,0],k);
+      var AX=shift([AXL,0,0],k), AY=shift([0,AXL,0],k), AZ=shift([0,0,AXL],k);
+      [[AX,'x'],[AY,'y'],[AZ,'z']].forEach(function(pair){
+        var on = pair[1]===hi;
+        line(O,pair[0], on?'var(--fix)':'var(--axis)',
+             on?{'stroke-width':LW*2.2,'stroke-opacity':0.55}:{});
+      });
+      head(AX,O,'var(--axis)'); head(AY,O,'var(--axis)'); head(AZ,O,'var(--axis)');
+      label(AX,'x', 4, 15,'start','var(--muted)',FSS);
+      label(AY,'y', 8, 4,'start','var(--muted)',FSS);
+      label(AZ,'z', 0,-8,'middle','var(--muted)',FSS);
+      return {O:O,AX:AX,AY:AY,AZ:AZ};
+    }
+
+    // ---------- панель 1: поворот вокруг z ----------
+    var k1 = 0;
+    axes(k1,'z');
+    var p1  = shift(P, k1), q1 = shift(RZ, k1);
+    // дуга: путь через промежуточную точку 45°
+    var mid = [Math.cos(Math.PI/4), Math.sin(Math.PI/4), 0];
+    var m1  = shift(mid, k1);
+    svg.appendChild(el('path',{d:'M '+sx(p1)+' '+sy(p1)+' Q '+
+      sx(shift([1,1,0],k1))+' '+sy(shift([1,1,0],k1))+' '+sx(q1)+' '+sy(q1),
+      fill:'none', stroke:'var(--move)','stroke-width':LW,'stroke-dasharray':'5 4'}));
+    head(q1, m1, 'var(--move)');
+    dot(p1,'var(--fg)'); dot(q1,'var(--move)');
+    label(p1,'(1, 0, 0)', 0, 20,'middle','var(--fg)',FSS);
+    label(q1,'(0, 1, 0)', 8,-10,'start','var(--move)',FSS);
+    label(shift([0,0,AXL],k1),'поворот 90° вокруг z', 0,-26,'middle','var(--move)',FS);
+
+    // ---------- панель 2: поворот вокруг x ----------
+    var k2 = PANEL_DX;
+    axes(k2,'x');
+    var p2 = shift(P,k2);
+    svg.appendChild(el('circle',{cx:sx(p2),cy:sy(p2),r:R*2.6,fill:'none',
+      stroke:'var(--fix)','stroke-width':LW,'stroke-dasharray':'4 4'}));
+    dot(p2,'var(--fix)');
+    label(p2,'(1, 0, 0)', 0, 30,'middle','var(--fix)',FSS);
+    label(p2,'на месте', 14,-12,'start','var(--fix)',FSS);
+    label(shift([0,0,AXL],k2),'поворот 90° вокруг x', 0,-26,'middle','var(--fix)',FS);
+
+    // ---------- легенда ----------
+    var lg = el('text',{x:W/2, y:H-PAD, 'text-anchor':'middle','font-size':FSS,
+                        fill:'var(--muted)'});
+    lg.textContent = 'Точка лежит на оси x: поворот вокруг x её не трогает, поворот вокруг z уводит по дуге.';
+    svg.appendChild(lg);
+
+    slot.innerHTML=''; slot.appendChild(svg);
+  }catch(e){
+    slot.innerHTML = '<p class="fallback">Схема: точка (1, 0, 0). Поворот на 90° вокруг оси z переводит её в (0, 1, 0) — она обходит ось по дуге. Поворот на 90° вокруг оси x оставляет её в (1, 0, 0): точка лежит на самой оси вращения.</p>';
+  }
+})();
+</script>
+</body>
+</html>
