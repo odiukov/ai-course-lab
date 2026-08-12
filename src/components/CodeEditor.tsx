@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type * as Monaco from "monaco-editor";
+import { hiddenRanges, type LineRange } from "@/lib/editor/hidden-areas";
 import { LspClient } from "@/lib/lsp/client";
 import {
   hoverMarkdown,
@@ -17,12 +18,11 @@ export interface CodeEditorProps {
   file: string;
   code: string;
   /**
-   * Функция текущего шага: подсвечена, остальные свёрнуты.
+   * Функция текущего шага: она одна и видна, остальной файл спрятан.
    *
    * `name` здесь обязателен и несёт всю смысловую нагрузку: строки съезжают от
    * любой правки в файле (и приезжают заново после каждого автосохранения), а
-   * сворачивать и двигать курсор нужно только когда шаг действительно сменил
-   * функцию.
+   * двигать курсор нужно только когда шаг действительно сменил функцию.
    */
   focus?: { name: string; startLine: number; endLine: number };
   lspUrl: string | null;
@@ -48,49 +48,32 @@ function clientForModel(model: Monaco.editor.ITextModel): LspClient | undefined 
   return lspClients.get(model.uri.toString());
 }
 
-// Ставит курсор в начало функции шага и сворачивает всё остальное.
-//
-// Одно действие «свернуть всё, кроме выделенного» вместо foldAll + один
-// unfold: второй вариант оставлял свёрнутыми собственные if/for учащегося
-// внутри его же функции, потому что unfold разворачивает ровно один уровень
-// под курсором. foldAllExcept не трогает ни то, что содержит выделение, ни то,
-// что лежит внутри него.
-function revealFunction(
-  editor: Monaco.editor.IStandaloneCodeEditor,
-  focus: { startLine: number },
-): void {
-  editor.setPosition({ lineNumber: focus.startLine, column: 1 });
-  void editor
-    .getAction("editor.foldAllExcept")
-    ?.run()
-    .then(() => editor.revealLineNearTop(focus.startLine));
-}
+// Рамка редактора живёт по содержимому: на экране одна функция, и фиксированная
+// высота под самую длинную из них оставляла под короткой полэкрана пустоты.
+// Нижняя граница — чтобы редактор не схлопнулся в две строки и в него было
+// куда печатать; верхняя — чтобы длинная функция не выталкивала кнопку прогона
+// тестов за экран, дальше редактор скроллит сам.
+const MIN_EDITOR_HEIGHT = 200;
+const MAX_EDITOR_HEIGHT = 520;
 
-// Затемнение чужих строк. Дешёвое и идемпотентное, поэтому пересчитывается на
-// каждый сдвиг строк — в отличие от свёртки и курсора.
-function dimOutside(
-  editor: Monaco.editor.IStandaloneCodeEditor,
-  decorations: Monaco.editor.IEditorDecorationsCollection,
-  focus: { startLine: number; endLine: number },
-): void {
+// setHiddenAreas не выведен в публичные типы monaco-editor, хотя это обычный
+// метод виджета, на котором стоит вся свёртка редактора. Каст — здесь, один
+// раз, чтобы ниже работать с нормально типизированной функцией.
+type EditorWithHiddenAreas = Monaco.editor.IStandaloneCodeEditor & {
+  setHiddenAreas(ranges: LineRange[]): void;
+};
+
+// Прячет из показа всё, кроме функции шага. Модель при этом целая: pyright
+// по-прежнему видит импорты и соседние функции, а сохранение пишет весь файл.
+//
+// Пересчитывается на каждую правку — Monaco держит скрытые области обычными
+// декорациями и сам отбрасывает вызов, если диапазоны не изменились.
+function hideOutside(editor: Monaco.editor.IStandaloneCodeEditor, startLine: number | null): void {
   const model = editor.getModel();
   if (!model) return;
-
-  const total = model.getLineCount();
-  const outside: Monaco.editor.IModelDeltaDecoration[] = [];
-  if (focus.startLine > 1) {
-    outside.push({
-      range: { startLineNumber: 1, startColumn: 1, endLineNumber: focus.startLine - 1, endColumn: 1 },
-      options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
-    });
-  }
-  if (focus.endLine < total) {
-    outside.push({
-      range: { startLineNumber: focus.endLine + 1, startColumn: 1, endLineNumber: total, endColumn: 1 },
-      options: { isWholeLine: true, inlineClassName: "lab-dim-line" },
-    });
-  }
-  decorations.set(outside);
+  (editor as EditorWithHiddenAreas).setHiddenAreas(
+    startLine === null ? [] : hiddenRanges(model, startLine),
+  );
 }
 
 export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: CodeEditorProps) {
@@ -99,10 +82,10 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
   const clientRef = useRef<LspClient | null>(null);
   const docKeyRef = useRef<string | null>(null);
   const versionRef = useRef(1);
-  const decorationsRef = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
   const changeListenerRef = useRef<Monaco.IDisposable | null>(null);
-  // Имя функции, под которую файл уже свёрнут: пока оно не изменилось, курсор
-  // и свёртку трогать нельзя.
+  const sizeListenerRef = useRef<Monaco.IDisposable | null>(null);
+  // Имя функции, на которую редактор уже наведён: пока оно не изменилось,
+  // курсор трогать нельзя.
   const focusedNameRef = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
@@ -162,7 +145,21 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
         theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "vs-dark" : "vs",
       });
       editorRef.current = editor;
-      decorationsRef.current = editor.createDecorationsCollection();
+
+      // Высота хоста считается по видимому содержимому: скрытые области в
+      // getContentHeight не входят, поэтому рамка садится ровно по функции
+      // шага и переезжает сама, когда учащийся дописывает строки.
+      const applyHeight = () => {
+        if (!host.current) return;
+        const height = Math.min(
+          Math.max(editor.getContentHeight(), MIN_EDITOR_HEIGHT),
+          MAX_EDITOR_HEIGHT,
+        );
+        host.current.style.height = `${height}px`;
+      };
+      applyHeight();
+      sizeListenerRef.current = editor.onDidContentSizeChange(applyHeight);
+
       setEditorReady(true);
 
       // Модель переживает размонтирование (её держит кэш monaco.editor.getModel
@@ -302,12 +299,12 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
       clientRef.current = null;
       changeListenerRef.current?.dispose();
       changeListenerRef.current = null;
-      decorationsRef.current?.clear();
-      decorationsRef.current = null;
+      sizeListenerRef.current?.dispose();
+      sizeListenerRef.current = null;
       editorRef.current?.dispose();
       editorRef.current = null;
-      // Новый редактор обязан свернуть файл заново, даже если функция шага та
-      // же самая: свёртка живёт в конкретном экземпляре, а не в модели.
+      // Новый редактор обязан спрятать файл заново, даже если функция шага та
+      // же самая: скрытые области живут в конкретном экземпляре, а не в модели.
       focusedNameRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- редактор монтируется один раз на файл
@@ -330,33 +327,50 @@ export function CodeEditor({ file, code, focus, lspUrl, onChange, onLspError }: 
     model.pushStackElement();
   }, [code]);
 
-  // Своя функция развёрнута и подсвечена, чужие свёрнуты и приглушены.
+  // На экране одна функция — своя. Остального файла для учащегося просто нет.
   //
-  // Затемнение пересчитывается на каждое изменение границ — оно идемпотентное
-  // и ничего не двигает. Свёртка и курсор — только когда сменилась ФУНКЦИЯ
-  // шага: границы приезжают заново после каждого автосохранения, и раньше
-  // правка в transpose уводила курсор через секунду после набора, потому что у
-  // matmul сдвинулись номера строк.
+  // Скрытые области пересчитываются на каждую правку: конец функции считается
+  // по тексту и едет от каждой набранной строки, а числа из пропа приезжают
+  // только после автосохранения. Курсор двигается, только когда сменилась
+  // ФУНКЦИЯ шага: границы приходят заново после каждого сохранения, и иначе
+  // правка в transpose уводила бы курсор через секунду после набора, потому
+  // что у matmul сдвинулись номера строк.
   //
   // Зависимость от editorReady — не от одного focus — это то, что позволяет
-  // применить свёртку и в момент, когда focus меняется на уже смонтированном
+  // спрятать лишнее и в момент, когда focus меняется на уже смонтированном
   // редакторе, и в момент, когда редактор только доехал, а focus был известен
   // с самого первого рендера.
   useEffect(() => {
     const editor = editorRef.current;
-    const decorations = decorationsRef.current;
-    if (!editor || !decorations || !focus) return;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
 
-    dimOutside(editor, decorations, focus);
-    if (focusedNameRef.current === focus.name) return;
-    focusedNameRef.current = focus.name;
-    revealFunction(editor, focus);
+    // Шаг без известной функции показывает файл целиком: спрятать по неизвестно
+    // чему хуже, чем не прятать.
+    if (!focus) {
+      hideOutside(editor, null);
+      focusedNameRef.current = null;
+      return;
+    }
+
+    hideOutside(editor, focus.startLine);
+    if (focusedNameRef.current !== focus.name) {
+      focusedNameRef.current = focus.name;
+      editor.setPosition({ lineNumber: focus.startLine, column: 1 });
+      editor.revealLineNearTop(focus.startLine);
+    }
+
+    const listener = model.onDidChangeContent(() => hideOutside(editor, focus.startLine));
+    return () => listener.dispose();
   }, [focus, editorReady]);
 
   return (
     <div
       ref={host}
-      className="h-[420px] w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"
+      // Высоту дальше ведёт applyHeight; здесь она нужна на те доли секунды,
+      // пока monaco догружается динамическим импортом.
+      style={{ height: MIN_EDITOR_HEIGHT }}
+      className="w-full overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"
     />
   );
 }
