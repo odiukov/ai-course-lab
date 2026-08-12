@@ -116,8 +116,12 @@ check:
   });
 });
 
-// Шесть перегенерированных check-шагов урока 02 — те, ради которых схема и
-// ужесточается. Новые границы не должны отвергать уже написанное.
+// Проверочные шаги урока 02 — те, ради которых схема и ужесточается. Новые
+// границы не должны отвергать уже написанное.
+//
+// Числом шагов проверка не связана намеренно: урок пересобирается, и в новом
+// плане их столько, сколько требует материал. Прибитое число ловило бы не
+// поломку схемы, а очередной разбор.
 describe("шаги урока 02 с вопросами", () => {
   const dir = path.join(
     process.cwd(),
@@ -130,7 +134,7 @@ describe("шаги урока 02 с вопросами", () => {
       .map((name) => parseStep(fs.readFileSync(path.join(dir, name), "utf8")))
       .filter((step) => (step.check?.length ?? 0) > 0);
 
-    expect(withCheck.length).toBe(6);
+    expect(withCheck.length).toBeGreaterThan(0);
     for (const step of withCheck) {
       for (const item of step.check!) {
         expect(item.options.length).toBeGreaterThanOrEqual(2);

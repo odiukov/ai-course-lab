@@ -5,6 +5,7 @@ import {
   resolveVisualPath,
   type VisualPathResolution,
 } from "@/lib/api/visual-path";
+import { withHeightReporter } from "@/lib/api/visual-height";
 
 // Схема — это HTML со своим скриптом, и браузер исполняет его с правами
 // нашего origin: `sandbox="allow-scripts"` на iframe сеть не режет, а открытая
@@ -44,7 +45,9 @@ export async function GET(request: Request) {
       : new Response("Запрещённый путь", { status: 400 });
   }
 
-  return new Response(fs.readFileSync(resolved.path, "utf8"), {
+  // Мерка подшивается и к схемам курса, и к нашим: рамка вокруг схемы иначе
+  // не знает, какой высоты та выросла, и оставляет скролл внутри себя.
+  return new Response(withHeightReporter(fs.readFileSync(resolved.path, "utf8")), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
