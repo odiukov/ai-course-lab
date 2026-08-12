@@ -98,6 +98,11 @@ export function ExercisePanel({
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
+  // Имя функции, для которой кнопка сброса уже взведена, — не булев флаг.
+  // Панель переживает переход между code-шагами, и взведённая на transpose
+  // кнопка иначе оставалась бы взведённой над matmul.
+  const [resetArmedFor, setResetArmedFor] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   // Текст, который точно лежит на диске, и mtime этого файла — то, с чем
   // сервер сверяет предусловие записи.
@@ -298,6 +303,66 @@ export function ExercisePanel({
     saveErrorRef.current = null;
     setError(null);
   }, [conflict]);
+
+  /**
+   * Возвращает функцию шага к заготовке из `exercise.template.py`.
+   *
+   * Выход из тупика, а не удобство: снесённую строку `def` сервер перестаёт
+   * видеть, шаг остаётся без границ, редактор показывает весь файл — и
+   * восстановить заготовку руками уже неоткуда, её вида на экране нет.
+   *
+   * Черновик здесь именно то, от чего учащийся отказывается, поэтому таймер
+   * дебаунса снимается, а запись «в полёте» дожидается до запроса: иначе
+   * поздний PUT прилетел бы уже после сброса и вернул стёртое обратно.
+   */
+  const resetToTemplate = useCallback(async () => {
+    setResetting(true);
+    setError(null);
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    try {
+      await (inFlightRef.current ?? Promise.resolve(true)).catch(() => false);
+
+      const result = await fetchJson<{
+        code: string;
+        mtimeMs: number;
+        functions: ExerciseFunction[];
+      }>(`/api/lesson/${slug}/exercise/reset`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fn }),
+      });
+      if (!result.ok) {
+        setError(`Не удалось сбросить функцию: ${result.error}`);
+        return;
+      }
+
+      savedCodeRef.current = result.data.code;
+      latestCodeRef.current = result.data.code;
+      mtimeRef.current = result.data.mtimeMs;
+      setCode(result.data.code);
+      setData((existing) =>
+        existing
+          ? {
+              ...existing,
+              code: result.data.code,
+              mtimeMs: result.data.mtimeMs,
+              functions: result.data.functions,
+            }
+          : existing,
+      );
+      // Расхождение (если оно было) разрешено самим сбросом: на диске теперь
+      // то же, что в редакторе, и выбирать между текстами больше нечего.
+      setConflict(null);
+      setSaveState("saved");
+      saveErrorRef.current = null;
+    } finally {
+      setResetting(false);
+      setResetArmedFor(null);
+    }
+  }, [fn, slug]);
 
   // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
   // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
@@ -605,7 +670,7 @@ export function ExercisePanel({
         </div>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={() => void runTests()}
           disabled={running}
@@ -620,6 +685,32 @@ export function ExercisePanel({
             className="rounded border border-emerald-600 px-4 py-2 text-sm text-emerald-700 disabled:opacity-40 dark:text-emerald-400"
           >
             {reviewing ? "Разбираю…" : "Замер и разбор кода"}
+          </button>
+        )}
+        {/* Сброс стирает написанное, поэтому одного нажатия мало: первое
+            превращает кнопку в вопрос, и только второе идёт на сервер. */}
+        {resetArmedFor === fn ? (
+          <>
+            <button
+              onClick={() => void resetToTemplate()}
+              disabled={resetting}
+              className="rounded bg-rose-700 px-4 py-2 text-sm text-white disabled:opacity-40"
+            >
+              {resetting ? "Сбрасываю…" : `Точно стереть мой ${fn}?`}
+            </button>
+            <button
+              onClick={() => setResetArmedFor(null)}
+              className="px-2 py-2 text-sm underline"
+            >
+              отмена
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setResetArmedFor(fn)}
+            className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300"
+          >
+            Сбросить функцию
           </button>
         )}
       </div>
