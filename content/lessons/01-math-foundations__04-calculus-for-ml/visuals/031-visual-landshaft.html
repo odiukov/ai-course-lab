@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Кривая потерь с двумя впадинами</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1f2430; --muted:#5b6472; --axis:#8a93a3;
+    --curve:#2563eb; --local:#d97706; --global:#16a34a; --start:#dc2626;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --ink:#e8ecf3; --muted:#a3adbd; --axis:#6b7484;
+      --curve:#7aa2ff; --local:#f0a83c; --global:#5fd18a; --start:#ff7b72;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .wrap{max-width:760px;margin:0 auto;padding:8px 10px 10px;background:var(--bg);}
+  h2{font-size:16px;margin:0 0 4px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:470px;background:var(--bg);}
+  .legend{font-size:13px;color:var(--muted);margin:4px 0 0;}
+  .fallback{font-size:14px;line-height:1.5;color:var(--ink);white-space:pre-line;}
+</style>
+<div class="wrap">
+  <h2>Кривая потерь: две впадины</h2>
+  <svg id="fig" viewBox="0 0 760 430" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Кривая ошибки с локальным и глобальным минимумом и стартовой точкой"></svg>
+  <p class="legend">Плоское дно впадины — наклон нулевой: спуск считает, что пришёл.</p>
+  <div id="fallback" class="fallback" hidden></div>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById('fig');
+  try{
+    // ---- данные схемы (в единицах данных) ----
+    var DATA = {
+      curve:[[0,8.6],[0.5,7.4],[1,5.6],[1.5,4.0],[2,3.2],[2.5,3.0],[3,3.3],[3.5,4.2],
+             [4,5.2],[4.5,5.9],[5,6.2],[5.5,6.0],[6,5.2],[6.5,4.0],[7,2.7],[7.5,1.6],
+             [8,1.0],[8.5,0.8],[9,1.2],[9.5,2.4],[10,4.2]],
+      start:[1,5.6], localMin:[2.5,3.0], globalMin:[8.5,0.8], hump:[5,6.2],
+      descent:[[1,6.1],[1.5,4.5],[2,3.7],[2.35,3.6]],
+      axisXend:[10.6,0], axisYend:[0,9.2],
+      flatHalf:0.7, dotR:0.09, head:{len:0.34, wid:0.2}
+    };
+    var origin = {x:90, y:390};
+    var scale  = {x:60, y:40};
+
+    // ---- единственная пара функций перевода ----
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(tag, attrs){
+      var n=document.createElementNS(NS,tag);
+      for(var k in attrs){ n.setAttribute(k, attrs[k]); }
+      svg.appendChild(n); return n;
+    }
+    function poly(pts){ return pts.map(function(p){ return sx(p[0])+','+sy(p[1]); }).join(' '); }
+    function line(a,b,attrs){
+      attrs=attrs||{};
+      attrs.x1=sx(a[0]); attrs.y1=sy(a[1]); attrs.x2=sx(b[0]); attrs.y2=sy(b[1]);
+      return el('line',attrs);
+    }
+    function arrowHead(from,to,fill){
+      var dx=to[0]-from[0], dy=to[1]-from[1];
+      var len=Math.sqrt(dx*dx+dy*dy) || 1;
+      var ux=dx/len, uy=dy/len;
+      var bx=to[0]-ux*DATA.head.len, by=to[1]-uy*DATA.head.len;
+      var p1=[bx-uy*DATA.head.wid, by+ux*DATA.head.wid];
+      var p2=[bx+uy*DATA.head.wid, by-ux*DATA.head.wid];
+      el('polygon',{points:poly([to,p1,p2]), fill:fill});
+    }
+    function dot(p,color){
+      var r = sx(DATA.dotR) - sx(0);
+      el('circle',{cx:sx(p[0]), cy:sy(p[1]), r:r, fill:color});
+    }
+    function label(p,text,anchor,dx,dy,color,weight){
+      var t=el('text',{x:sx(p[0])+dx, y:sy(p[1])+dy, 'text-anchor':anchor,
+        'font-size':15, fill:color, 'font-weight':weight||400});
+      t.textContent=text;
+    }
+
+    var zero=[0,0];
+
+    // оси
+    line(zero, DATA.axisXend, {stroke:'var(--axis)','stroke-width':1.5});
+    arrowHead([DATA.axisXend[0]-1, 0], DATA.axisXend, 'var(--axis)');
+    line(zero, DATA.axisYend, {stroke:'var(--axis)','stroke-width':1.5});
+    arrowHead([0, DATA.axisYend[1]-1], DATA.axisYend, 'var(--axis)');
+    label(DATA.axisXend,'вес w','end',-6,22,'var(--muted)');
+    label(DATA.axisYend,'ошибка L','start',10,-6,'var(--muted)');
+
+    // плоское дно впадин
+    [[DATA.localMin,'var(--local)'],[DATA.globalMin,'var(--global)']].forEach(function(m){
+      line([m[0][0]-DATA.flatHalf, m[0][1]], [m[0][0]+DATA.flatHalf, m[0][1]],
+        {stroke:m[1], 'stroke-width':2, 'stroke-dasharray':'5 4'});
+    });
+
+    // кривая
+    el('polyline',{points:poly(DATA.curve), fill:'none', stroke:'var(--curve)',
+      'stroke-width':3, 'stroke-linejoin':'round', 'stroke-linecap':'round'});
+
+    // скатывание из стартовой точки
+    var d=DATA.descent;
+    el('polyline',{points:poly(d), fill:'none', stroke:'var(--start)',
+      'stroke-width':2.5, 'stroke-linejoin':'round'});
+    arrowHead(d[d.length-2], d[d.length-1], 'var(--start)');
+
+    // точки и подписи
+    dot(DATA.start,'var(--start)');
+    label(DATA.start,'старт','end',-12,-8,'var(--start)',600);
+
+    dot(DATA.localMin,'var(--local)');
+    label(DATA.localMin,'локальный минимум (мельче)','middle',0,26,'var(--local)',600);
+
+    dot(DATA.globalMin,'var(--global)');
+    label(DATA.globalMin,'глобальный минимум (глубже)','middle',0,-16,'var(--global)',600);
+
+    label(DATA.hump,'горб','middle',0,-14,'var(--muted)');
+  }catch(e){
+    svg.setAttribute('hidden','hidden');
+    var f=document.getElementById('fallback');
+    f.hidden=false;
+    f.textContent =
+      'Схема не построилась. Она должна показывать:\n'+
+      '• кривую L(w): по горизонтали — вес w, по вертикали — ошибка L;\n'+
+      '• слева мелкую впадину (локальный минимум), справа глубокую (глобальный минимум), между ними горб;\n'+
+      '• стартовую точку слева от горба и стрелку, которая скатывает её вниз по склону в мелкую впадину;\n'+
+      '• плоское дно у обеих впадин: наклон нулевой, и спуск считает, что пришёл.';
+  }
+})();
+</script>
+</html>
