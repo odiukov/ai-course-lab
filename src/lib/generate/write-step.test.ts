@@ -202,19 +202,46 @@ describe("ensureSteps", () => {
     expect(ids).toEqual(["004-c"]);
   });
 
-  it("в соседях нет текущего шага, но есть соседний", async () => {
+  it("в соседях только то, что ВПЕРЕДИ: ни текущего шага, ни прошлого", async () => {
     const contentDir = tmpDir();
     const run = vi.fn().mockResolvedValue("Тело.");
     await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
 
     const prompt = run.mock.calls[0][0] as string;
-    const match = /Соседние шаги, чтобы не повторяться:\n([\s\S]*?)\n\nКусок/.exec(prompt);
+    const match = /не забегай в них, их материал не твой:\n([\s\S]*?)\n\nКусок/.exec(prompt);
     expect(match).not.toBeNull();
     const neighbours = match![1];
 
     expect(neighbours).not.toContain("transpose");
-    expect(neighbours).toContain("Зачем");
+    // Прошлое теперь приходит содержимым, а не заголовком, — отдельной секцией.
+    expect(neighbours).not.toContain("Зачем");
     expect(neighbours).toContain("Дальше");
+    expect(neighbours).toContain("matmul");
+  });
+
+  it("написанные раньше шаги приезжают в промпт содержимым, а не заголовком", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Тело.");
+    // Первый шаг с формулой и аналогией, дальше — шаг, который раньше вывел бы
+    // эту же формулу заново, потому что видел только заголовок соседа.
+    await ensureSteps({
+      contentDir,
+      source: SOURCE,
+      plan: PLAN,
+      fromIndex: 0,
+      count: 1,
+      deps: {
+        run: vi
+          .fn()
+          .mockResolvedValue("Текст.\n\n$$|v| = \\sqrt{x^2 + y^2}$$\n\n> 🎒 **На пальцах.** Ты вышел из входа в парк."),
+      },
+    });
+    await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
+
+    const prompt = run.mock.calls[0][0] as string;
+    expect(prompt).toContain("1. Зачем");
+    expect(prompt).toContain("|v| = \\sqrt{x^2 + y^2}");
+    expect(prompt).toContain("парк");
   });
 
   it("сохраняет visual и baseline из плана шага в файле", async () => {

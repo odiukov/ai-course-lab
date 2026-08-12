@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
 import { buildClarificationContext } from "../content/clarification-context";
+import { buildCoveredContext } from "../content/covered-context";
 import type { LessonPlan } from "../content/lesson-plan";
 import {
   checkSchema,
@@ -167,12 +168,26 @@ export function parseStepReply(reply: string, expectCheck: boolean): StepReply {
   };
 }
 
-function neighbourSummary(plan: LessonPlan, index: number): string {
-  return plan.steps
-    .slice(Math.max(0, index - 2), index + 2)
-    .filter((_, offset) => Math.max(0, index - 2) + offset !== index)
-    .map((step) => `- ${step.type}: ${step.title}`)
-    .join("\n") || "(соседей нет)";
+/**
+ * Шаги сразу после текущего — чтобы шаг не забегал в material, который урок
+ * разложил на следующие экраны.
+ *
+ * Только те, что ВПЕРЕДИ. Прошлое приходит отдельно, из buildCoveredContext, и
+ * приходит содержимым, а не заголовком: заголовок «Длина вектора» не мешал
+ * выводить длину вектора заново, потому что по нему не видно, что там уже
+ * выведено.
+ *
+ * Имя переменной в промпте осталось `neighbours`: она читается из шаблона на
+ * каждый вызов, и переименование сломало бы генерацию, запущенную со старым
+ * шаблоном в этот же момент.
+ */
+function upcomingSummary(plan: LessonPlan, index: number): string {
+  return (
+    plan.steps
+      .slice(index + 1, index + 3)
+      .map((step) => `- ${step.type}: ${step.title}`)
+      .join("\n") || "(это последний шаг урока)"
+  );
 }
 
 export async function ensureSteps(opts: {
@@ -237,7 +252,13 @@ export async function ensureSteps(opts: {
       lesson_title: plan.title,
       step_title: meta.title,
       step_type: meta.type,
-      neighbours: neighbourSummary(plan, fromIndex + offset),
+      neighbours: upcomingSummary(plan, fromIndex + offset),
+      covered: buildCoveredContext({
+        contentDir,
+        slug: plan.slug,
+        steps: plan.steps,
+        beforeStepId: meta.id,
+      }),
       source_excerpt: excerpt,
       clarifications: buildClarificationContext({
         contentDir,

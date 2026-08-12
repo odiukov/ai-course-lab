@@ -8,7 +8,8 @@ describe("renderPrompt — write-step", () => {
       step_title: "Транспонирование",
       step_type: "theory",
       source_excerpt: "текст урока",
-      neighbours: "предыдущий шаг",
+      neighbours: "следующий шаг",
+      covered: "- 1. Зачем это нужно",
       clarifications: "- «Что такое строка матрицы?» (шаг: Матрица)",
     });
     expect(out).toContain("Транспонирование");
@@ -28,7 +29,8 @@ describe("renderPrompt — write-step", () => {
         step_title: "Транспонирование",
         step_type: "theory",
         source_excerpt: "текст урока",
-        neighbours: "предыдущий шаг",
+        neighbours: "следующий шаг",
+        covered: "- 1. Зачем это нужно",
       }),
     ).toThrow(/clarifications/);
   });
