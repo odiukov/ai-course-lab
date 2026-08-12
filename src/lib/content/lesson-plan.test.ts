@@ -160,6 +160,24 @@ describe("повторное написание функций", () => {
     expect(validatePlan(plan, SOURCE, written)).toEqual([]);
   });
 
+  // Так планировщик и ошибался на уроке про матричные преобразования: в конце
+  // урока он ставил recall-шаг «ваш compose — это стек слоёв нейросети», то
+  // есть отсылку к функции, которую человек написал парой десятков шагов
+  // выше, в этом же уроке.
+  it("не пускает recall про функцию, которую человек ещё не писал", () => {
+    const plan = GOOD.map((item) =>
+      item.exercise_fn === "matmul" ? { ...item, type: "recall" as const } : item,
+    );
+    expect(validatePlan(plan, SOURCE, written).join(" ")).toMatch(/ещё не писал/);
+  });
+
+  // Тот же промах, но recall стоит ДОПОЛНИТЕЛЬНО к code-шагу, а не вместо
+  // него: практика на месте, зато карточке recall нечего показать.
+  it("не пускает recall рядом с code-шагом на ту же функцию", () => {
+    const plan = [...GOOD, step({ id: "005-recall-matmul", type: "recall", exercise_fn: "matmul" })];
+    expect(validatePlan(plan, SOURCE, written).join(" ")).toMatch(/уже занята/);
+  });
+
   it("без реестра ведёт себя как раньше", () => {
     expect(validatePlan(GOOD, SOURCE)).toEqual([]);
   });
