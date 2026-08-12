@@ -39,8 +39,21 @@ describe("stepQuestions", () => {
     expect(stepQuestions(step, source)).toHaveLength(2);
   });
 
-  it("для quiz-шага берёт итоговый квиз урока", () => {
+  it("для quiz-шага без своих вопросов берёт итоговый квиз урока", () => {
     const step = { type: "quiz" } as unknown as Step;
+    expect(stepQuestions(step, source).map((item) => item.question)).toEqual(["после урока"]);
+  });
+
+  // Порядок тот же, что в ридере: разойдись он — сервер проверял бы ответ по
+  // вопросу из quiz.json, пока человек отвечает на свой, и оценка стала бы
+  // случайной.
+  it("свои вопросы quiz-шага важнее итогового квиза урока", () => {
+    const step = { type: "quiz", check: questions } as unknown as Step;
+    expect(stepQuestions(step, source).map((item) => item.question)).toEqual(["1?", "2?"]);
+  });
+
+  it("пустой список своих вопросов у quiz-шага откатывается на квиз урока", () => {
+    const step = { type: "quiz", check: [] } as unknown as Step;
     expect(stepQuestions(step, source).map((item) => item.question)).toEqual(["после урока"]);
   });
 

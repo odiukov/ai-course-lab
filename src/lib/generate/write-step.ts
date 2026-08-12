@@ -247,7 +247,10 @@ export async function ensureSteps(opts: {
       }),
     });
 
-    const expectCheck = meta.type === "check";
+    // Вопросы приходят frontmatter'ом у обоих типов, которые их показывают.
+    // Разбирать его у `quiz` тоже обязательно: иначе блок с вопросами уезжает
+    // в тело шага и учащийся видит на итоговом экране сырой YAML.
+    const expectCheck = meta.type === "check" || meta.type === "quiz";
     let reply = parseStepReply(await deps.run(prompt, onEvent), expectCheck);
 
     // Одна повторная попытка: чаще всего агент просто написал тело и забыл про
@@ -266,7 +269,11 @@ export async function ensureSteps(opts: {
         true,
       );
     }
-    if (expectCheck && !reply.check) {
+    // Провалом это считается только для `check`: там вопросы — весь смысл шага,
+    // и без них экран пустой. У `quiz` есть запасной источник — quiz.json
+    // курса, — поэтому шаг записывается и без своих вопросов; учащийся получит
+    // английские из исходника вместо русских, но не пустой итог урока.
+    if (meta.type === "check" && !reply.check) {
       withoutQuestions.push(meta.id);
       continue;
     }

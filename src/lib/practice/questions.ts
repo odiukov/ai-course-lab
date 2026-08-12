@@ -24,16 +24,25 @@ export function finalQuizQuestions(source: LessonSource): GradableQuestion[] {
   }));
 }
 
+function ownQuestions(step: Step): GradableQuestion[] {
+  return (step.check ?? []).map((item) => ({
+    question: item.question,
+    options: item.options,
+    correct: item.correct,
+    explanation: item.explanation,
+  }));
+}
+
 export function stepQuestions(step: Step, source: LessonSource): GradableQuestion[] {
-  if (step.type === "check") {
-    return (step.check ?? []).map((item) => ({
-      question: item.question,
-      options: item.options,
-      correct: item.correct,
-      explanation: item.explanation,
-    }));
+  if (step.type === "check") return ownQuestions(step);
+  // Свои вопросы итогового шага важнее quiz.json: они по-русски и написаны по
+  // тому уроку, который человек прошёл. Порядок должен совпадать с ридером —
+  // разойдись он, сервер проверял бы ответ не по тому вопросу, на который
+  // человек отвечает.
+  if (step.type === "quiz") {
+    const own = ownQuestions(step);
+    return own.length > 0 ? own : finalQuizQuestions(source);
   }
-  if (step.type === "quiz") return finalQuizQuestions(source);
   return [];
 }
 

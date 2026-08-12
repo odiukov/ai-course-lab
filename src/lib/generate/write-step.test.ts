@@ -465,6 +465,38 @@ describe("ensureSteps и шаги-проверки", () => {
   });
 });
 
+describe("ensureSteps и итоговый квиз", () => {
+  const QUIZ_PLAN: LessonPlan = {
+    ...PLAN,
+    steps: [{ id: "006-quiz", type: "quiz", title: "Итоговая проверка урока" }],
+  };
+
+  it("вопросы квиза попадают в frontmatter шага, а не в тело", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue(CHECK_REPLY);
+    await ensureSteps({ contentDir, source: SOURCE, plan: QUIZ_PLAN, fromIndex: 0, deps: { run } });
+
+    const step = readStep(contentDir, QUIZ_PLAN.slug, "006-quiz")!;
+    expect(step.check).toHaveLength(1);
+    expect(step.body).toBe("Тело шага-проверки.");
+    // Ровно тот баг, из-за которого учащийся видел на итоговом экране сырой YAML.
+    expect(step.body).not.toContain("check:");
+  });
+
+  it("квиз без вопросов записывается всё равно: у него есть quiz.json курса", async () => {
+    const contentDir = tmpDir();
+    const run = vi.fn().mockResolvedValue("Итог урока без вопросов.");
+
+    const ids = await ensureSteps({ contentDir, source: SOURCE, plan: QUIZ_PLAN, fromIndex: 0, deps: { run } });
+
+    // Одна повторная попытка — вопросы по-русски лучше английских из quiz.json,
+    // но их отсутствие шаг не отменяет, в отличие от шага-проверки.
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(ids).toEqual(["006-quiz"]);
+    expect(readStep(contentDir, QUIZ_PLAN.slug, "006-quiz")?.check).toBeUndefined();
+  });
+});
+
 describe("ensureSteps — дорисовка пропавших схем", () => {
   const WITH_VISUAL: LessonPlan = {
     ...PLAN,

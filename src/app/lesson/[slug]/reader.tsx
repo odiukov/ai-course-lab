@@ -354,7 +354,21 @@ export function Reader({
             </p>
           ))}
         {step.type === "quiz" &&
-          (data.quiz.length > 0 ? (
+          // Свои вопросы шага идут первыми: они по-русски, на «ты» и написаны по
+          // тому уроку, который человек только что прошёл. Вопросы из quiz.json —
+          // запасной вариант для уроков, которым их ещё не написали.
+          (step.check && step.check.length > 0 ? (
+            <>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Итоговый квиз урока.</p>
+              <QuestionSet
+                slug={slug}
+                stepId={step.id}
+                questions={step.check}
+                onExplain={(text) => setDraft({ text, at: Date.now() })}
+                onProgressChanged={() => void load()}
+              />
+            </>
+          ) : data.quiz.length > 0 ? (
             <>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 Итоговый квиз урока. Вопросы из курса — они по-английски, как в исходнике.
