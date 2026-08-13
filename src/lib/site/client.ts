@@ -190,6 +190,181 @@ if (resume) {
 })();
 `;
 
+/**
+ * Практика: редактор, прогон тестов, эталон.
+ *
+ * Python исполняется в браузере читателя — Pyodide, то есть CPython в
+ * WebAssembly. Сервера у сайта нет и быть не может, так что чужой код никуда,
+ * кроме своей вкладки, не дотянется.
+ *
+ * Всё тяжёлое грузится по требованию: Pyodide весит десяток мегабайт, и
+ * тянуть его на шаге с теорией незачем.
+ */
+export const EXERCISE_SCRIPT = `
+(function () {
+  var node = document.querySelector("[data-exercise]");
+  if (!node) return;
+  var data = JSON.parse(node.textContent || "{}");
+
+  var area = document.querySelector("[data-code]");
+  var runButton = document.querySelector("[data-run]");
+  var resetButton = document.querySelector("[data-reset]");
+  var solutionButton = document.querySelector("[data-show-solution]");
+  var solutionBox = document.querySelector("[data-solution]");
+  var status = document.querySelector("[data-run-status]");
+  var results = document.querySelector("[data-results]");
+  if (!area || !runButton) return;
+
+  var storageKey = "course-exercise:" + data.slug;
+  var template = "";
+
+  function save() {
+    try {
+      localStorage.setItem(storageKey, area.value);
+    } catch (error) {
+      // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
+    }
+  }
+
+  function setCode(text) {
+    area.value = text;
+    // Редактор, если он поднялся, слушает это событие и подхватывает текст.
+    area.dispatchEvent(new Event("course-editor-reset"));
+  }
+
+  function text(url) {
+    return fetch(url).then(function (response) {
+      if (!response.ok) throw new Error("не удалось загрузить " + url);
+      return response.text();
+    });
+  }
+
+  // Заготовка нужна всегда: по ней работает «Сбросить».
+  text(data.urls.template).then(function (source) {
+    template = source;
+    var saved = null;
+    try {
+      saved = localStorage.getItem(storageKey);
+    } catch (error) {
+      saved = null;
+    }
+    setCode(saved === null ? source : saved);
+    if (window.CourseEditor) window.CourseEditor.mount(area);
+  });
+
+  area.addEventListener("input", save);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (!template) return;
+      if (!window.confirm("Вернуть заготовку? Написанный код пропадёт.")) return;
+      setCode(template);
+      save();
+    });
+  }
+
+  if (solutionButton && solutionBox && data.urls.solution) {
+    solutionButton.addEventListener("click", function () {
+      if (!solutionBox.hidden) {
+        solutionBox.hidden = true;
+        solutionButton.textContent = "Показать решение";
+        return;
+      }
+      text(data.urls.solution).then(function (source) {
+        solutionBox.textContent = source;
+        solutionBox.hidden = false;
+        solutionButton.textContent = "Скрыть решение";
+      });
+    });
+  } else if (solutionButton) {
+    solutionButton.hidden = true;
+  }
+
+  var pyodidePromise = null;
+
+  function loadPyodideOnce() {
+    if (pyodidePromise) return pyodidePromise;
+
+    pyodidePromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = data.assets.pyodide + "pyodide.js";
+      script.onload = resolve;
+      script.onerror = function () {
+        reject(new Error("не удалось загрузить Python"));
+      };
+      document.head.appendChild(script);
+    })
+      .then(function () {
+        return window.loadPyodide({ indexURL: data.assets.pyodide });
+      })
+      .then(function (pyodide) {
+        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+          pyodide.FS.mkdirTree("/exercise");
+          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          pyodide.runPython(files[0]);
+          return pyodide;
+        });
+      });
+
+    return pyodidePromise;
+  }
+
+  function render(report) {
+    results.innerHTML = "";
+    if (report.loadError) {
+      var problem = document.createElement("p");
+      problem.className = "run-error";
+      problem.textContent = report.loadError;
+      results.appendChild(problem);
+      return;
+    }
+
+    var passed = 0;
+    var list = document.createElement("ul");
+    list.className = "test-list";
+    for (var i = 0; i < report.results.length; i += 1) {
+      var item = report.results[i];
+      if (item.passed) passed += 1;
+      var row = document.createElement("li");
+      row.className = item.passed ? "test is-passed" : "test is-failed";
+      row.textContent = (item.passed ? "✓ " : "✗ ") + item.name + (item.message ? " — " + item.message : "");
+      list.appendChild(row);
+    }
+
+    var total = report.results.length;
+    status.textContent =
+      passed + " из " + total + " зелёные" +
+      (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
+    status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    results.appendChild(list);
+  }
+
+  runButton.addEventListener("click", function () {
+    runButton.disabled = true;
+    status.className = "run-status";
+    status.textContent = "Готовлю Python…";
+
+    loadPyodideOnce()
+      .then(function (pyodide) {
+        status.textContent = "Гоняю тесты…";
+        pyodide.globals.set(
+          "PAYLOAD",
+          JSON.stringify({ code: area.value, fn: data.fn, functions: data.functions })
+        );
+        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+      })
+      .then(render)
+      .catch(function (error) {
+        status.className = "run-status";
+        status.textContent = String(error && error.message ? error.message : error);
+      })
+      .then(function () {
+        runButton.disabled = false;
+      });
+  });
+})();
+`;
+
 /** Каталог: сколько шагов урока прочитано в этом браузере. */
 export const CATALOG_SCRIPT = `
 (function () {

@@ -5,11 +5,13 @@ import { lessonUrl, stepPageHref, stepPageUrl } from "./anchors";
 import type { CatalogPhase } from "./catalog";
 import {
   CATALOG_SCRIPT,
+  EXERCISE_SCRIPT,
   FRAME_SCRIPT,
   LESSON_INDEX_SCRIPT,
   PROGRESS_SCRIPT,
   QUIZ_SCRIPT,
 } from "./client";
+import type { ExerciseUrls } from "./exercise";
 import type { LessonBlock, LessonModel } from "./lesson-page";
 import { encodeQuizPayload } from "./quiz";
 
@@ -18,10 +20,20 @@ export interface NextLesson {
   title: string;
 }
 
+export interface ExercisePanelData {
+  /** Каталог упражнения, он же ключ хранения кода. */
+  slug: string;
+  /** Канонический состав упражнения — по нему отбираются тесты шага. */
+  functions: string[];
+  urls: ExerciseUrls;
+}
+
 export interface RenderOptions {
   basePath: string;
   /** Следующий урок курса — куда идти, когда этот дочитан. */
   nextLesson?: NextLesson | null;
+  /** Упражнение урока, если оно есть. */
+  exercise?: ExercisePanelData | null;
 }
 
 function escapeHtml(text: string): string {
@@ -42,8 +54,13 @@ function htmlDocument(options: {
   basePath: string;
   body: string;
   scripts?: string[];
+  /** Внешние файлы скриптов сайта: грузятся до инлайновых. */
+  modules?: string[];
 }): string {
-  const scripts = (options.scripts ?? []).map((code) => `<script>${code}</script>`).join("\n");
+  const scripts = [
+    ...(options.modules ?? []).map((src) => `<script src="${src}"></script>`),
+    ...(options.scripts ?? []).map((code) => `<script>${code}</script>`),
+  ].join("\n");
 
   return `<!doctype html>
 <html lang="ru">
@@ -109,6 +126,53 @@ ${items}
 </ol></nav>`;
 }
 
+/**
+ * Практика: редактор с заготовкой упражнения и прогон тестов в браузере.
+ *
+ * В редакторе весь файл упражнения, а не одна функция: тесты импортируют из
+ * него все имена сразу, и файл с одной функцией не загрузился бы вовсе.
+ * Проверяются при этом только тесты текущего шага.
+ */
+function renderPractice(block: LessonBlock, options: RenderOptions): string {
+  const fn = block.practiceFn;
+  if (!fn || (block.step.type !== "code" && block.step.type !== "recall")) return "";
+
+  const exercise = options.exercise;
+  if (!exercise) {
+    return `<p class="practice">Практика: функция <code>${escapeHtml(fn)}</code>. Упражнение к этому уроку не выложено.</p>`;
+  }
+
+  const payload = encodeJson({
+    slug: exercise.slug,
+    fn,
+    functions: exercise.functions,
+    urls: exercise.urls,
+    assets: {
+      pyodide: `${options.basePath}/assets/pyodide/`,
+      harness: `${options.basePath}/assets/harness.py`,
+    },
+  });
+
+  const solution = exercise.urls.solution
+    ? `<button type="button" class="nav-button" data-show-solution>Показать решение</button>`
+    : "";
+
+  return `<section class="practice-panel">
+<h2 class="practice-title">Практика: <code>${escapeHtml(fn)}</code></h2>
+<p class="practice-hint">Код выполняется прямо здесь, в твоём браузере. Первый запуск качает Python — примерно десять мегабайт, дальше из кэша.</p>
+<textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
+<div class="practice-actions">
+<button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
+<button type="button" class="nav-button" data-reset>Сбросить</button>
+${solution}
+</div>
+<p class="run-status" data-run-status></p>
+<div data-results></div>
+<pre class="solution" data-solution hidden></pre>
+<script type="application/json" data-exercise>${payload}</script>
+</section>`;
+}
+
 function renderProgressBar(): string {
   return `<div class="progress"><div class="progress-fill" data-progress-fill></div></div>`;
 }
@@ -139,10 +203,13 @@ export function renderStepPage(
     ? `<iframe class="visual" data-visual src="${escapeHtml(block.visualHref)}" sandbox="allow-scripts" loading="lazy" title="${escapeHtml(block.step.title)}"></iframe>`
     : "";
 
-  const practice =
-    block.practiceFn && (block.step.type === "code" || block.step.type === "recall")
-      ? `<p class="practice">Практика: функция <code>${escapeHtml(block.practiceFn)}</code>. Писать код — в локальном приложении курса.</p>`
-      : "";
+  const practice = renderPractice(block, options);
+  // Скрипт практики нужен только там, где есть редактор: на шаге без
+  // выложенного упражнения запускать нечего.
+  const hasEditor =
+    Boolean(options.exercise) &&
+    Boolean(block.practiceFn) &&
+    (block.step.type === "code" || block.step.type === "recall");
 
   const back = previous
     ? `<a class="nav-button" href="${stepPageUrl(options.basePath, model.slug, previous.step.id)}">Назад</a>`
@@ -203,7 +270,10 @@ ${onward}
     title: `${block.step.title} — ${model.title}`,
     basePath: options.basePath,
     body: page,
-    scripts: [PROGRESS_SCRIPT, QUIZ_SCRIPT, FRAME_SCRIPT],
+    // Скрипт практики подключается только там, где есть что запускать: на
+    // шаге с теорией ему нечего делать.
+    scripts: [PROGRESS_SCRIPT, QUIZ_SCRIPT, FRAME_SCRIPT, ...(hasEditor ? [EXERCISE_SCRIPT] : [])],
+    modules: hasEditor ? [`${options.basePath}/assets/editor.js`] : [],
   });
 }
 

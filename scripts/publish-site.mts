@@ -18,12 +18,43 @@ const REPO = process.env.SITE_REPO ?? "https://github.com/odiukov/ai-course-lab.
 const BRANCH = "gh-pages";
 const outDir = path.join(process.cwd(), "out");
 
+const CREDENTIALS = ["-c", "credential.helper=!gh auth git-credential"];
+// Сайт уезжает паком в десятки мегабайт, и на буфере по умолчанию (1 МБ)
+// HTTPS-пуш обрывается на «RPC failed; HTTP 400».
+const BUFFER = ["-c", "http.postBuffer=524288000"];
+
 function run(command: string, args: string[], cwd: string): string {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
+}
+
+/**
+ * Пытается взять за основу то, что уже опубликовано.
+ *
+ * Без этого каждая публикация — новая история с нуля, и на провод уходит весь
+ * сайт целиком: сотня мегабайт ради двух изменившихся страниц. С предком в
+ * основе git отправляет только разницу. Первая публикация предка не находит и
+ * честно уезжает целиком.
+ */
+function fetchPrevious(staging: string): boolean {
+  try {
+    run("git", [...CREDENTIALS, "fetch", "--depth=1", "-q", REPO, BRANCH], staging);
+    run("git", ["reset", "--hard", "-q", "FETCH_HEAD"], staging);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Убирает из каталога всё, кроме .git: содержимое приезжает из свежей сборки. */
+function clearWorktree(staging: string): void {
+  for (const entry of fs.readdirSync(staging)) {
+    if (entry === ".git") continue;
+    fs.rmSync(path.join(staging, entry), { recursive: true, force: true });
+  }
 }
 
 function main(): void {
@@ -34,9 +65,11 @@ function main(): void {
 
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "course-site-"));
   try {
+    run("git", ["init", "-q", "-b", BRANCH], staging);
+    const incremental = fetchPrevious(staging);
+    clearWorktree(staging);
     fs.cpSync(outDir, staging, { recursive: true });
 
-    run("git", ["init", "-q", "-b", BRANCH], staging);
     run("git", ["add", "-A"], staging);
     run(
       "git",
@@ -52,30 +85,19 @@ function main(): void {
       ],
       staging,
     );
-    // --force: ветка — артефакт сборки, а не журнал. История из одного коммита
-    // каждый раз.
-    //
-    // credential.helper задаётся флагом на одну команду, а не записывается в
-    // конфиг: публикация не должна менять настройки машины автора.
+    // --force: ветка — артефакт сборки, а не журнал, и переписывать её можно
+    // без сожалений. credential.helper задаётся флагом на одну команду, а не
+    // записывается в конфиг: публикация не должна менять настройки машины.
     run(
       "git",
-      [
-        "-c",
-        "credential.helper=!gh auth git-credential",
-        // Сайт уезжает одним паком в несколько мегабайт, и на буфере по
-        // умолчанию (1 МБ) HTTPS-пуш обрывается на «RPC failed; HTTP 400».
-        "-c",
-        "http.postBuffer=524288000",
-        "push",
-        "--force",
-        "--quiet",
-        REPO,
-        `HEAD:${BRANCH}`,
-      ],
+      [...CREDENTIALS, ...BUFFER, "push", "--force", "--quiet", REPO, `HEAD:${BRANCH}`],
       staging,
     );
 
-    console.log(`Опубликовано в ${REPO} (${BRANCH}).`);
+    console.log(
+      `Опубликовано в ${REPO} (${BRANCH})` +
+        (incremental ? " — отправлена только разница." : " — первая публикация, целиком."),
+    );
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }

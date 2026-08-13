@@ -6,9 +6,16 @@
 // Читает content/lessons на месте и ничего в рабочей копии не меняет: уроки
 // дописываются параллельно, и сборка обязана быть просто срезом того, что
 // лежит на диске сию секунду.
+import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
 import { withHeightReporter } from "../src/lib/api/visual-height.js";
+import {
+  exerciseFiles,
+  exerciseUrls,
+  findLessonExercise,
+  type ExerciseBundle,
+} from "../src/lib/site/exercise.js";
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { readStepsById } from "../src/lib/content/step-file.js";
 import { groupLessons, type CatalogLesson } from "../src/lib/site/catalog.js";
@@ -45,6 +52,43 @@ function prepareVisual(html: string): string {
   return withHeightReporter(withMeta);
 }
 
+/**
+ * Python для браузера — рядом с сайтом, а не с чужого CDN.
+ *
+ * Из пакета нужны только эти пять файлов: ядро, стандартная библиотека и
+ * список пакетов. Всё остальное в дистрибутиве — предсобранные numpy и прочие,
+ * которых упражнениям курса не требуется.
+ */
+function copyPyodide(): void {
+  const from = path.join(root, "node_modules", "pyodide");
+  const to = path.join(outDir, "assets", "pyodide");
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of [
+    "pyodide.js",
+    "pyodide.asm.js",
+    "pyodide.asm.mjs",
+    "pyodide.asm.wasm",
+    "python_stdlib.zip",
+    "pyodide-lock.json",
+  ]) {
+    const file = path.join(from, name);
+    if (fs.existsSync(file)) fs.copyFileSync(file, path.join(to, name));
+  }
+}
+
+/** Редактор кода одним файлом: CodeMirror собирается esbuild-ом. */
+async function buildEditor(): Promise<void> {
+  await build({
+    entryPoints: [path.join(root, "src", "site-editor", "editor.ts")],
+    outfile: path.join(outDir, "assets", "editor.js"),
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2019",
+    logLevel: "warning",
+  });
+}
+
 function copyKatexAssets(): void {
   const katexDir = path.join(root, "node_modules", "katex", "dist");
   fs.mkdirSync(path.join(outDir, "assets", "katex"), { recursive: true });
@@ -76,7 +120,7 @@ function lessonSlugs(): string[] {
     .sort();
 }
 
-function main(): void {
+async function main(): Promise<void> {
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
 
@@ -84,6 +128,7 @@ function main(): void {
   // Модели копятся первым проходом, страницы пишутся вторым: ссылка «следующий
   // урок» существует только после того, как известен порядок всех уроков.
   const models = new Map<string, ReturnType<typeof buildLessonModel>>();
+  const exercises = new Map<string, ExerciseBundle>();
   let renderedSteps = 0;
   let missingSteps = 0;
   let copiedVisuals = 0;
@@ -128,6 +173,17 @@ function main(): void {
 
     models.set(slug, model);
 
+    // Упражнение копируется целиком: заготовка, тесты и эталон. Тесты
+    // импортируют из файла все функции сразу, поэтому в браузере должен
+    // лежать весь файл, а не одна функция шага.
+    const exercise = findLessonExercise(sourceDir, slug);
+    if (exercise) {
+      exercises.set(slug, exercise);
+      for (const file of exerciseFiles(exercise)) {
+        write(file.to, fs.readFileSync(file.from, "utf8"));
+      }
+    }
+
     renderedSteps += model.writtenCount;
     missingSteps += model.plannedCount - model.writtenCount;
     catalog.push({
@@ -151,6 +207,11 @@ function main(): void {
     const after = ordered[position + 1];
     const nextLesson = after ? { slug: after.slug, title: after.title } : null;
 
+    const bundle = exercises.get(lesson.slug);
+    const exercise = bundle
+      ? { slug: bundle.slug, functions: bundle.functions, urls: exerciseUrls(basePath, bundle) }
+      : null;
+
     // Страница урока — оглавление; каждый шаг живёт своей страницей, чтобы
     // урок читался порциями, а не одним полотном.
     write(
@@ -160,23 +221,27 @@ function main(): void {
     model.blocks.forEach((block, index) => {
       write(
         path.join("lesson", lesson.slug, block.step.id, "index.html"),
-        renderStepPage(model, index, { basePath, nextLesson }),
+        renderStepPage(model, index, { basePath, nextLesson, exercise }),
       );
     });
   });
 
   write("index.html", renderIndexPage(phases, { basePath }));
   write("assets/site.css", buildSiteCss());
+  write("assets/harness.py", fs.readFileSync(path.join(root, "src", "site-python", "harness.py"), "utf8"));
   // Без .nojekyll Pages прогоняет вывод через Jekyll и выбрасывает всё, что
   // начинается с подчёркивания.
   write(".nojekyll", "");
   copyKatexAssets();
+  copyPyodide();
+  await buildEditor();
 
   console.log(
     `Собрано: уроков ${catalog.length}, шагов ${renderedSteps}, ` +
-      `не написано ${missingSteps}, схем ${copiedVisuals}` +
+      `не написано ${missingSteps}, схем ${copiedVisuals}, ` +
+      `упражнений ${exercises.size}` +
       (skippedLessons > 0 ? `, пропущено уроков ${skippedLessons}` : ""),
   );
 }
 
-main();
+await main();

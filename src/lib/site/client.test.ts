@@ -161,6 +161,75 @@ describe("страница шага", () => {
   });
 });
 
+describe("практика", () => {
+  const exercisePlan: StepMeta[] = [
+    { id: "001-code", type: "code", title: "Пишем magnitude", exercise_fn: "magnitude" },
+  ];
+  const exerciseModel = buildLessonModel({
+    slug: "lesson-a",
+    title: "Урок",
+    steps: exercisePlan,
+    written: {
+      "001-code": { ...exercisePlan[0], body: "" } as Step,
+    },
+    visualHrefByStepId: {},
+  });
+  const panel = {
+    slug: "p01-l01-linear-algebra",
+    functions: ["magnitude", "dot"],
+    urls: {
+      template: "/base/exercise/p01-l01-linear-algebra/template.py",
+      test: "/base/exercise/p01-l01-linear-algebra/test.py",
+      solution: "/base/exercise/p01-l01-linear-algebra/solution.py",
+    },
+  };
+  const template = "def magnitude(v):\n    raise NotImplementedError\n";
+
+  /** Открывает шаг практики, подменив загрузку файлов упражнения. */
+  async function openPractice(saved?: string): Promise<Window> {
+    const window = new Window({ url: "https://example.test/base/lesson/lesson-a/001-code/" });
+    if (saved !== undefined) {
+      window.localStorage.setItem(`course-exercise:${panel.slug}`, saved);
+    }
+    window.fetch = (async () =>
+      ({ ok: true, text: async () => template })) as unknown as typeof window.fetch;
+
+    const html = renderStepPage(exerciseModel, 0, { basePath: "/base", exercise: panel });
+    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    for (const script of [...window.document.body.querySelectorAll("script")]) {
+      if (script.getAttribute("type") === "application/json") continue;
+      window.eval(script.textContent ?? "");
+    }
+
+    // Заготовка приезжает через промис — даём ему завершиться.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return window;
+  }
+
+  it("кладёт в редактор заготовку упражнения", async () => {
+    const window = await openPractice();
+
+    expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toBe(template);
+  });
+
+  it("возвращает написанный раньше код", async () => {
+    // Код живёт в браузере: вернулся через неделю — он на месте.
+    const window = await openPractice("def magnitude(v):\n    return 1\n");
+
+    expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toContain("return 1");
+  });
+
+  it("сохраняет код при вводе", async () => {
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitude(v):\n    return 2\n";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    expect(window.localStorage.getItem(`course-exercise:${panel.slug}`)).toContain("return 2");
+  });
+});
+
 describe("оглавление урока", () => {
   it("считает прочитанное и ведёт «Продолжить» на первый непрочитанный шаг", () => {
     const window = open(renderLessonIndexPage(model, { basePath: "/base" }), ["001-a"]);

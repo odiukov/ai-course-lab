@@ -129,6 +129,62 @@ describe("renderStepPage", () => {
     expect(html).toContain('loading="lazy"');
   });
 
+  it("gives a code step an editor, the exercise files and the step's function", () => {
+    const codePlan: StepMeta[] = [
+      { id: "001-code", type: "code", title: "Практика", exercise_fn: "magnitude" },
+    ];
+    const html = renderStepPage(
+      buildLessonModel({
+        slug: "lesson-a",
+        title: "Урок",
+        steps: codePlan,
+        written: { "001-code": step(codePlan[0]) },
+        visualHrefByStepId: {},
+      }),
+      0,
+      {
+        basePath: "/base",
+        exercise: {
+          slug: "p01-l01-x",
+          functions: ["magnitude", "dot"],
+          urls: {
+            template: "/base/exercise/p01-l01-x/template.py",
+            test: "/base/exercise/p01-l01-x/test.py",
+            solution: null,
+          },
+        },
+      },
+    );
+
+    expect(html).toContain("data-code");
+    expect(html).toContain("data-run");
+    expect(html).toContain('"fn":"magnitude"');
+    expect(html).toContain('"functions":["magnitude","dot"]');
+    expect(html).toContain("/base/assets/pyodide/");
+    // Эталона у этого упражнения нет — и кнопки быть не должно.
+    expect(html).not.toContain("<button type=\"button\" class=\"nav-button\" data-show-solution>");
+  });
+
+  it("says so when the lesson has no exercise", () => {
+    const codePlan: StepMeta[] = [
+      { id: "001-code", type: "code", title: "Практика", exercise_fn: "magnitude" },
+    ];
+    const html = renderStepPage(
+      buildLessonModel({
+        slug: "lesson-a",
+        title: "Урок",
+        steps: codePlan,
+        written: { "001-code": step(codePlan[0]) },
+        visualHrefByStepId: {},
+      }),
+      0,
+      { basePath: "/base" },
+    );
+
+    expect(html).toContain("Упражнение к этому уроку не выложено");
+    expect(html).not.toContain("data-run");
+  });
+
   it("escapes the step title", () => {
     const html = renderStepPage(
       model({ "001-a": step({ ...plan[0], title: "<script>alert(1)</script>" }) }),
