@@ -108,7 +108,7 @@ M1001 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlis
 
 <section class="practice-panel">
 <h2 class="practice-title">Практика: <code>magnitude</code></h2>
-<p class="practice-hint">Код выполняется прямо здесь, в твоём браузере. Первый запуск качает Python — примерно десять мегабайт, дальше из кэша.</p>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
 <textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
 <div class="practice-actions">
 <button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
@@ -319,10 +319,52 @@ window.addEventListener("message", function (event) {
 
   var storageKey = "course-exercise:" + data.slug;
   var template = "";
+  // Полный файл упражнения. В редакторе видна только функция шага, но на
+  // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
+  // сразу, и файл с одной функцией не загрузился бы вовсе.
+  var full = "";
+
+  /**
+   * Делит файл на «до функции», саму функцию и «после».
+   *
+   * Границы ищутся по тексту, а не по номерам строк из сборки: файл живёт в
+   * браузере и уже мог измениться — человек дописал функцию выше, и любые
+   * заранее посчитанные номера уехали бы.
+   */
+  function split(source, fn) {
+    var lines = source.split("\n");
+    var head = new RegExp("^(async\\s+)?def\\s+" + fn + "\\s*\\(");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (head.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      var line = lines[j];
+      // Первая строка, начатая с левого края, — уже следующее определение.
+      if (line !== "" && line[0] !== " " && line[0] !== "\t") { end = j; break; }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+
+    return {
+      before: lines.slice(0, start).join("\n"),
+      code: lines.slice(start, end).join("\n"),
+      after: lines.slice(end).join("\n"),
+    };
+  }
+
+  function join(source, fn, code) {
+    var parts = split(source, fn);
+    if (!parts) return source;
+    return [parts.before, code, parts.after].join("\n");
+  }
 
   function save() {
+    full = join(full, data.fn, area.value);
     try {
-      localStorage.setItem(storageKey, area.value);
+      localStorage.setItem(storageKey, full);
     } catch (error) {
       // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
     }
@@ -350,7 +392,12 @@ window.addEventListener("message", function (event) {
     } catch (error) {
       saved = null;
     }
-    setCode(saved === null ? source : saved);
+    full = saved === null ? source : saved;
+
+    var parts = split(full, data.fn);
+    // Функции шага в файле нет — показываем файл целиком, это честнее пустого
+    // редактора.
+    setCode(parts ? parts.code : full);
     if (window.CourseEditor) window.CourseEditor.mount(area);
   });
 
@@ -359,8 +406,11 @@ window.addEventListener("message", function (event) {
   if (resetButton) {
     resetButton.addEventListener("click", function () {
       if (!template) return;
-      if (!window.confirm("Вернуть заготовку? Написанный код пропадёт.")) return;
-      setCode(template);
+      if (!window.confirm("Вернуть заготовку этой функции? Написанный код пропадёт.")) return;
+      // Сбрасывается только функция шага: остальное в файле человек писал на
+      // других шагах, и терять это из-за одной кнопки он не подписывался.
+      var fresh = split(template, data.fn);
+      setCode(fresh ? fresh.code : template);
       save();
     });
   }
@@ -449,9 +499,15 @@ window.addEventListener("message", function (event) {
     loadPyodideOnce()
       .then(function (pyodide) {
         status.textContent = "Гоняю тесты…";
+        // В Python уезжает файл целиком, а не то, что в редакторе: тесты
+        // импортируют из него все имена упражнения разом.
         pyodide.globals.set(
           "PAYLOAD",
-          JSON.stringify({ code: area.value, fn: data.fn, functions: data.functions })
+          JSON.stringify({
+            code: join(full, data.fn, area.value),
+            fn: data.fn,
+            functions: data.functions,
+          })
         );
         return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
       })
