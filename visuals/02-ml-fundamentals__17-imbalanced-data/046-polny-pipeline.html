@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Честный пайплайн несбалансированной классификации</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#f7f9fc;
+  --ink:#172033;
+  --muted:#526078;
+  --line:#64748b;
+  --train-bg:#eaf8f1;
+  --train-stroke:#15966a;
+  --valid-bg:#edf3ff;
+  --valid-stroke:#3b6fd8;
+  --test-bg:#fff4e5;
+  --test-stroke:#d97706;
+  --data-bg:#f2edff;
+  --data-stroke:#7656c7;
+  --final-bg:#fff0f3;
+  --final-stroke:#c53b5c;
+  --plain:#ffffff;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#111827;
+    --ink:#f3f6fb;
+    --muted:#b8c2d4;
+    --line:#94a3b8;
+    --train-bg:#12372e;
+    --train-stroke:#55d6a5;
+    --valid-bg:#172d55;
+    --valid-stroke:#7da8ff;
+    --test-bg:#432d12;
+    --test-stroke:#f2b45f;
+    --data-bg:#302653;
+    --data-stroke:#b9a1ff;
+    --final-bg:#48202b;
+    --final-stroke:#ff91aa;
+    --plain:#182131;
+  }
+}
+html,body{background:var(--page);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:20px}
+svg{display:block;width:100%;height:auto;max-height:440px;background:var(--page)}
+.lane{stroke-width:1.5;vector-effect:non-scaling-stroke}
+.train-lane{fill:var(--train-bg);stroke:var(--train-stroke)}
+.valid-lane{fill:var(--valid-bg);stroke:var(--valid-stroke)}
+.test-lane{fill:var(--test-bg);stroke:var(--test-stroke)}
+.node{stroke-width:2;vector-effect:non-scaling-stroke}
+.data-node{fill:var(--data-bg);stroke:var(--data-stroke)}
+.split-node{fill:var(--plain);stroke:var(--line)}
+.train-node{fill:var(--plain);stroke:var(--train-stroke)}
+.valid-node{fill:var(--plain);stroke:var(--valid-stroke)}
+.test-node{fill:var(--plain);stroke:var(--test-stroke)}
+.final-node{fill:var(--final-bg);stroke:var(--final-stroke)}
+.monitor-node{fill:var(--plain);stroke:var(--line)}
+.arrow{fill:none;stroke:var(--line);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.arrow-head{fill:var(--line)}
+.node-text{fill:var(--ink);font-size:15px;font-weight:bold}
+.sub-text{fill:var(--muted);font-size:13px}
+.lane-title{fill:var(--ink);font-size:15px;font-weight:bold}
+.arrow-label{fill:var(--muted);font-size:13px}
+.note{fill:var(--muted);font-size:13px}
+.metric{fill:var(--final-stroke);font-size:15px;font-weight:bold}
+#error{font-size:15px;color:var(--ink)}
+</style>
+</head>
+<body>
+<h1 id="diagram-title">Честный пайплайн несбалансированной классификации</h1>
+<svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="diagram-title"></svg>
+<p id="error" hidden>Схема должна была показать: SMOTE и веса классов применяются только к train, порог выбирается на validation, а untouched test используется один раз для финального замера F1, AUPRC и MCC.</p>
+<script>
+const DATA=[{
+  origin:{x:0,y:0},
+  scale:{x:1,y:1},
+  zero:0,
+  divide:2,
+  radius:12,
+  arrow:{length:10,wing:6},
+  lanes:[
+    {x:390,y:28,w:775,h:122,kind:"train-lane"},
+    {x:390,y:166,w:775,h:136,kind:"valid-lane"},
+    {x:390,y:318,w:775,h:78,kind:"test-lane"}
+  ],
+  nodes:[
+    {x:28,y:72,w:140,h:66,kind:"data-node",lines:[
+      {t:"Датасет",dy:-10,kind:"node-text"},
+      {t:"редкий класс — 5%",dy:12,kind:"sub-text"}
+    ]},
+    {x:205,y:72,w:150,h:66,kind:"split-node",lines:[
+      {t:"Разделение",dy:-10,kind:"node-text"},
+      {t:"до экспериментов",dy:12,kind:"sub-text"}
+    ]},
+    {x:420,y:76,w:125,h:58,kind:"train-node",lines:[
+      {t:"SMOTE",dy:-9,kind:"node-text"},
+      {t:"только train",dy:11,kind:"sub-text"}
+    ]},
+    {x:575,y:76,w:125,h:58,kind:"train-node",lines:[
+      {t:"Веса",dy:-9,kind:"node-text"},
+      {t:"классов",dy:11,kind:"sub-text"}
+    ]},
+    {x:730,y:76,w:135,h:58,kind:"train-node",lines:[
+      {t:"Обучение",dy:-9,kind:"node-text"},
+      {t:"модели",dy:11,kind:"sub-text"}
+    ]},
+    {x:420,y:202,w:125,h:58,kind:"valid-node",lines:[
+      {t:"VALIDATION",dy:-9,kind:"node-text"},
+      {t:"без SMOTE",dy:11,kind:"sub-text"}
+    ]},
+    {x:585,y:202,w:135,h:58,kind:"valid-node",lines:[
+      {t:"Настройка",dy:-9,kind:"node-text"},
+      {t:"порога",dy:11,kind:"sub-text"}
+    ]},
+    {x:760,y:202,w:150,h:58,kind:"valid-node",lines:[
+      {t:"Пайплайн",dy:-9,kind:"node-text"},
+      {t:"выбран",dy:11,kind:"sub-text"}
+    ]},
+    {x:420,y:330,w:125,h:54,kind:"test-node",lines:[
+      {t:"TEST",dy:-8,kind:"node-text"},
+      {t:"untouched",dy:11,kind:"sub-text"}
+    ]},
+    {x:590,y:330,w:150,h:54,kind:"test-node",lines:[
+      {t:"Открыть",dy:-8,kind:"node-text"},
+      {t:"только в финале",dy:11,kind:"sub-text"}
+    ]},
+    {x:790,y:326,w:350,h:62,kind:"final-node",lines:[
+      {t:"Единственный финальный замер",dy:-12,kind:"node-text"},
+      {t:"F1   •   AUPRC   •   MCC",dy:14,kind:"metric"}
+    ]},
+    {x:790,y:408,w:350,h:24,kind:"monitor-node",lines:[
+      {t:"После запуска: мониторинг доли редкого класса и качества",dy:0,kind:"sub-text"}
+    ]}
+  ],
+  labels:[
+    {t:"TRAIN · меняем данные и обучение",x:410,y:50,anchor:"start",kind:"lane-title"},
+    {t:"VALIDATION · выбираем стратегию и порог",x:410,y:187,anchor:"start",kind:"lane-title"},
+    {t:"Слабый результат → изменить стратегию и снова проверить на validation",x:585,y:283,anchor:"start",kind:"note"},
+    {t:"TEST · запечатан до финала",x:410,y:318,anchor:"start",kind:"lane-title"}
+  ],
+  arrows:[
+    {points:[{x:168,y:105},{x:205,y:105}],dir:"right"},
+    {points:[{x:355,y:105},{x:390,y:105},{x:420,y:105}],dir:"right"},
+    {points:[{x:355,y:105},{x:375,y:105},{x:375,y:231},{x:420,y:231}],dir:"right"},
+    {points:[{x:355,y:105},{x:365,y:105},{x:365,y:357},{x:420,y:357}],dir:"right"},
+    {points:[{x:545,y:105},{x:575,y:105}],dir:"right"},
+    {points:[{x:700,y:105},{x:730,y:105}],dir:"right"},
+    {points:[{x:545,y:231},{x:585,y:231}],dir:"right"},
+    {points:[{x:720,y:231},{x:760,y:231}],dir:"right"},
+    {points:[{x:797,y:134},{x:797,y:178},{x:652,y:178},{x:652,y:202}],dir:"down",
+      label:{t:"прогнозы модели",x:808,y:164,anchor:"start"}},
+    {points:[{x:835,y:260},{x:835,y:307},{x:665,y:307},{x:665,y:330}],dir:"down",
+      label:{t:"после выбора пайплайна",x:845,y:294,anchor:"start"}},
+    {points:[{x:545,y:357},{x:590,y:357}],dir:"right"},
+    {points:[{x:740,y:357},{x:790,y:357}],dir:"right",
+      label:{t:"один раз",x:765,y:342,anchor:"middle"}},
+    {points:[{x:965,y:388},{x:965,y:408}],dir:"down"}
+  ]
+}];
+
+const [D]=DATA;
+const origin=Object.freeze(D.origin);
+const scale=Object.freeze(D.scale);
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("diagram");
+const fallback=document.getElementById("error");
+
+function make(tag,attrs,kind){
+  const element=document.createElementNS(NS,tag);
+  for(const [name,value] of Object.entries(attrs)) element.setAttribute(name,String(value));
+  if(kind) element.setAttribute("class",kind);
+  return element;
+}
+
+function addText(parent,item,kind){
+  const text=make("text",{
+    x:sx(item.x),
+    y:sy(item.y),
+    "text-anchor":item.anchor||"middle",
+    "dominant-baseline":"middle"
+  },kind||item.kind);
+  text.textContent=item.t;
+  parent.appendChild(text);
+}
+
+function arrowHead(tip,dir){
+  const a=D.arrow;
+  if(dir==="right"){
+    return [
+      {x:tip.x,y:tip.y},
+      {x:tip.x-a.length,y:tip.y-a.wing},
+      {x:tip.x-a.length,y:tip.y+a.wing}
+    ];
+  }
+  return [
+    {x:tip.x,y:tip.y},
+    {x:tip.x-a.wing,y:tip.y-a.length},
+    {x:tip.x+a.wing,y:tip.y-a.length}
+  ];
+}
+
+try{
+  const scene=make("g",{});
+  const laneLayer=make("g",{});
+  const arrowLayer=make("g",{});
+  const nodeLayer=make("g",{});
+  const labelLayer=make("g",{});
+
+  for(const lane of D.lanes){
+    laneLayer.appendChild(make("rect",{
+      x:sx(lane.x),
+      y:sy(lane.y),
+      width:sx(lane.x+lane.w)-sx(lane.x),
+      height:sy(lane.y+lane.h)-sy(lane.y),
+      rx:sx(D.radius)-sx(D.zero),
+      ry:sy(D.radius)-sy(D.zero)
+    },"lane "+lane.kind));
+  }
+
+  for(const arrow of D.arrows){
+    const points=arrow.points.map(point=>sx(point.x)+","+sy(point.y)).join(" ");
+    arrowLayer.appendChild(make("polyline",{points},"arrow"));
+    let tip;
+    for(const point of arrow.points) tip=point;
+    const head=arrowHead(tip,arrow.dir)
+      .map(point=>sx(point.x)+","+sy(point.y)).join(" ");
+    arrowLayer.appendChild(make("polygon",{points:head},"arrow-head"));
+    if(arrow.label) addText(labelLayer,arrow.label,"arrow-label");
+  }
+
+  for(const node of D.nodes){
+    const group=make("g",{});
+    group.appendChild(make("rect",{
+      x:sx(node.x),
+      y:sy(node.y),
+      width:sx(node.x+node.w)-sx(node.x),
+      height:sy(node.y+node.h)-sy(node.y),
+      rx:sx(D.radius)-sx(D.zero),
+      ry:sy(D.radius)-sy(D.zero)
+    },"node "+node.kind));
+
+    for(const line of node.lines){
+      addText(group,{
+        t:line.t,
+        x:node.x+node.w/D.divide,
+        y:node.y+node.h/D.divide+line.dy,
+        anchor:"middle"
+      },line.kind);
+    }
+    nodeLayer.appendChild(group);
+  }
+
+  for(const label of D.labels) addText(labelLayer,label,label.kind);
+
+  scene.appendChild(laneLayer);
+  scene.appendChild(arrowLayer);
+  scene.appendChild(nodeLayer);
+  scene.appendChild(labelLayer);
+  svg.appendChild(scene);
+}catch(error){
+  svg.hidden=true;
+  fallback.hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

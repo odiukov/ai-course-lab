@@ -1,0 +1,192 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Два выживших направления</title>
+<style>
+  :root{
+    --bg:#fbfbf8; --ink:#1a1a1a; --muted:#6b7280; --axis:#a8a8a8;
+    --blue:#2563eb; --orange:#dd6206; --eig:#8b5cf6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --ink:#e9eaec; --muted:#9aa1ab; --axis:#4b5058;
+      --blue:#79a6ff; --orange:#ffa851; --eig:#b79bff;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:560px;margin:0 auto;padding:8px 10px 10px}
+  h1{font-size:14px;font-weight:600;margin:0 0 4px;text-align:center}
+  h1 span{color:var(--muted);font-weight:400}
+  svg{display:block;width:100%;height:auto;max-height:430px;margin:0 auto}
+  .legend{margin:6px 2px 0;color:var(--muted);font-size:12.5px}
+  .legend div{display:flex;align-items:center;gap:7px;margin-top:3px}
+  .sw{flex:0 0 22px;height:0;border-top-width:2.5px;border-top-style:solid}
+  .sw.b{border-color:var(--blue)} .sw.o{border-color:var(--orange)}
+  .sw.e{border-color:var(--eig);border-top-style:dashed}
+  .fail{display:none;padding:10px;color:var(--ink);font-size:13px}
+  text{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    fill:var(--ink)}
+  text.dim{fill:var(--muted);font-size:12px}
+</style>
+<div class="wrap">
+  <h1>A = [[2, 1], [1, 2]] <span>— два направления, которые не поехали</span></h1>
+  <svg id="fig" viewBox="0 0 470 410" role="img"
+       aria-label="Синие векторы по кругу и оранжевые после умножения на A"></svg>
+  <div class="fail" id="fail">
+    Схема должна показывать: A = [[2, 1], [1, 2]] действует на векторы, разбросанные по кругу.
+    Почти каждый вектор меняет направление. Направление [1, 1] растянуто втрое (λ = 3),
+    направление [1, −1] не изменилось совсем (λ = 1).
+  </div>
+  <div class="legend">
+    <div><i class="sw b"></i>исходный вектор v</div>
+    <div><i class="sw o"></i>A·v — тот же вектор после умножения на матрицу</div>
+    <div><i class="sw e"></i>собственные направления: [1, 1] — втрое (λ = 3), [1, −1] — без изменений (λ = 1)</div>
+  </div>
+</div>
+<script>
+(function(){
+try{
+  /* ---------- данные схемы ---------- */
+  var A     = [[2,1],[1,2]];        // матрица из текста шага
+  var R     = 1.4;                  // радиус круга исходных векторов
+  var DIRS  = [0,30,60,90,120,150,180,210,240,270,300,330]; // углы, градусы
+  var AXIS  = 3.6;                  // длина полуоси
+  var DIAG  = 3.4;                  // длина пунктирной собственной прямой
+  var TICKS = [1,2,3];
+  var ARC   = 1.05;                 // радиус дуги поворота
+  var PICK  = 90;                   // угол «произвольного» вектора v
+
+  /* ---------- один origin, один scale, одна пара sx/sy ---------- */
+  var scale  = 50;
+  var origin = {x:215, y:205};
+  function sx(x){ return origin.x + x*scale; }
+  function sy(y){ return origin.y - y*scale; }
+  function P(v){ return [sx(v[0]), sy(v[1])]; }   // единственная точка входа
+
+  var svg = document.getElementById('fig');
+  var NS  = 'http://www.w3.org/2000/svg';
+  function add(tag, at, parent){
+    var e = document.createElementNS(NS, tag);
+    for(var k in at) e.setAttribute(k, at[k]);
+    (parent||svg).appendChild(e); return e;
+  }
+  function seg(a, b, at){
+    var p = P(a), q = P(b);
+    at.x1=p[0]; at.y1=p[1]; at.x2=q[0]; at.y2=q[1];
+    return add('line', at);
+  }
+  function label(pt, dx, dy, anchor, txt, cls){
+    var p = P(pt);
+    var t = add('text', {x:p[0]+dx, y:p[1]+dy, 'text-anchor':anchor});
+    if(cls) t.setAttribute('class', cls);
+    t.textContent = txt; return t;
+  }
+  /* стрелка: линия по P(), наконечник строится из тех же пиксельных точек */
+  function arrow(tail, tip, color, w){
+    seg(tail, tip, {stroke:color, 'stroke-width':w, 'stroke-linecap':'round'});
+    var a = P(tail), b = P(tip);
+    var ux = b[0]-a[0], uy = b[1]-a[1];
+    var L  = Math.sqrt(ux*ux + uy*uy) || 1;
+    ux/=L; uy/=L;
+    var HL = 9, HW = 4.2;                     // размер наконечника, пиксели
+    var bx = b[0]-ux*HL, by = b[1]-uy*HL;
+    add('polygon', {fill:color, points:
+      b[0]+','+b[1]+' '+
+      (bx-uy*HW)+','+(by+ux*HW)+' '+
+      (bx+uy*HW)+','+(by-ux*HW)});
+  }
+  function mul(m, v){ return [m[0][0]*v[0]+m[0][1]*v[1], m[1][0]*v[0]+m[1][1]*v[1]]; }
+  function polar(deg, r){
+    var t = deg*Math.PI/180;
+    return [r*Math.cos(t), r*Math.sin(t)];
+  }
+
+  var CB = 'var(--blue)', CO = 'var(--orange)', CE = 'var(--eig)', CA = 'var(--axis)';
+
+  /* ---------- оси и засечки ---------- */
+  seg([-AXIS,0], [AXIS,0], {stroke:CA, 'stroke-width':1});
+  seg([0,-AXIS], [0,AXIS], {stroke:CA, 'stroke-width':1});
+  TICKS.forEach(function(t){
+    [t,-t].forEach(function(k){
+      var px = P([k,0]), py = P([0,k]);
+      add('line', {x1:px[0], y1:px[1]-4, x2:px[0], y2:px[1]+4, stroke:CA, 'stroke-width':1});
+      add('line', {x1:py[0]-4, y1:py[1], x2:py[0]+4, y2:py[1], stroke:CA, 'stroke-width':1});
+    });
+  });
+  label([AXIS,0], 10, 4, 'start', 'x', 'dim');
+  label([0,AXIS], 0, -8, 'middle', 'y', 'dim');
+
+  /* ---------- пунктирные собственные прямые ---------- */
+  seg([-DIAG,-DIAG], [DIAG,DIAG], {stroke:CE, 'stroke-width':1.4, 'stroke-dasharray':'6 5'});
+  seg([-DIAG, DIAG], [DIAG,-DIAG], {stroke:CE, 'stroke-width':1.4, 'stroke-dasharray':'6 5'});
+
+  /* ---------- круг векторов: синие, затем оранжевые ---------- */
+  var pairs = DIRS.map(function(d){ var v = polar(d, R); return [v, mul(A, v)]; });
+  pairs.forEach(function(p){ arrow([0,0], p[0], CB, 1.8); });
+  pairs.forEach(function(p){ arrow([0,0], p[1], CO, 1.8); });
+
+  /* ---------- дуга: куда уехал произвольный вектор ---------- */
+  var v0 = polar(PICK, R), v1 = mul(A, v0);
+  var a0 = Math.atan2(v0[1], v0[0]), a1 = Math.atan2(v1[1], v1[0]);
+  var d  = '';
+  for(var i=0; i<=16; i++){
+    var q = P(polar((a0 + (a1-a0)*i/16)*180/Math.PI, ARC));
+    d += (i ? ' L' : 'M') + q[0] + ' ' + q[1];
+  }
+  add('path', {d:d, fill:'none', stroke:CA, 'stroke-width':1.2, 'stroke-dasharray':'2 4'});
+
+  /* ---------- собственное направление [1, 1]: втрое ---------- */
+  arrow([0,0], [1,1], CB, 2.6);
+  arrow([0,0], [3,3], CO, 2.6);
+  label([-DIAG+0.1,-DIAG+0.1], -8, 16, 'end', 'λ = 3');
+
+  /* ---------- собственное направление [1, -1]: без изменений ---------- */
+  arrow([0,0], [1,-1], CB, 4.2);
+  arrow([0,0], [1,-1], CO, 1.8);
+  label([2.6,-2.6], 12, 14, 'start', 'λ = 1');
+
+  /* ---------- подписи произвольной пары (у хвоста / сбоку) ---------- */
+  label(v0, -10, -4, 'end',  'v');
+  label(v1,  10, -6, 'start', 'A·v');
+}catch(e){
+  document.getElementById('fig').style.display = 'none';
+  document.getElementById('fail').style.display = 'block';
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Раскладка float32 по битам</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6673;
+    --sign:#c2410c; --exp:#1d4ed8; --man:#047857;
+    --signbg:#fde8dc; --expbg:#dbe6fe; --manbg:#d6f3e6;
+    --line:#98a2b3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e7edf5; --muted:#98a7b8;
+      --sign:#ff9d63; --exp:#84aaff; --man:#54d6a4;
+      --signbg:#3a2317; --expbg:#1b2b52; --manbg:#123a2c;
+      --line:#5b6a7c;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .wrap{max-width:100%;padding:8px 4px 10px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;letter-spacing:.01em;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);padding:6px 2px;}
+  text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Раскладка float32 по битам</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var FIELDS = [
+      {id:'s', start:0,  bits:1,  name:'знак',      short:'s', color:'var(--sign)', bg:'var(--signbg)'},
+      {id:'e', start:1,  bits:8,  name:'экспонента',short:'E', color:'var(--exp)',  bg:'var(--expbg)'},
+      {id:'m', start:9,  bits:23, name:'мантисса',  short:'f', color:'var(--man)',  bg:'var(--manbg)'}
+    ];
+    var TOTAL = 32;
+
+    // ---- единый origin + scale ----
+    var ORIGIN = {x:70, y:150};   // px: sx(0), sy(0) = левый край полоски, её верх
+    var SCALE  = {x:20, y:20};    // px на 1 бит по X, на 1 условную единицу по Y
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y + y * SCALE.y; }
+
+    // ---- литералы: холст и отступы подписей ----
+    var VB_W = 800, VB_H = 300;
+    var PAD = 8, PAD2 = 16, STROKE = 1.5, FS = 13, FS_SM = 11.5, FS_BIG = 15;
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,a){
+      var t=el('text',{x:x,y:y,'text-anchor':a.anchor||'middle',
+        'font-size':a.size||FS,'fill':a.fill||'var(--fg)',
+        'dominant-baseline':a.baseline||'auto'});
+      if(a.weight)t.setAttribute('font-weight',a.weight);
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Полоска из 32 бит float32: 1 бит знака, 8 бит экспоненты, 23 бита мантиссы'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    var defs = el('defs',{});
+    var mk = el('marker',{id:'ah',markerWidth:'7',markerHeight:'7',refX:'6',refY:'3',orient:'auto'});
+    mk.appendChild(el('path',{d:'M0,0 L6,3 L0,6 z',fill:'var(--line)'}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    var BAR_TOP = 0, BAR_BOT = 1;      // единицы по Y
+
+    // ---- поля полоски ----
+    FIELDS.forEach(function(f){
+      var x0=sx(f.start), x1=sx(f.start+f.bits);
+      svg.appendChild(el('rect',{x:x0,y:sy(BAR_TOP),width:x1-x0,height:sy(BAR_BOT)-sy(BAR_TOP),
+        fill:f.bg,stroke:f.color,'stroke-width':STROKE}));
+      // короткая метка внутри
+      svg.appendChild(txt((x0+x1)/2, sy(BAR_TOP)+(sy(BAR_BOT)-sy(BAR_TOP))/2, f.short,
+        {size:FS,fill:f.color,weight:'600',baseline:'middle'}));
+    });
+
+    // ---- разделители битов ----
+    for(var i=1;i<TOTAL;i++){
+      svg.appendChild(el('line',{x1:sx(i),y1:sy(BAR_TOP),x2:sx(i),y2:sy(BAR_BOT),
+        stroke:'var(--line)','stroke-width':0.5,'stroke-opacity':'0.55'}));
+    }
+
+    // ---- скобки снизу + подписи полей (число бит) ----
+    FIELDS.forEach(function(f){
+      var x0=sx(f.start), x1=sx(f.start+f.bits), xc=(x0+x1)/2;
+      var yb=sy(BAR_BOT+0.35), yt=sy(BAR_BOT);
+      var d='M'+x0+','+yt+' L'+x0+','+yb+' L'+x1+','+yb+' L'+x1+','+yt;
+      svg.appendChild(el('path',{d:d,fill:'none',stroke:f.color,'stroke-width':STROKE}));
+      svg.appendChild(txt(xc, yb+PAD2, f.bits+' бит', {size:FS,fill:f.color,weight:'600'}));
+      svg.appendChild(txt(xc, yb+PAD2+PAD2, f.name, {size:FS_SM,fill:'var(--muted)'}));
+    });
+
+    // ---- нумерация битов сверху: 31 слева, 0 справа ----
+    [{b:0,lab:'31'},{b:1,lab:'30'},{b:8,lab:'23'},{b:9,lab:'22'},{b:31,lab:'0'}].forEach(function(p){
+      svg.appendChild(txt(sx(p.b)+SCALE.x/2, sy(BAR_TOP)-PAD, p.lab,{size:FS_SM,fill:'var(--muted)'}));
+    });
+    svg.appendChild(txt(sx(0), sy(BAR_TOP)-PAD-PAD2, 'номер бита',{anchor:'start',size:FS_SM,fill:'var(--muted)'}));
+
+    // ---- итог: 32 бита (стрелка над всей полоской) ----
+    var yAll = sy(BAR_TOP-1.5);
+    svg.appendChild(el('line',{x1:sx(0),y1:yAll,x2:sx(TOTAL),y2:yAll,
+      stroke:'var(--line)','stroke-width':STROKE,'marker-end':'url(#ah)'}));
+    svg.appendChild(el('line',{x1:sx(0),y1:yAll-SCALE.y*0.2,x2:sx(0),y2:yAll+SCALE.y*0.2,
+      stroke:'var(--line)','stroke-width':STROKE}));
+    svg.appendChild(txt(sx(0)+PAD, yAll-PAD, 'всего 32 бита',{anchor:'start',size:FS,fill:'var(--muted)'}));
+
+    // ---- формула под подписями полей ----
+    var yF = sy(BAR_BOT+3.4);
+    var fx = sx(0);
+    var frag = [
+      {t:'значение = ', c:'var(--fg)'},
+      {t:'(−1)', c:'var(--sign)'}, {t:'s', c:'var(--sign)', sup:true},
+      {t:' · 2', c:'var(--exp)'}, {t:'E−127', c:'var(--exp)', sup:true},
+      {t:' · 1.', c:'var(--man)'}, {t:'f', c:'var(--man)'}
+    ];
+    var fg = el('text',{x:fx,y:yF,'text-anchor':'start','font-size':FS_BIG,'font-weight':'600'});
+    frag.forEach(function(p){
+      var ts=el('tspan',{fill:p.c});
+      if(p.sup){ts.setAttribute('baseline-shift','super');ts.setAttribute('font-size',FS_SM);}
+      ts.textContent=p.t; fg.appendChild(ts);
+    });
+    svg.appendChild(fg);
+
+    // ---- легенда обозначений: одна строка под формулой ----
+    var yL = yF + PAD2 + PAD;
+    var legend = [
+      {c:'var(--sign)', t:'s — бит знака'},
+      {c:'var(--exp)',  t:'E — целое из 8 бит, степень = E − 127'},
+      {c:'var(--man)',  t:'f — 23 бита после точки, единица перед точкой не хранится'}
+    ];
+    var lx = sx(0);
+    legend.forEach(function(p){
+      svg.appendChild(el('rect',{x:lx,y:yL-FS_SM+2,width:FS_SM-2,height:FS_SM-2,fill:p.c,rx:2}));
+      var t=txt(lx+FS_SM+4, yL, p.t,{anchor:'start',size:FS_SM,fill:'var(--muted)'});
+      svg.appendChild(t);
+      lx += FS_SM + 4 + p.t.length * (FS_SM*0.5) + PAD2;
+    });
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML = '<div class="fallback">' +
+      'Схема не построилась. Она должна показывать полоску из 32 бит float32: ' +
+      '1 бит знака, 8 бит экспоненты, 23 бита мантиссы, идущие подряд, ' +
+      'и формулу значение = (−1)^s · 2^(E−127) · 1.f, где s — бит знака, ' +
+      'E — целое число из восьми бит экспоненты, f — 23 бита после точки ' +
+      '(единица перед точкой не хранится).</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

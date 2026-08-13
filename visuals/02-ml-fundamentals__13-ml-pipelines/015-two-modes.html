@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Один пайплайн в двух режимах</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:ivory;
+  --ink:midnightblue;
+  --muted:slategray;
+  --card:white;
+  --soft:aliceblue;
+  --fit:royalblue;
+  --predict:seagreen;
+  --state:lavender;
+  --line:lightsteelblue;
+  --error:firebrick;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:midnightblue;
+    --ink:white;
+    --muted:lightgray;
+    --card:darkslategray;
+    --soft:darkslateblue;
+    --fit:lightskyblue;
+    --predict:mediumaquamarine;
+    --state:slateblue;
+    --line:lightslategray;
+    --error:lightsalmon;
+  }
+}
+html,body{background:var(--page);color:var(--ink)}
+body{margin:unset;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.frame{background:var(--page);border:1px solid var(--line)}
+.static-title{font-size:22px;color:var(--ink);text-align:center}
+svg{display:block;width:100%;height:auto;max-height:450px;background:var(--page)}
+.card{fill:var(--card);stroke:var(--line);stroke-width:2px}
+.card.input{stroke:var(--muted)}
+.card.model{stroke:var(--fit)}
+.flow-fit{stroke:var(--fit);stroke-width:2px;fill:none}
+.flow-predict{stroke:var(--predict);stroke-width:2px;fill:none}
+.arrow-fit{fill:var(--fit)}
+.arrow-predict{fill:var(--predict)}
+.connector{stroke:var(--muted);stroke-width:2px;fill:none}
+.state-pill{fill:var(--state);stroke:var(--line);stroke-width:1px}
+.action-fit{fill:var(--soft);stroke:var(--fit);stroke-width:1px}
+.action-predict{fill:var(--soft);stroke:var(--predict);stroke-width:1px}
+.mode-fit{fill:var(--fit)}
+.mode-predict{fill:var(--predict)}
+.mode-text{font-size:14px;font-weight:bold;fill:white}
+.card-title{font-size:16px;font-weight:bold;fill:var(--ink)}
+.action-text{font-size:14px;font-weight:bold;fill:var(--ink)}
+.detail{font-size:13px;fill:var(--muted)}
+.state-text{font-size:13px;font-weight:bold;fill:var(--ink)}
+.route-note{font-size:13px;font-weight:bold;fill:var(--muted)}
+.footer{font-size:13px;fill:var(--muted)}
+#error{font-size:16px;color:var(--error);text-align:center}
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1 class="static-title">Один пайплайн — два режима</h1>
+  <svg id="diagram" viewBox="0 0 1200 420" width="1200" height="420"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Обучение и предсказание одним пайплайном</title>
+    <desc id="svg-desc">Две параллельные цепочки используют одинаковые шаги. При обучении выполняется fit_transform и сохраняется состояние, при предсказании выполняется transform с этим состоянием.</desc>
+  </svg>
+  <p id="error" hidden>Схема должна была показать один пайплайн: при обучении шаги выполняют fit_transform и сохраняют состояние, а при предсказании те же шаги выполняют transform.</p>
+  <noscript>Схема должна была показать две одинаковые цепочки: обучение сохраняет параметры шагов, а предсказание применяет сохранённые параметры к новым данным.</noscript>
+</main>
+
+<script>
+const data=[{
+  zero:0,
+  origin:{x:0,y:0},
+  scale:{x:1,y:1},
+  canvas:{width:1200,height:420},
+  math:{half:0.5,double:2},
+  geometry:{
+    radius:12,
+    inset:12,
+    modeRadius:13,
+    stateY:190,
+    stateH:34,
+    footerY:411
+  },
+  line:{width:2,dash:7,gap:6},
+  font:{mode:14,title:16,action:14,detail:13,state:13,footer:13},
+  text:{
+    middle:"middle",
+    start:"start",
+    end:"end",
+    baseline:5
+  },
+  arrow:{tailGap:7,tipGap:8,length:11,halfHeight:6},
+  rows:[
+    {
+      name:"FIT · ОБУЧЕНИЕ",
+      y:48,
+      h:98,
+      tag:{x:34,y:12,w:180,h:27},
+      titleOffset:31,
+      actionOffset:53,
+      actionH:30,
+      detailStart:66,
+      detailGap:18,
+      flowClass:"flow-fit",
+      arrowClass:"arrow-fit",
+      modeClass:"mode-fit",
+      content:"fit"
+    },
+    {
+      name:"PREDICT · ПРЕДСКАЗАНИЕ",
+      y:267,
+      h:118,
+      tag:{x:34,y:232,w:260,h:27},
+      titleOffset:29,
+      actionOffset:63,
+      actionH:32,
+      detailStart:52,
+      detailGap:18,
+      flowClass:"flow-predict",
+      arrowClass:"arrow-predict",
+      modeClass:"mode-predict",
+      content:"predict"
+    }
+  ],
+  cards:[
+    {
+      x:34,w:180,type:"input",
+      fit:{title:"Сырые данные",details:["обучающая выборка"]},
+      predict:{
+        title:"Новая строка",
+        details:["возраст — пропуск","доход — 80 000","город — Казань"]
+      },
+      state:{x:48,w:152,label:"начало разное",connect:false}
+    },
+    {
+      x:254,w:190,type:"step",
+      fit:{title:"Пропуски",action:"fit_transform"},
+      predict:{title:"Пропуски",action:"transform"},
+      state:{x:264,w:170,label:"сохранённая медиана",connect:true}
+    },
+    {
+      x:484,w:190,type:"step",
+      fit:{title:"Масштабирование",action:"fit_transform"},
+      predict:{title:"Масштабирование",action:"transform"},
+      state:{x:494,w:170,label:"параметры масштаба",connect:true}
+    },
+    {
+      x:714,w:190,type:"step",
+      fit:{title:"Кодирование",action:"fit_transform"},
+      predict:{title:"Кодирование",action:"transform"},
+      state:{x:724,w:170,label:"правила кодирования",connect:true}
+    },
+    {
+      x:944,w:222,type:"model",
+      fit:{title:"Модель",action:"обучение модели"},
+      predict:{title:"Модель",action:"предсказание"},
+      state:{x:959,w:192,label:"обученная модель",connect:true}
+    }
+  ],
+  notes:{
+    route:{x:1166,y:28,text:"ТЕ ЖЕ ШАГИ · ТОТ ЖЕ ПОРЯДОК"},
+    footer:{
+      x:600,
+      text:"Меняются данные и действие шагов — маршрут и сохранённое состояние остаются вместе."
+    }
+  }
+}];
+
+const [cfg]=data;
+const origin=Object.freeze(cfg.origin);
+const scale=Object.freeze(cfg.scale);
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const ns=svg.namespaceURI;
+  const zero=cfg.zero;
+
+  function element(name,attributes,parent=svg){
+    const node=document.createElementNS(ns,name);
+    Object.entries(attributes).forEach(([key,value])=>{
+      node.setAttribute(key,String(value));
+    });
+    parent.append(node);
+    return node;
+  }
+
+  function group(className){
+    return element("g",{class:className});
+  }
+
+  function rectangle(x,y,w,h,className,radius=cfg.geometry.radius,parent=svg){
+    return element("rect",{
+      x:sx(x),
+      y:sy(y),
+      width:sx(w)-sx(zero),
+      height:sy(h)-sy(zero),
+      rx:sx(radius)-sx(zero),
+      ry:sy(radius)-sy(zero),
+      class:className
+    },parent);
+  }
+
+  function segment(xStart,yStart,xEnd,yEnd,className,parent=svg){
+    return element("line",{
+      x1:sx(xStart),
+      y1:sy(yStart),
+      x2:sx(xEnd),
+      y2:sy(yEnd),
+      class:className
+    },parent);
+  }
+
+  function label(value,x,y,className,anchor=cfg.text.middle,parent=svg){
+    const node=element("text",{
+      x:sx(x),
+      y:sy(y),
+      class:className,
+      "text-anchor":anchor
+    },parent);
+    node.textContent=value;
+    return node;
+  }
+
+  function arrow(fromX,toX,y,lineClass,arrowClass,parent){
+    const tip=toX-cfg.arrow.tipGap;
+    const base=tip-cfg.arrow.length;
+    segment(fromX+cfg.arrow.tailGap,y,base,y,lineClass,parent);
+    element("polygon",{
+      points:[
+        `${sx(tip)},${sy(y)}`,
+        `${sx(base)},${sy(y-cfg.arrow.halfHeight)}`,
+        `${sx(base)},${sy(y+cfg.arrow.halfHeight)}`
+      ].join(" "),
+      class:arrowClass
+    },parent);
+  }
+
+  const connectorLayer=group("connectors");
+  const flowLayer=group("flows");
+  const cardLayer=group("cards");
+  const labelLayer=group("labels");
+
+  cfg.cards.forEach(card=>{
+    const center=card.x+card.w*cfg.math.half;
+    if(card.state.connect){
+      const [fitRow,predictRow]=cfg.rows;
+      const connector=segment(
+        center,
+        fitRow.y+fitRow.h,
+        center,
+        predictRow.y,
+        "connector",
+        connectorLayer
+      );
+      connector.setAttribute(
+        "stroke-dasharray",
+        `${sx(cfg.line.dash)-sx(zero)} ${sx(cfg.line.gap)-sx(zero)}`
+      );
+    }
+  });
+
+  cfg.rows.forEach(row=>{
+    let previous;
+    cfg.cards.forEach(card=>{
+      if(previous){
+        arrow(
+          previous.x+previous.w,
+          card.x,
+          row.y+row.h*cfg.math.half,
+          row.flowClass,
+          row.arrowClass,
+          flowLayer
+        );
+      }
+      previous=card;
+    });
+  });
+
+  cfg.rows.forEach(row=>{
+    rectangle(
+      row.tag.x,row.tag.y,row.tag.w,row.tag.h,
+      row.modeClass,cfg.geometry.modeRadius,cardLayer
+    );
+    label(
+      row.name,
+      row.tag.x+row.tag.w*cfg.math.half,
+      row.tag.y+row.tag.h*cfg.math.half+cfg.text.baseline,
+      "mode-text",
+      cfg.text.middle,
+      labelLayer
+    );
+
+    cfg.cards.forEach(card=>{
+      const content=card[row.content];
+      const cardClass=`card ${card.type}`;
+      rectangle(card.x,row.y,card.w,row.h,cardClass,cfg.geometry.radius,cardLayer);
+
+      label(
+        content.title,
+        card.x+card.w*cfg.math.half,
+        row.y+row.titleOffset,
+        "card-title",
+        cfg.text.middle,
+        labelLayer
+      );
+
+      if(content.action){
+        const actionX=card.x+cfg.geometry.inset;
+        const actionW=card.w-cfg.math.double*cfg.geometry.inset;
+        const actionClass=row.content==="fit" ? "action-fit" : "action-predict";
+        rectangle(
+          actionX,
+          row.y+row.actionOffset,
+          actionW,
+          row.actionH,
+          actionClass,
+          cfg.geometry.modeRadius,
+          cardLayer
+        );
+        label(
+          content.action,
+          card.x+card.w*cfg.math.half,
+          row.y+row.actionOffset+row.actionH*cfg.math.half+cfg.text.baseline,
+          "action-text",
+          cfg.text.middle,
+          labelLayer
+        );
+      }
+
+      if(content.details){
+        content.details.forEach((detail,index)=>{
+          label(
+            detail,
+            card.x+card.w*cfg.math.half,
+            row.y+row.detailStart+index*row.detailGap,
+            "detail",
+            cfg.text.middle,
+            labelLayer
+          );
+        });
+      }
+    });
+  });
+
+  cfg.cards.forEach(card=>{
+    rectangle(
+      card.state.x,
+      cfg.geometry.stateY,
+      card.state.w,
+      cfg.geometry.stateH,
+      "state-pill",
+      cfg.geometry.modeRadius,
+      cardLayer
+    );
+    label(
+      card.state.label,
+      card.state.x+card.state.w*cfg.math.half,
+      cfg.geometry.stateY+cfg.geometry.stateH*cfg.math.half+cfg.text.baseline,
+      "state-text",
+      cfg.text.middle,
+      labelLayer
+    );
+  });
+
+  label(
+    cfg.notes.route.text,
+    cfg.notes.route.x,
+    cfg.notes.route.y,
+    "route-note",
+    cfg.text.end,
+    labelLayer
+  );
+
+  label(
+    cfg.notes.footer.text,
+    cfg.notes.footer.x,
+    cfg.geometry.footerY,
+    "footer",
+    cfg.text.middle,
+    labelLayer
+  );
+
+  svg.setAttribute(
+    "data-origin",
+    `${sx(zero)},${sy(zero)}`
+  );
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const fallback=document.getElementById("error");
+  svg.hidden=true;
+  fallback.hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

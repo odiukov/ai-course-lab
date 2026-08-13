@@ -1,0 +1,161 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Как словарь распухает на логах</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2126; --muted:#6b7280; --line:#9aa3ad;
+    --num:#c2410c; --numbg:#fdecdf; --sep:#6b7280; --sepbg:#eceff3;
+    --boxbg:#eef2f7; --boxline:#7d8894;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8ecf1; --muted:#98a2af; --line:#7c8794;
+      --num:#fb923c; --numbg:#3a2415; --sep:#98a2af; --sepbg:#232a32;
+      --boxbg:#1e252d; --boxline:#5c6874;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg)}
+  figure{margin:0;padding:10px 12px 4px;background:var(--bg)}
+  h2{font:600 15px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  .fb{font:13px/1.5 system-ui,sans-serif;color:var(--fg);padding:8px 0}
+</style>
+<figure>
+  <h2>Как словарь распухает на логах</h2>
+  <svg id="d" viewBox="0 0 820 308" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Метка времени 2026-08-05T14:22:01 разорвана на 11 tokens; 1 млн строк лога даёт миллионы бесполезных записей в словаре"></svg>
+  <div id="fb" class="fb" hidden>
+    Метка времени <b>2026-08-05T14:22:01</b> разрывается на ≈ <b>11 tokens</b>
+    (<code>2026</code>, <code>08</code>, <code>05</code>, <code>T</code>, <code>14</code>,
+    <code>22</code>, <code>01</code> и разделители). Следующая строка — другая секунда,
+    новые числа: 14:22:02, 14:22:03, 14:23:17. Итог: <b>1 млн строк лога</b> —
+    <b>миллионы бесполезных записей в словаре</b>.
+  </div>
+</figure>
+<script>
+(function(){
+  var svg = document.getElementById('d');
+  try{
+    /* ---------- данные ---------- */
+    var TOKENS = [
+      {t:'2026',k:'num'},{t:'-',k:'sep'},{t:'08',k:'num'},{t:'-',k:'sep'},
+      {t:'05',k:'num'},{t:'T',k:'sep'},{t:'14',k:'num'},{t:':',k:'sep'},
+      {t:'22',k:'num'},{t:':',k:'sep'},{t:'01',k:'num'}
+    ];
+    var ROW  = {y0:2.6, y1:3.6, gap:0.05};
+    var BOXA = {x0:0,   x1:4.4, y0:0.35, y1:1.35};
+    var BOXB = {x0:6.6,  x1:11, y0:0.35, y1:1.35};
+    var VARR = {x:2.2, yFrom:2.5, yTo:1.45};
+    var HARR = {y:0.85, xFrom:4.6, xTo:6.4};
+    var HEAD = 0.16;
+
+    var LABELS = [
+      {x:5.5, y:3.86, s:'2026-08-05T14:22:01 — одна метка времени', a:'middle', c:'fg',    f:14, w:600},
+      {x:8.0, y:2.24, s:'≈ 11 tokens вместо одного',               a:'middle', c:'num',   f:13, w:600},
+      {x:2.0, y:1.98, s:'на каждой строке лога',                    a:'end',    c:'muted', f:12, w:400},
+      {x:2.2, y:1.00, s:'1 млн строк лога',                         a:'middle', c:'fg',    f:14, w:600},
+      {x:2.2, y:0.64, s:'14:22:01 · 14:22:02 · 14:23:17 …',         a:'middle', c:'muted', f:11, w:400},
+      {x:5.5, y:1.52, s:'растёт словарь',                           a:'middle', c:'muted', f:12, w:400},
+      {x:8.8, y:1.00, s:'миллионы бесполезных',                     a:'middle', c:'num',   f:14, w:600},
+      {x:8.8, y:0.64, s:'записей в словаре',                        a:'middle', c:'num',   f:14, w:600},
+      {x:0.0, y:-0.22,s:'Каждое такое число встречается 1–2 раза: error, timeout, retry тонут среди мусора.',
+                                                                    a:'start',  c:'muted', f:12, w:400}
+    ];
+
+    /* ---------- единственный перевод координат ---------- */
+    var SCALE = 66, ORIGIN = {x:47, y:285};
+    var sx = function(x){ return ORIGIN.x + x * SCALE; };
+    var sy = function(y){ return ORIGIN.y - y * SCALE; };
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var LW = 1.6, LABEL_DY = 4;
+    function el(n,at){ var e=document.createElementNS(NS,n); for(var k in at) e.setAttribute(k,at[k]); return e; }
+    function add(e){ svg.appendChild(e); return e; }
+
+    function rect(x0,y0,x1,y1,fill,stroke,r){
+      return add(el('rect',{x:sx(x0), y:sy(y1), width:sx(x1)-sx(x0), height:sy(y0)-sy(y1),
+        rx:r, fill:fill, stroke:stroke, 'stroke-width':LW}));
+    }
+    function label(L){
+      var t = add(el('text',{x:sx(L.x), y:sy(L.y), 'text-anchor':L.a,
+        'font-size':L.f, 'font-weight':L.w, fill:'var(--'+L.c+')', dy:LABEL_DY}));
+      t.textContent = L.s; return t;
+    }
+    function arrow(x1,y1,x2,y2){
+      var dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy);
+      var ux=dx/len, uy=dy/len, px=-uy, py=ux;
+      var bx=x2-ux*HEAD, by=y2-uy*HEAD, s=HEAD*0.62;
+      add(el('line',{x1:sx(x1), y1:sy(y1), x2:sx(bx), y2:sy(by),
+        stroke:'var(--line)', 'stroke-width':LW}));
+      add(el('polygon',{points:
+        sx(x2)+','+sy(y2)+' '+
+        sx(bx+px*s)+','+sy(by+py*s)+' '+
+        sx(bx-px*s)+','+sy(by-py*s), fill:'var(--line)'}));
+    }
+
+    /* ---------- строка tokens ---------- */
+    TOKENS.forEach(function(tk,i){
+      var isNum = tk.k==='num';
+      rect(i+ROW.gap, ROW.y0, i+1-ROW.gap, ROW.y1,
+           isNum?'var(--numbg)':'var(--sepbg)', isNum?'var(--num)':'var(--sep)', 6);
+      var mid = (ROW.y0+ROW.y1)/2;
+      var t = add(el('text',{x:sx(i+0.5), y:sy(mid), 'text-anchor':'middle',
+        'dominant-baseline':'central', 'font-size':isNum?15:14, 'font-weight':600,
+        'font-family':'ui-monospace,SFMono-Regular,Menlo,monospace',
+        fill:isNum?'var(--num)':'var(--sep)'}));
+      t.textContent = tk.t;
+      var n = add(el('text',{x:sx(i+0.5), y:sy(ROW.y1), 'text-anchor':'middle',
+        dy:-LABEL_DY*1.6, 'font-size':10, fill:'var(--muted)'}));
+      n.textContent = String(i+1);
+    });
+
+    /* ---------- счётчик ---------- */
+    rect(BOXA.x0, BOXA.y0, BOXA.x1, BOXA.y1, 'var(--boxbg)', 'var(--boxline)', 8);
+    rect(BOXB.x0, BOXB.y0, BOXB.x1, BOXB.y1, 'var(--numbg)', 'var(--num)', 8);
+
+    arrow(VARR.x, VARR.yFrom, VARR.x, VARR.yTo);
+    arrow(HARR.xFrom, HARR.y, HARR.xTo, HARR.y);
+
+    LABELS.forEach(label);
+  }catch(e){
+    svg.setAttribute('hidden','');
+    document.getElementById('fb').removeAttribute('hidden');
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

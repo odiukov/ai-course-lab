@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Градиенты текут справа налево</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1d2230; --muted:#5b6478;
+    --fwd:#9aa3b5; --back:#c8442f; --node:#ffffff; --stroke:#39415a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151c; --fg:#e8ecf6; --muted:#9aa4bb;
+      --fwd:#4d566c; --back:#ff8a6a; --node:#1b2030; --stroke:#93a0bd;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:12px 10px 16px;}
+  h2{font-size:15px;margin:0 0 2px;font-weight:600;}
+  p.sub{margin:0 0 8px;color:var(--muted);font-size:12.5px;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{border:1px solid var(--back);padding:10px;color:var(--fg);font-size:13px;}
+  text{fill:var(--fg);}
+  .lbl{font-size:12px;fill:var(--muted);}
+  .grad{font-size:12.5px;fill:var(--back);}
+  .node{font-size:13px;font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Градиенты текут справа налево</h2>
+  <p class="sub">Прямой проход — серым, обратный — цветом. Один обратный проход отдаёт градиенты и весу, и смещению.</p>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var NODES=[
+      {id:'x', p:[0,2],   t:'x',  cap:'вход'},
+      {id:'w', p:[0,3.4], t:'w',  cap:'вес'},
+      {id:'b', p:[0,0.6], t:'b',  cap:'смещение'},
+      {id:'z', p:[3,2],   t:'z₂', cap:'z₂ = w·x + b'},
+      {id:'a', p:[6,2],   t:'a',  cap:'a = сигмоида(z₂)'},
+      {id:'L', p:[9,2],   t:'L',  cap:'потери'}
+    ];
+    var FWD=[['x','z'],['w','z'],['b','z'],['z','a'],['a','L']];
+    // обратные звенья: [от, к, подпись, сторона]
+    var BACK=[
+      {a:'L',b:'a',t:'∂L/∂L = 1',    side:'up'},
+      {a:'a',b:'z',t:'∂L/∂a',        side:'up'},
+      {a:'z',b:'x',t:'∂a/∂z₂ = a(1−a)', side:'up'},
+      {a:'z',b:'w',t:'∂z₂/∂w = x',   side:'down'},
+      {a:'z',b:'b',t:'∂z₂/∂b = 1',   side:'up'}
+    ];
+
+    // ---- одна система перевода ----
+    var ORIGIN=[86,44], SCALE=[62,58];
+    function sx(x){ return ORIGIN[0]+x*SCALE[0]; }
+    function sy(y){ return ORIGIN[1]+y*SCALE[1]; }
+
+    var R=1.7, RX=0.36, RY=0.30; // радиусы узла в единицах данных
+    var W=700, H=290;            // холст
+    var PAD=6;                   // отступ подписи в пикселях
+
+    function N(id){ for(var i=0;i<NODES.length;i++) if(NODES[i].id===id) return NODES[i]; }
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,at){ var e=document.createElementNS(NS,n);
+      for(var k in at) e.setAttribute(k,at[k]); return e; }
+
+    var svg=el('svg',{viewBox:'0 0 '+W+' '+H,preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Обратный граф вычислений'});
+    var defs=el('defs',{});
+    function marker(id,color){
+      var m=el('marker',{id:id,viewBox:'0 0 10 10',refX:'9',refY:'5',
+        markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+      m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:color}));
+      return m;
+    }
+    defs.appendChild(marker('mf','var(--fwd)'));
+    defs.appendChild(marker('mb','var(--back)'));
+    svg.appendChild(defs);
+
+    // край узла по направлению к цели (эллипс в единицах данных)
+    function edge(from,to){
+      var dx=to.p[0]-from.p[0], dy=to.p[1]-from.p[1];
+      var m=Math.sqrt((dx/RX)*(dx/RX)+(dy/RY)*(dy/RY))||1;
+      return [from.p[0]+dx/m, from.p[1]+dy/m];
+    }
+    function line(p,q,cls,mk){
+      return el('line',{x1:sx(p[0]),y1:sy(p[1]),x2:sx(q[0]),y2:sy(q[1]),
+        stroke:cls,'stroke-width':cls==='var(--back)'?2.2:1.4,
+        'marker-end':'url(#'+mk+')',
+        'stroke-dasharray':cls==='var(--back)'?'':'5 4'});
+    }
+
+    // прямой проход
+    FWD.forEach(function(e){
+      var A=N(e[0]), B=N(e[1]);
+      svg.appendChild(line(edge(A,B),edge(B,A),'var(--fwd)','mf'));
+    });
+
+    // обратный проход: чуть ниже прямой линии, чтобы не слипались
+    var OFF=0.26;
+    BACK.forEach(function(e){
+      var A=N(e.a), B=N(e.b);
+      var p=edge(A,B), q=edge(B,A);
+      var same=Math.abs(A.p[1]-B.p[1])<0.01;
+      var o=same?OFF:0;
+      var l=line([p[0],p[1]+o],[q[0],q[1]+o],'var(--back)','mb');
+      svg.appendChild(l);
+      // подпись у хвоста стрелки (у узла A), разведена по стороне
+      var tx=p[0]-(p[0]-q[0])*0.18, ty=p[1]+o;
+      var up=e.side==='up';
+      var t=el('text',{x:sx(tx),y:sy(ty)+(up?-PAD-2:PAD+11),
+        'text-anchor': same?'middle':(q[0]<p[0]?'end':'start'), class:'grad'});
+      t.textContent=e.t;
+      svg.appendChild(t);
+    });
+
+    // узлы
+    NODES.forEach(function(n){
+      svg.appendChild(el('ellipse',{cx:sx(n.p[0]),cy:sy(n.p[1]),
+        rx:sx(RX)-sx(0),ry:sy(RY)-sy(0),
+        fill:'var(--node)',stroke:'var(--stroke)','stroke-width':1.4}));
+      var t=el('text',{x:sx(n.p[0]),y:sy(n.p[1])+5,'text-anchor':'middle',class:'node'});
+      t.textContent=n.t; svg.appendChild(t);
+      // подписи узлов: левая колонка — влево (end), правые — вниз (middle)
+      var left=n.p[0]===0;
+      var c=el('text',{
+        x: left? sx(n.p[0])-(sx(RX)-sx(0))-PAD : sx(n.p[0]),
+        y: left? sy(n.p[1])+4 : sy(n.p[1])+(sy(RY)-sy(0))+PAD+11,
+        'text-anchor': left?'end':'middle', class:'lbl'});
+      c.textContent=n.cap; svg.appendChild(c);
+    });
+
+    // развилка у z₂: пометка «здесь градиент делится»
+    var z=N('z');
+    var f=el('text',{x:sx(z.p[0]),y:sy(z.p[1])-(sy(RY)-sy(0))-PAD-16,
+      'text-anchor':'middle',class:'grad'});
+    f.textContent='развилка: ∂L/∂w и ∂L/∂b';
+    svg.appendChild(f);
+
+    // легенда строкой внизу
+    var Ly=4.05;
+    var g1=el('line',{x1:sx(0),y1:sy(Ly),x2:sx(0.5),y2:sy(Ly),
+      stroke:'var(--fwd)','stroke-width':1.4,'stroke-dasharray':'5 4'});
+    svg.appendChild(g1);
+    var t1=el('text',{x:sx(0.62),y:sy(Ly)+4,'text-anchor':'start',class:'lbl'});
+    t1.textContent='прямой проход (слева направо)'; svg.appendChild(t1);
+    var g2=el('line',{x1:sx(4.6),y1:sy(Ly),x2:sx(5.1),y2:sy(Ly),
+      stroke:'var(--back)','stroke-width':2.2});
+    svg.appendChild(g2);
+    var t2=el('text',{x:sx(5.22),y:sy(Ly)+4,'text-anchor':'start',class:'grad'});
+    t2.textContent='обратный проход (справа налево)'; svg.appendChild(t2);
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML='<div class="fail">Схема не построилась. Она должна показывать '+
+      'обратный граф: от потерь L влево к весу. Звенья цепочки: ∂L/∂L = 1, затем ∂L/∂a, '+
+      'затем ∂a/∂z₂ = a(1−a), и на узле z₂ = w·x + b развилка — ∂z₂/∂w = x уходит к весу w, '+
+      '∂z₂/∂b = 1 уходит к смещению b. Один обратный проход даёт ∂L/∂w и ∂L/∂b сразу.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

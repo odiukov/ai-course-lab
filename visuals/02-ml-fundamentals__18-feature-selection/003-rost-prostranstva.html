@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Пространство растёт быстрее числа наблюдений</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: whitesmoke;
+    --ink: midnightblue;
+    --muted: slategray;
+    --grid: lightsteelblue;
+    --edge: steelblue;
+    --point: royalblue;
+    --accent: darkorange;
+    --soft: lavender;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: midnightblue;
+      --ink: white;
+      --muted: lightsteelblue;
+      --grid: slategray;
+      --edge: lightskyblue;
+      --point: deepskyblue;
+      --accent: orange;
+      --soft: darkslateblue;
+    }
+  }
+
+  html,
+  body,
+  main {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    max-width: 1200px;
+    margin-inline: auto;
+  }
+
+  h1 {
+    font-size: 24px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+
+  .grid {
+    fill: none;
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .edge {
+    fill: none;
+    stroke: var(--edge);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .axis {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .point {
+    fill: var(--point);
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .panel-detail {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .status {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .summary {
+    fill: var(--accent);
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .constant {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  #fallback {
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Пространство растёт быстрее числа наблюдений</h1>
+
+  <svg id="diagram"
+       width="1200"
+       height="430"
+       viewBox="0 0 1200 430"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Сравнение пятисот точек на линии, в квадрате и в кубе</title>
+    <desc id="svg-desc">
+      Одни и те же пятьсот наблюдений заполняют линию длиной десять,
+      распределяются реже в квадрате десять на десять и оставляют
+      половину ячеек пустыми в кубе десять на десять на десять.
+    </desc>
+  </svg>
+
+  <p id="fallback" hidden>
+    Схема должна была показать, как одни и те же 500 точек заполняют
+    линию длиной 10, становятся реже в квадрате 10 × 10 и оставляют
+    много пустого пространства в кубе 10 × 10 × 10.
+  </p>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const data = Object.freeze({
+    zero: 0,
+    one: 1,
+    half: 0.5,
+    canvas: { width: 1200, height: 430 },
+    observations: 500,
+    ranges: 10,
+    squareCells: 100,
+    cubeCells: 1000,
+    permutation: 37,
+    dotRadius: 1.25,
+    cubeDotRadius: 1.65,
+    tickHalf: 8,
+    arrowHead: 10,
+    arrowWing: 5,
+    line: {
+      x: 70,
+      y: 220,
+      width: 300
+    },
+    square: {
+      x: 450,
+      y: 95,
+      side: 250
+    },
+    cube: {
+      x: 805,
+      y: 90,
+      side: 220,
+      depthX: 75,
+      depthY: 50
+    },
+    headings: {
+      y: 392,
+      detailY: 370
+    },
+    statuses: {
+      y: 68
+    },
+    summary: {
+      y: 38,
+      constantY: 16
+    },
+    centers: {
+      line: 220,
+      square: 575,
+      cube: 955,
+      all: 600
+    },
+    arrows: [
+      { x1: 382, y1: 220, x2: 428, y2: 220 },
+      { x1: 716, y1: 220, x2: 770, y2: 220 }
+    ],
+    squareOffsets: [
+      { x: 0.20, y: 0.24 },
+      { x: 0.72, y: 0.20 },
+      { x: 0.48, y: 0.50 },
+      { x: 0.22, y: 0.76 },
+      { x: 0.76, y: 0.72 }
+    ],
+    labels: [
+      {
+        x: 220,
+        title: "Линия длиной 10",
+        detail: "500 точек • 10 диапазонов",
+        status: "пространство заполнено"
+      },
+      {
+        x: 575,
+        title: "Квадрат 10 × 10",
+        detail: "500 точек • 100 ячеек",
+        status: "между точками видны зазоры"
+      },
+      {
+        x: 955,
+        title: "Куб 10 × 10 × 10",
+        detail: "500 точек • 1 000 ячеек",
+        status: "половина ячеек пуста"
+      }
+    ],
+    summaryText: "пространство: 10 → 100 → 1 000",
+    constantText: "число наблюдений не меняется: 500"
+  });
+
+  const origin = Object.freeze({
+    x: data.zero,
+    y: data.canvas.height
+  });
+
+  const scale = Object.freeze({
+    x: data.one,
+    y: data.one
+  });
+
+  const sx = x => origin.x + x * scale.x;
+  const sy = y => origin.y - y * scale.y;
+
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  try {
+    const make = (name, className) => {
+      const node = document.createElementNS(ns, name);
+      if (className) node.setAttribute("class", className);
+      return node;
+    };
+
+    const append = node => {
+      svg.appendChild(node);
+      return node;
+    };
+
+    const line = (a, b, className) => {
+      const node = make("line", className);
+      node.setAttribute("x1", sx(a.x));
+      node.setAttribute("y1", sy(a.y));
+      node.setAttribute("x2", sx(b.x));
+      node.setAttribute("y2", sy(b.y));
+      return append(node);
+    };
+
+    const polyline = (points, className) => {
+      const node = make("polyline", className);
+      node.setAttribute(
+        "points",
+        points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+      );
+      return append(node);
+    };
+
+    const rect = (x, y, width, height, className) => {
+      const node = make("rect", className);
+      node.setAttribute("x", sx(x));
+      node.setAttribute("y", sy(y + height));
+      node.setAttribute("width", sx(x + width) - sx(x));
+      node.setAttribute("height", sy(y) - sy(y + height));
+      return append(node);
+    };
+
+    const circle = (x, y, radius, className) => {
+      const node = make("circle", className);
+      node.setAttribute("cx", sx(x));
+      node.setAttribute("cy", sy(y));
+      node.setAttribute("r", sx(radius) - sx(data.zero));
+      return append(node);
+    };
+
+    const text = (x, y, value, className, anchor) => {
+      const node = make("text", className);
+      node.setAttribute("x", sx(x));
+      node.setAttribute("y", sy(y));
+      node.setAttribute("text-anchor", anchor);
+      node.textContent = value;
+      return append(node);
+    };
+
+    const arrow = spec => {
+      line(
+        { x: spec.x1, y: spec.y1 },
+        { x: spec.x2, y: spec.y2 },
+        "arrow"
+      );
+
+      polyline(
+        [
+          {
+            x: spec.x2 - data.arrowHead,
+            y: spec.y2 + data.arrowWing
+          },
+          {
+            x: spec.x2,
+            y: spec.y2
+          },
+          {
+            x: spec.x2 - data.arrowHead,
+            y: spec.y2 - data.arrowWing
+          }
+        ],
+        "arrow"
+      );
+    };
+
+    const projectCube = (x, y, z) => ({
+      x:
+        data.cube.x +
+        x * data.cube.side / data.ranges +
+        z * data.cube.depthX / data.ranges,
+      y:
+        data.cube.y +
+        y * data.cube.side / data.ranges +
+        z * data.cube.depthY / data.ranges
+    });
+
+    rect(
+      data.zero,
+      data.zero,
+      data.canvas.width,
+      data.canvas.height,
+      "background"
+    ).setAttribute("fill", "var(--bg)");
+
+    data.labels.forEach(label => {
+      text(
+        label.x,
+        data.headings.y,
+        label.title,
+        "panel-title",
+        "middle"
+      );
+      text(
+        label.x,
+        data.headings.detailY,
+        label.detail,
+        "panel-detail",
+        "middle"
+      );
+      text(
+        label.x,
+        data.statuses.y,
+        label.status,
+        "status",
+        "middle"
+      );
+    });
+
+    line(
+      { x: data.line.x, y: data.line.y },
+      { x: data.line.x + data.line.width, y: data.line.y },
+      "axis"
+    );
+
+    for (
+      let index = data.zero;
+      index <= data.ranges;
+      index += data.one
+    ) {
+      const x =
+        data.line.x +
+        index * data.line.width / data.ranges;
+
+      line(
+        { x, y: data.line.y - data.tickHalf },
+        { x, y: data.line.y + data.tickHalf },
+        "grid"
+      );
+    }
+
+    for (
+      let index = data.zero;
+      index < data.observations;
+      index += data.one
+    ) {
+      const x =
+        data.line.x +
+        (index + data.half) *
+        data.line.width /
+        data.observations;
+
+      circle(
+        x,
+        data.line.y,
+        data.dotRadius,
+        "point"
+      );
+    }
+
+    rect(
+      data.square.x,
+      data.square.y,
+      data.square.side,
+      data.square.side,
+      "edge"
+    );
+
+    for (
+      let index = data.one;
+      index < data.ranges;
+      index += data.one
+    ) {
+      const shift =
+        index * data.square.side / data.ranges;
+
+      line(
+        {
+          x: data.square.x + shift,
+          y: data.square.y
+        },
+        {
+          x: data.square.x + shift,
+          y: data.square.y + data.square.side
+        },
+        "grid"
+      );
+
+      line(
+        {
+          x: data.square.x,
+          y: data.square.y + shift
+        },
+        {
+          x: data.square.x + data.square.side,
+          y: data.square.y + shift
+        },
+        "grid"
+      );
+    }
+
+    for (
+      let index = data.zero;
+      index < data.observations;
+      index += data.one
+    ) {
+      const cell = index % data.squareCells;
+      const column = cell % data.ranges;
+      const row = Math.floor(cell / data.ranges);
+      const repetition = Math.floor(index / data.squareCells);
+      const offset =
+        data.squareOffsets[
+          repetition % data.squareOffsets.length
+        ];
+
+      const x =
+        data.square.x +
+        (column + offset.x) *
+        data.square.side /
+        data.ranges;
+
+      const y =
+        data.square.y +
+        (row + offset.y) *
+        data.square.side /
+        data.ranges;
+
+      circle(x, y, data.dotRadius, "point");
+    }
+
+    for (
+      let index = data.zero;
+      index <= data.ranges;
+      index += data.one
+    ) {
+      line(
+        projectCube(index, data.zero, data.zero),
+        projectCube(index, data.ranges, data.zero),
+        "grid"
+      );
+
+      line(
+        projectCube(data.zero, index, data.zero),
+        projectCube(data.ranges, index, data.zero),
+        "grid"
+      );
+
+      line(
+        projectCube(index, data.zero, data.zero),
+        projectCube(index, data.zero, data.ranges),
+        "grid"
+      );
+
+      line(
+        projectCube(data.zero, index, data.zero),
+        projectCube(data.zero, index, data.ranges),
+        "grid"
+      );
+
+      line(
+        projectCube(index, data.ranges, data.zero),
+        projectCube(index, data.ranges, data.ranges),
+        "grid"
+      );
+
+      line(
+        projectCube(data.ranges, index, data.zero),
+        projectCube(data.ranges, index, data.ranges),
+        "grid"
+      );
+    }
+
+    const front = [
+      projectCube(data.zero, data.zero, data.zero),
+      projectCube(data.ranges, data.zero, data.zero),
+      projectCube(data.ranges, data.ranges, data.zero),
+      projectCube(data.zero, data.ranges, data.zero),
+      projectCube(data.zero, data.zero, data.zero)
+    ];
+
+    const back = [
+      projectCube(data.zero, data.zero, data.ranges),
+      projectCube(data.ranges, data.zero, data.ranges),
+      projectCube(data.ranges, data.ranges, data.ranges),
+      projectCube(data.zero, data.ranges, data.ranges),
+      projectCube(data.zero, data.zero, data.ranges)
+    ];
+
+    polyline(front, "edge");
+    polyline(back, "edge");
+
+    [
+      [front.shift(), back.shift()],
+      [front.shift(), back.shift()],
+      [front.shift(), back.shift()],
+      [front.shift(), back.shift()]
+    ].forEach(pair => line(pair.shift(), pair.shift(), "edge"));
+
+    for (
+      let index = data.zero;
+      index < data.observations;
+      index += data.one
+    ) {
+      const cell =
+        index * data.permutation % data.cubeCells;
+
+      const x = cell % data.ranges;
+      const y =
+        Math.floor(cell / data.ranges) % data.ranges;
+      const z =
+        Math.floor(cell / data.squareCells) % data.ranges;
+
+      const point = projectCube(
+        x + data.half,
+        y + data.half,
+        z + data.half
+      );
+
+      circle(
+        point.x,
+        point.y,
+        data.cubeDotRadius,
+        "point"
+      );
+    }
+
+    data.arrows.forEach(arrow);
+
+    text(
+      data.centers.all,
+      data.summary.y,
+      data.summaryText,
+      "summary",
+      "middle"
+    );
+
+    text(
+      data.centers.all,
+      data.summary.constantY,
+      data.constantText,
+      "constant",
+      "middle"
+    );
+  } catch (error) {
+    svg.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

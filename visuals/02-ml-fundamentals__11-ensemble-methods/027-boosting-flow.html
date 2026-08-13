@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Последовательная передача ошибок между слабыми моделями</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:white;
+  --panel:ghostwhite;
+  --panel-strong:aliceblue;
+  --ink:midnightblue;
+  --muted:slategray;
+  --line:lightslategray;
+  --ok:seagreen;
+  --ok-fill:honeydew;
+  --error:crimson;
+  --error-fill:mistyrose;
+  --focus:darkorange;
+  --focus-fill:oldlace;
+  --result:royalblue;
+  --result-fill:lavender;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:midnightblue;
+    --panel:darkslategray;
+    --panel-strong:slategray;
+    --ink:white;
+    --muted:lightgray;
+    --line:lightslategray;
+    --ok:lightgreen;
+    --ok-fill:darkgreen;
+    --error:lightpink;
+    --error-fill:maroon;
+    --focus:gold;
+    --focus-fill:saddlebrown;
+    --result:lightskyblue;
+    --result-fill:darkslateblue;
+  }
+}
+html,body{background:var(--page);color:var(--ink);}
+body{margin:unset;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+header{font-size:19px;font-weight:bold;text-align:center;}
+svg{display:block;width:100%;height:auto;max-height:520px;background:var(--page);}
+[hidden]{display:none;}
+#fallback{font-size:16px;text-align:center;color:var(--muted);}
+</style>
+</head>
+<body>
+<header>Как boosting передаёт ошибки дальше</header>
+<div id="fallback">Схема показывает, как три слабые модели по очереди получают фокус на ошибках, исправляют их и складывают голоса.</div>
+<svg id="chart" viewBox="0 0 1200 500" preserveAspectRatio="xMidYMid meet"
+     role="img" aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">Последовательная передача ошибок между слабыми моделями</title>
+  <desc id="svgDesc">Восемь посылок проходят через три слабые модели. Ошибки получают усиленный фокус, а прогнозы моделей складываются.</desc>
+</svg>
+<script>
+const DATA={
+  canvas:[1200,500],
+  origin:[0,0],
+  scale:[1,1],
+  zero:[0],
+  widths:[2,3,4],
+  fonts:[13,14,16,18,22],
+  panels:[
+    [24,72,278,365],
+    [324,72,578,365],
+    [624,72,878,365],
+    [924,72,1176,365]
+  ],
+  heads:[
+    [151,102,"Слабая модель 1"],
+    [451,102,"Слабая модель 2"],
+    [751,102,"Слабая модель 3"],
+    [1050,102,"Итог ансамбля"]
+  ],
+  subheads:[
+    [151,128,"8 посылок"],
+    [451,128,"Фокус на 3 ошибках"],
+    [751,128,"Новый фокус"],
+    [1050,128,"Голоса складываются"]
+  ],
+  parcelPositions:[
+    [76,174],[126,174],[176,174],[226,174],
+    [76,238],[126,238],[176,238],[226,238]
+  ],
+  parcelBox:[17,14],
+  parcelSeam:[8],
+  parcelMark:[5],
+  roundOne:["ok","ok","error","ok","error","ok","ok","error"],
+  roundTwo:["ok","ok","ok","new","ok","ok","ok","error"],
+  roundThree:["ok","ok","ok","ok","ok","ok","ok","ok"],
+  focusTwo:["plain","plain","focus","plain","focus","plain","plain","focus"],
+  focusThree:["plain","plain","plain","focus","plain","plain","plain","focus"],
+  summaries:[
+    [151,296,"5 верно · 3 ошибки","error"],
+    [451,296,"2 исправлены · 1 новая ошибка","focus"],
+    [751,296,"Оставшиеся ошибки исправлены","ok"]
+  ],
+  notes:[
+    [151,331,"Ошибки отмечены","middle"],
+    [451,331,"Трудные посылки влияют сильнее","middle"],
+    [751,331,"Поправка учитывает прошлые раунды","middle"]
+  ],
+  arrows:[
+    [[278,211],[324,211],[314,204],[324,211],[314,218]],
+    [[578,211],[624,211],[614,204],[624,211],[614,218]],
+    [[878,211],[924,211],[914,204],[924,211],[914,218]]
+  ],
+  arrowLabels:[
+    [301,188,"усилить фокус"],
+    [601,188,"обновить фокус"],
+    [901,188,"добавить голос"]
+  ],
+  votes:[
+    [958,159,1142,196,"Модель 1","5 верно · 3 ошибки","error"],
+    [958,207,1142,244,"Модель 2","поправка","focus"],
+    [958,255,1142,292,"Модель 3","поправка","ok"]
+  ],
+  voteText:[
+    [978,178],[1124,178],
+    [978,226],[1124,226],
+    [978,274],[1124,274]
+  ],
+  sumLine:[[990,316],[1110,316]],
+  sumHeads:[[990,316,1000,309,1000,323],[1110,316,1100,309,1100,323]],
+  result:[982,339,1118,374],
+  resultText:[1050,362,"Общий прогноз"],
+  legendLine:[[24,401],[1176,401]],
+  legendIcons:[[170,439,"ok"],[455,439,"error"],[760,439,"focus"]],
+  legendText:[
+    [194,444,"верно распознано","start"],
+    [479,444,"ошибка","start"],
+    [784,444,"усиленный фокус","start"]
+  ],
+  focusRadius:[25],
+  iconRadius:[10],
+  colors:{
+    panel:"var(--panel)",
+    panelStrong:"var(--panel-strong)",
+    ink:"var(--ink)",
+    muted:"var(--muted)",
+    line:"var(--line)",
+    ok:"var(--ok)",
+    okFill:"var(--ok-fill)",
+    error:"var(--error)",
+    errorFill:"var(--error-fill)",
+    focus:"var(--focus)",
+    focusFill:"var(--focus-fill)",
+    result:"var(--result)",
+    resultFill:"var(--result-fill)"
+  }
+};
+const [originX,originY]=DATA.origin;
+const [scaleX,scaleY]=DATA.scale;
+const sx=x=>originX+x*scaleX;
+const sy=y=>originY+y*scaleY;
+
+try{
+  const svg=document.getElementById("chart");
+  const fallback=document.getElementById("fallback");
+  const NS="http://www.w3.org/2000/svg";
+  const [zero]=DATA.zero;
+  const [thin,medium,heavy]=DATA.widths;
+  const [small,normal,label,heading,big]=DATA.fonts;
+  const C=DATA.colors;
+
+  function node(tag,attributes,parent=svg){
+    const item=document.createElementNS(NS,tag);
+    Object.entries(attributes).forEach(([key,value])=>item.setAttribute(key,value));
+    parent.appendChild(item);
+    return item;
+  }
+  function line(a,b,color=C.line,width=medium,parent=svg){
+    const [x1,y1]=a,[x2,y2]=b;
+    return node("line",{
+      x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+      stroke:color,"stroke-width":width,"stroke-linecap":"round"
+    },parent);
+  }
+  function rect(box,fill,stroke=C.line,width=thin,parent=svg){
+    const [x1,y1,x2,y2]=box;
+    return node("rect",{
+      x:sx(x1),y:sy(y1),
+      width:sx(x2)-sx(x1),height:sy(y2)-sy(y1),
+      fill,stroke,"stroke-width":width
+    },parent);
+  }
+  function circle(point,radius,fill,stroke,width=thin,parent=svg){
+    const [x,y]=point;
+    return node("circle",{
+      cx:sx(x),cy:sy(y),r:sx(radius)-sx(zero),
+      fill,stroke,"stroke-width":width
+    },parent);
+  }
+  function text(item,size=normal,color=C.ink,weight="normal",parent=svg){
+    const [x,y,copy,anchor="middle"]=item;
+    const element=node("text",{
+      x:sx(x),y:sy(y),"text-anchor":anchor,
+      "font-size":size,fill:color,"font-weight":weight,
+      "font-family":"system-ui, sans-serif"
+    },parent);
+    element.textContent=copy;
+    return element;
+  }
+  function path(points,color=C.line,width=medium,parent=svg){
+    const commands=points.map((point,index)=>{
+      const [x,y]=point;
+      return `${index ? "L" : "M"} ${sx(x)} ${sy(y)}`;
+    }).join(" ");
+    return node("path",{
+      d:commands,fill:"none",stroke:color,
+      "stroke-width":width,"stroke-linecap":"round","stroke-linejoin":"round"
+    },parent);
+  }
+  function arrow(spec){
+    const [shaftStart,shaftEnd,left,tip,right]=spec;
+    line(shaftStart,shaftEnd,C.result,heavy);
+    node("polygon",{
+      points:[left,tip,right].map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+      fill:C.result
+    });
+  }
+  function parcel(point,status,focus){
+    const [x,y]=point;
+    const [halfWidth,halfHeight]=DATA.parcelBox;
+    const [seam]=DATA.parcelSeam;
+    const [mark]=DATA.parcelMark;
+    if(focus==="focus"){
+      const [focusRadius]=DATA.focusRadius;
+      circle([x,y],focusRadius,C.focusFill,C.focus,heavy);
+    }
+    const fill=status==="ok" ? C.okFill : C.errorFill;
+    const stroke=status==="ok" ? C.ok : C.error;
+    rect([x-halfWidth,y-halfHeight,x+halfWidth,y+halfHeight],fill,stroke,medium);
+    line([x-halfWidth,y-seam],[x,y],[stroke],thin);
+    line([x,y],[x+halfWidth,y-seam],[stroke],thin);
+    line([x,y-seam],[x,y+halfHeight],stroke,thin);
+    if(status==="ok"){
+      path([[x-mark,y],[x-mark+mark,y+mark],[x+mark,y-mark]],C.ok,medium);
+    }else{
+      line([x-mark,y-mark],[x+mark,y+mark],C.error,medium);
+      line([x+mark,y-mark],[x-mark,y+mark],C.error,medium);
+    }
+  }
+
+  DATA.panels.forEach((panel,index)=>{
+    rect(panel,index===DATA.panels.length-1 ? C.panelStrong : C.panel,C.line,thin);
+  });
+  DATA.heads.forEach(item=>text(item,heading,C.ink,"bold"));
+  DATA.subheads.forEach(item=>text(item,normal,C.muted,"bold"));
+
+  const rounds=[
+    [DATA.roundOne,DATA.roundOne.map(()=> "plain"),zero],
+    [DATA.roundTwo,DATA.focusTwo,DATA.panels.length-DATA.panels.length+DATA.parcelPositions.length-DATA.parcelPositions.length+zero+300],
+    [DATA.roundThree,DATA.focusThree,DATA.panels.length-DATA.panels.length+zero+600]
+  ];
+  rounds.forEach(([statuses,focuses,shift])=>{
+    DATA.parcelPositions.forEach((point,index)=>{
+      const [x,y]=point;
+      parcel([x+shift,y],statuses[index],focuses[index]);
+    });
+  });
+
+  DATA.summaries.forEach(([x,y,copy,tone])=>{
+    const color=tone==="ok" ? C.ok : tone==="focus" ? C.focus : C.error;
+    text([x,y,copy,"middle"],label,color,"bold");
+  });
+  DATA.notes.forEach(item=>text(item,small,C.muted));
+  DATA.arrows.forEach(arrow);
+  DATA.arrowLabels.forEach(item=>text(item,small,C.result,"bold"));
+
+  DATA.votes.forEach(([x1,y1,x2,y2,name,detail,tone],index)=>{
+    const color=tone==="ok" ? C.ok : tone==="focus" ? C.focus : C.error;
+    rect([x1,y1,x2,y2],C.panel,color,thin);
+    const [left,right]=DATA.voteText.slice(index+index,index+index+DATA.widths[zero+zero+zero]);
+    text([left[0],left[1],name,"start"],small,C.ink,"bold");
+    text([right[0],right[1],detail,"end"],small,color,"bold");
+  });
+
+  line(DATA.sumLine[zero],DATA.sumLine[DATA.scale[zero]],C.result,heavy);
+  DATA.sumHeads.forEach(([tipX,tipY,leftX,leftY,rightX,rightY])=>{
+    node("polygon",{
+      points:[[leftX,leftY],[tipX,tipY],[rightX,rightY]]
+        .map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+      fill:C.result
+    });
+  });
+  rect(DATA.result,C.resultFill,C.result,heavy);
+  text(DATA.resultText,label,C.result,"bold");
+
+  line(DATA.legendLine[zero],DATA.legendLine[DATA.scale[zero]],C.line,thin);
+  DATA.legendIcons.forEach(([x,y,tone])=>{
+    const [radius]=DATA.iconRadius;
+    if(tone==="focus"){
+      circle([x,y],radius,C.focusFill,C.focus,heavy);
+    }else if(tone==="ok"){
+      circle([x,y],radius,C.okFill,C.ok,medium);
+      path([[x-radius/medium,y],[x,y+radius/medium],[x+radius/medium,y-radius/medium]],C.ok,medium);
+    }else{
+      circle([x,y],radius,C.errorFill,C.error,medium);
+      line([x-radius/medium,y-radius/medium],[x+radius/medium,y+radius/medium],C.error,medium);
+      line([x+radius/medium,y-radius/medium],[x-radius/medium,y+radius/medium],C.error,medium);
+    }
+  });
+  DATA.legendText.forEach(item=>text(item,normal,C.muted));
+  fallback.hidden=true;
+}catch(error){
+  const fallback=document.getElementById("fallback");
+  fallback.hidden=false;
+  fallback.textContent="Схема должна была показать цепочку из трёх слабых моделей: ошибки получают усиленный фокус, исправляются по очереди, а голоса моделей складываются.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

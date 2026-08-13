@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прямая находит данные</title>
+<style>
+  :root{
+    --bg:#ffffff; --card:#ffffff; --ink:#1d2430; --muted:#5d6b7f;
+    --axis:#8b98aa; --grid:#dde3ec; --dot:#1f6feb; --line:#e0562d;
+    --target:#129a6b; --loss:#7a4fd0; --btn:#eef2f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --card:#12161c; --ink:#e8edf4; --muted:#9fb0c4;
+      --axis:#66748a; --grid:#28313d; --dot:#6ea8ff; --line:#ff8a5c;
+      --target:#4ed9a4; --loss:#b79bff; --btn:#1c2430;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;}
+  .card{margin:0;padding:14px 14px 16px;background:var(--card);}
+  h2{margin:0 0 8px;font-size:16px;font-weight:650;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .ax{stroke:var(--axis);stroke-width:1.4;fill:none;}
+  .axf{fill:var(--axis);}
+  .tick{fill:var(--muted);font-size:13px;}
+  .lbl{fill:var(--ink);font-size:14px;}
+  .dot{fill:var(--dot);}
+  .res{stroke:var(--grid);stroke-width:2;}
+  .cur{stroke:var(--line);stroke-width:3;fill:none;stroke-linejoin:round;}
+  .tgt{stroke:var(--target);stroke-width:2;fill:none;stroke-dasharray:7 6;}
+  .tgtT{fill:var(--target);font-size:14px;}
+  .lossP{stroke:var(--loss);stroke-width:2.5;fill:none;}
+  .lossD{fill:var(--loss);}
+  .lossT{fill:var(--loss);font-size:13px;}
+  .read{fill:var(--ink);font-size:14px;font-variant-numeric:tabular-nums;}
+  .cap{margin:6px 2px 0;font-size:13px;color:var(--muted);line-height:1.45;}
+  button{margin-top:8px;font:inherit;font-size:13px;padding:5px 11px;border-radius:7px;
+    border:1px solid var(--grid);background:var(--btn);color:var(--ink);cursor:pointer;}
+  #fb{font-size:14px;color:var(--ink);line-height:1.5;}
+</style>
+</head>
+<body>
+<figure class="card">
+  <h2>Прямая находит данные: 200 шагов спуска</h2>
+  <svg id="svg" viewBox="0 0 880 500" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Слева точки (1,3)…(5,11) и прямая, сходящаяся к y = 2x + 1; справа падающая кривая потерь по 200 эпохам."></svg>
+  <p class="cap">Пунктир — цель <b>y = 2x + 1</b>; сплошная — текущая прямая <b>y = wx + b</b>; серые отрезки — ошибки, из которых считаются dw и db.</p>
+  <button id="again" type="button">Заново со случайного старта</button>
+  <p id="fb" hidden></p>
+</figure>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  var svg=document.getElementById("svg"), fb=document.getElementById("fb");
+  try{
+    /* ---- данные схемы ---- */
+    var DATA=[[1,3],[2,5],[3,7],[4,9],[5,11]];
+    var EPOCHS=200, LR=0.06;
+
+    /* ---- единственные origin и scale ---- */
+    var ORIGIN={x:95,y:452}, SCALE=32;
+    var sx=function(u){return ORIGIN.x+u*SCALE;};
+    var sy=function(v){return ORIGIN.y-v*SCALE;};
+
+    /* ---- границы, выведенные из данных (в координатах данных) ---- */
+    var XMAX=0,YMAX=0;
+    DATA.forEach(function(p){XMAX=Math.max(XMAX,p[0]);YMAX=Math.max(YMAX,p[1]);});
+    var AX0=-0.5, AX1=XMAX+1, AY0=-0.5, AY1=YMAX+1.5;
+    var LX0=XMAX+3.5, LX1=XMAX+18, LY1=YMAX;
+    var R=sy(0)-sy(0.17);
+
+    function el(t,a,txt){var e=document.createElementNS(NS,t);
+      for(var k in a)e.setAttribute(k,a[k]);
+      if(txt!=null)e.textContent=txt; svg.appendChild(e); return e;}
+    function line(x1,y1,x2,y2,c){return el("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),"class":c});}
+    function poly(P,c){return el("polyline",{points:P.map(function(p){return sx(p[0])+","+sy(p[1]);}).join(" "),"class":c});}
+    function tri(P){return el("polygon",{points:P.map(function(p){return sx(p[0])+","+sy(p[1]);}).join(" "),"class":"axf"});}
+    function txt(x,y,dx,dy,anch,c,s){
+      return el("text",{x:sx(x)+dx,y:sy(y)+dy,"text-anchor":anch,"class":c},s);}
+
+    /* ---- оси левой панели ---- */
+    line(AX0,0,AX1,0,"ax"); line(0,AY0,0,AY1,"ax");
+    tri([[AX1,0],[AX1-0.25,0.13],[AX1-0.25,-0.13]]);
+    tri([[0,AY1],[-0.13,AY1-0.25],[0.13,AY1-0.25]]);
+    DATA.forEach(function(p){
+      line(p[0],0,p[0],-0.15,"ax"); txt(p[0],0,0,17,"middle","tick",String(p[0]));
+      line(0,p[1],-0.15,p[1],"ax"); txt(0,p[1],-9,5,"end","tick",String(p[1]));
+    });
+    txt(AX1,0,0,18,"middle","lbl","x");
+    txt(0,AY1,-10,5,"end","lbl","y");
+
+    /* ---- целевая прямая ---- */
+    poly([[0,1],[XMAX+0.6,2*(XMAX+0.6)+1]],"tgt");
+    txt(XMAX+0.6,2*(XMAX+0.6)+1,0,-9,"end","tgtT","y = 2x + 1");
+
+    /* ---- оси правой панели (потери) ---- */
+    line(LX0,0,LX1,0,"ax"); line(LX0,0,LX0,LY1+0.9,"ax");
+    tri([[LX1,0],[LX1-0.25,0.13],[LX1-0.25,-0.13]]);
+    txt(LX0,0,0,17,"middle","tick","0");
+    txt(LX1,0,0,17,"middle","tick",String(EPOCHS));
+    txt((LX0+LX1)/2,0,0,34,"middle","lbl","эпохи");
+    txt(LX0,LY1+1.2,0,0,"start","lossT","потери (MSE)");
+
+    /* ---- динамические слои ---- */
+    var resG=el("g",{}), cur=el("polyline",{"class":"cur",points:""});
+    var lossP=el("polyline",{"class":"lossP",points:""});
+    var dot=el("circle",{"class":"lossD",r:R*0.8,cx:sx(LX0),cy:sy(LY1)});
+    DATA.forEach(function(p){el("circle",{"class":"dot",r:R,cx:sx(p[0]),cy:sy(p[1])});});
+    var read=txt(LX1,LY1,0,0,"end","read","");
+
+    /* ---- обучение: dw = 2*error*x, db = 2*error ---- */
+    function train(){
+      var w=Math.random()*1.7-0.8, b=Math.random()*4, h=[], N=DATA.length;
+      for(var e=0;e<=EPOCHS;e++){
+        var L=0,gw=0,gb=0;
+        for(var i=0;i<N;i++){
+          var x=DATA[i][0], err=w*x+b-DATA[i][1];
+          L+=err*err; gw+=2*err*x; gb+=2*err;
+        }
+        h.push({w:w,b:b,loss:L/N});
+        w-=LR*gw/N; b-=LR*gb/N;
+      }
+      return h;
+    }
+
+    var hist=null, lossMax=1, frame=0, raf=null, tmr=null;
+    var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function clamp(v){return Math.max(AY0,Math.min(AY1,v));}
+
+    function drawLoss(){
+      var P=[];
+      for(var i=0;i<=EPOCHS;i++)
+        P.push([LX0+(LX1-LX0)*i/EPOCHS, hist[i].loss/lossMax*LY1]);
+      lossP.setAttribute("points",P.map(function(p){return sx(p[0])+","+sy(p[1]);}).join(" "));
+    }
+
+    function render(i){
+      var s=hist[i], P=[];
+      for(var k=0;k<=60;k++){
+        var x=AX0+(AX1-AX0)*k/60, y=s.w*x+s.b;
+        if(y>=AY0&&y<=AY1)P.push(sx(x)+","+sy(y));
+      }
+      cur.setAttribute("points",P.join(" "));
+      while(resG.firstChild)resG.removeChild(resG.firstChild);
+      DATA.forEach(function(p){
+        var r=document.createElementNS(NS,"line");
+        r.setAttribute("x1",sx(p[0])); r.setAttribute("y1",sy(p[1]));
+        r.setAttribute("x2",sx(p[0])); r.setAttribute("y2",sy(clamp(s.w*p[0]+s.b)));
+        r.setAttribute("class","res"); resG.appendChild(r);
+      });
+      dot.setAttribute("cx",sx(LX0+(LX1-LX0)*i/EPOCHS));
+      dot.setAttribute("cy",sy(s.loss/lossMax*LY1));
+      read.textContent="эпоха "+i+" · w = "+s.w.toFixed(2)+" · b = "+s.b.toFixed(2);
+    }
+
+    function step(){
+      frame+=1.5;
+      var i=Math.min(EPOCHS,Math.round(frame));
+      render(i);
+      if(i<EPOCHS)raf=requestAnimationFrame(step);
+      else tmr=setTimeout(run,1700);
+    }
+    function run(){
+      if(raf)cancelAnimationFrame(raf); if(tmr)clearTimeout(tmr);
+      hist=train(); lossMax=hist[0].loss||1; drawLoss(); frame=0;
+      if(reduce){render(EPOCHS);return;}
+      render(0); raf=requestAnimationFrame(step);
+    }
+    document.getElementById("again").addEventListener("click",run);
+    run();
+  }catch(e){
+    svg.setAttribute("hidden","hidden"); fb.hidden=false;
+    fb.textContent="Схема должна показывать: точки (1,3), (2,5), (3,7), (4,9), (5,11); "+
+      "прямая y = wx + b стартует со случайных w и b, за 200 эпох градиентного спуска "+
+      "сходится к y = 2x + 1; рядом кривая потерь падает круто, а затем почти выравнивается.";
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

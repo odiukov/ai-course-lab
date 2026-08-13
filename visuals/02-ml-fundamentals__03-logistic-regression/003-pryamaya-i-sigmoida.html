@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Прямая против S-образной кривой</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: snow;
+      --ink: midnightblue;
+      --muted: slategray;
+      --grid: lightgray;
+      --band: honeydew;
+      --switch-band: lavender;
+      --linear: crimson;
+      --sigmoid: seagreen;
+      --point: darkslateblue;
+      --point-fill: white;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: midnightblue;
+        --ink: whitesmoke;
+        --muted: lightgray;
+        --grid: slategray;
+        --band: darkslategray;
+        --switch-band: darkolivegreen;
+        --linear: tomato;
+        --sigmoid: mediumspringgreen;
+        --point: lightskyblue;
+        --point-fill: midnightblue;
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--page);
+    }
+
+    h1 {
+      margin: 0;
+      text-align: center;
+      font-size: 20px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--page);
+      overflow: visible;
+      shape-rendering: geometricPrecision;
+    }
+
+    svg text {
+      font-size: 15px;
+      fill: var(--ink);
+      paint-order: stroke;
+      stroke: var(--page);
+      stroke-width: 3px;
+      stroke-linejoin: round;
+    }
+
+    svg .small {
+      font-size: 13px;
+    }
+
+    svg .muted {
+      fill: var(--muted);
+    }
+
+    svg .linear-label {
+      fill: var(--linear);
+      font-weight: bold;
+    }
+
+    svg .sigmoid-label {
+      fill: var(--sigmoid);
+      font-weight: bold;
+    }
+
+    svg line,
+    svg path,
+    svg circle,
+    svg rect {
+      vector-effect: non-scaling-stroke;
+    }
+
+    #failure {
+      font-size: 16px;
+      text-align: center;
+      color: var(--ink);
+      background: var(--page);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-heading">Прямая против S-образной кривой</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 960 430"
+      width="960"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-heading diagram-description"
+    >
+      <title>Сравнение прямой и S-образной кривой</title>
+      <desc id="diagram-description">
+        Точки показывают результаты «сдал» и «не сдал» по часам подготовки.
+        Прямая выходит ниже нуля и выше единицы, а S-образная кривая остаётся
+        между нулём и единицей и резко поднимается между четырьмя и пятью часами.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="failure" hidden aria-live="polite"></p>
+
+    <noscript>
+      <p id="failure-noscript">
+        Схема должна была показать, что прямая выходит ниже 0 и выше 1,
+        а S-образная кривая остаётся в диапазоне от 0 до 1 и резко
+        поднимается между 4 и 5 часами подготовки.
+      </p>
+    </noscript>
+  </main>
+
+  <script>
+    "use strict";
+
+    /*
+      Все содержательные числа собраны здесь. Геометрия любого элемента
+      ниже получает экранные координаты только через sx() и sy().
+    */
+    const diagramData = {
+      observations: [
+        { hours: 1, passed: 0 },
+        { hours: 2, passed: 0 },
+        { hours: 3, passed: 0 },
+        { hours: 4, passed: 0 },
+        { hours: 5, passed: 1 },
+        { hours: 6, passed: 1 },
+        { hours: 7, passed: 1 },
+        { hours: 8, passed: 1 },
+        { hours: 9, passed: 1 },
+        { hours: 10, passed: 1 }
+      ],
+      probability: { low: 0, high: 1 },
+      transition: { from: 4, to: 5 },
+      linearExamples: [
+        { hours: 1, probability: -0.2 },
+        { hours: 10, probability: 1.3 }
+      ]
+    };
+
+    const canvas = { width: 960, height: 430 };
+    const origin = { x: 110, y: 325 };
+    const scale = { x: 74, y: 200 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svgNamespace = "http://www.w3.org/2000/svg";
+      const layer = document.getElementById("drawing");
+      const styles = getComputedStyle(document.documentElement);
+
+      const labelGap = 12;
+      const fontSize = 15;
+      const smallFontSize = 13;
+      const thinLine = 1;
+      const mediumLine = 2;
+      const wideLine = 3;
+
+      const observations = diagramData.observations;
+      const probability = diagramData.probability;
+      const transition = diagramData.transition;
+      const linearExamples = diagramData.linearExamples;
+
+      const firstObservation = observations.at(0);
+      const lastObservation = observations.at(-1);
+      const firstLinear = linearExamples.at(0);
+      const lastLinear = linearExamples.at(-1);
+
+      const verticalMargin = Math.abs(firstLinear.probability);
+      const bounds = {
+        left: probability.low,
+        right: lastObservation.hours,
+        bottom: firstLinear.probability - verticalMargin,
+        top: lastLinear.probability + verticalMargin
+      };
+
+      const transitionMiddle =
+        (transition.from + transition.to) /
+        (probability.high + probability.high);
+
+      const probabilityMiddle =
+        (probability.low + probability.high) /
+        (probability.high + probability.high);
+
+      const tickX = labelGap / scale.x;
+      const tickY = labelGap / scale.y;
+      const pointRadius = mediumLine + wideLine;
+
+      const linearSlope =
+        (lastLinear.probability - firstLinear.probability) /
+        (lastLinear.hours - firstLinear.hours);
+
+      const linear = hours =>
+        firstLinear.probability +
+        (hours - firstLinear.hours) * linearSlope;
+
+      const sigmoidSteepness =
+        probability.high + Math.abs(firstLinear.probability);
+
+      const sigmoid = hours =>
+        probability.high /
+        (
+          probability.high +
+          Math.exp(
+            -sigmoidSteepness * (hours - transitionMiddle)
+          )
+        );
+
+      const make = (name, attributes = {}, className = "") => {
+        const element = document.createElementNS(svgNamespace, name);
+
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+
+        if (className) {
+          element.setAttribute("class", className);
+        }
+
+        layer.appendChild(element);
+        return element;
+      };
+
+      const addLine = (
+        x1,
+        y1,
+        x2,
+        y2,
+        stroke,
+        strokeWidth,
+        dash = ""
+      ) => {
+        const attributes = {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          stroke,
+          "stroke-width": strokeWidth,
+          "stroke-linecap": "round"
+        };
+
+        if (dash) {
+          attributes["stroke-dasharray"] = dash;
+        }
+
+        return make("line", attributes);
+      };
+
+      const addText = (
+        text,
+        x,
+        y,
+        dx,
+        dy,
+        anchor,
+        className = ""
+      ) => {
+        const node = make(
+          "text",
+          {
+            x: sx(x),
+            y: sy(y),
+            dx,
+            dy,
+            "text-anchor": anchor,
+            "dominant-baseline": "middle",
+            "font-size": className.includes("small")
+              ? smallFontSize
+              : fontSize
+          },
+          className
+        );
+
+        node.textContent = text;
+        return node;
+      };
+
+      /*
+        Светлая полоса — весь допустимый диапазон вероятности.
+        Более узкая полоса отмечает место смены результата.
+      */
+      make("rect", {
+        x: sx(bounds.left),
+        y: sy(probability.high),
+        width: sx(bounds.right) - sx(bounds.left),
+        height: sy(probability.low) - sy(probability.high),
+        fill: styles.getPropertyValue("--band").trim()
+      });
+
+      make("rect", {
+        x: sx(transition.from),
+        y: sy(probability.high),
+        width: sx(transition.to) - sx(transition.from),
+        height: sy(probability.low) - sy(probability.high),
+        fill: styles.getPropertyValue("--switch-band").trim()
+      });
+
+      const gridColor = styles.getPropertyValue("--grid").trim();
+      const inkColor = styles.getPropertyValue("--ink").trim();
+      const mutedColor = styles.getPropertyValue("--muted").trim();
+      const linearColor = styles.getPropertyValue("--linear").trim();
+      const sigmoidColor = styles.getPropertyValue("--sigmoid").trim();
+      const pointColor = styles.getPropertyValue("--point").trim();
+      const pointFill = styles.getPropertyValue("--point-fill").trim();
+      const dashed = `${wideLine} ${wideLine}`;
+
+      addLine(
+        bounds.left,
+        probability.high,
+        bounds.right,
+        probability.high,
+        gridColor,
+        thinLine,
+        dashed
+      );
+
+      addLine(
+        bounds.left,
+        probability.low,
+        bounds.right,
+        probability.low,
+        inkColor,
+        mediumLine
+      );
+
+      addLine(
+        bounds.left,
+        bounds.bottom,
+        bounds.left,
+        bounds.top,
+        inkColor,
+        mediumLine
+      );
+
+      observations.forEach(observation => {
+        addLine(
+          observation.hours,
+          probability.low,
+          observation.hours,
+          probability.low - tickY,
+          mutedColor,
+          thinLine
+        );
+
+        addText(
+          String(observation.hours),
+          observation.hours,
+          probability.low,
+          probability.low,
+          labelGap + labelGap,
+          "middle",
+          "small muted"
+        );
+      });
+
+      [probability.low, probability.high].forEach(value => {
+        addLine(
+          bounds.left - tickX,
+          value,
+          bounds.left,
+          value,
+          mutedColor,
+          thinLine
+        );
+      });
+
+      addText(
+        "0 — не сдал",
+        bounds.left,
+        probability.low,
+        -labelGap,
+        probability.low,
+        "end",
+        "small"
+      );
+
+      addText(
+        "1 — сдал",
+        bounds.left,
+        probability.high,
+        -labelGap,
+        probability.low,
+        "end",
+        "small"
+      );
+
+      addText(
+        "вероятность сдачи",
+        bounds.left,
+        bounds.top,
+        labelGap,
+        labelGap,
+        "start",
+        "small muted"
+      );
+
+      addText(
+        "часы подготовки",
+        transitionMiddle,
+        bounds.bottom,
+        probability.low,
+        labelGap,
+        "middle",
+        "small muted"
+      );
+
+      addText(
+        "допустимая вероятность: от 0 до 1",
+        firstObservation.hours,
+        probability.high,
+        labelGap,
+        -labelGap,
+        "start",
+        "small muted"
+      );
+
+      /*
+        Прямая строится по двум указанным примерам и продолжается на всю
+        ширину графика. Обе её экранные вершины проходят через sx()/sy().
+      */
+      const linearPath = [
+        "M",
+        sx(bounds.left),
+        sy(linear(bounds.left)),
+        "L",
+        sx(bounds.right),
+        sy(linear(bounds.right))
+      ].join(" ");
+
+      make("path", {
+        d: linearPath,
+        fill: "none",
+        stroke: linearColor,
+        "stroke-width": wideLine,
+        "stroke-linecap": "round"
+      });
+
+      /*
+        S-кривая вычисляется в координатах данных. Каждая выборка пути
+        переводится в SVG той же неизменной парой sx()/sy().
+      */
+      const curveCommands = [];
+
+      Array.from({ length: canvas.width }).forEach((unused, index) => {
+        const hours =
+          bounds.left +
+          (bounds.right - bounds.left) *
+          index /
+          (canvas.width - probability.high);
+
+        curveCommands.push(
+          index === probability.low ? "M" : "L",
+          sx(hours),
+          sy(sigmoid(hours))
+        );
+      });
+
+      make("path", {
+        d: curveCommands.join(" "),
+        fill: "none",
+        stroke: sigmoidColor,
+        "stroke-width": wideLine,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      });
+
+      observations.forEach(observation => {
+        make("circle", {
+          cx: sx(observation.hours),
+          cy: sy(observation.passed),
+          r: pointRadius,
+          fill: pointFill,
+          stroke: pointColor,
+          "stroke-width": mediumLine
+        });
+      });
+
+      /*
+        Близкие подписи разведены по разным сторонам линий.
+        Подписи краёв направлены внутрь viewBox.
+      */
+      addText(
+        "Прямая: ниже 0",
+        firstLinear.hours,
+        firstLinear.probability,
+        labelGap,
+        labelGap + labelGap,
+        "start",
+        "linear-label"
+      );
+
+      addText(
+        "Прямая: выше 1",
+        lastLinear.hours,
+        lastLinear.probability,
+        -labelGap,
+        -labelGap,
+        "end",
+        "linear-label"
+      );
+
+      addText(
+        "S-кривая",
+        observations.at(6).hours,
+        sigmoid(observations.at(6).hours),
+        labelGap,
+        -labelGap,
+        "start",
+        "sigmoid-label"
+      );
+
+      addText(
+        "прямая",
+        observations.at(6).hours,
+        linear(observations.at(6).hours),
+        labelGap,
+        labelGap,
+        "start",
+        "linear-label"
+      );
+
+      addText(
+        "резкий переход между 4 и 5 часами",
+        transitionMiddle,
+        probabilityMiddle,
+        probability.low,
+        -(labelGap + labelGap),
+        "middle",
+        "small"
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const failure = document.getElementById("failure");
+
+      svg.hidden = true;
+      failure.hidden = false;
+      failure.textContent =
+        "Схема должна была показать, что прямая выходит ниже 0 и выше 1, " +
+        "а S-образная кривая остаётся в диапазоне от 0 до 1 и резко " +
+        "поднимается между 4 и 5 часами подготовки.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

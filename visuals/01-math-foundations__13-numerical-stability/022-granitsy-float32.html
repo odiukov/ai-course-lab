@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Числовая ось float32</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5b6470;
+    --axis:#1a1d21; --zero:#0b7a5a; --denorm:#c98a00;
+    --normal:#2b6cb0; --over:#c0392b; --band:#eef1f5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf1; --muted:#9aa5b1;
+      --axis:#e8ecf1; --zero:#4ecfa5; --denorm:#f0b429;
+      --normal:#7fb3e8; --over:#ff8a75; --band:#1e232a;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);}
+  .wrap{background:var(--bg);padding:10px 12px 12px;box-sizing:border-box;}
+  h2{font:600 15px/1.3 system-ui,sans-serif;margin:0 0 6px;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{font:14px/1.5 system-ui,sans-serif;color:var(--fg);white-space:pre-wrap;}
+  text{font-family:system-ui,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Числовая ось float32: ноль, денормали, норма, inf</h2>
+  <div id="host"><svg id="svg" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Схема числовой оси float32"></svg></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    // ---- данные схемы (логарифмическая координата x = log10(значение)) ----
+    var PTS=[
+      {id:"zero",  x:-48, label:"0",              note:"ноль"},
+      {id:"min_d", x:-45, label:"1.401e-45",      note:"underflow"},
+      {id:"min_n", x:-38, label:"1.175e-38",      note:"граница нормальных"},
+      {id:"max_n", x:  38, label:"3.4028235e+38", note:"overflow в inf"},
+      {id:"inf",   x:  44, label:"inf",           note:"бесконечность"}
+    ];
+    var ZONES=[
+      {a:-48,b:-45,name:"underflow → 0", key:"zero"},
+      {a:-45,b:-38,name:"денормали",     key:"denorm"},
+      {a:-38,b: 38,name:"рабочая зона (нормальные числа, ~7 цифр)", key:"normal"},
+      {a: 38,b: 44,name:"overflow → inf",key:"over"}
+    ];
+
+    // ---- одна пара функций перевода ----
+    var ORIGIN={x:150,y:170};          // sx(0), sy(0)
+    var SCALE ={x:6.6,  y:6.6};        // пикселей на единицу
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y - y*SCALE.y; }
+
+    // ---- литералы: только отступы подписей, толщины, кегли ----
+    var LW=2, LW_THIN=1.4, FS=13, FS_SM=12, FS_LG=14;
+    var PAD_TICK=8, PAD_ZONE=6, PAD_LEG=0;
+
+    var NS="http://www.w3.org/2000/svg";
+    var svg=document.getElementById("svg");
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function add(n,a,t){var e=el(n,a);if(t!=null)e.textContent=t;svg.appendChild(e);return e;}
+    function line(x1,y1,x2,y2,a){
+      a=a||{};a.x1=sx(x1);a.y1=sy(y1);a.x2=sx(x2);a.y2=sy(y2);
+      a["stroke-width"]=a["stroke-width"]||LW;return add("line",a);
+    }
+    function txt(x,y,dx,dy,anchor,fill,size,s){
+      return add("text",{x:sx(x)+dx,y:sy(y)+dy,"text-anchor":anchor,fill:fill,"font-size":size},s);
+    }
+
+    add("rect",{x:0,y:0,width:900,height:300,fill:"var(--bg)"});
+
+    // фон рабочей зоны
+    add("rect",{x:sx(-38),y:sy(4),width:sx(38)-sx(-38),height:sy(0)-sy(4),fill:"var(--band)"});
+
+    // ---- ось со стрелкой ----
+    var AX0=-50, AX1=48;
+    line(AX0,0,AX1,0,{stroke:"var(--axis)"});
+    add("polygon",{points:[
+      sx(AX1)+","+sy(0),
+      sx(AX1-2)+","+sy(1.2),
+      sx(AX1-2)+","+sy(-1.2)
+    ].join(" "),fill:"var(--axis)"});
+    txt(AX0,0,0,-PAD_TICK*2,"start","var(--muted)",FS_SM,"меньше");
+    txt(AX1-2,0,0,-PAD_TICK*2,"end","var(--muted)",FS_SM,"больше");
+
+    // ---- зоны: скобки над осью ----
+    var colorOf={zero:"var(--zero)",denorm:"var(--denorm)",normal:"var(--normal)",over:"var(--over)"};
+    ZONES.forEach(function(z,i){
+      var top=(i%2===0)?7:10.5;
+      var c=colorOf[z.key];
+      line(z.a,top,z.b,top,{stroke:c,"stroke-width":LW_THIN});
+      line(z.a,top,z.a,top-1.6,{stroke:c,"stroke-width":LW_THIN});
+      line(z.b,top,z.b,top-1.6,{stroke:c,"stroke-width":LW_THIN});
+      var mid=(z.a+z.b)/2;
+      txt(mid,top,0,-PAD_ZONE,"middle",c,FS,z.name);
+    });
+
+    // ---- точки и подписи под осью, разведённые по двум ярусам ----
+    var levels={zero:-4.5,min_d:-11.5,min_n:-4.5,max_n:-4.5,inf:-11.5};
+    var anchors={zero:"start",min_d:"start",min_n:"middle",max_n:"middle",inf:"end"};
+    PTS.forEach(function(p){
+      var c=(p.id==="zero")?"var(--zero)":(p.id==="min_d")?"var(--denorm)":
+            (p.id==="min_n")?"var(--normal)":(p.id==="inf")?"var(--over)":"var(--over)";
+      var ly=levels[p.id];
+      line(p.x,1.6,p.x,ly+1.2,{stroke:c,"stroke-width":LW_THIN,"stroke-dasharray":"3 3"});
+      add("circle",{cx:sx(p.x),cy:sy(0),r:LW*2,fill:c});
+      txt(p.x,ly,0,0,anchors[p.id],"var(--fg)",FS_LG,p.label);
+      txt(p.x,ly,0,PAD_TICK*2,anchors[p.id],"var(--muted)",FS_SM,p.note);
+    });
+
+    // ---- легенда строкой снизу ----
+    txt(AX0,-18,PAD_LEG,0,"start","var(--muted)",FS_SM,
+      "точность падает у краёв: слева теряются цифры мантиссы, справа число теряется целиком");
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна показывать числовую ось float32 слева направо: '+
+      'точка 0; узкая полоса денормалей от 1.401e-45 (underflow) до 1.175e-38; '+
+      'рабочая зона нормальных чисел от 1.175e-38 до 3.4028235e+38; '+
+      'дальше overflow в inf.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

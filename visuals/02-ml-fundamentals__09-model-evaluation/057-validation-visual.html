@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Поиск полезной сложности по validation curve</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --ink: #172033;
+      --muted: #667085;
+      --axis: #344054;
+      --grid: #cbd5e1;
+      --train: #2563eb;
+      --validation: #db2777;
+      --peak: #047857;
+      --underfit: #fff1dc;
+      --useful: #dcfce7;
+      --overfit: #fee2e2;
+      --underfit-ink: #9a4b08;
+      --useful-ink: #047857;
+      --overfit-ink: #b42318;
+      --surface: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --ink: #f1f5f9;
+        --muted: #aab4c3;
+        --axis: #d5dbea;
+        --grid: #475569;
+        --train: #60a5fa;
+        --validation: #f472b6;
+        --peak: #4ade80;
+        --underfit: #3b2b19;
+        --useful: #173b2d;
+        --overfit: #422327;
+        --underfit-ink: #fdba74;
+        --useful-ink: #86efac;
+        --overfit-ink: #fca5a5;
+        --surface: #111827;
+      }
+    }
+
+    html,
+    body {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      margin: unset;
+      padding: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    h2 {
+      margin: unset;
+      padding: 14px 18px 8px;
+      font-size: 20px;
+      line-height: normal;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .zone {
+      stroke: none;
+    }
+
+    .zone-underfit {
+      fill: var(--underfit);
+    }
+
+    .zone-useful {
+      fill: var(--useful);
+    }
+
+    .zone-overfit {
+      fill: var(--overfit);
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1.5;
+    }
+
+    .curve {
+      fill: none;
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .curve-train {
+      stroke: var(--train);
+    }
+
+    .curve-validation {
+      stroke: var(--validation);
+    }
+
+    .point-train {
+      fill: var(--surface);
+      stroke: var(--train);
+      stroke-width: 3;
+    }
+
+    .point-validation {
+      fill: var(--surface);
+      stroke: var(--validation);
+      stroke-width: 3;
+    }
+
+    .peak-halo {
+      fill: var(--surface);
+      stroke: var(--peak);
+      stroke-width: 4;
+    }
+
+    .peak-core {
+      fill: var(--peak);
+      stroke: none;
+    }
+
+    .gap {
+      fill: none;
+      stroke: var(--overfit-ink);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+    }
+
+    .leader {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    text {
+      font-size: 15px;
+      fill: var(--ink);
+    }
+
+    .axis-label {
+      font-size: 16px;
+      fill: var(--axis);
+    }
+
+    .tick-label {
+      font-size: 14px;
+      fill: var(--muted);
+    }
+
+    .region-label {
+      font-size: 14px;
+      font-weight: bold;
+      letter-spacing: normal;
+    }
+
+    .underfit-label {
+      fill: var(--underfit-ink);
+    }
+
+    .useful-label {
+      fill: var(--useful-ink);
+    }
+
+    .overfit-label,
+    .gap-label {
+      fill: var(--overfit-ink);
+    }
+
+    .curve-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .train-label {
+      fill: var(--train);
+    }
+
+    .validation-label {
+      fill: var(--validation);
+    }
+
+    .peak-label {
+      fill: var(--peak);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      margin: unset;
+      padding: 18px;
+      font-size: 16px;
+      color: var(--ink);
+      background: var(--surface);
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="figure-heading">
+    <h2 id="figure-heading">Поиск полезной сложности по validation curve</h2>
+    <div id="diagram">
+      <svg
+        id="chart"
+        viewBox="0 0 900 430"
+        width="900"
+        height="430"
+        role="img"
+        aria-labelledby="svg-title svg-description"
+        preserveAspectRatio="xMidYMid meet">
+      </svg>
+    </div>
+  </main>
+
+  <script>
+    const D = Object.freeze({
+      canvas: [900, 430],
+      zero: 0,
+      labelGap: 12,
+      train: [
+        [1, 0.30],
+        [3, 0.48],
+        [5, 0.74],
+        [6, 0.86],
+        [8, 0.92],
+        [10, 0.96],
+        [12, 0.98],
+        [15, 0.995],
+        [18, 0.998],
+        [20, 1.00]
+      ],
+      validation: [
+        [1, 0.24],
+        [3, 0.42],
+        [5, 0.72],
+        [6, 0.82],
+        [8, 0.78],
+        [10, 0.71],
+        [12, 0.63],
+        [15, 0.52],
+        [18, 0.44],
+        [20, 0.40]
+      ],
+      zones: [
+        [0, 4.5, "zone zone-underfit"],
+        [4.5, 8.5, "zone zone-useful"],
+        [8.5, 20.6, "zone zone-overfit"]
+      ],
+      zoneBottom: 0,
+      zoneTop: 1.04,
+      regionLabels: [
+        [2.25, 1.095, "НЕДООБУЧЕНИЕ", "region-label underfit-label"],
+        [6.5, 1.095, "ПОЛЕЗНЫЙ ПИК", "region-label useful-label"],
+        [14.2, 1.095, "ПЕРЕОБУЧЕНИЕ", "region-label overfit-label"]
+      ],
+      ticks: [
+        [1, "1"],
+        [6, "6"],
+        [15, "15"],
+        [20, "20"]
+      ],
+      tickLow: -0.025,
+      tickHigh: 0.025,
+      tickTextY: -0.10,
+      horizontalGuides: [0.25, 0.50, 0.75, 1.00],
+      plotLeft: 0,
+      plotRight: 20.6,
+      axisXEnd: 20.72,
+      axisYEnd: 1.08,
+      xArrow: [
+        [20.72, 0],
+        [20.31, 0.055],
+        [20.31, -0.055]
+      ],
+      yArrow: [
+        [0, 1.08],
+        [-0.16, 1.025],
+        [0.16, 1.025]
+      ],
+      xAxisLabel: [20.55, -0.25],
+      yAxisLabel: [0.18, 1.145],
+      peak: [6, 0.82],
+      peakOuterRadius: 0.20,
+      peakInnerRadius: 0.08,
+      peakLeaderEnd: [7.05, 0.65],
+      peakLabel: [7.05, 0.65],
+      gapX: 15,
+      gapBottom: 0.52,
+      gapTop: 0.995,
+      gapCapLeft: 14.80,
+      gapCapRight: 15.20,
+      gapLabel: [15.18, 0.72],
+      trainLabel: [19.75, 0.94],
+      validationLabel: [19.75, 0.36],
+      trainLeaderStart: [18.3, 0.998],
+      trainLeaderEnd: [19.35, 0.94],
+      validationLeaderStart: [18.25, 0.43],
+      validationLeaderEnd: [19.35, 0.36],
+      depthPoints: [
+        [15, 0.995, "point-train"],
+        [15, 0.52, "point-validation"]
+      ],
+      pointRadius: 0.14
+    });
+
+    const origin = Object.freeze({ x: 90, y: 350 });
+    const scale = Object.freeze({ x: 35, y: 245 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const ns = "http://www.w3.org/2000/svg";
+      const [canvasWidth, canvasHeight] = D.canvas;
+
+      svg.setAttribute(
+        "viewBox",
+        `${D.zero} ${D.zero} ${canvasWidth} ${canvasHeight}`
+      );
+      svg.setAttribute("width", canvasWidth);
+      svg.setAttribute("height", canvasHeight);
+
+      const make = (name, attributes, content) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (content !== undefined) node.textContent = content;
+        return node;
+      };
+
+      const addLine = (a, b, className) => {
+        svg.appendChild(make("line", {
+          x1: sx(a.x),
+          y1: sy(a.y),
+          x2: sx(b.x),
+          y2: sy(b.y),
+          class: className
+        }));
+      };
+
+      const addText = (
+        point,
+        content,
+        className,
+        anchor,
+        offsetX,
+        offsetY
+      ) => {
+        svg.appendChild(make("text", {
+          x: sx(point.x) + offsetX,
+          y: sy(point.y) + offsetY,
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content));
+      };
+
+      svg.appendChild(make("title", { id: "svg-title" },
+        "Validation curve для глубины дерева от 1 до 20"
+      ));
+
+      svg.appendChild(make("desc", { id: "svg-description" },
+        "Слева оценки обучения и валидации низкие. Валидация достигает максимума при глубине 6. При глубине 15 качество обучения почти идеально, но качество валидации уже ниже."
+      ));
+
+      D.zones.forEach(([left, right, className]) => {
+        svg.appendChild(make("rect", {
+          x: sx(left),
+          y: sy(D.zoneTop),
+          width: sx(right) - sx(left),
+          height: sy(D.zoneBottom) - sy(D.zoneTop),
+          class: className
+        }));
+      });
+
+      D.horizontalGuides.forEach(value => {
+        addLine(
+          { x: D.plotLeft, y: value },
+          { x: D.plotRight, y: value },
+          "guide"
+        );
+      });
+
+      addLine(
+        { x: D.zero, y: D.zero },
+        { x: D.axisXEnd, y: D.zero },
+        "axis"
+      );
+
+      addLine(
+        { x: D.zero, y: D.zero },
+        { x: D.zero, y: D.axisYEnd },
+        "axis"
+      );
+
+      svg.appendChild(make("polygon", {
+        points: D.xArrow
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" "),
+        class: "axis"
+      }));
+
+      svg.appendChild(make("polygon", {
+        points: D.yArrow
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" "),
+        class: "axis"
+      }));
+
+      D.ticks.forEach(([value, label]) => {
+        addLine(
+          { x: value, y: D.tickLow },
+          { x: value, y: D.tickHigh },
+          "axis"
+        );
+
+        addText(
+          { x: value, y: D.tickTextY },
+          label,
+          "tick-label",
+          "middle",
+          D.zero,
+          D.zero
+        );
+      });
+
+      addText(
+        { x: D.xAxisLabel[Symbol.iterator]().next().value,
+          y: [...D.xAxisLabel].pop() },
+        "сложность: глубина дерева",
+        "axis-label",
+        "end",
+        D.zero,
+        D.zero
+      );
+
+      const [yLabelX, yLabelY] = D.yAxisLabel;
+      addText(
+        { x: yLabelX, y: yLabelY },
+        "качество",
+        "axis-label",
+        "start",
+        D.zero,
+        D.zero
+      );
+
+      D.regionLabels.forEach(([x, y, label, className]) => {
+        addText(
+          { x, y },
+          label,
+          className,
+          "middle",
+          D.zero,
+          D.zero
+        );
+      });
+
+      svg.appendChild(make("polyline", {
+        points: D.train
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" "),
+        class: "curve curve-train"
+      }));
+
+      svg.appendChild(make("polyline", {
+        points: D.validation
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" "),
+        class: "curve curve-validation"
+      }));
+
+      D.depthPoints.forEach(([x, y, className]) => {
+        svg.appendChild(make("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(D.pointRadius) - sx(D.zero),
+          class: className
+        }));
+      });
+
+      const [peakX, peakY] = D.peak;
+
+      svg.appendChild(make("circle", {
+        cx: sx(peakX),
+        cy: sy(peakY),
+        r: sx(D.peakOuterRadius) - sx(D.zero),
+        class: "peak-halo"
+      }));
+
+      svg.appendChild(make("circle", {
+        cx: sx(peakX),
+        cy: sy(peakY),
+        r: sx(D.peakInnerRadius) - sx(D.zero),
+        class: "peak-core"
+      }));
+
+      const [peakEndX, peakEndY] = D.peakLeaderEnd;
+      addLine(
+        { x: peakX, y: peakY },
+        { x: peakEndX, y: peakEndY },
+        "leader"
+      );
+
+      const [peakLabelX, peakLabelY] = D.peakLabel;
+      addText(
+        { x: peakLabelX, y: peakLabelY },
+        "максимум валидации: глубина 6",
+        "peak-label",
+        "start",
+        D.labelGap,
+        D.labelGap
+      );
+
+      addLine(
+        { x: D.gapX, y: D.gapBottom },
+        { x: D.gapX, y: D.gapTop },
+        "gap"
+      );
+
+      addLine(
+        { x: D.gapCapLeft, y: D.gapBottom },
+        { x: D.gapCapRight, y: D.gapBottom },
+        "gap"
+      );
+
+      addLine(
+        { x: D.gapCapLeft, y: D.gapTop },
+        { x: D.gapCapRight, y: D.gapTop },
+        "gap"
+      );
+
+      const [gapLabelX, gapLabelY] = D.gapLabel;
+      addText(
+        { x: gapLabelX, y: gapLabelY },
+        "разрыв при глубине 15",
+        "gap-label",
+        "start",
+        D.labelGap,
+        D.zero
+      );
+
+      const [trainStartX, trainStartY] = D.trainLeaderStart;
+      const [trainEndX, trainEndY] = D.trainLeaderEnd;
+      addLine(
+        { x: trainStartX, y: trainStartY },
+        { x: trainEndX, y: trainEndY },
+        "leader"
+      );
+
+      const [trainLabelX, trainLabelY] = D.trainLabel;
+      addText(
+        { x: trainLabelX, y: trainLabelY },
+        "обучение",
+        "curve-label train-label",
+        "end",
+        -D.labelGap,
+        D.zero
+      );
+
+      const [validationStartX, validationStartY] =
+        D.validationLeaderStart;
+      const [validationEndX, validationEndY] =
+        D.validationLeaderEnd;
+
+      addLine(
+        { x: validationStartX, y: validationStartY },
+        { x: validationEndX, y: validationEndY },
+        "leader"
+      );
+
+      const [validationLabelX, validationLabelY] =
+        D.validationLabel;
+
+      addText(
+        { x: validationLabelX, y: validationLabelY },
+        "валидация",
+        "curve-label validation-label",
+        "end",
+        -D.labelGap,
+        D.zero
+      );
+    } catch (error) {
+      document.getElementById("diagram").innerHTML =
+        '<p class="fallback">Схема должна была показать: слева обе оценки низкие, при глубине 6 валидация достигает максимума, а справа обучение остаётся высоким, пока валидация падает.</p>';
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

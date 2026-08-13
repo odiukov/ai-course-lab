@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bias и variance на мишени</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5d687c;
+      --target-fill: #f1f5fa;
+      --target-line: #9aa8ba;
+      --target-center: #41536d;
+      --bullet: #d95745;
+      --bullet-edge: #8f2f25;
+      --mean: #7047b8;
+      --shift: #d08a24;
+      --divider: #d8dee8;
+      --fallback: #8f2f25;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #182131;
+        --ink: #f1f5fb;
+        --muted: #b7c1d1;
+        --target-fill: #202c3d;
+        --target-line: #71819a;
+        --target-center: #c3cede;
+        --bullet: #ff7b68;
+        --bullet-edge: #ffd0c8;
+        --mean: #c6a7ff;
+        --shift: #ffc269;
+        --divider: #354258;
+        --fallback: #ffb0a4;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+    }
+
+    main {
+      width: min(100%, 1000px);
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    header {
+      padding: 12px 20px 8px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+      font-weight: 720;
+      letter-spacing: -0.02em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+      background: var(--panel);
+    }
+
+    .target-field {
+      fill: var(--target-fill);
+      stroke: var(--target-line);
+    }
+
+    .target-ring {
+      fill: none;
+      stroke: var(--target-line);
+    }
+
+    .crosshair {
+      stroke: var(--target-center);
+      stroke-linecap: round;
+    }
+
+    .bullet {
+      fill: var(--bullet);
+      stroke: var(--bullet-edge);
+    }
+
+    .bullet-glint {
+      fill: var(--panel);
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    .mean-marker {
+      fill: var(--mean);
+      stroke: var(--panel);
+      stroke-linejoin: round;
+    }
+
+    .mean-halo {
+      fill: none;
+      stroke: var(--mean);
+      stroke-dasharray: 5 5;
+    }
+
+    .shift-line {
+      fill: none;
+      stroke: var(--shift);
+      stroke-linecap: round;
+      stroke-dasharray: 7 6;
+    }
+
+    .leader {
+      fill: none;
+      stroke: var(--mean);
+      stroke-linecap: round;
+    }
+
+    .divider {
+      stroke: var(--divider);
+      stroke-linecap: round;
+    }
+
+    .case-label {
+      fill: var(--ink);
+      font-weight: 720;
+      letter-spacing: 0.01em;
+    }
+
+    .mean-label {
+      fill: var(--muted);
+      font-weight: 600;
+    }
+
+    .term-bias {
+      fill: var(--shift);
+    }
+
+    .term-variance {
+      fill: var(--mean);
+    }
+
+    #fallback {
+      margin: 12px 24px 24px;
+      color: var(--fallback);
+      font-size: 18px;
+      line-height: 1.45;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Bias и variance на мишени</h1>
+    </header>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1000 450"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Две мишени: bias и variance</title>
+      <desc id="svg-desc">
+        Слева пули собраны кучно, но группа смещена левее центра.
+        Справа пули широко разбросаны вокруг центра.
+      </desc>
+      <g id="stage"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать две мишени: кучную группу левее центра
+      для bias и широкий разброс вокруг центра для variance.
+    </p>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze({
+      canvas: { width: 1000, height: 450 },
+      logicalCanvas: { width: 100, height: 45 },
+      zero: { x: 0, y: 0 },
+
+      sizes: {
+        outerRadius: 14.5,
+        rings: [14.5, 10.9, 7.3, 3.7],
+        crossHalf: 1.15,
+        crossGap: 0.38,
+        bulletRadius: 0.82,
+        glintRadius: 0.22,
+        glintShift: { x: -0.24, y: -0.24 },
+        meanHalf: 0.9,
+        haloRadius: 1.65,
+        lineWidth: 2,
+        ringWidth: 1.6,
+        centerWidth: 1.7,
+        bulletWidth: 1.35,
+        meanWidth: 1.6,
+        leaderWidth: 1.7,
+        labelPad: 8,
+        caseFont: 18,
+        meanFont: 16
+      },
+
+      layout: {
+        topLabelY: 3.5,
+        targetY: 20.5,
+        leaderTurnY: 37.7,
+        meanLabelY: 41.1,
+        dividerX: 50,
+        dividerTop: 5.7,
+        dividerBottom: 41.2
+      },
+
+      targets: [
+        {
+          kind: "bias",
+          center: { x: 28.5, y: 20.5 },
+          mean: { x: 22.6, y: 20.5 },
+          label: {
+            anchor: { x: 28.5, y: 3.5 },
+            term: "BIAS",
+            description: " · кучно левее центра"
+          },
+          meanLabel: {
+            anchor: { x: 28.5, y: 41.1 },
+            text: "середина группы смещена"
+          },
+          bullets: [
+            { x: 21.2, y: 19.4 },
+            { x: 21.8, y: 21.2 },
+            { x: 22.8, y: 20.0 },
+            { x: 23.4, y: 21.3 },
+            { x: 24.0, y: 20.3 },
+            { x: 22.2, y: 19.0 },
+            { x: 23.0, y: 22.0 },
+            { x: 21.4, y: 20.6 },
+            { x: 23.7, y: 20.7 }
+          ]
+        },
+        {
+          kind: "variance",
+          center: { x: 71.5, y: 20.5 },
+          mean: { x: 71.5, y: 20.5 },
+          label: {
+            anchor: { x: 71.5, y: 3.5 },
+            term: "VARIANCE",
+            description: " · широко вокруг центра"
+          },
+          meanLabel: {
+            anchor: { x: 71.5, y: 41.1 },
+            text: "середина группы у центра"
+          },
+          bullets: [
+            { x: 61.5, y: 12.5 },
+            { x: 81.5, y: 28.5 },
+            { x: 63.5, y: 27.5 },
+            { x: 79.5, y: 13.5 },
+            { x: 69.5, y: 9.5 },
+            { x: 73.5, y: 31.5 },
+            { x: 60.5, y: 22.5 },
+            { x: 82.5, y: 18.5 },
+            { x: 67.5, y: 23.5 },
+            { x: 75.5, y: 17.5 },
+            { x: 71.5, y: 20.5 }
+          ]
+        }
+      ]
+    });
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 10, y: 10 });
+
+    const toPx = (point) => ({
+      x: origin.x + point.x * scale.x,
+      y: origin.y + point.y * scale.y
+    });
+
+    try {
+      const svg = document.getElementById("diagram");
+      const stage = document.getElementById("stage");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes = {}, text = "") => {
+        const node = document.createElementNS(NS, name);
+
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+
+        if (text) {
+          node.textContent = text;
+        }
+
+        return node;
+      };
+
+      const mappedLength = (value) => {
+        const start = toPx(diagramData.zero);
+        const finish = toPx({ x: value, y: diagramData.zero.y });
+        return Math.abs(finish.x - start.x);
+      };
+
+      const pointAttributes = (point) => {
+        const mapped = toPx(point);
+        return { cx: mapped.x, cy: mapped.y };
+      };
+
+      const lineAttributes = (from, to) => {
+        const start = toPx(from);
+        const finish = toPx(to);
+
+        return {
+          x1: start.x,
+          y1: start.y,
+          x2: finish.x,
+          y2: finish.y
+        };
+      };
+
+      const appendLine = (parent, from, to, className, width) => {
+        parent.appendChild(make("line", {
+          ...lineAttributes(from, to),
+          class: className,
+          "stroke-width": width,
+          "vector-effect": "non-scaling-stroke"
+        }));
+      };
+
+      const appendText = (
+        parent,
+        point,
+        className,
+        fontSize,
+        anchor,
+        text
+      ) => {
+        const mapped = toPx(point);
+
+        parent.appendChild(make("text", {
+          x: mapped.x,
+          y: mapped.y,
+          class: className,
+          "font-size": fontSize,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, text));
+      };
+
+      const drawCrosshair = (parent, center) => {
+        const half = diagramData.sizes.crossHalf;
+        const gap = diagramData.sizes.crossGap;
+        const width = diagramData.sizes.centerWidth;
+
+        appendLine(
+          parent,
+          { x: center.x - half, y: center.y },
+          { x: center.x - gap, y: center.y },
+          "crosshair",
+          width
+        );
+        appendLine(
+          parent,
+          { x: center.x + gap, y: center.y },
+          { x: center.x + half, y: center.y },
+          "crosshair",
+          width
+        );
+        appendLine(
+          parent,
+          { x: center.x, y: center.y - half },
+          { x: center.x, y: center.y - gap },
+          "crosshair",
+          width
+        );
+        appendLine(
+          parent,
+          { x: center.x, y: center.y + gap },
+          { x: center.x, y: center.y + half },
+          "crosshair",
+          width
+        );
+      };
+
+      const drawBullet = (parent, bullet) => {
+        const bulletGroup = make("g");
+        const glint = {
+          x: bullet.x + diagramData.sizes.glintShift.x,
+          y: bullet.y + diagramData.sizes.glintShift.y
+        };
+
+        bulletGroup.appendChild(make("circle", {
+          ...pointAttributes(bullet),
+          r: mappedLength(diagramData.sizes.bulletRadius),
+          class: "bullet",
+          "stroke-width": diagramData.sizes.bulletWidth,
+          "vector-effect": "non-scaling-stroke"
+        }));
+
+        bulletGroup.appendChild(make("circle", {
+          ...pointAttributes(glint),
+          r: mappedLength(diagramData.sizes.glintRadius),
+          class: "bullet-glint"
+        }));
+
+        parent.appendChild(bulletGroup);
+      };
+
+      const drawMean = (parent, mean) => {
+        const half = diagramData.sizes.meanHalf;
+        const points = [
+          { x: mean.x, y: mean.y - half },
+          { x: mean.x + half, y: mean.y },
+          { x: mean.x, y: mean.y + half },
+          { x: mean.x - half, y: mean.y }
+        ]
+          .map(toPx)
+          .map((point) => `${point.x},${point.y}`)
+          .join(" ");
+
+        parent.appendChild(make("circle", {
+          ...pointAttributes(mean),
+          r: mappedLength(diagramData.sizes.haloRadius),
+          class: "mean-halo",
+          "stroke-width": diagramData.sizes.meanWidth,
+          "vector-effect": "non-scaling-stroke"
+        }));
+
+        parent.appendChild(make("polygon", {
+          points,
+          class: "mean-marker",
+          "stroke-width": diagramData.sizes.meanWidth,
+          "vector-effect": "non-scaling-stroke"
+        }));
+      };
+
+      const drawCaseLabel = (parent, target) => {
+        const mapped = toPx(target.label.anchor);
+        const text = make("text", {
+          x: mapped.x,
+          y: mapped.y,
+          class: "case-label",
+          "font-size": diagramData.sizes.caseFont,
+          "text-anchor": "middle",
+          "dominant-baseline": "middle"
+        });
+
+        text.appendChild(make("tspan", {
+          class: target.kind === "bias" ? "term-bias" : "term-variance"
+        }, target.label.term));
+
+        text.appendChild(make("tspan", {}, target.label.description));
+        parent.appendChild(text);
+      };
+
+      const drawTarget = (target) => {
+        const group = make("g", {
+          "aria-label": target.kind === "bias"
+            ? "Кучная группа левее центра"
+            : "Широкий разброс вокруг центра"
+        });
+
+        drawCaseLabel(group, target);
+
+        diagramData.sizes.rings.forEach((ring, index) => {
+          group.appendChild(make("circle", {
+            ...pointAttributes(target.center),
+            r: mappedLength(ring),
+            class: index === diagramData.zero.x
+              ? "target-field"
+              : "target-ring",
+            "stroke-width": index === diagramData.zero.x
+              ? diagramData.sizes.lineWidth
+              : diagramData.sizes.ringWidth,
+            "vector-effect": "non-scaling-stroke"
+          }));
+        });
+
+        drawCrosshair(group, target.center);
+
+        if (target.kind === "bias") {
+          appendLine(
+            group,
+            target.center,
+            target.mean,
+            "shift-line",
+            diagramData.sizes.leaderWidth
+          );
+        }
+
+        target.bullets.forEach((bullet) => drawBullet(group, bullet));
+        drawMean(group, target.mean);
+
+        appendLine(
+          group,
+          target.mean,
+          {
+            x: target.mean.x,
+            y: diagramData.layout.leaderTurnY
+          },
+          "leader",
+          diagramData.sizes.leaderWidth
+        );
+
+        appendLine(
+          group,
+          {
+            x: target.mean.x,
+            y: diagramData.layout.leaderTurnY
+          },
+          {
+            x: target.meanLabel.anchor.x,
+            y: diagramData.layout.leaderTurnY
+          },
+          "leader",
+          diagramData.sizes.leaderWidth
+        );
+
+        appendText(
+          group,
+          target.meanLabel.anchor,
+          "mean-label",
+          diagramData.sizes.meanFont,
+          "middle",
+          target.meanLabel.text
+        );
+
+        stage.appendChild(group);
+      };
+
+      appendLine(
+        stage,
+        {
+          x: diagramData.layout.dividerX,
+          y: diagramData.layout.dividerTop
+        },
+        {
+          x: diagramData.layout.dividerX,
+          y: diagramData.layout.dividerBottom
+        },
+        "divider",
+        diagramData.sizes.ringWidth
+      );
+
+      diagramData.targets.forEach(drawTarget);
+
+      if (!stage.hasChildNodes()) {
+        throw new Error("Содержимое схемы не создано");
+      }
+
+      fallback.hidden = true;
+      svg.hidden = false;
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      if (svg) {
+        svg.hidden = true;
+      }
+
+      if (fallback) {
+        fallback.hidden = false;
+      }
+
+      console.error(error);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

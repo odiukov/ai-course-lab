@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Шесть слов глазами, восемь tokens моделью</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1b1d22; --muted:#5d6472;
+    --cell:#ffffff; --cellStroke:#2f6fbf; --cellFill:#e8f1fc;
+    --punct:#c2410c; --punctFill:#fdeee5; --split:#8b5cf6;
+    --eye:#0f766e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8eaef; --muted:#9aa3b2;
+      --cell:#1b1f26; --cellStroke:#6ea8f0; --cellFill:#1d2a3b;
+      --punct:#fb923c; --punctFill:#3a2416; --split:#a78bfa;
+      --eye:#5eead4;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;}
+  .wrap{background:var(--bg);padding:10px 12px 14px;box-sizing:border-box;}
+  h2{margin:0 0 8px;font-size:15px;font-weight:600;letter-spacing:.01em;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5;margin:6px 0 0;}
+  text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Шесть слов глазами, восемь tokens моделью</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- data ----
+    var TOKENS = [
+      {t:"The",     w:1, eye:"The",     span:1, kind:"word"},
+      {t:"cats",    w:1, eye:"cats",    span:1, kind:"word"},
+      {t:"weren't", w:1.5, eye:"weren't", span:1, kind:"keep"},
+      {t:"running", w:1.5, eye:"running", span:1, kind:"word"},
+      {t:"at",      w:0.8, eye:"at",    span:1, kind:"word"},
+      {t:"3",       w:0.6, eye:"3pm.",  span:3, kind:"split"},
+      {t:"pm",      w:0.8, eye:null,    span:0, kind:"split"},
+      {t:".",       w:0.6, eye:null,    span:0, kind:"punct"}
+    ];
+
+    // ---- single coordinate mapping ----
+    var ORIGIN = {x:132, y:118};   // pixel of (0,0)
+    var SCALE  = {x:56,  y:56};    // pixels per unit
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    // ---- literals allowed: canvas, label offsets, strokes, font sizes ----
+    var VB_W = 900, VB_H = 300;
+    var STROKE = 1.6, THIN = 1.1;
+    var FS_TOK = 15, FS_LBL = 13, FS_SMALL = 11.5, FS_NUM = 10.5;
+    var PAD = 8, PAD_SM = 5;
+
+    var GAP = 0.09;              // units between cells
+    var ROW_EYE = -0.9;          // y of eye row (top)
+    var ROW_TOK = 0.25;          // y of token row
+    var H = 0.62;                // cell height in units
+
+    // lay out token cells along x, in units
+    var cursor = 0, i;
+    for(i=0;i<TOKENS.length;i++){
+      TOKENS[i].x0 = cursor;
+      TOKENS[i].x1 = cursor + TOKENS[i].w;
+      TOKENS[i].xc = cursor + TOKENS[i].w/2;
+      cursor = TOKENS[i].x1 + GAP;
+    }
+    var TOTAL = cursor - GAP;
+
+    var svg = [];
+    function el(s){ svg.push(s); }
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;'); }
+
+    el('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+VB_W+' '+VB_H+'" '+
+       'preserveAspectRatio="xMidYMid meet" role="img" '+
+       'aria-label="Фраза The cats weren\'t running at 3pm. разложена в восемь токенов">');
+    el('<rect x="0" y="0" width="'+VB_W+'" height="'+VB_H+'" fill="var(--bg)"/>');
+    el('<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+       '<path d="M0 0 L10 5 L0 10 z" fill="var(--split)"/></marker></defs>');
+
+    // ---- row labels (left of drawing, text-anchor=end) ----
+    el('<text x="'+(sx(0)-PAD*2)+'" y="'+(sy(ROW_EYE)+H/2*SCALE.y)+'" text-anchor="end" '+
+       'font-size="'+FS_LBL+'" fill="var(--eye)" font-weight="600">глазами 6 слов</text>');
+    el('<text x="'+(sx(0)-PAD*2)+'" y="'+(sy(ROW_TOK)+H/2*SCALE.y)+'" text-anchor="end" '+
+       'font-size="'+FS_LBL+'" fill="var(--cellStroke)" font-weight="600">модели 8 позиций</text>');
+    el('<text x="'+(sx(0)-PAD*2)+'" y="'+(sy(ROW_TOK)+H/2*SCALE.y+16)+'" text-anchor="end" '+
+       'font-size="'+FS_SMALL+'" fill="var(--muted)">словаря</text>');
+
+    // ---- eye row: 6 words ----
+    for(i=0;i<TOKENS.length;i++){
+      var d = TOKENS[i];
+      if(!d.eye) continue;
+      var a = d, b = TOKENS[i + d.span - 1];
+      var x0 = sx(a.x0), x1 = sx(b.x1);
+      el('<rect x="'+x0+'" y="'+sy(ROW_EYE)+'" width="'+(x1-x0)+'" height="'+(H*SCALE.y)+'" rx="6" '+
+         'fill="none" stroke="var(--eye)" stroke-width="'+THIN+'" stroke-dasharray="5 3"/>');
+      el('<text class="mono" x="'+((x0+x1)/2)+'" y="'+(sy(ROW_EYE)+H/2*SCALE.y)+'" text-anchor="middle" '+
+         'dominant-baseline="central" font-size="'+FS_TOK+'" fill="var(--eye)">'+esc(d.eye)+'</text>');
+    }
+
+    // ---- token row: 8 cells ----
+    for(i=0;i<TOKENS.length;i++){
+      var t = TOKENS[i];
+      var fill = t.kind==="punct" ? "var(--punctFill)" : "var(--cellFill)";
+      var stk  = t.kind==="punct" ? "var(--punct)"     : "var(--cellStroke)";
+      el('<rect x="'+sx(t.x0)+'" y="'+sy(ROW_TOK)+'" width="'+(t.w*SCALE.x)+'" height="'+(H*SCALE.y)+'" rx="6" '+
+         'fill="'+fill+'" stroke="'+stk+'" stroke-width="'+STROKE+'"/>');
+      el('<text class="mono" x="'+sx(t.xc)+'" y="'+(sy(ROW_TOK)+H/2*SCALE.y)+'" text-anchor="middle" '+
+         'dominant-baseline="central" font-size="'+FS_TOK+'" fill="'+stk+'">'+esc(t.t)+'</text>');
+      // index under each cell
+      el('<text x="'+sx(t.xc)+'" y="'+(sy(ROW_TOK)+H*SCALE.y+PAD+FS_NUM)+'" text-anchor="middle" '+
+         'font-size="'+FS_NUM+'" fill="var(--muted)">'+(i+1)+'</text>');
+    }
+
+    // ---- connectors eye -> tokens ----
+    for(i=0;i<TOKENS.length;i++){
+      var e = TOKENS[i];
+      if(!e.eye) continue;
+      for(var k=0;k<e.span;k++){
+        var tgt = TOKENS[i+k];
+        var col = e.span>1 ? "var(--split)" : "var(--muted)";
+        el('<path d="M'+sx(e.xc)+' '+(sy(ROW_EYE)+H*SCALE.y)+
+           ' C'+sx(e.xc)+' '+sy(ROW_EYE+H)+' '+sx(tgt.xc)+' '+sy(ROW_TOK-0.18)+' '+
+           sx(tgt.xc)+' '+sy(ROW_TOK)+'" fill="none" stroke="'+col+'" stroke-width="'+THIN+'" '+
+           (e.span>1?'marker-end="url(#ah)"':'opacity="0.55"')+'/>');
+      }
+    }
+
+    // ---- annotation: weren't kept whole (above eye row) ----
+    var wr = TOKENS[2];
+    el('<text x="'+sx(wr.xc)+'" y="'+(sy(ROW_EYE)-PAD_SM)+'" text-anchor="middle" '+
+       'font-size="'+FS_SMALL+'" fill="var(--eye)">апостроф внутри — 1 token</text>');
+
+    // ---- annotation: 3pm -> 3 + pm + . (tail of the split arrows, left side) ----
+    var sp = TOKENS[5];
+    el('<text x="'+sx(sp.x0 - GAP)+'" y="'+(sy(ROW_EYE)-PAD_SM)+'" text-anchor="end" '+
+       'font-size="'+FS_SMALL+'" fill="var(--split)">1 слово «3pm.» — 3 tokens</text>');
+
+    // ---- count brackets ----
+    var yB = ROW_TOK + H + 0.42;
+    el('<path d="M'+sx(0)+' '+sy(yB-0.09)+' L'+sx(0)+' '+sy(yB)+' L'+sx(TOTAL)+' '+sy(yB)+
+       ' L'+sx(TOTAL)+' '+sy(yB-0.09)+'" fill="none" stroke="var(--cellStroke)" stroke-width="'+THIN+'"/>');
+    el('<text x="'+sx(TOTAL/2)+'" y="'+(sy(yB)+PAD+FS_LBL)+'" text-anchor="middle" '+
+       'font-size="'+FS_LBL+'" fill="var(--cellStroke)">8 tokens: '+
+       'The · cats · weren&#39;t · running · at · 3 · pm · .</text>');
+
+    // ---- legend line: punctuation cell ----
+    el('<text x="'+sx(0)+'" y="'+(sy(yB)+PAD+FS_LBL+PAD+FS_SMALL+2)+'" text-anchor="start" '+
+       'font-size="'+FS_SMALL+'" fill="var(--punct)">оранжевая ячейка — точка отделилась: «pm.» и «pm» дают одну запись словаря</text>');
+
+    el('</svg>');
+    host.innerHTML = svg.join('');
+  }catch(err){
+    host.innerHTML = '<p class="fail">Схема должна была показать: фраза «The cats weren\u2019t running at 3pm.» — '+
+      'глазами 6 слов, а токенизатор даёт 8 позиций словаря: The | cats | weren\u2019t | running | at | 3 | pm | . '+
+      '«weren\u2019t» остался одним куском, «3pm» разорвался на «3» и «pm», точка стала отдельным token.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

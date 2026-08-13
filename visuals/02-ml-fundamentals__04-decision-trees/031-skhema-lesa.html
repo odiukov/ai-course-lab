@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>От обучающих данных к голосованию деревьев</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --panel-soft: #f1f4fa;
+      --text: #172033;
+      --muted: #59657a;
+      --border: #ccd4e2;
+      --flow: #73829b;
+      --blue: #3975d5;
+      --blue-soft: #eaf2ff;
+      --green: #2c8a68;
+      --green-soft: #e8f7f1;
+      --amber: #b46b17;
+      --amber-soft: #fff3df;
+      --violet: #7654c4;
+      --violet-soft: #f1ecff;
+      --vote: #155f4e;
+      --vote-soft: #ddf5ec;
+      --legend: #edf1f7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #1a2230;
+        --panel-soft: #202a3a;
+        --text: #edf2fa;
+        --muted: #aeb9cb;
+        --border: #3b485d;
+        --flow: #8291a9;
+        --blue: #72a7ff;
+        --blue-soft: #1b3151;
+        --green: #64c9a5;
+        --green-soft: #173a32;
+        --amber: #efad59;
+        --amber-soft: #422f19;
+        --violet: #b59aff;
+        --violet-soft: #30284b;
+        --vote: #79d7b7;
+        --vote-soft: #173e34;
+        --legend: #202a39;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      max-width: 1040px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .diagram__title {
+      margin: 0;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      font-size: 18px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--panel);
+    }
+
+    .column-label {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .card {
+      fill: var(--panel-soft);
+      stroke: var(--border);
+    }
+
+    .source-card {
+      fill: var(--blue-soft);
+      stroke: var(--blue);
+    }
+
+    .sample-card {
+      fill: var(--panel-soft);
+    }
+
+    .tree-card {
+      fill: var(--panel-soft);
+    }
+
+    .vote-card {
+      fill: var(--vote-soft);
+      stroke: var(--vote);
+    }
+
+    .card-title {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .card-note {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .sample-mark {
+      fill: var(--blue);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--flow);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--flow);
+    }
+
+    .tree-line {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .vote-divider {
+      stroke: var(--vote);
+    }
+
+    .vote-title {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .vote-note {
+      fill: var(--vote);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .legend-box {
+      fill: var(--legend);
+      stroke: var(--border);
+    }
+
+    .legend-text {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .fallback {
+      padding: 16px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="diagram">
+    <h2 class="diagram__title" id="diagram-title">От обучающих данных к голосованию деревьев</h2>
+    <svg
+      id="forest-diagram"
+      width="1040"
+      height="460"
+      viewBox="0 0 1040 460"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title"
+      aria-describedby="diagram-description">
+    </svg>
+    <div id="diagram-description" hidden>
+      Обучающая выборка расходится в четыре bootstrap-выборки, каждая обучает
+      дерево со своим случайным набором признаков, после чего голоса деревьев
+      объединяются.
+    </div>
+    <div class="fallback" id="fallback" hidden>
+      Схема должна была показать путь от одной обучающей выборки через четыре
+      bootstrap-выборки и четыре разных дерева к общему голосованию.
+    </div>
+  </figure>
+
+  <script>
+    const scheme = {
+      origin: [0, 0],
+      scale: [1, 1],
+      constants: [0, 2, 4, 6, 8, 10, 12, 14, 18, 22, 28, 34],
+      canvas: [1040, 460],
+      columns: [
+        [125, 27, "ОБУЧАЮЩИЕ ДАННЫЕ"],
+        [347, 27, "BOOTSTRAP-ВЫБОРКИ"],
+        [647, 27, "РАЗНЫЕ ДЕРЕВЬЯ"],
+        [919, 27, "ОДИН ИТОГ"]
+      ],
+      source: [32, 161, 186, 118, 125, 202, 225],
+      sampleFrame: [260, 174, 64],
+      treeFrame: [542, 210, 64],
+      vote: [830, 151, 178, 138, 919, 184, 208, 233, 257],
+      rows: [
+        [49, 81, 49, 81, 172, "#3975d5", "сумма + время", "● ● ○ ●"],
+        [138, 170, 138, 170, 202, "#2c8a68", "время + страна", "● ○ ● ●"],
+        [227, 259, 227, 259, 238, "#b46b17", "страна + сумма", "○ ● ● ●"],
+        [316, 348, 316, 348, 268, "#7654c4", "сумма + страна", "● ● ● ○"]
+      ],
+      cardText: [278, 304, 568, 594],
+      arrows: [218, 260, 434, 542, 752, 830, 236, 224, 10, 6],
+      stripe: [6, 8],
+      treeIcon: [556, 28, 11, 8, 5],
+      legend: [20, 405, 1000, 39, 36, 425, 52, 429, 355, 425, 372, 429, 701, 425, 718, 429],
+      lineWidths: [1, 2]
+    };
+
+    const [originX, originY] = scheme.origin;
+    const [scaleX, scaleY] = scheme.scale;
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("forest-diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const [
+        zero, two, four, six, eight, ten, twelve, fourteen,
+        eighteen, twentyTwo, twentyEight, thirtyFour
+      ] = scheme.constants;
+      const [thinLine, thickLine] = scheme.lineWidths;
+
+      const make = (name, attributes = {}) => {
+        const node = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, value);
+        }
+        return node;
+      };
+
+      const add = node => {
+        svg.appendChild(node);
+        return node;
+      };
+
+      const addText = (x, y, content, className, anchor = "middle") => {
+        const text = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        });
+        text.textContent = content;
+        return add(text);
+      };
+
+      const addRect = (x, y, width, height, radius, className, strokeWidth) => {
+        return add(make("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(zero),
+          height: sy(y + height) - sy(zero),
+          rx: sx(radius) - sx(zero),
+          ry: sy(radius) - sy(zero),
+          class: className,
+          "stroke-width": strokeWidth
+        }));
+      };
+
+      const addLine = (x1, y1, x2, y2, className, strokeWidth, stroke) => {
+        const attributes = {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className,
+          "stroke-width": strokeWidth
+        };
+        if (stroke) attributes.stroke = stroke;
+        return add(make("line", attributes));
+      };
+
+      const addArrow = (startX, startY, endX, endY, bendX) => {
+        const path = make("path", {
+          d: [
+            "M", sx(startX), sy(startY),
+            "C", sx(bendX), sy(startY),
+            sx(bendX), sy(endY),
+            sx(endX), sy(endY)
+          ].join(" "),
+          class: "flow",
+          "stroke-width": thickLine
+        });
+        add(path);
+
+        const [, , , , , , , , headDepth, headHalf] = scheme.arrows;
+        const head = make("polygon", {
+          points: [
+            [endX, endY],
+            [endX - headDepth, endY - headHalf],
+            [endX - headDepth, endY + headHalf]
+          ].map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: "arrow-head"
+        });
+        add(head);
+      };
+
+      const addTreeIcon = (baseX, centerY, color) => {
+        const [, , branchWidth, branchRise, nodeRadius] = scheme.treeIcon;
+        const trunkTop = centerY - branchRise;
+        const trunkBottom = centerY + branchRise;
+        const leftX = baseX - branchWidth;
+        const rightX = baseX + branchWidth;
+
+        addLine(baseX, trunkTop, baseX, trunkBottom, "tree-line", thickLine, color);
+        addLine(baseX, trunkTop, leftX, trunkTop - branchRise, "tree-line", thickLine, color);
+        addLine(baseX, trunkTop, rightX, trunkTop - branchRise, "tree-line", thickLine, color);
+        addLine(baseX, trunkBottom, leftX, trunkBottom + branchRise, "tree-line", thickLine, color);
+        addLine(baseX, trunkBottom, rightX, trunkBottom + branchRise, "tree-line", thickLine, color);
+
+        for (const [x, y] of [
+          [leftX, trunkTop - branchRise],
+          [rightX, trunkTop - branchRise],
+          [leftX, trunkBottom + branchRise],
+          [rightX, trunkBottom + branchRise]
+        ]) {
+          add(make("circle", {
+            cx: sx(x),
+            cy: sy(y),
+            r: sx(nodeRadius) - sx(zero),
+            fill: color
+          }));
+        }
+      };
+
+      for (const [x, y, label] of scheme.columns) {
+        addText(x, y, label, "column-label");
+      }
+
+      const [
+        sourceRight, sampleLeft, sampleRight, treeLeft,
+        treeRight, voteLeft, firstBend, secondBend
+      ] = scheme.arrows;
+      const [, , , , , , sourceCenterY] = scheme.source;
+
+      for (const [
+        sampleY, sampleCenterY, treeY, treeCenterY,
+        voteEntryY
+      ] of scheme.rows) {
+        addArrow(sourceRight, sourceCenterY, sampleLeft, sampleCenterY, firstBend);
+        addArrow(sampleRight, sampleCenterY, treeLeft, treeCenterY, secondBend);
+        addArrow(treeRight, treeCenterY, voteLeft, voteEntryY, voteLeft - twentyEight);
+      }
+
+      const [sourceX, sourceY, sourceW, sourceH, sourceMidX] = scheme.source;
+      addRect(sourceX, sourceY, sourceW, sourceH, fourteen, "card source-card", thickLine);
+      addText(sourceMidX, sourceY + forty(sourceH, two), "Обучающая", "card-title");
+      addText(sourceMidX, sourceY + forty(sourceH, two) + twentyTwo, "выборка", "card-title");
+      addText(sourceMidX, sourceY + sourceH - eighteen, "исходные операции", "card-note");
+
+      const [sampleX, sampleW, sampleH] = scheme.sampleFrame;
+      const [treeX, treeW, treeH] = scheme.treeFrame;
+      const [sampleTextX, sampleNoteX, treeTextX, treeNoteX] = scheme.cardText;
+      const [stripeW, stripeInset] = scheme.stripe;
+      const [treeIconX] = scheme.treeIcon;
+
+      for (const [
+        sampleY, sampleCenterY, treeY, treeCenterY,
+        voteEntryY, color, features, samplePattern
+      ] of scheme.rows) {
+        addRect(sampleX, sampleY, sampleW, sampleH, ten, "card sample-card", thinLine);
+        addRect(
+          sampleX + stripeInset,
+          sampleY + stripeInset,
+          stripeW,
+          sampleH - stripeInset - stripeInset,
+          four,
+          "sample-card",
+          zero
+        ).setAttribute("fill", color);
+        addText(sampleTextX, sampleY + twentyEight, "Bootstrap-выборка", "card-title", "start");
+        addText(sampleNoteX, sampleY + sampleH - twelve, "с возвращением", "card-note", "start");
+        addText(sampleX + sampleW - twelve, sampleCenterY + four, samplePattern, "sample-mark", "end");
+
+        addRect(treeX, treeY, treeW, treeH, ten, "card tree-card", thinLine);
+        addTreeIcon(treeIconX, treeCenterY, color);
+        addText(treeTextX, treeY + twentyEight, "Дерево", "card-title", "start");
+        addText(treeNoteX, treeY + treeH - twelve, `случайные признаки: ${features}`, "card-note", "start");
+      }
+
+      const [
+        voteX, voteY, voteW, voteH, voteMidX,
+        voteTitleY, voteSecondY, voteRuleY, voteNoteY
+      ] = scheme.vote;
+      addRect(voteX, voteY, voteW, voteH, fourteen, "card vote-card", thickLine);
+      addText(voteMidX, voteTitleY, "Общее", "vote-title");
+      addText(voteMidX, voteSecondY, "голосование", "vote-title");
+      addLine(
+        voteX + eighteen,
+        voteRuleY,
+        voteX + voteW - eighteen,
+        voteRuleY,
+        "vote-divider",
+        thinLine
+      );
+      addText(voteMidX, voteNoteY, "класс большинства", "vote-note");
+
+      const [
+        legendX, legendY, legendW, legendH,
+        dotOneX, dotY, textOneX, textY,
+        dotTwoX, dotTwoY, textTwoX, textTwoY,
+        dotThreeX, dotThreeY, textThreeX, textThreeY
+      ] = scheme.legend;
+      addRect(legendX, legendY, legendW, legendH, ten, "legend-box", thinLine);
+
+      for (const [x, y, color] of [
+        [dotOneX, dotY, "#3975d5"],
+        [dotTwoX, dotTwoY, "#7654c4"],
+        [dotThreeX, dotThreeY, "#155f4e"]
+      ]) {
+        add(make("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(four) - sx(zero),
+          fill: color
+        }));
+      }
+
+      addText(textOneX, textY, "Bootstrap: выборка с возвращением", "legend-text", "start");
+      addText(textTwoX, textTwoY, "В деревьях: случайные признаки", "legend-text", "start");
+      addText(textThreeX, textThreeY, "В финале: общее голосование", "legend-text", "start");
+
+      function forty(length, divisor) {
+        return length / divisor - eighteen;
+      }
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("forest-diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

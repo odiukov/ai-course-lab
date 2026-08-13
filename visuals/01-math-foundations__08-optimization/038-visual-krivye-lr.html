@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Три расписания learning rate</title>
+<style>
+  :root{
+    --bg:#fbfbf8; --panel:#ffffff; --ink:#1d2125; --muted:#5b6570; --axis:#39414a;
+    --grid:#d7dce1; --c1:#c2410c; --c2:#1d4ed8; --c3:#0f766e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --panel:#181c22; --ink:#e8ebee; --muted:#9aa5b1; --axis:#93a0ad;
+      --grid:#2c333c; --c1:#fb923c; --c2:#7aa8ff; --c3:#43d3bb;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:12px;box-sizing:border-box;}
+  h2{font-size:15px;font-weight:600;margin:0 0 6px;letter-spacing:.01em;}
+  .card{background:var(--panel);border:1px solid var(--grid);border-radius:10px;padding:6px 8px;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fb{font-size:13px;color:var(--muted);line-height:1.5;padding:8px;}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Одинаковый старт, разная форма спада</h2>
+  <div class="card">
+    <svg id="chart" viewBox="0 12 720 298" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Графики learning rate по шагам для трёх расписаний"></svg>
+    <div id="fallback" class="fb" hidden></div>
+  </div>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById("chart");
+  try{
+    /* ---- данные схемы ---- */
+    var D = {
+      lr0: 0.001,
+      gamma: 0.999,
+      lrMin: 0,
+      T: 100,
+      xTicks: [0, 25, 50, 75, 100],
+      yTicks: [0, 0.0005, 0.001]
+    };
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var origin = { x: 96, y: 226 };
+    var scale  = { x: 5.4, y: 180000 };
+    function sx(step){ return origin.x + step * scale.x; }
+    function sy(lr){ return origin.y - lr * scale.y; }
+
+    /* ---- пиксельные литералы: только отступы подписей и толщины ---- */
+    var LBL = 13, SML = 12, W = 2.2, WA = 1.4;
+    var PAD_Y = 10, PAD_X = 18, PAD_TITLE = 34, PAD_L1 = 52, PAD_L2 = 72;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; }
+    function txt(x, y, s, anchor, fill, size){
+      var t = el("text", {x:x, y:y, "text-anchor":anchor, fill:fill, "font-size":size});
+      t.textContent = s; return t;
+    }
+    function line(x1,y1,x2,y2,stroke,w,dash){
+      var a = {x1:x1,y1:y1,x2:x2,y2:y2,stroke:stroke,"stroke-width":w};
+      if(dash) a["stroke-dasharray"] = dash; return el("line", a);
+    }
+
+    /* ---- расписания ---- */
+    function constant(){ return D.lr0; }
+    function expDecay(t){ return D.lr0 * Math.pow(D.gamma, t); }
+    function cosine(t){
+      var k = Math.min(t, D.T) / D.T;
+      return D.lrMin + 0.5 * (D.lr0 - D.lrMin) * (1 + Math.cos(Math.PI * k));
+    }
+    function path(f){
+      var d = "", t;
+      for(t = 0; t <= D.T; t++) d += (t ? "L" : "M") + sx(t) + " " + sy(f(t));
+      return d;
+    }
+
+    /* ---- сетка ---- */
+    D.yTicks.forEach(function(v){
+      line(sx(0), sy(v), sx(D.T), sy(v), "var(--grid)", WA, v ? "4 5" : null);
+    });
+    line(sx(D.T), sy(D.lrMin), sx(D.T), sy(D.lr0), "var(--grid)", WA, "4 5");
+
+    /* ---- оси со стрелками ---- */
+    line(sx(0), sy(0), sx(D.T + 1.2), sy(0), "var(--axis)", WA);
+    line(sx(0), sy(0), sx(0), sy(0.00113), "var(--axis)", WA);
+    el("polygon", {points:
+        sx(D.T + 2) + "," + sy(0) + " " +
+        sx(D.T + 1) + "," + sy(0.00003) + " " +
+        sx(D.T + 1) + "," + sy(-0.00003), fill:"var(--axis)"});
+    el("polygon", {points:
+        sx(0) + "," + sy(0.00118) + " " +
+        sx(-1) + "," + sy(0.00108) + " " +
+        sx(1)  + "," + sy(0.00108), fill:"var(--axis)"});
+
+    /* ---- засечки и их подписи ---- */
+    D.yTicks.forEach(function(v){
+      line(sx(-0.7), sy(v), sx(0), sy(v), "var(--axis)", WA);
+      txt(sx(0) - PAD_Y, sy(v) + 4, v.toFixed(4), "end", "var(--muted)", SML);
+    });
+    D.xTicks.forEach(function(v){
+      line(sx(v), sy(0), sx(v), sy(-0.00003), "var(--axis)", WA);
+      txt(sx(v), sy(0) + PAD_X, String(v), "middle", "var(--muted)", SML);
+    });
+    txt(sx(0) - PAD_Y, sy(0.0011) + 4, "lr", "end", "var(--ink)", LBL);
+    txt(sx(D.T / 2), sy(0) + PAD_TITLE, "шаг обучения t", "middle", "var(--muted)", SML);
+
+    /* ---- кривые ---- */
+    el("path", {d:path(constant), fill:"none", stroke:"var(--c1)",
+                "stroke-width":W, "stroke-dasharray":"7 4"});
+    el("path", {d:path(expDecay), fill:"none", stroke:"var(--c2)", "stroke-width":W});
+    el("path", {d:path(cosine),   fill:"none", stroke:"var(--c3)", "stroke-width":W});
+
+    /* ---- подписи кривых: каждая в свою сторону ---- */
+    txt(sx(20), sy(constant(20)) - PAD_Y, "константа", "middle", "var(--c1)", LBL);
+    txt(sx(60), sy(expDecay(60)) + PAD_X, "экспонента", "middle", "var(--c2)", LBL);
+    txt(sx(80) + PAD_Y, sy(cosine(80)) - PAD_Y, "косинус", "start", "var(--c3)", LBL);
+
+    /* ---- общий старт ---- */
+    el("circle", {cx:sx(0), cy:sy(D.lr0), r:3.4, fill:"var(--ink)"});
+    txt(sx(3), sy(D.lr0) + PAD_X, "общий старт lr₀ = 0.001", "start", "var(--ink)", SML);
+    el("circle", {cx:sx(D.T), cy:sy(D.lrMin), r:3.4, fill:"var(--c3)"});
+    txt(sx(D.T) - PAD_Y, sy(D.lrMin) - PAD_Y, "lr_min = 0", "end", "var(--c3)", SML);
+
+    /* ---- легенда двумя строками под схемой ---- */
+    function leg(step, off, color, dash, label){
+      line(sx(step), sy(0) + off - 4, sx(step + 3), sy(0) + off - 4, color, W, dash);
+      txt(sx(step + 3) + PAD_Y, sy(0) + off, label, "start", "var(--muted)", SML);
+    }
+    leg(0,  PAD_L1, "var(--c1)", "7 4", "константа: lr = 0.001");
+    leg(42, PAD_L1, "var(--c2)", null,  "экспонента: lr = 0.001 · 0.999^t");
+    leg(0,  PAD_L2, "var(--c3)", null,  "косинус: от 0.001 до 0 за T = 100 шагов");
+  }catch(e){
+    var fb = document.getElementById("fallback");
+    svg.setAttribute("hidden", "hidden");
+    fb.hidden = false;
+    fb.textContent = "Схема должна была показать три кривой learning rate по шагам "
+      + "обучения из одного старта lr₀ = 0.001: константа 0.001 — ровная линия; "
+      + "экспоненциальное затухание 0.001 · 0.999^t — крутой спад в начале и длинный "
+      + "плоский хвост; косинусный отжиг — долго держится наверху, основной спад в "
+      + "середине, мягкий выход на lr_min = 0 к шагу T = 100.";
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

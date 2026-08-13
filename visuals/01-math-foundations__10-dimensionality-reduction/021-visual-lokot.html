@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Накопленная объяснённая дисперсия</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d23; --muted:#5d6470;
+    --curve:#2563eb; --dot:#2563eb; --thr:#c2410c; --elbow:#047857; --grid:#d8dce3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --fg:#e8ebf0; --muted:#9aa3b2;
+      --curve:#7aa7ff; --dot:#7aa7ff; --thr:#ff9d5c; --elbow:#4fd1a5; --grid:#2c323c;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 6px 10px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;text-align:center;}
+  svg{display:block;width:100%;height:auto;max-height:520px;margin:0 auto;}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);padding:6px 10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Накопленная объяснённая дисперсия и локоть</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var DATA = [
+      {k:1, R:0.473},
+      {k:2, R:0.724},
+      {k:3, R:0.836},
+      {k:4, R:0.925}
+    ];
+    var THRESHOLD = 0.95;
+    var ELBOW_K = 2;
+
+    var W = 700, H = 430;          // холст
+    var PAD = 6;                   // отступ подписи от точки привязки
+    var LW = 2;                    // толщина линий
+    var FS = 13;                   // размер шрифта
+
+    // Одна пара функций перевода: origin + scale, дальше не меняются.
+    var origin = {x:112, y:352};
+    var scale  = {x:118, y:300};
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,'font-size':FS,
+        fill:'var(--fg)','dominant-baseline':'middle'});
+      if(cls) t.setAttribute('fill','var(--'+cls+')');
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,
+      preserveAspectRatio:'xMidYMid meet', role:'img',
+      'aria-label':'Накопленная объяснённая дисперсия по числу компонент'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    // --- сетка по горизонтали ---
+    var yTicks=[0,0.25,0.5,0.75,1];
+    yTicks.forEach(function(v){
+      svg.appendChild(el('line',{x1:sx(0),y1:sy(v),x2:sx(4.6),y2:sy(v),
+        stroke:'var(--grid)','stroke-width':1}));
+      svg.appendChild(txt(sx(0)-PAD, sy(v), v.toFixed(2), 'end'));
+    });
+
+    // --- оси ---
+    svg.appendChild(el('line',{x1:sx(0),y1:sy(0),x2:sx(4.6),y2:sy(0),
+      stroke:'var(--fg)','stroke-width':LW}));
+    svg.appendChild(el('line',{x1:sx(0),y1:sy(0),x2:sx(0),y2:sy(1.16),
+      stroke:'var(--fg)','stroke-width':LW}));
+
+    // наконечники осей — тоже через sx/sy
+    svg.appendChild(el('polygon',{points:
+      sx(4.72)+','+sy(0)+' '+sx(4.6)+','+sy(0.035)+' '+sx(4.6)+','+sy(-0.035),
+      fill:'var(--fg)'}));
+    svg.appendChild(el('polygon',{points:
+      sx(0)+','+sy(1.22)+' '+sx(-0.045)+','+sy(1.16)+' '+sx(0.045)+','+sy(1.16),
+      fill:'var(--fg)'}));
+
+    svg.appendChild(txt(sx(4.72), sy(0)+FS+PAD, 'k — число компонент','end'));
+    svg.appendChild(txt(sx(0.09), sy(1.22), 'Rₖ','start'));
+
+    // --- засечки по k ---
+    DATA.forEach(function(d){
+      svg.appendChild(el('line',{x1:sx(d.k),y1:sy(0),x2:sx(d.k),y2:sy(-0.022),
+        stroke:'var(--fg)','stroke-width':1}));
+      svg.appendChild(txt(sx(d.k), sy(0)+FS+PAD, String(d.k),'middle'));
+    });
+
+    // --- порог 0.95 ---
+    svg.appendChild(el('line',{x1:sx(0),y1:sy(THRESHOLD),x2:sx(4.6),y2:sy(THRESHOLD),
+      stroke:'var(--thr)','stroke-width':LW,'stroke-dasharray':'7 5'}));
+    svg.appendChild(txt(sx(4.6), sy(THRESHOLD)-FS, 'порог 0.95','end','thr'));
+
+    // --- кривая ---
+    var pts = DATA.map(function(d){ return sx(d.k)+','+sy(d.R); }).join(' ');
+    svg.appendChild(el('polyline',{points:pts, fill:'none',
+      stroke:'var(--curve)','stroke-width':LW+1,
+      'stroke-linejoin':'round','stroke-linecap':'round'}));
+
+    // --- точки и подписи значений ---
+    DATA.forEach(function(d){
+      svg.appendChild(el('circle',{cx:sx(d.k),cy:sy(d.R),r:4.5,
+        fill:'var(--dot)',stroke:'var(--bg)','stroke-width':1.5}));
+      var above = (d.k !== ELBOW_K);      // локоть подписан снизу, чтобы не столкнуться
+      svg.appendChild(txt(sx(d.k), sy(d.R)+(above?-1:1)*(FS+PAD),
+        d.R.toFixed(3), 'middle'));
+    });
+
+    // --- локоть: стрелка снизу-справа, подпись у хвоста ---
+    var eb = DATA[ELBOW_K-1];
+    var tailX = 3.05, tailY = 0.44;        // хвост стрелки
+    var headX = eb.k + 0.11, headY = eb.R - 0.045;
+    svg.appendChild(el('line',{x1:sx(tailX),y1:sy(tailY),
+      x2:sx(headX),y2:sy(headY),
+      stroke:'var(--elbow)','stroke-width':LW}));
+    var ang = Math.atan2(sy(headY)-sy(tailY), sx(headX)-sx(tailX));
+    var hl = 13, hw = 5;
+    svg.appendChild(el('polygon',{points:
+      (sx(headX))+','+(sy(headY))+' '+
+      (sx(headX)-hl*Math.cos(ang)+hw*Math.sin(ang))+','+(sy(headY)-hl*Math.sin(ang)-hw*Math.cos(ang))+' '+
+      (sx(headX)-hl*Math.cos(ang)-hw*Math.sin(ang))+','+(sy(headY)-hl*Math.sin(ang)+hw*Math.cos(ang)),
+      fill:'var(--elbow)'}));
+    svg.appendChild(txt(sx(tailX)+PAD, sy(tailY), 'локоть: дальше прибавка мельчает','start','elbow'));
+
+    // --- зона «до локтя» / «после» ---
+    svg.appendChild(el('circle',{cx:sx(eb.k),cy:sy(eb.R),r:9,fill:'none',
+      stroke:'var(--elbow)','stroke-width':LW}));
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML='<div class="fallback">Схема должна была показать растущую кривую '+
+      'накопленной объяснённой дисперсии: k=1 — 0.473, k=2 — 0.724, k=3 — 0.836, k=4 — 0.925; '+
+      'горизонтальный пунктир порога 0.95 и отмеченный локоть при k=2, после которого прибавка резко мельчает.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

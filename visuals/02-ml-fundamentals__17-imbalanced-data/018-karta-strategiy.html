@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Три места вмешательства в классификатор</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f6f8fc;
+      --panel: #ffffff;
+      --panel-soft: #eef2f8;
+      --ink: #172033;
+      --muted: #526078;
+      --line: #77849a;
+      --data: #087f8c;
+      --data-fill: #d9f4f2;
+      --train: #7c4dca;
+      --train-fill: #eee5ff;
+      --decision: #d05b22;
+      --decision-fill: #ffeadc;
+      --stage-fill: #ffffff;
+      --ratio-fill: #e8edf5;
+      --ratio-stroke: #a5afbf;
+      --focus: #174ea6;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #182131;
+        --panel-soft: #202b3d;
+        --ink: #edf3ff;
+        --muted: #b7c3d8;
+        --line: #94a3ba;
+        --data: #58d8d3;
+        --data-fill: #163d42;
+        --train: #c5a3ff;
+        --train-fill: #352852;
+        --decision: #ff9c68;
+        --decision-fill: #4b2d22;
+        --stage-fill: #182131;
+        --ratio-fill: #263247;
+        --ratio-stroke: #64738c;
+        --focus: #8db8ff;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 24px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--page);
+    }
+
+    .backdrop {
+      fill: var(--page);
+    }
+
+    .stage {
+      fill: var(--stage-fill);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .stage-accent {
+      stroke: var(--focus);
+      stroke-width: 4px;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+    }
+
+    .flow-head {
+      fill: var(--line);
+    }
+
+    .data-box {
+      fill: var(--data-fill);
+      stroke: var(--data);
+      stroke-width: 2px;
+    }
+
+    .train-box {
+      fill: var(--train-fill);
+      stroke: var(--train);
+      stroke-width: 2px;
+    }
+
+    .decision-box {
+      fill: var(--decision-fill);
+      stroke: var(--decision);
+      stroke-width: 2px;
+    }
+
+    .data-link {
+      stroke: var(--data);
+      stroke-width: 3px;
+    }
+
+    .train-link {
+      stroke: var(--train);
+      stroke-width: 3px;
+    }
+
+    .decision-link {
+      stroke: var(--decision);
+      stroke-width: 3px;
+    }
+
+    .data-dot {
+      fill: var(--data);
+    }
+
+    .train-dot {
+      fill: var(--train);
+    }
+
+    .decision-dot {
+      fill: var(--decision);
+    }
+
+    .ratio-band {
+      fill: var(--panel-soft);
+      stroke: var(--ratio-stroke);
+      stroke-width: 1px;
+    }
+
+    .ratio-pill {
+      fill: var(--ratio-fill);
+      stroke: var(--ratio-stroke);
+      stroke-width: 1px;
+    }
+
+    .eyebrow {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    .stage-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .stage-copy {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .intervention-title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .intervention-copy {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .arrow-label {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .ratio-label {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .ratio-value {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .footer-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .footer-focus {
+      fill: var(--focus);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      color: var(--ink);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Три места вмешательства в классификатор</h1>
+
+  <svg id="diagram"
+       viewBox="0 0 1000 452"
+       width="1000"
+       height="452"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Три места вмешательства в классификатор</title>
+    <desc id="svg-description">
+      Единый поток от учебных данных через обучение и вероятности к меткам.
+      Ресэмплинг меняет данные, веса классов действуют во время обучения,
+      а настройка порога находится между вероятностями и итоговыми метками.
+    </desc>
+  </svg>
+
+  <p id="fallback" hidden>
+    Схема должна показывать поток «учебные данные → обучение → вероятности →
+    метки» и три места вмешательства: ресэмплинг данных, веса классов при
+    обучении и настройку порога перед выдачей меток.
+  </p>
+
+  <script>
+    const diagramData = Object.freeze({
+      n: Object.freeze({ z: 0 }),
+      canvas: Object.freeze({ w: 1000, h: 460 }),
+      section: Object.freeze({
+        x: 40, y: 27,
+        text: "ЕДИНЫЙ ПОТОК КЛАССИФИКАТОРА"
+      }),
+      stages: Object.freeze([
+        Object.freeze({
+          x: 40, y: 145, w: 195, h: 110,
+          titleX: 137.5, titleY: 187,
+          copyX: 137.5, copyY: 219,
+          title: "Учебные данные",
+          copy: "признаки + целевая переменная"
+        }),
+        Object.freeze({
+          x: 290, y: 145, w: 195, h: 110,
+          titleX: 387.5, titleY: 187,
+          copyX: 387.5, copyY: 219,
+          title: "Обучение",
+          copy: "оптимизация функции потерь"
+        }),
+        Object.freeze({
+          x: 540, y: 145, w: 190, h: 110,
+          titleX: 635, titleY: 187,
+          copyX: 635, copyY: 219,
+          title: "Вероятности",
+          copy: "оценка редкого класса"
+        }),
+        Object.freeze({
+          x: 780, y: 145, w: 180, h: 110,
+          titleX: 870, titleY: 187,
+          copyX: 870, copyY: 219,
+          title: "Метки",
+          copy: "редкий или частый класс"
+        })
+      ]),
+      accents: Object.freeze([
+        Object.freeze({ x1: 40, y1: 145, x2: 235, y2: 145 }),
+        Object.freeze({ x1: 290, y1: 145, x2: 485, y2: 145 }),
+        Object.freeze({ x1: 540, y1: 145, x2: 730, y2: 145 }),
+        Object.freeze({ x1: 780, y1: 145, x2: 960, y2: 145 })
+      ]),
+      arrows: Object.freeze([
+        Object.freeze({
+          x1: 235, y1: 200, x2: 282, y2: 200,
+          points: Object.freeze([
+            Object.freeze({ x: 290, y: 200 }),
+            Object.freeze({ x: 279, y: 193 }),
+            Object.freeze({ x: 279, y: 207 })
+          ]),
+          labelX: 262.5, labelY: 132,
+          label: "учебный набор"
+        }),
+        Object.freeze({
+          x1: 485, y1: 200, x2: 532, y2: 200,
+          points: Object.freeze([
+            Object.freeze({ x: 540, y: 200 }),
+            Object.freeze({ x: 529, y: 193 }),
+            Object.freeze({ x: 529, y: 207 })
+          ]),
+          labelX: 512.5, labelY: 132,
+          label: "модель выдаёт"
+        }),
+        Object.freeze({
+          x1: 730, y1: 200, x2: 772, y2: 200,
+          points: Object.freeze([
+            Object.freeze({ x: 780, y: 200 }),
+            Object.freeze({ x: 769, y: 193 }),
+            Object.freeze({ x: 769, y: 207 })
+          ])
+        })
+      ]),
+      interventions: Object.freeze([
+        Object.freeze({
+          kind: "data",
+          x: 40, y: 42, w: 195, h: 70,
+          titleX: 137.5, titleY: 69,
+          copyX: 137.5, copyY: 94,
+          title: "До обучения",
+          copy: "ресэмплинг (SMOTE)",
+          linkX1: 137.5, linkY1: 112,
+          linkX2: 137.5, linkY2: 145,
+          dotX: 137.5, dotY: 145, dotR: 5
+        }),
+        Object.freeze({
+          kind: "train",
+          x: 290, y: 42, w: 195, h: 70,
+          titleX: 387.5, titleY: 69,
+          copyX: 387.5, copyY: 94,
+          title: "Во время обучения",
+          copy: "веса классов",
+          linkX1: 387.5, linkY1: 112,
+          linkX2: 387.5, linkY2: 145,
+          dotX: 387.5, dotY: 145, dotR: 5
+        }),
+        Object.freeze({
+          kind: "decision",
+          x: 640, y: 287, w: 230, h: 67,
+          titleX: 755, titleY: 314,
+          copyX: 755, copyY: 339,
+          title: "После обучения",
+          copy: "настройка порога",
+          linkX1: 755, linkY1: 287,
+          linkX2: 755, linkY2: 200,
+          dotX: 755, dotY: 200, dotR: 5
+        })
+      ]),
+      ratioBand: Object.freeze({
+        x: 40, y: 372, w: 920, h: 44,
+        labelX: 58, labelY: 400,
+        label: "Дисбаланс — отправная точка:",
+        noteX: 850, noteY: 400,
+        note: "не готовый рецепт"
+      }),
+      ratios: Object.freeze([
+        Object.freeze({ x: 400, y: 380, w: 90, h: 28, tx: 445, ty: 400, value: "80/20" }),
+        Object.freeze({ x: 510, y: 380, w: 90, h: 28, tx: 555, ty: 400, value: "95/5" }),
+        Object.freeze({ x: 620, y: 380, w: 90, h: 28, tx: 665, ty: 400, value: "99/1" })
+      ]),
+      footer: Object.freeze({
+        firstX: 500, firstY: 444,
+        first: "Проверка после каждого варианта: ",
+        focus: "F1 / AUPRC / MCC",
+        last: " · не устраивает — выбрать другое место"
+      })
+    });
+
+    const origin = Object.freeze({ x: 20, y: 10 });
+    const scale = Object.freeze({ x: 0.96, y: 0.94 });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const ns = svg.namespaceURI;
+      const z = diagramData.n.z;
+
+      const make = (name, className) => {
+        const node = document.createElementNS(ns, name);
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const set = (node, attributes) => {
+        Object.entries(attributes).forEach(([name, value]) => {
+          node.setAttribute(name, String(value));
+        });
+        return node;
+      };
+
+      const add = node => {
+        svg.appendChild(node);
+        return node;
+      };
+
+      const rect = (item, className) => add(set(make("rect", className), {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y)
+      }));
+
+      const line = (item, className) => add(set(make("line", className), {
+        x1: sx(item.x1),
+        y1: sy(item.y1),
+        x2: sx(item.x2),
+        y2: sy(item.y2)
+      }));
+
+      const text = (x, y, value, className, anchor) => {
+        const node = add(set(make("text", className), {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor
+        }));
+        node.textContent = value;
+        return node;
+      };
+
+      const polygon = (points, className) => {
+        const value = points.map(point =>
+          `${sx(point.x)},${sy(point.y)}`
+        ).join(" ");
+        return add(set(make("polygon", className), { points: value }));
+      };
+
+      const dot = (item, className) => add(set(make("ellipse", className), {
+        cx: sx(item.dotX),
+        cy: sy(item.dotY),
+        rx: sx(item.dotR) - sx(z),
+        ry: sy(item.dotR) - sy(z)
+      }));
+
+      const background = make("rect", "backdrop");
+      set(background, {
+        x: sx(z),
+        y: sy(z),
+        width: sx(diagramData.canvas.w) - sx(z),
+        height: sy(diagramData.canvas.h) - sy(z)
+      });
+      svg.insertBefore(background, svg.firstChild);
+
+      text(
+        diagramData.section.x,
+        diagramData.section.y,
+        diagramData.section.text,
+        "eyebrow",
+        "start"
+      );
+
+      diagramData.stages.forEach(stage => {
+        rect(stage, "stage");
+        text(stage.titleX, stage.titleY, stage.title, "stage-title", "middle");
+        text(stage.copyX, stage.copyY, stage.copy, "stage-copy", "middle");
+      });
+
+      diagramData.accents.forEach(accent => line(accent, "stage-accent"));
+
+      diagramData.arrows.forEach(arrow => {
+        line(arrow, "flow");
+        polygon(arrow.points, "flow-head");
+        if (arrow.label) {
+          text(
+            arrow.labelX,
+            arrow.labelY,
+            arrow.label,
+            "arrow-label",
+            "middle"
+          );
+        }
+      });
+
+      diagramData.interventions.forEach(item => {
+        rect(item, `${item.kind}-box`);
+        line(item, `${item.kind}-link`);
+        dot(item, `${item.kind}-dot`);
+        text(
+          item.titleX,
+          item.titleY,
+          item.title,
+          "intervention-title",
+          "middle"
+        );
+        text(
+          item.copyX,
+          item.copyY,
+          item.copy,
+          "intervention-copy",
+          "middle"
+        );
+      });
+
+      rect(diagramData.ratioBand, "ratio-band");
+      text(
+        diagramData.ratioBand.labelX,
+        diagramData.ratioBand.labelY,
+        diagramData.ratioBand.label,
+        "ratio-label",
+        "start"
+      );
+      text(
+        diagramData.ratioBand.noteX,
+        diagramData.ratioBand.noteY,
+        diagramData.ratioBand.note,
+        "ratio-label",
+        "middle"
+      );
+
+      diagramData.ratios.forEach(ratio => {
+        rect(ratio, "ratio-pill");
+        text(
+          ratio.tx,
+          ratio.ty,
+          ratio.value,
+          "ratio-value",
+          "middle"
+        );
+      });
+
+      const footer = add(set(make("text", "footer-label"), {
+        x: sx(diagramData.footer.firstX),
+        y: sy(diagramData.footer.firstY),
+        "text-anchor": "middle"
+      }));
+
+      const first = make("tspan");
+      first.textContent = diagramData.footer.first;
+      footer.appendChild(first);
+
+      const focus = make("tspan", "footer-focus");
+      focus.textContent = diagramData.footer.focus;
+      footer.appendChild(focus);
+
+      const last = make("tspan");
+      last.textContent = diagramData.footer.last;
+      footer.appendChild(last);
+
+      fallback.hidden = true;
+    } catch (error) {
+      const failedDiagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      failedDiagram.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

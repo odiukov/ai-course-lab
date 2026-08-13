@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как AdaBoost переносит внимание на трудные примеры</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: white;
+      --panel: whitesmoke;
+      --cell: white;
+      --text: midnightblue;
+      --muted: slategray;
+      --grid: gainsboro;
+      --weight: royalblue;
+      --weight-soft: lightblue;
+      --focus: darkorange;
+      --focus-soft: moccasin;
+      --error: crimson;
+      --arrow: crimson;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: midnightblue;
+        --panel: darkslateblue;
+        --cell: midnightblue;
+        --text: white;
+        --muted: lightgray;
+        --grid: slategray;
+        --weight: cornflowerblue;
+        --weight-soft: steelblue;
+        --focus: gold;
+        --focus-soft: darkgoldenrod;
+        --error: tomato;
+        --arrow: tomato;
+      }
+    }
+
+    html,
+    body,
+    figure {
+      margin: unset;
+      background: var(--bg);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .title {
+      fill: var(--text);
+      font-size: 25px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .header {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .row-label {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .row-note {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .cell-label {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .weight-value {
+      fill: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+
+    .error-mark {
+      fill: var(--error);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .callout {
+      fill: var(--error);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .legend {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .cell {
+      fill: var(--cell);
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .cell-error {
+      stroke: var(--error);
+      stroke-width: 3px;
+    }
+
+    .grid-line {
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .weight {
+      fill: var(--weight-soft);
+      stroke: var(--weight);
+      stroke-width: 3px;
+    }
+
+    .weight-inherited {
+      fill: var(--focus-soft);
+      stroke: var(--focus);
+      stroke-width: 3px;
+    }
+
+    .weight-error {
+      stroke: var(--error);
+      stroke-width: 4px;
+    }
+
+    .transfer {
+      fill: none;
+      stroke: var(--arrow);
+      stroke-width: 3px;
+    }
+
+    .arrow-head {
+      fill: var(--arrow);
+    }
+
+    .legend-weight {
+      fill: var(--weight-soft);
+      stroke: var(--weight);
+      stroke-width: 2px;
+    }
+
+    .legend-focus {
+      fill: var(--focus-soft);
+      stroke: var(--focus);
+      stroke-width: 2px;
+    }
+
+    .legend-error {
+      fill: var(--cell);
+      stroke: var(--error);
+      stroke-width: 3px;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <figure>
+    <svg id="diagram"
+         viewBox="0 0 1200 500"
+         width="1200"
+         height="500"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-desc">
+      <title id="diagram-title">Как AdaBoost переносит внимание на трудные примеры</title>
+      <desc id="diagram-desc">Таблица весов пяти объектов в трёх раундах. Промахи выделены, а их нормализованные веса увеличиваются перед следующим stump.</desc>
+      <text id="static-heading" class="title">Как AdaBoost переносит внимание на трудные примеры</text>
+      <g id="drawing"></g>
+      <text id="fallback" class="fallback" visibility="hidden">
+        Схема должна показать, как промах увеличивает нормализованный вес объекта перед следующим stump.
+      </text>
+    </svg>
+  </figure>
+
+  <script>
+    const rounds = [
+      {
+        label: "Раунд 1",
+        note: "все начинают одинаково",
+        weights: [
+          ["1", 0.2, "0,2"],
+          ["2", 0.2, "0,2"],
+          ["3", 0.2, "0,2"],
+          ["4", 0.2, "0,2"],
+          ["5", 0.2, "0,2"]
+        ],
+        misses: ["2", "4"]
+      },
+      {
+        label: "Раунд 2",
+        note: "после нормализации",
+        weights: [
+          ["1", 0.12, ""],
+          ["2", 0.32, ""],
+          ["3", 0.12, ""],
+          ["4", 0.32, ""],
+          ["5", 0.12, ""]
+        ],
+        misses: ["2", "5"]
+      },
+      {
+        label: "Раунд 3",
+        note: "внимание сместилось снова",
+        weights: [
+          ["1", 0.08, ""],
+          ["2", 0.46, ""],
+          ["3", 0.08, ""],
+          ["4", 0.21, ""],
+          ["5", 0.17, ""]
+        ],
+        misses: ["3"]
+      }
+    ];
+
+    const canvas = [1200, 500];
+    const origin = [0, 0];
+    const scale = [1, 1];
+    const labels = [8];
+    const constants = [0, 1, 2, 0.5];
+    const layout = [
+      32, 62, 94,
+      24, 1160, 312,
+      176, 166, 78, 22,
+      300, 480, 660, 840, 1020,
+      145, 255, 365,
+      42, 8,
+      54, 7, 9, 4,
+      455, 482,
+      38, 72, 1128,
+      715, 406, 430, 742,
+      92, 106, 184, 216, 294, 326, 404,
+      1138, 132, 18, 20,
+      238, 17, 33,
+      548, 17, 630,
+      788, 17, 870,
+      1048, 17, 1130
+    ];
+    const styleNumbers = [2, 3, 4, 25, 18, 16, 15, 14, 13, 12];
+
+    const [canvasWidth, canvasHeight] = canvas;
+    const [originX, originY] = origin;
+    const [scaleX, scaleY] = scale;
+    const [labelPad] = labels;
+    const [zero, one, two, half] = constants;
+    const [
+      titleY, subtitleY, headerY,
+      panelX, panelWidth, panelTop,
+      labelColumnWidth, cellWidth, cellHeight, cornerRadius,
+      columnOne, columnTwo, columnThree, columnFour, columnFive,
+      rowOne, rowTwo, rowThree,
+      radiusScale, minimumRadius,
+      arrowOffsetX, arrowHalfWidth, arrowHeadHeight, connectorInset,
+      legendY, finalNoteY,
+      headerLineStart, headerLineY, headerLineEnd,
+      lastArrowX, lastArrowStartY, lastArrowEndY, lastCalloutX,
+      objectHeaderY, firstTop, firstBottom, secondTop, secondBottom,
+      thirdTop, thirdBottom,
+      sumX, sumY, sumRadius, badgeRadius,
+      legendOneX, legendRadius, legendOneTextX,
+      legendTwoX, legendTwoRadius, legendTwoTextX,
+      legendThreeX, legendThreeRadius, legendThreeTextX
+    ] = layout;
+
+    const [thinLine, normalLine, strongLine] = styleNumbers;
+    const columnCenters = [
+      columnOne,
+      columnTwo,
+      columnThree,
+      columnFour,
+      columnFive
+    ];
+    const rowCenters = [rowOne, rowTwo, rowThree];
+    const rowTops = [firstTop, secondTop, thirdTop];
+    const rowBottoms = [firstBottom, secondBottom, thirdBottom];
+
+    const sx = x => originX + x * scaleX;
+    const sy = y => originY + y * scaleY;
+
+    const svg = document.getElementById("diagram");
+    const drawing = document.getElementById("drawing");
+    const heading = document.getElementById("static-heading");
+    const fallback = document.getElementById("fallback");
+
+    function make(tag, attributes, parent = drawing) {
+      const node = document.createElementNS(svg.namespaceURI, tag);
+      Object.entries(attributes).forEach(([name, value]) => {
+        node.setAttribute(name, value);
+      });
+      parent.appendChild(node);
+      return node;
+    }
+
+    function rectangle(x, y, width, height, className, radius = zero) {
+      return make("rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + width) - sx(x),
+        height: sy(y + height) - sy(y),
+        rx: sx(x + radius) - sx(x),
+        ry: sy(y + radius) - sy(y),
+        class: className
+      });
+    }
+
+    function circle(x, y, radius, className) {
+      return make("circle", {
+        cx: sx(x),
+        cy: sy(y),
+        r: sx(x + radius) - sx(x),
+        class: className
+      });
+    }
+
+    function line(xOne, yOne, xTwo, yTwo, className) {
+      return make("line", {
+        x1: sx(xOne),
+        y1: sy(yOne),
+        x2: sx(xTwo),
+        y2: sy(yTwo),
+        class: className
+      });
+    }
+
+    function text(x, y, value, className, anchor = "middle") {
+      const node = make("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      });
+      node.textContent = value;
+      return node;
+    }
+
+    function verticalArrow(x, startY, endY) {
+      line(x, startY, x, endY, "transfer");
+      make("polygon", {
+        points: [
+          `${sx(x - arrowHalfWidth)},${sy(endY - arrowHeadHeight)}`,
+          `${sx(x)},${sy(endY)}`,
+          `${sx(x + arrowHalfWidth)},${sy(endY - arrowHeadHeight)}`
+        ].join(" "),
+        class: "arrow-head"
+      });
+    }
+
+    try {
+      heading.setAttribute("x", sx(canvasWidth * half));
+      heading.setAttribute("y", sy(titleY));
+      heading.setAttribute("text-anchor", "middle");
+      heading.setAttribute("dominant-baseline", "middle");
+
+      rectangle(zero, zero, canvasWidth, canvasHeight, "panel", zero);
+
+      text(
+        canvasWidth * half,
+        subtitleY,
+        "Красная рамка — промах; крупнее кружок — больше влияние на следующий stump",
+        "subtitle"
+      );
+
+      text(labelColumnWidth * half, headerY, "Вес перед stump", "header");
+      ["Объект 1", "Объект 2", "Объект 3", "Объект 4", "Объект 5"]
+        .forEach((label, index) => {
+          text(columnCenters[index], objectHeaderY, label, "header");
+        });
+
+      line(headerLineStart, headerLineY, headerLineEnd, headerLineY, "grid-line");
+
+      rounds.forEach((round, rowIndex) => {
+        const rowY = rowCenters[rowIndex];
+        const rowTop = rowTops[rowIndex];
+
+        text(labelColumnWidth - labelPad, rowY - labelPad, round.label, "row-label", "end");
+        text(labelColumnWidth - labelPad, rowY + labelPad, round.note, "row-note", "end");
+
+        round.weights.forEach((item, columnIndex) => {
+          const [objectId, weight, visibleValue] = item;
+          const columnX = columnCenters[columnIndex];
+          const missed = round.misses.includes(objectId);
+          const inherited =
+            rowIndex > zero &&
+            rounds[rowIndex - one].misses.includes(objectId);
+          const cellX = columnX - cellWidth * half;
+          const radius = minimumRadius + Math.sqrt(weight) * radiusScale;
+          const cellClass = missed ? "cell cell-error" : "cell";
+
+          rectangle(
+            cellX,
+            rowTop,
+            cellWidth,
+            cellHeight,
+            cellClass,
+            cornerRadius
+          );
+
+          let weightClass = inherited ? "weight weight-inherited" : "weight";
+          if (missed) {
+            weightClass += " weight-error";
+          }
+
+          circle(columnX, rowY, radius, weightClass);
+
+          if (visibleValue) {
+            text(columnX, rowY, visibleValue, "weight-value");
+          }
+
+          if (missed) {
+            const badgeX = columnX + cellWidth * half - badgeRadius - labelPad;
+            const badgeY = rowTop + badgeRadius + labelPad;
+            text(badgeX, badgeY, "×", "error-mark");
+
+            if (rowIndex < rounds.length - one) {
+              const arrowX = columnX + arrowOffsetX;
+              const arrowStart = rowBottoms[rowIndex] + connectorInset;
+              const arrowEnd = rowTops[rowIndex + one] - connectorInset;
+              verticalArrow(arrowX, arrowStart, arrowEnd);
+            }
+          }
+        });
+
+        circle(sumX, rowY, sumRadius, "legend-weight");
+        text(sumX, rowY, "Σ", "weight-value");
+        text(sumX + sumRadius + labelPad, rowY, "= 1", "row-note", "start");
+      });
+
+      verticalArrow(lastArrowX, lastArrowStartY, lastArrowEndY);
+      text(
+        lastCalloutX,
+        lastArrowEndY,
+        "промах → вес ↑ перед следующим stump",
+        "callout",
+        "start"
+      );
+
+      circle(legendOneX, legendY, legendRadius, "legend-weight");
+      text(legendOneTextX, legendY, "обычный вес", "legend", "start");
+
+      circle(legendTwoX, legendY, legendTwoRadius, "legend-focus");
+      text(
+        legendTwoTextX,
+        legendY,
+        "вырос после прошлого промаха",
+        "legend",
+        "start"
+      );
+
+      circle(legendThreeX, legendY, legendThreeRadius, "legend-error");
+      text(legendThreeX, legendY, "×", "error-mark");
+      text(legendThreeTextX, legendY, "промах этого stump", "legend", "start");
+
+      text(
+        canvasWidth * half,
+        finalNoteY,
+        "Нормализация возвращает сумму к 1, но перераспределяет внимание между объектами",
+        "subtitle"
+      );
+    } catch (error) {
+      drawing.replaceChildren();
+      heading.setAttribute("x", sx(canvasWidth * half));
+      heading.setAttribute("y", sy(titleY));
+      heading.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("x", sx(canvasWidth * half));
+      fallback.setAttribute("y", sy(canvasHeight * half));
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("dominant-baseline", "middle");
+      fallback.setAttribute("visibility", "visible");
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

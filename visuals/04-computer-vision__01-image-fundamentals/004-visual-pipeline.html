@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Путь от файла до модели</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1f2937; --muted:#6b7280; --line:#9ca3af;
+    --box:#f9fafb; --boxStroke:#9ca3af;
+    --warm:#fef3c7; --warmStroke:#d97706;
+    --red:#fecaca; --redStroke:#dc2626;
+    --blue:#bfdbfe; --blueStroke:#2563eb;
+    --violet:#ddd6fe; --violetStroke:#7c3aed;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f172a; --fg:#e5e7eb; --muted:#9ca3af; --line:#64748b;
+      --box:#1e293b; --boxStroke:#64748b;
+      --warm:#4a3410; --warmStroke:#f59e0b;
+      --red:#4c1d1d; --redStroke:#f87171;
+      --blue:#173055; --blueStroke:#60a5fa;
+      --violet:#2e2352; --violetStroke:#a78bfa;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;box-sizing:border-box}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fail{font-size:13px;line-height:1.5;color:var(--fg)}
+  text{fill:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Весь путь от файла до модели: размер → масштаб чисел → раскладка</h2>
+  <div id="host"><svg id="d" viewBox="0 0 980 420" preserveAspectRatio="xMidYMid meet" role="img"
+      aria-label="Цепочка преобразований от JPEG до модели"></svg></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    // ---------- данные схемы ----------
+    var NODES=[
+      {c:0,r:0,k:"warm",  t:["JPEG","на диске"]},
+      {c:1,r:0,k:"box",   t:["Decode","uint8 HWC"]},
+      {c:2,r:0,k:"warm",  t:["Colorspace","RGB / BGR"]},
+      {c:3,r:0,k:"warm",  t:["Resize","короткая сторона"]},
+      {c:4,r:0,k:"warm",  t:["Center crop","размер модели"]},
+      {c:4,r:1,k:"red",   t:["/255 → float32","[0, 1]"]},
+      {c:3,r:1,k:"red",   t:["− mean / std","около нуля"]},
+      {c:2,r:1,k:"blue",  t:["Transpose","HWC → CHW"]},
+      {c:1,r:1,k:"box",   t:["Батч","CHW → NCHW"]},
+      {c:0,r:1,k:"violet",t:["Модель",""]}
+    ];
+    var BANDS=[
+      {r:0,from:0,to:4,lab:"размер картинки"},
+      {r:1,from:4,to:2,lab:"масштаб чисел (красные) → раскладка (синий)"}
+    ];
+    var LEGEND=[
+      {c:0,r:2,k:"red", lab:"стандартизация: тип чисел и масштаб"},
+      {c:2.6,r:2,k:"blue",lab:"transpose: порядок чисел в памяти"}
+    ];
+    // ---------- один origin, один scale ----------
+    var origin={x:26,y:34}, scale={x:186,y:150};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+    // ---------- производные, только через sx/sy ----------
+    var BW=sx(0.86)-sx(0), BH=sy(0.44)-sy(0);          // размер блока
+    var HALF={x:sx(0.43)-sx(0), y:sy(0.22)-sy(0)};
+    var LINE=2, FS=13, FSS=11.5, PAD=6;
+
+    function cx(n){ return sx(n.c)+HALF.x; }
+    function cy(n){ return sy(n.r)+HALF.y; }
+    function left(n){ return sx(n.c); }
+    function right(n){ return sx(n.c)+BW; }
+    function top(n){ return sy(n.r); }
+    function bot(n){ return sy(n.r)+BH; }
+
+    var svg=document.getElementById("d"), NS="http://www.w3.org/2000/svg";
+    function el(tag,at){ var e=document.createElementNS(NS,tag);
+      for(var k in at) e.setAttribute(k,at[k]); return e; }
+    function add(e){ svg.appendChild(e); return e; }
+    function txt(x,y,s,anchor,size,cls){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle","font-size":size||FS});
+      if(cls) t.setAttribute("fill",cls);
+      t.textContent=s; return add(t);
+    }
+
+    // наконечник стрелки: вершины тоже через sx/sy
+    function head(x,y,dir,stroke){
+      var w=sx(0.045)-sx(0), h=sy(0.03)-sy(0), p;
+      if(dir==="r") p=[[x,y],[x-w,y-h],[x-w,y+h]];
+      else if(dir==="l") p=[[x,y],[x+w,y-h],[x+w,y+h]];
+      else p=[[x,y],[x-w,y-h],[x+w,y-h]];
+      add(el("polygon",{points:p.map(function(q){return q[0]+","+q[1];}).join(" "),
+        fill:stroke,stroke:stroke}));
+    }
+    function seg(x1,y1,x2,y2,stroke){
+      add(el("line",{x1:x1,y1:y1,x2:x2,y2:y2,stroke:stroke,
+        "stroke-width":LINE,"stroke-linecap":"round"}));
+    }
+
+    var FILL={box:"var(--box)",warm:"var(--warm)",red:"var(--red)",
+              blue:"var(--blue)",violet:"var(--violet)"};
+    var STRK={box:"var(--boxStroke)",warm:"var(--warmStroke)",red:"var(--redStroke)",
+              blue:"var(--blueStroke)",violet:"var(--violetStroke)"};
+
+    // ---------- полосы-подписи над/под рядами ----------
+    BANDS.forEach(function(b){
+      var y = b.r===0 ? sy(b.r)-PAD : sy(b.r)+BH+PAD+FSS;
+      var xa = sx(Math.min(b.from,b.to)), xb = sx(Math.max(b.from,b.to))+BW;
+      txt((xa+xb)/2, y, b.lab, "middle", FSS, "var(--muted)");
+    });
+
+    // ---------- связи ----------
+    var LC="var(--line)";
+    for(var i=0;i<NODES.length-1;i++){
+      var a=NODES[i], b=NODES[i+1];
+      if(a.r===b.r && b.c>a.c){                 // вправо
+        seg(right(a),cy(a),left(b),cy(b),LC); head(left(b),cy(b),"r",LC);
+      } else if(a.r===b.r && b.c<a.c){          // влево
+        seg(left(a),cy(a),right(b),cy(b),LC); head(right(b),cy(b),"l",LC);
+      } else {                                   // перенос строки
+        seg(cx(a),bot(a),cx(b),top(b),LC); head(cx(b),top(b),"d",LC);
+        txt(cx(a)+PAD, (bot(a)+top(b))/2, "далее", "start", FSS, "var(--muted)");
+      }
+    }
+
+    // ---------- блоки ----------
+    NODES.forEach(function(n){
+      add(el("rect",{x:left(n),y:top(n),width:BW,height:BH,rx:PAD,
+        fill:FILL[n.k],stroke:STRK[n.k],"stroke-width":LINE}));
+      var two=n.t[1]!=="";
+      if(two){
+        txt(cx(n), cy(n)-PAD, n.t[0], "middle", FS);
+        txt(cx(n), cy(n)+PAD+FSS-4, n.t[1], "middle", FSS, "var(--muted)");
+      } else {
+        txt(cx(n), cy(n)+PAD-1, n.t[0], "middle", FS);
+      }
+    });
+
+    // ---------- легенда отдельной строкой ----------
+    LEGEND.forEach(function(g){
+      var x=sx(g.c), y=sy(g.r), s=sy(g.r+0.1)-sy(g.r);
+      add(el("rect",{x:x,y:y,width:s,height:s,rx:3,
+        fill:FILL[g.k],stroke:STRK[g.k],"stroke-width":LINE}));
+      txt(x+s+PAD, y+s-PAD/2, g.lab, "start", FSS, "var(--muted)");
+    });
+  }catch(e){
+    host.innerHTML='<p class="fail"><b>Схема не построилась.</b> Она показывает цепочку '+
+      'из 8 шагов: JPEG → decode uint8 HWC → colorspace → resize → center crop → '+
+      '/255 float32 [0,1] → минус mean / деление на std (красный шаг, масштаб чисел) → '+
+      'transpose HWC→CHW (синий шаг, раскладка) → батч NCHW → модель. '+
+      'От файла до модели меняются три вещи: тип чисел, размер картинки, раскладка.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

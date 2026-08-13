@@ -1,0 +1,177 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Конвейер ML-проекта</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1d2430; --muted:#5a6474;
+    --node:#eef3fb; --stroke:#3f6fd6; --loop:#c2643a; --legend:#6b7686;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e8edf5; --muted:#9aa6b8;
+      --node:#1c2531; --stroke:#7aa2f7; --loop:#e0925f; --legend:#8d99ac;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{padding:12px 14px;background:var(--bg);}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;color:var(--muted);line-height:1.5;}
+  .node-box{fill:var(--node);stroke:var(--stroke);}
+  .node-label{fill:var(--fg);font-size:13px;}
+  .edge{stroke:var(--stroke);fill:none;}
+  .edge-head{fill:var(--stroke);}
+  .loop{stroke:var(--loop);fill:none;stroke-dasharray:6 4;}
+  .loop-head{fill:var(--loop);}
+  .loop-label{fill:var(--loop);font-size:11px;}
+  .legend{fill:var(--legend);font-size:11.5px;}
+</style>
+<div class="wrap">
+  <h2>Конвейер ML-проекта: не линия, а петля</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---------- данные схемы (логические координаты) ---------- */
+    var NODES = [
+      {label:'Сбор данных', x:-2.83, y: 1.34},
+      {label:'Очистка',     x: 0.00, y: 1.90},
+      {label:'Признаки',    x: 2.83, y: 1.34},
+      {label:'Разбиение',   x: 4.00, y: 0.00},
+      {label:'Обучение',    x: 2.83, y:-1.34},
+      {label:'Оценка',      x: 0.00, y:-1.90},
+      {label:'Внедрение',   x:-2.83, y:-1.34},
+      {label:'Мониторинг',  x:-4.00, y: 0.00}
+    ];
+    var FLOW = [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,7]];
+    var LOOPS = [
+      {from:5, to:2, ctrl:{x:0.40, y:0.10},
+       label:'к признакам', at:{x:0.90, y:-0.62}, anchor:'middle'},
+      {from:7, to:0, ctrl:{x:-3.30, y:0.75},
+       label:'новые данные', at:{x:-3.02, y:0.52}, anchor:'start'}
+    ];
+    var LEGEND = [
+      {text:'Признаки — инженерия признаков · Разбиение — train / test split', y:-2.55},
+      {text:'Пунктир — возвраты: оценка отправляет назад к признакам, мониторинг — к данным', y:-2.92}
+    ];
+    var G = {hw:0.78, hh:0.33, gap:0.07, head:0.22, headW:0.11};
+
+    /* ---------- одна пара функций перевода ---------- */
+    var ORIGIN = {x:350, y:130}, SCALE = 62;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y - y * SCALE; }
+
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 700 320');
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label','Цикл ML-проекта из восьми этапов с двумя возвратами');
+
+    function add(name, attrs, cls, text){
+      var e=document.createElementNS(NS,name);
+      for(var k in attrs) e.setAttribute(k, attrs[k]);
+      if(cls) e.setAttribute('class', cls);
+      if(text!=null) e.textContent=text;
+      svg.appendChild(e); return e;
+    }
+    function unit(a,b){ var dx=b.x-a.x, dy=b.y-a.y, l=Math.hypot(dx,dy)||1;
+      return {x:dx/l, y:dy/l}; }
+    function border(c,d){ /* выход луча из прямоугольника узла */
+      var tx = Math.abs(d.x)>1e-9 ? G.hw/Math.abs(d.x) : Infinity;
+      var ty = Math.abs(d.y)>1e-9 ? G.hh/Math.abs(d.y) : Infinity;
+      var t = Math.min(tx,ty) + G.gap;
+      return {x:c.x + d.x*t, y:c.y + d.y*t};
+    }
+    function arrowHead(tip, d, cls){
+      var b = {x: tip.x - d.x*G.head, y: tip.y - d.y*G.head};
+      var p = {x:-d.y, y:d.x};
+      var pts = [ tip,
+        {x:b.x + p.x*G.headW, y:b.y + p.y*G.headW},
+        {x:b.x - p.x*G.headW, y:b.y - p.y*G.headW} ];
+      add('polygon',{points: pts.map(function(q){return sx(q.x)+','+sy(q.y);}).join(' ')}, cls);
+    }
+
+    /* ---------- стрелки цикла ---------- */
+    FLOW.forEach(function(e){
+      var a=NODES[e[0]], b=NODES[e[1]];
+      var d=unit(a,b), p=border(a,d), q=border(b,{x:-d.x,y:-d.y});
+      var tail={x:q.x - d.x*G.head, y:q.y - d.y*G.head};
+      add('path',{d:'M '+sx(p.x)+' '+sy(p.y)+' L '+sx(tail.x)+' '+sy(tail.y),
+        'stroke-width':1.8,'stroke-linecap':'round'},'edge');
+      arrowHead(q, d, 'edge-head');
+    });
+
+    /* ---------- возвраты ---------- */
+    LOOPS.forEach(function(L){
+      var a=NODES[L.from], b=NODES[L.to];
+      var din=unit(a,L.ctrl), dout=unit(L.ctrl,b);
+      var p=border(a,din), q=border(b,{x:-dout.x,y:-dout.y});
+      var tail={x:q.x - dout.x*G.head, y:q.y - dout.y*G.head};
+      add('path',{d:'M '+sx(p.x)+' '+sy(p.y)+' Q '+sx(L.ctrl.x)+' '+sy(L.ctrl.y)
+        +' '+sx(tail.x)+' '+sy(tail.y), 'stroke-width':1.8,'stroke-linecap':'round'},'loop');
+      arrowHead(q, dout, 'loop-head');
+      add('text',{x:sx(L.at.x), y:sy(L.at.y),'text-anchor':L.anchor}, 'loop-label', L.label);
+    });
+
+    /* ---------- узлы ---------- */
+    NODES.forEach(function(n){
+      var l=sx(n.x-G.hw), r=sx(n.x+G.hw), t=sy(n.y+G.hh), bm=sy(n.y-G.hh);
+      add('rect',{x:l, y:t, width:r-l, height:bm-t, rx:(bm-t)/3,
+        'stroke-width':1.6}, 'node-box');
+      add('text',{x:sx(n.x), y:sy(n.y),'text-anchor':'middle',
+        'dominant-baseline':'central'}, 'node-label', n.label);
+    });
+
+    /* ---------- легенда ---------- */
+    LEGEND.forEach(function(L){
+      add('text',{x:sx(0), y:sy(L.y),'text-anchor':'middle'}, 'legend', L.text);
+    });
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML='<p class="fail">Схема не построилась. Она показывает цикл: '
+      +'Сбор данных → Очистка → Признаки → Разбиение → Обучение → Оценка → Внедрение → Мониторинг, '
+      +'плюс два возврата пунктиром: от Оценки назад к Признакам и от Мониторинга назад к Сбору данных. '
+      +'Главное — это петля, а не прямая линия.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

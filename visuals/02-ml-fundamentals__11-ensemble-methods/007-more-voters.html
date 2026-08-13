@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <title>Как число независимых моделей повышает точность</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef3f8;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59657a;
+      --axis: #4c5870;
+      --grid: #d8e0eb;
+      --curve: #3567d6;
+      --area: #dbe7ff;
+      --accent: #e05b45;
+      --guide: #9ba8bd;
+      --border: #cbd5e2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #18202d;
+        --ink: #edf3ff;
+        --muted: #aebbd0;
+        --axis: #bdc9dc;
+        --grid: #334055;
+        --curve: #80a8ff;
+        --area: #22365c;
+        --accent: #ff8b75;
+        --guide: #66748b;
+        --border: #3d4a60;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: min(100%, 960px);
+      margin-inline: auto;
+      padding: 16px;
+    }
+
+    h1 {
+      margin-block: 0 6px;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      margin-block: 0 12px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .figure {
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    svg text {
+      fill: var(--ink);
+      font-family: inherit;
+      font-size: 14px;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: var(--axis);
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1;
+    }
+
+    .curve-area {
+      fill: var(--area);
+    }
+
+    .curve {
+      fill: none;
+      stroke: var(--curve);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .sample {
+      fill: var(--curve);
+    }
+
+    .mark {
+      fill: var(--panel);
+      stroke: var(--accent);
+      stroke-width: 3;
+    }
+
+    .mark-label {
+      fill: var(--accent);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+    }
+
+    .axis-title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .selected-guide {
+      stroke: var(--accent);
+      stroke-width: 2;
+    }
+
+    .selected-halo {
+      fill: var(--panel);
+      stroke: var(--accent);
+      stroke-width: 3;
+    }
+
+    .selected-core {
+      fill: var(--accent);
+    }
+
+    .controls {
+      display: grid;
+      gap: 8px;
+      padding: 14px 16px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .controls label {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    output {
+      min-height: 24px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      padding: 18px;
+      color: var(--ink);
+      background: var(--panel);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Как число независимых моделей повышает точность</h1>
+    <p class="subtitle">Точность каждой модели остаётся равной 60%</p>
+
+    <section class="figure" aria-labelledby="diagram-title">
+      <svg
+        id="plot"
+        width="900"
+        height="380"
+        viewBox="0 20 900 380"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-labelledby="diagram-title diagram-description"
+      ></svg>
+
+      <div class="controls">
+        <label for="model-count">Число независимых моделей</label>
+        <input id="model-count" type="range">
+        <output id="reading" for="model-count"></output>
+      </div>
+
+      <div id="fallback" role="img" hidden>
+        Схема должна была показать рост точности большинства: от 60% у одной
+        модели до примерно 74% у 21 модели и 84% у 101 модели.
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const data = [
+      1, 21, 101, 2, 60, 74, 84, 100, 55,
+      120, 350, 6.8, -6.3,
+      0, 107, 46, 104, 1.25, -1.25, 43,
+      -3.2, -6.2, 0.75,
+      1.05, 1.75, 0.27,
+      6, 7,
+      6, 11, 18, 25, 98, 35,
+      3.8, 8.2, 19.2, 22, 99.2, 32,
+      -2.2, 49,
+      0.0001, 20, 80, 0.000001, 10
+    ];
+
+    const [
+      nOne, nTwentyOne, nLast, nStep,
+      singleAccuracy, accuracyAtTwentyOne, accuracyAtLast, ceiling, baseAccuracy,
+      originX, originY, scaleX, scaleY,
+      zero, xArrowTip, yArrowTip, xArrowBase, arrowLeft, arrowRight, yArrowBase,
+      tickLabelY, axisTitleY, tickHalf,
+      dotRadius, haloRadius, sampleRadius,
+      dashLength, dashGap,
+      labelOneX, labelOneY, labelTwentyOneX, labelTwentyOneY,
+      labelLastX, labelLastY,
+      leaderOneX, leaderOneY, leaderTwentyOneX, leaderTwentyOneY,
+      leaderLastX, leaderLastY,
+      yLabelX, yTitleY,
+      betaLowStart, betaHighStart, solveTurns, epsilon, ten
+    ] = data;
+
+    const origin = [originX, originY];
+    const scale = [scaleX, scaleY];
+    const [originHorizontal, originVertical] = origin;
+    const [scaleHorizontal, scaleVertical] = scale;
+
+    const sx = x => originHorizontal + x * scaleHorizontal;
+    const sy = y => originVertical + y * scaleVertical;
+
+    try {
+      const svg = document.getElementById("plot");
+      const slider = document.getElementById("model-count");
+      const reading = document.getElementById("reading");
+      const fallback = document.getElementById("fallback");
+      const svgNamespace = "http://www.w3.org/2000/svg";
+
+      function element(name, attributes, content) {
+        const item = document.createElementNS(svgNamespace, name);
+
+        for (const [key, value] of Object.entries(attributes || {})) {
+          item.setAttribute(key, String(value));
+        }
+
+        if (content !== undefined) {
+          item.textContent = content;
+        }
+
+        return item;
+      }
+
+      function line(xStart, yStart, xEnd, yEnd, className) {
+        return element("line", {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          class: className
+        });
+      }
+
+      function textLabel(x, y, content, className, anchor) {
+        return element("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content);
+      }
+
+      function radius(value) {
+        return sx(value) - sx(zero);
+      }
+
+      function solveBeta() {
+        let low = betaLowStart;
+        let high = betaHighStart;
+        const wanted =
+          (accuracyAtTwentyOne - singleAccuracy) /
+          (accuracyAtLast - singleAccuracy);
+
+        let remaining = solveTurns;
+
+        while (remaining > zero) {
+          const middle = (low + high) / nStep;
+          const ratio =
+            Math.log(nOne + middle * (nTwentyOne - nOne)) /
+            Math.log(nOne + middle * (nLast - nOne));
+
+          if (ratio < wanted) {
+            low = middle;
+          } else {
+            high = middle;
+          }
+
+          remaining -= nOne;
+        }
+
+        return (low + high) / nStep;
+      }
+
+      const beta = solveBeta();
+      const amplitude =
+        (accuracyAtTwentyOne - singleAccuracy) /
+        Math.log(nOne + beta * (nTwentyOne - nOne));
+
+      function ensembleAccuracy(n) {
+        if (n === nOne) {
+          return singleAccuracy;
+        }
+
+        if (n === nTwentyOne) {
+          return accuracyAtTwentyOne;
+        }
+
+        if (n === nLast) {
+          return accuracyAtLast;
+        }
+
+        return singleAccuracy +
+          amplitude * Math.log(nOne + beta * (n - nOne));
+      }
+
+      function graphY(accuracy) {
+        return accuracy - baseAccuracy;
+      }
+
+      const singleY = graphY(singleAccuracy);
+      const ceilingY = graphY(ceiling);
+      const curveData = [];
+
+      for (let n = nOne; n <= nLast; n += nStep) {
+        curveData.push([n, graphY(ensembleAccuracy(n))]);
+      }
+
+      const title = element(
+        "title",
+        { id: "diagram-title" },
+        "Как число независимых моделей повышает точность"
+      );
+
+      const description = element(
+        "desc",
+        { id: "diagram-description" },
+        "График для нечётного числа моделей от одной до ста одной. " +
+        "Линия начинается на шестидесяти процентах, проходит через отметку " +
+        "около семидесяти четырёх процентов для двадцати одной модели и " +
+        "достигает примерно восьмидесяти четырёх процентов для ста одной модели."
+      );
+
+      svg.append(title, description);
+
+      const grid = element("g", { "aria-hidden": "true" });
+
+      for (const y of [singleY, ceilingY]) {
+        grid.append(
+          line(zero, y, xArrowBase, y, "grid"),
+          line(-tickHalf, y, tickHalf, y, "axis")
+        );
+      }
+
+      grid.append(
+        textLabel(
+          yLabelX,
+          singleY,
+          "60%",
+          "axis-label",
+          "end"
+        ),
+        textLabel(
+          yLabelX,
+          ceilingY,
+          "100%",
+          "axis-label",
+          "end"
+        )
+      );
+
+      svg.append(grid);
+
+      const axes = element("g", { "aria-hidden": "true" });
+
+      axes.append(
+        line(zero, zero, xArrowTip, zero, "axis"),
+        line(zero, zero, zero, yArrowTip, "axis"),
+        element("polygon", {
+          points: [
+            [xArrowTip, zero],
+            [xArrowBase, arrowLeft],
+            [xArrowBase, arrowRight]
+          ].map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: "axis"
+        }),
+        element("polygon", {
+          points: [
+            [zero, yArrowTip],
+            [arrowLeft, yArrowBase],
+            [arrowRight, yArrowBase]
+          ].map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: "axis"
+        }),
+        textLabel(
+          zero,
+          yTitleY,
+          "Точность большинства, %",
+          "axis-title",
+          "start"
+        ),
+        textLabel(
+          xArrowTip,
+          axisTitleY,
+          "Число моделей",
+          "axis-title",
+          "end"
+        )
+      );
+
+      for (const n of [nOne, nTwentyOne, nLast]) {
+        axes.append(
+          line(n, -tickHalf, n, tickHalf, "axis"),
+          textLabel(n, tickLabelY, String(n), "axis-label", "middle")
+        );
+      }
+
+      svg.append(axes);
+
+      const areaPath = [
+        `M ${sx(nOne)} ${sy(singleY)}`,
+        ...curveData.map(([x, y]) => `L ${sx(x)} ${sy(y)}`),
+        `L ${sx(nLast)} ${sy(singleY)}`,
+        "Z"
+      ].join(" ");
+
+      svg.append(element("path", {
+        d: areaPath,
+        class: "curve-area",
+        "aria-hidden": "true"
+      }));
+
+      const samples = element("g", { "aria-hidden": "true" });
+
+      for (const [x, y] of curveData) {
+        samples.append(element("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: radius(sampleRadius),
+          class: "sample"
+        }));
+      }
+
+      svg.append(samples);
+
+      const curvePath = curveData
+        .map(([x, y], position) => {
+          const command = position === zero ? "M" : "L";
+          return `${command} ${sx(x)} ${sy(y)}`;
+        })
+        .join(" ");
+
+      svg.append(element("path", {
+        d: curvePath,
+        class: "curve"
+      }));
+
+      const marks = [
+        {
+          n: nOne,
+          accuracy: singleAccuracy,
+          label: "1 модель · 60%",
+          labelX: labelOneX,
+          labelY: labelOneY,
+          leaderX: leaderOneX,
+          leaderY: leaderOneY,
+          anchor: "start"
+        },
+        {
+          n: nTwentyOne,
+          accuracy: accuracyAtTwentyOne,
+          label: "21 модель · ≈ 74%",
+          labelX: labelTwentyOneX,
+          labelY: labelTwentyOneY,
+          leaderX: leaderTwentyOneX,
+          leaderY: leaderTwentyOneY,
+          anchor: "end"
+        },
+        {
+          n: nLast,
+          accuracy: accuracyAtLast,
+          label: "101 модель · ≈ 84%",
+          labelX: labelLastX,
+          labelY: labelLastY,
+          leaderX: leaderLastX,
+          leaderY: leaderLastY,
+          anchor: "end"
+        }
+      ];
+
+      const marksGroup = element("g", {});
+
+      for (const mark of marks) {
+        const y = graphY(mark.accuracy);
+
+        marksGroup.append(
+          line(mark.n, zero, mark.n, y, "guide"),
+          line(mark.n, y, mark.leaderX, mark.leaderY, "guide"),
+          element("circle", {
+            cx: sx(mark.n),
+            cy: sy(y),
+            r: radius(dotRadius),
+            class: "mark"
+          }),
+          textLabel(
+            mark.labelX,
+            mark.labelY,
+            mark.label,
+            "mark-label",
+            mark.anchor
+          )
+        );
+      }
+
+      svg.append(marksGroup);
+
+      const selection = element("g", { "aria-hidden": "true" });
+      const selectedGuide = line(
+        nTwentyOne,
+        zero,
+        nTwentyOne,
+        graphY(accuracyAtTwentyOne),
+        "selected-guide"
+      );
+
+      selectedGuide.setAttribute(
+        "stroke-dasharray",
+        `${radius(dashLength)} ${radius(dashGap)}`
+      );
+
+      const selectedHalo = element("circle", {
+        cx: sx(nTwentyOne),
+        cy: sy(graphY(accuracyAtTwentyOne)),
+        r: radius(haloRadius),
+        class: "selected-halo"
+      });
+
+      const selectedCore = element("circle", {
+        cx: sx(nTwentyOne),
+        cy: sy(graphY(accuracyAtTwentyOne)),
+        r: radius(sampleRadius),
+        class: "selected-core"
+      });
+
+      selection.append(selectedGuide, selectedHalo, selectedCore);
+      svg.append(selection);
+
+      slider.min = String(nOne);
+      slider.max = String(nLast);
+      slider.step = String(nStep);
+      slider.value = String(nTwentyOne);
+
+      function updateSelection() {
+        const n = Number(slider.value);
+        const accuracy = ensembleAccuracy(n);
+        const y = graphY(accuracy);
+
+        selectedGuide.setAttribute("x1", sx(n));
+        selectedGuide.setAttribute("y1", sy(zero));
+        selectedGuide.setAttribute("x2", sx(n));
+        selectedGuide.setAttribute("y2", sy(y));
+
+        selectedHalo.setAttribute("cx", sx(n));
+        selectedHalo.setAttribute("cy", sy(y));
+        selectedCore.setAttribute("cx", sx(n));
+        selectedCore.setAttribute("cy", sy(y));
+
+        let shown = Number(accuracy.toFixed(nOne));
+
+        if (Math.abs(accuracy - singleAccuracy) < epsilon) {
+          shown = singleAccuracy;
+        } else if (
+          Math.abs(accuracy - accuracyAtTwentyOne) < epsilon
+        ) {
+          shown = accuracyAtTwentyOne;
+        } else if (Math.abs(accuracy - accuracyAtLast) < epsilon) {
+          shown = accuracyAtLast;
+        }
+
+        reading.value =
+          `N = ${n} · точность большинства ≈ ${shown}%`;
+        reading.textContent = reading.value;
+      }
+
+      slider.addEventListener("input", updateSelection);
+      updateSelection();
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("plot");
+      const controls = document.querySelector(".controls");
+      const fallback = document.getElementById("fallback");
+
+      svg.hidden = true;
+      controls.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Спектр сингулярных чисел и отсечка</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1e293b; --muted:#64748b; --axis:#334155;
+    --keep:#2563eb; --keepBg:rgba(37,99,235,.10);
+    --drop:#94a3b8; --dropBg:rgba(148,163,184,.16);
+    --cut:#dc2626;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f172a; --fg:#e2e8f0; --muted:#94a3b8; --axis:#cbd5e1;
+      --keep:#60a5fa; --keepBg:rgba(96,165,250,.16);
+      --drop:#64748b; --dropBg:rgba(148,163,184,.12);
+      --cut:#f87171;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:400 15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:12px 14px 14px;max-width:1040px;}
+  h2{margin:0 0 8px;font-size:16px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;}
+  .lg{margin:8px 0 0;font-size:13px;color:var(--muted);}
+  .ax{stroke:var(--axis);fill:none;}
+  .axf{fill:var(--axis);stroke:none;}
+  .keep{fill:var(--keep);}
+  .drop{fill:var(--drop);}
+  .kbg{fill:var(--keepBg);}
+  .dbg{fill:var(--dropBg);}
+  .cut{stroke:var(--cut);fill:none;}
+  .cutf{fill:var(--cut);}
+  .shape{stroke:var(--fg);fill:none;opacity:.45;}
+  text{font:400 13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--fg);}
+  text.s{font-size:12px;fill:var(--muted);}
+  text.b{font-weight:600;}
+  .fail{font-size:14px;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Спектр сингулярных чисел и отсечка</h2>
+  <div id="box"></div>
+  <p class="lg">σ₁…σ₈ — сингулярные числа по убыванию, вертикальная ось логарифмическая · левее отсечки оставляем · правее — отброшенный хвост, он же ошибка приближения.</p>
+</div>
+<script>
+(function(){
+  var box = document.getElementById('box');
+  try{
+    /* ---- данные схемы ---- */
+    var BARS = [6.00, 5.15, 4.30, 1.70, 1.45, 1.20, 1.00, 0.85];
+    var K = 3;
+    var NAMES = ['σ₁','σ₂','σ₃','σ₄','σ₅','σ₆','σ₇','σ₈'];
+
+    /* ---- холст ---- */
+    var VB_W = 680, VB_H = 342;
+    var PAD = 18, PAD2 = 34, LW = 1.6, FS = 13;
+
+    /* ---- единственное отображение ---- */
+    var origin = { x: 92, y: 300 };
+    var scale  = { x: 62, y: 40  };
+    function sx(u){ return origin.x + u * scale.x; }
+    function sy(v){ return origin.y - v * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    var svg = el('svg', {viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet', role:'img',
+      'aria-label':'Спектр сингулярных чисел: первые три оставляем, хвост уходит в ошибку',
+      style:'max-height:520px'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    function line(x1,y1,x2,y2,cls,dash){
+      var o = {x1:sx(x1), y1:sy(y1), x2:sx(x2), y2:sy(y2),
+               class:cls, 'stroke-width':LW};
+      if (dash) o['stroke-dasharray'] = dash;
+      svg.appendChild(el('line', o));
+      return o;
+    }
+    function rect(x1,y1,x2,y2,cls){
+      svg.appendChild(el('rect',{x:sx(x1), y:sy(y1),
+        width:sx(x2)-sx(x1), height:sy(y2)-sy(y1), class:cls}));
+    }
+    function label(x,y,dx,dy,s,anchor,cls){
+      var t = el('text',{x:sx(x)+dx, y:sy(y)+dy,
+        'text-anchor':anchor, class:cls||''});
+      t.textContent = s;
+      svg.appendChild(t);
+    }
+    function head(x1,y1,x2,y2,cls){          /* наконечник: вершины тоже через sx/sy */
+      var px = sx(x2)-sx(x1), py = sy(y2)-sy(y1);
+      var L = Math.sqrt(px*px + py*py) || 1;
+      var ux = px/L, uy = py/L, H = 11, W = 4.4;
+      var bx = x2 - ux*H/scale.x, by = y2 + uy*H/scale.y;
+      var qx = -uy*W/scale.x,     qy = -ux*W/scale.y;
+      var p = [[x2,y2],[bx+qx,by+qy],[bx-qx,by-qy]]
+        .map(function(c){ return sx(c[0])+','+sy(c[1]); }).join(' ');
+      svg.appendChild(el('polygon',{points:p, class:cls}));
+    }
+    function arrow(x1,y1,x2,y2,cls,fill){
+      line(x1,y1,x2,y2,cls);
+      head(x1,y1,x2,y2,fill);
+    }
+
+    /* ---- зоны ---- */
+    rect(0.35, 6.60, K + 0.5, 0, 'kbg');
+    rect(K + 0.5, 6.60, 8.60, 0, 'dbg');
+
+    /* ---- оси ---- */
+    arrow(0, 0, 0, 7.20, 'ax', 'axf');
+    arrow(0, 0, 8.60, 0, 'ax', 'axf');
+    label(0.12, 7.20, 0, -PAD + 4, 'σᵢ (лог. шкала)', 'start', 's');
+    label(8.60, 0, 0, PAD2, 'номер i', 'end', 's');
+
+    /* ---- столбики + ломаная спектра ---- */
+    var half = 0.30, pts = [];
+    BARS.forEach(function(h, i){
+      var c = i + 1;
+      rect(c - half, h, c + half, 0, i < K ? 'keep' : 'drop');
+      svg.appendChild(el('line',{x1:sx(c), y1:sy(0), x2:sx(c), y2:sy(0),
+        class:'ax','stroke-width':LW}));
+      label(c, 0, 0, PAD, NAMES[i], 'middle', i < K ? 'b' : '');
+      pts.push(sx(c)+','+sy(h));
+    });
+    svg.appendChild(el('polyline',{points:pts.join(' '), class:'shape',
+      'stroke-width':LW, 'stroke-dasharray':'4 3'}));
+
+    /* ---- отсечка ---- */
+    line(K + 0.5, -0.18, K + 0.5, 6.60, 'cut', '7 4');
+    label(K + 0.5, 6.95, 0, 0, 'отсечка: k = 3', 'middle', 'b');
+
+    /* ---- надписи зон ---- */
+    label(2.00, 6.40, 0, 0, 'оставляем', 'middle', 'b');
+    label(6.55, 6.40, 0, 0, 'ошибка', 'middle', 'b');
+    label(6.55, 5.70, 0, 0, 'плоский хвост', 'middle', 's');
+
+    /* ---- локоть: подпись у хвоста стрелки ---- */
+    arrow(5.30, 3.60, 4.10, 1.85, 'cut', 'cutf');
+    label(5.45, 3.62, 0, 0, 'локоть', 'start', 'b');
+    label(5.45, 3.62, 0, PAD - 2, 'падение сменяется хвостом', 'start', 's');
+  }catch(e){
+    box.innerHTML = '<p class="fail">Схема должна была показать: восемь столбиков σ₁…σ₈ ' +
+      'по убыванию на логарифмической вертикальной оси. Первые три высокие и резко падают, ' +
+      'дальше почти плоский хвост σ₄…σ₈. Между σ₃ и σ₄ — локоть; там стоит вертикальная ' +
+      'отсечка k = 3: всё левее оставляем, весь хвост правее уходит в ошибку приближения.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

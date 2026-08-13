@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поток данных через сеть 2–3–1</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f4f7fb;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5b6578;
+    --frame: #cbd5e1;
+    --frame-fill: #f8fafc;
+    --blue: #2563eb;
+    --blue-fill: #dbeafe;
+    --orange: #d97706;
+    --orange-fill: #ffedd5;
+    --violet: #7c3aed;
+    --violet-fill: #ede9fe;
+    --badge: #e8eef7;
+    --badge-ink: #263449;
+    --guide: #94a3b8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101520;
+      --panel: #151c29;
+      --ink: #edf2f7;
+      --muted: #b7c0cf;
+      --frame: #465268;
+      --frame-fill: #1b2534;
+      --blue: #77a7ff;
+      --blue-fill: #19375f;
+      --orange: #f6b65f;
+      --orange-fill: #50351d;
+      --violet: #bd9cff;
+      --violet-fill: #372761;
+      --badge: #263247;
+      --badge-ink: #e3eaf5;
+      --guide: #76839a;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--panel);
+    overflow: hidden;
+  }
+
+  .figure-heading {
+    margin: 0;
+    padding: 12px 18px 4px;
+    font-size: 22px;
+    line-height: normal;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--panel);
+  }
+
+  .layer-frame {
+    fill: var(--frame-fill);
+    stroke: var(--frame);
+  }
+
+  .input-node {
+    fill: var(--blue-fill);
+    stroke: var(--blue);
+  }
+
+  .input-node.second {
+    fill: var(--orange-fill);
+    stroke: var(--orange);
+  }
+
+  .hidden-node {
+    fill: var(--violet-fill);
+    stroke: var(--violet);
+  }
+
+  .output-node {
+    fill: var(--violet);
+    stroke: var(--violet);
+  }
+
+  .edge {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .edge-blue {
+    stroke: var(--blue);
+  }
+
+  .edge-orange {
+    stroke: var(--orange);
+  }
+
+  .edge-violet {
+    stroke: var(--violet);
+  }
+
+  .head-blue {
+    fill: var(--blue);
+  }
+
+  .head-orange {
+    fill: var(--orange);
+  }
+
+  .head-violet {
+    fill: var(--violet);
+  }
+
+  .badge {
+    fill: var(--badge);
+    stroke: var(--frame);
+  }
+
+  .layer-label,
+  .node-label,
+  .badge-label,
+  .process-label,
+  .caption,
+  .fallback {
+    font-family: inherit;
+  }
+
+  .layer-label {
+    fill: var(--ink);
+    font-weight: bold;
+  }
+
+  .node-label {
+    fill: var(--ink);
+    font-weight: bold;
+  }
+
+  .output-label {
+    fill: var(--panel);
+    font-weight: bold;
+  }
+
+  .badge-label {
+    fill: var(--badge-ink);
+    font-weight: bold;
+  }
+
+  .process-label,
+  .caption {
+    fill: var(--muted);
+  }
+
+  .caption-line {
+    stroke: var(--guide);
+    stroke-linecap: round;
+  }
+
+  .fallback {
+    fill: var(--ink);
+  }
+
+  noscript p {
+    margin: 0;
+    padding: 18px;
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="figure" aria-labelledby="figure-heading">
+  <h1 class="figure-heading" id="figure-heading">Поток данных через сеть 2–3–1</h1>
+  <svg id="diagram"
+       viewBox="0 0 1200 430"
+       width="1200"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Прямой проход через сеть 2–3–1</title>
+    <desc id="svg-desc">Два входных значения через матрицу W1 поступают каждому из трёх скрытых нейронов, затем три скрытых результата через W2 сходятся в одном выходе.</desc>
+  </svg>
+  <noscript>
+    <p>Вход x формы (2,) проходит через W₁ формы (3, 2), превращается в скрытый выход h формы (3,), затем через W₂ формы (1, 3) — в итоговый выход y формы (1,).</p>
+  </noscript>
+</main>
+
+<script>
+const data = Object.freeze({
+  canvas: [1200, 430],
+  origin: [45, 10],
+  scale: [52, 52],
+  stroke: [2, 1],
+  font: [16, 15, 14, 13],
+  labelPad: [4, 7, 10],
+  radius: [0.46, 0.51, 0.55, 0.13],
+  arrow: [0.28, 0.13],
+  input: [[2.2, 3.12, "x₁"], [2.2, 5.18, "x₂"]],
+  hidden: [[10.1, 2.28, "h₁"], [10.1, 4.15, "h₂"], [10.1, 6.02, "h₃"]],
+  output: [18.35, 4.15, "y"],
+  frames: [
+    [1.22, 2.42, 3.18, 5.88, 0.22],
+    [9.12, 1.58, 11.08, 6.72, 0.22],
+    [17.37, 3.28, 19.33, 5.02, 0.22]
+  ],
+  badges: [
+    [4.42, 0.90, 7.76, 1.55, 0.20, 6.09, 1.225, "W₁  ·  форма (3, 2)"],
+    [12.64, 0.90, 16.16, 1.55, 0.20, 14.40, 1.225, "W₂  ·  форма (1, 3)"]
+  ],
+  layerLabels: [
+    [2.2, 0.42, "Вход x  ·  форма (2,)"],
+    [10.1, 0.42, "Скрытый выход h  ·  форма (3,)"],
+    [18.35, 0.42, "Выход y  ·  форма (1,)"]
+  ],
+  processLabels: [
+    [6.09, 1.78, "оба входа участвуют в каждом h"],
+    [14.40, 1.78, "все три h участвуют в одном y"]
+  ],
+  captions: [
+    [2.2, 6.54, "два значения"],
+    [10.1, 7.18, "три новых признака"],
+    [18.35, 5.66, "один итог"]
+  ],
+  captionLines: [
+    [2.2, 5.98, 2.2, 6.30],
+    [10.1, 6.74, 10.1, 6.94],
+    [18.35, 5.04, 18.35, 5.42]
+  ],
+  flowCaption: [10.25, 7.82, "Прямой проход:  x  →  σ(W₁x + b₁)  →  h  →  σ(W₂h + b₂)  →  y"],
+  fallback: [
+    [0.72, 3.65, "Схема должна была показать цепочку:"],
+    [0.72, 4.25, "вход (2,) → W₁ (3, 2) → скрытый выход (3,) → W₂ (1, 3) → выход (1,)"]
+  ]
+});
+
+const origin = Object.freeze({ x: data.origin[0], y: data.origin[1] });
+const scale = Object.freeze({ x: data.scale[0], y: data.scale[1] });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const [
+    primaryStroke,
+    fineStroke
+  ] = data.stroke;
+  const [
+    layerFont,
+    nodeFont,
+    processFont,
+    captionFont
+  ] = data.font;
+  const [
+    baselinePad,
+    smallPad,
+    largePad
+  ] = data.labelPad;
+  const [
+    inputRadius,
+    hiddenRadius,
+    outputRadius,
+    cornerRadius
+  ] = data.radius;
+  const [
+    arrowLength,
+    arrowHalfWidth
+  ] = data.arrow;
+  const [
+    firstInput,
+    secondInput
+  ] = data.input;
+  const [
+    firstHidden,
+    secondHidden,
+    thirdHidden
+  ] = data.hidden;
+  const [
+    outputX,
+    outputY,
+    outputText
+  ] = data.output;
+
+  function make(tag, attributes, parent) {
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      element.setAttribute(name, String(value));
+    });
+    (parent || svg).appendChild(element);
+    return element;
+  }
+
+  function rectFrom(spec, className) {
+    const [left, top, right, bottom, round] = spec;
+    return make("rect", {
+      x: sx(left),
+      y: sy(top),
+      width: sx(right) - sx(left),
+      height: sy(bottom) - sy(top),
+      rx: sx(round) - sx(0),
+      class: className,
+      "stroke-width": primaryStroke
+    });
+  }
+
+  function circleAt(point, radius, className) {
+    const [x, y] = point;
+    return make("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(radius) - sx(0),
+      class: className,
+      "stroke-width": primaryStroke
+    });
+  }
+
+  function textAt(x, y, value, className, anchor, fontSize, dx, dy) {
+    const text = make("text", {
+      x: sx(x),
+      y: sy(y),
+      dx: dx,
+      dy: dy,
+      class: className,
+      "text-anchor": anchor,
+      "font-size": fontSize
+    });
+    text.textContent = value;
+    return text;
+  }
+
+  function arrow(from, to, sourceRadius, targetRadius, lineClass, headClass) {
+    const [fromX, fromY] = from;
+    const [toX, toY] = to;
+    const deltaX = toX - fromX;
+    const deltaY = toY - fromY;
+    const distance = Math.hypot(deltaX, deltaY);
+    const unitX = deltaX / distance;
+    const unitY = deltaY / distance;
+    const normalX = -unitY;
+    const normalY = unitX;
+
+    const startX = fromX + unitX * sourceRadius;
+    const startY = fromY + unitY * sourceRadius;
+    const tipX = toX - unitX * targetRadius;
+    const tipY = toY - unitY * targetRadius;
+    const baseX = tipX - unitX * arrowLength;
+    const baseY = tipY - unitY * arrowLength;
+    const leftX = baseX + normalX * arrowHalfWidth;
+    const leftY = baseY + normalY * arrowHalfWidth;
+    const rightX = baseX - normalX * arrowHalfWidth;
+    const rightY = baseY - normalY * arrowHalfWidth;
+
+    make("line", {
+      x1: sx(startX),
+      y1: sy(startY),
+      x2: sx(baseX),
+      y2: sy(baseY),
+      class: "edge " + lineClass,
+      "stroke-width": primaryStroke
+    });
+
+    make("polygon", {
+      points:
+        sx(tipX) + "," + sy(tipY) + " " +
+        sx(leftX) + "," + sy(leftY) + " " +
+        sx(rightX) + "," + sy(rightY),
+      class: headClass
+    });
+  }
+
+  data.frames.forEach(frame => rectFrom(frame, "layer-frame"));
+
+  [firstHidden, secondHidden, thirdHidden].forEach(hidden => {
+    arrow(firstInput, hidden, inputRadius, hiddenRadius, "edge-blue", "head-blue");
+    arrow(secondInput, hidden, inputRadius, hiddenRadius, "edge-orange", "head-orange");
+  });
+
+  [firstHidden, secondHidden, thirdHidden].forEach(hidden => {
+    arrow(hidden, data.output, hiddenRadius, outputRadius, "edge-violet", "head-violet");
+  });
+
+  data.badges.forEach(badge => {
+    const [
+      left,
+      top,
+      right,
+      bottom,
+      round,
+      labelX,
+      labelY,
+      label
+    ] = badge;
+    rectFrom([left, top, right, bottom, round], "badge");
+    textAt(
+      labelX,
+      labelY,
+      label,
+      "badge-label",
+      "middle",
+      processFont,
+      sx(0) - sx(0),
+      baselinePad
+    );
+  });
+
+  circleAt(firstInput, inputRadius, "input-node");
+  circleAt(secondInput, inputRadius, "input-node second");
+  [firstHidden, secondHidden, thirdHidden].forEach(hidden => {
+    circleAt(hidden, hiddenRadius, "hidden-node");
+  });
+  circleAt(data.output, outputRadius, "output-node");
+
+  [firstInput, secondInput].forEach(input => {
+    const [x, y, label] = input;
+    textAt(
+      x,
+      y,
+      label,
+      "node-label",
+      "middle",
+      nodeFont,
+      sx(0) - sx(0),
+      baselinePad
+    );
+  });
+
+  [firstHidden, secondHidden, thirdHidden].forEach(hidden => {
+    const [x, y, label] = hidden;
+    textAt(
+      x,
+      y,
+      label,
+      "node-label",
+      "middle",
+      nodeFont,
+      sx(0) - sx(0),
+      baselinePad
+    );
+  });
+
+  textAt(
+    outputX,
+    outputY,
+    outputText,
+    "output-label",
+    "middle",
+    nodeFont,
+    sx(0) - sx(0),
+    baselinePad
+  );
+
+  data.layerLabels.forEach(label => {
+    const [x, y, value] = label;
+    textAt(
+      x,
+      y,
+      value,
+      "layer-label",
+      "middle",
+      layerFont,
+      sx(0) - sx(0),
+      smallPad
+    );
+  });
+
+  data.processLabels.forEach(label => {
+    const [x, y, value] = label;
+    textAt(
+      x,
+      y,
+      value,
+      "process-label",
+      "middle",
+      processFont,
+      sx(0) - sx(0),
+      baselinePad
+    );
+  });
+
+  data.captionLines.forEach(line => {
+    const [x1, y1, x2, y2] = line;
+    make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: "caption-line",
+      "stroke-width": fineStroke
+    });
+  });
+
+  data.captions.forEach(caption => {
+    const [x, y, value] = caption;
+    textAt(
+      x,
+      y,
+      value,
+      "caption",
+      "middle",
+      captionFont,
+      sx(0) - sx(0),
+      smallPad
+    );
+  });
+
+  const [flowX, flowY, flowText] = data.flowCaption;
+  textAt(
+    flowX,
+    flowY,
+    flowText,
+    "caption",
+    "middle",
+    processFont,
+    sx(0) - sx(0),
+    largePad
+  );
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  while (svg.lastChild) {
+    svg.removeChild(svg.lastChild);
+  }
+
+  data.fallback.forEach(item => {
+    const [x, y, value] = item;
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", String(sx(x)));
+    text.setAttribute("y", String(sy(y)));
+    text.setAttribute("text-anchor", "start");
+    text.setAttribute("font-size", String(data.font[0]));
+    text.setAttribute("class", "fallback");
+    text.textContent = value;
+    svg.appendChild(text);
+  });
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

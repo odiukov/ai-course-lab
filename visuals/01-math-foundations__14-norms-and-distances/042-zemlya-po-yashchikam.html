@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Перенос массы между четырьмя ящиками</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --panel-soft: #f1f4f9;
+      --ink: #172033;
+      --muted: #526078;
+      --grid: #aab4c4;
+      --source: #b76000;
+      --source-fill: #ffe2b8;
+      --target: #076d89;
+      --target-fill: #c9edf5;
+      --flow: #7748b8;
+      --cost-fill: #eee7fa;
+      --cost-stroke: #9a78c9;
+      --line: 2px;
+      --flow-line: 8px;
+      --title-size: 22px;
+      --body-size: 16px;
+      --small-size: 14px;
+      --formula-size: 20px;
+      --label-pad: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: min(960px, 100%);
+      margin: auto;
+      background: var(--panel);
+      border: var(--line) solid var(--grid);
+    }
+
+    h1 {
+      margin: auto;
+      padding: var(--label-pad);
+      border-bottom: var(--line) solid var(--grid);
+      font-size: var(--title-size);
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    #status {
+      margin: auto;
+      padding: var(--label-pad);
+      color: var(--muted);
+      font-size: var(--body-size);
+      text-align: center;
+    }
+
+    .hidden,
+    svg.failed {
+      display: none;
+    }
+
+    .box {
+      fill: var(--panel-soft);
+      stroke: var(--grid);
+      stroke-width: var(--line);
+    }
+
+    .source-fill {
+      fill: var(--source-fill);
+    }
+
+    .target-fill {
+      fill: var(--target-fill);
+    }
+
+    .divider,
+    .guide {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: var(--line);
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--flow);
+      stroke-width: var(--flow-line);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrowhead {
+      fill: var(--flow);
+      stroke: var(--flow);
+      stroke-width: var(--line);
+      stroke-linejoin: round;
+    }
+
+    .source-text {
+      fill: var(--source);
+    }
+
+    .target-text {
+      fill: var(--target);
+    }
+
+    .flow-text {
+      fill: var(--flow);
+    }
+
+    .muted-text {
+      fill: var(--muted);
+    }
+
+    .ink-text {
+      fill: var(--ink);
+    }
+
+    .label {
+      font-size: var(--body-size);
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: var(--small-size);
+    }
+
+    .formula {
+      font-size: var(--formula-size);
+      font-weight: bold;
+    }
+
+    .cost-panel {
+      fill: var(--cost-fill);
+      stroke: var(--cost-stroke);
+      stroke-width: var(--line);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111520;
+        --panel: #191f2c;
+        --panel-soft: #232b3a;
+        --ink: #f2f5fb;
+        --muted: #b9c3d5;
+        --grid: #68758b;
+        --source: #ffb45e;
+        --source-fill: #59391b;
+        --target: #72d9ef;
+        --target-fill: #164857;
+        --flow: #c5a1ff;
+        --cost-fill: #35294b;
+        --cost-stroke: #9675c7;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Перенос массы между четырьмя ящиками</h1>
+    <p id="status">Строим схему переноса массы…</p>
+    <svg
+      id="diagram"
+      viewBox="0 0 960 430"
+      width="960"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Перенос массы между четырьмя ящиками</title>
+      <desc id="svg-description">
+        Распределение 0.5, 0.5, 0, 0 превращается в 0, 0, 0.5, 0.5:
+        две половины массы проходят по два промежутка, общая стоимость равна 2.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const diagramData = {
+      canvas: { width: 960, height: 430 },
+      zero: 0,
+      distributions: {
+        source: [0.5, 0.5, 0, 0],
+        target: [0, 0, 0.5, 0.5]
+      },
+      legend: [
+        {
+          point: { x: 0.25, y: 0.55 },
+          textPoint: { x: 0.55, y: 0.55 },
+          text: "Было: u = [0.5, 0.5, 0, 0]",
+          className: "source-text label",
+          dotClass: "source-fill",
+          radius: 0.09
+        },
+        {
+          point: { x: 0.25, y: 1.15 },
+          textPoint: { x: 0.55, y: 1.15 },
+          text: "Нужно: v = [0, 0, 0.5, 0.5]",
+          className: "target-text label",
+          dotClass: "target-fill",
+          radius: 0.09
+        }
+      ],
+      boxes: [
+        {
+          left: 0.15,
+          right: 1.65,
+          center: 0.9,
+          namePoint: { x: 0.9, y: 6.55 },
+          name: "первый ящик"
+        },
+        {
+          left: 2.4,
+          right: 3.9,
+          center: 3.15,
+          namePoint: { x: 3.15, y: 6.55 },
+          name: "второй ящик"
+        },
+        {
+          left: 4.65,
+          right: 6.15,
+          center: 5.4,
+          namePoint: { x: 5.4, y: 6.55 },
+          name: "третий ящик"
+        },
+        {
+          left: 6.9,
+          right: 8.4,
+          center: 7.65,
+          namePoint: { x: 7.65, y: 6.55 },
+          name: "четвёртый ящик"
+        }
+      ],
+      box: {
+        top: 3.45,
+        middle: 4.65,
+        bottom: 5.85,
+        radius: 0.1,
+        sourceTextY: 4.2,
+        targetTextY: 5.4
+      },
+      arrows: [
+        {
+          start: { x: 0.9, y: 3.45 },
+          control: { x: 3.15, y: 1.55 },
+          end: { x: 5.4, y: 3.45 },
+          head: [
+            { x: 5.4, y: 3.45 },
+            { x: 5.16, y: 2.98 },
+            { x: 5.64, y: 2.98 }
+          ],
+          labelPoint: { x: 1.45, y: 2.35 },
+          label: "0.5 × 2",
+          notePoint: { x: 1.45, y: 2.75 },
+          note: "масса × два промежутка",
+          anchor: "start"
+        },
+        {
+          start: { x: 3.15, y: 3.45 },
+          control: { x: 5.4, y: 2.15 },
+          end: { x: 7.65, y: 3.45 },
+          head: [
+            { x: 7.65, y: 3.45 },
+            { x: 7.41, y: 2.98 },
+            { x: 7.89, y: 2.98 }
+          ],
+          labelPoint: { x: 3.7, y: 3.0 },
+          label: "0.5 × 2",
+          notePoint: { x: 4.05, y: 3.32 },
+          note: "масса × два промежутка",
+          anchor: "start"
+        }
+      ],
+      cost: {
+        left: 0.15,
+        right: 8.4,
+        top: 7.05,
+        bottom: 8.35,
+        radius: 0.12,
+        titlePoint: { x: 0.45, y: 7.55 },
+        title: "Стоимость переноса",
+        formulaPoint: { x: 4.4, y: 7.95 },
+        formula: "0.5 × 2 + 0.5 × 2 = 2"
+      },
+      footer: {
+        point: { x: 4.28, y: 9.12 },
+        text: "Обе половины массы проходят одинаковый путь: по два промежутка."
+      }
+    };
+
+    const origin = { x: 60, y: 18 };
+    const scale = { x: 100, y: 43 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const status = document.getElementById("status");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function appendElement(name, attributes, content) {
+        const node = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, value);
+        }
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+        svg.appendChild(node);
+        return node;
+      }
+
+      function addText(point, content, className, anchor) {
+        return appendElement(
+          "text",
+          {
+            x: sx(point.x),
+            y: sy(point.y),
+            class: className,
+            "text-anchor": anchor,
+            "dominant-baseline": "middle"
+          },
+          content
+        );
+      }
+
+      function addRect(left, top, right, bottom, radius, className) {
+        return appendElement("rect", {
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top),
+          rx: sx(left + radius) - sx(left),
+          ry: sy(top + radius) - sy(top),
+          class: className
+        });
+      }
+
+      function addLine(start, end, className) {
+        return appendElement("line", {
+          x1: sx(start.x),
+          y1: sy(start.y),
+          x2: sx(end.x),
+          y2: sy(end.y),
+          class: className
+        });
+      }
+
+      for (const item of diagramData.legend) {
+        appendElement("circle", {
+          cx: sx(item.point.x),
+          cy: sy(item.point.y),
+          r: sx(item.point.x + item.radius) - sx(item.point.x),
+          class: item.dotClass
+        });
+        addText(item.textPoint, item.text, item.className, "start");
+      }
+
+      for (const arrow of diagramData.arrows) {
+        const pathData = [
+          "M", sx(arrow.start.x), sy(arrow.start.y),
+          "Q", sx(arrow.control.x), sy(arrow.control.y),
+          sx(arrow.end.x), sy(arrow.end.y)
+        ].join(" ");
+
+        appendElement("path", {
+          d: pathData,
+          class: "flow"
+        });
+
+        appendElement("polygon", {
+          points: arrow.head
+            .map(point => `${sx(point.x)},${sy(point.y)}`)
+            .join(" "),
+          class: "arrowhead"
+        });
+
+        addText(
+          arrow.labelPoint,
+          arrow.label,
+          "flow-text label",
+          arrow.anchor
+        );
+        addText(
+          arrow.notePoint,
+          arrow.note,
+          "muted-text small",
+          arrow.anchor
+        );
+      }
+
+      for (const [box, sourceValue, targetValue] of diagramData.boxes.map(
+        (box, index) => [
+          box,
+          diagramData.distributions.source[index],
+          diagramData.distributions.target[index]
+        ]
+      )) {
+        addRect(
+          box.left,
+          diagramData.box.top,
+          box.right,
+          diagramData.box.bottom,
+          diagramData.box.radius,
+          "box"
+        );
+
+        if (sourceValue !== diagramData.zero) {
+          addRect(
+            box.left,
+            diagramData.box.top,
+            box.right,
+            diagramData.box.middle,
+            diagramData.box.radius,
+            "source-fill"
+          );
+        }
+
+        if (targetValue !== diagramData.zero) {
+          addRect(
+            box.left,
+            diagramData.box.middle,
+            box.right,
+            diagramData.box.bottom,
+            diagramData.box.radius,
+            "target-fill"
+          );
+        }
+
+        addLine(
+          { x: box.left, y: diagramData.box.middle },
+          { x: box.right, y: diagramData.box.middle },
+          "divider"
+        );
+
+        addText(
+          { x: box.center, y: diagramData.box.sourceTextY },
+          `u: ${sourceValue}`,
+          "source-text label",
+          "middle"
+        );
+        addText(
+          { x: box.center, y: diagramData.box.targetTextY },
+          `v: ${targetValue}`,
+          "target-text label",
+          "middle"
+        );
+        addText(
+          box.namePoint,
+          box.name,
+          "muted-text small",
+          "middle"
+        );
+      }
+
+      addRect(
+        diagramData.cost.left,
+        diagramData.cost.top,
+        diagramData.cost.right,
+        diagramData.cost.bottom,
+        diagramData.cost.radius,
+        "cost-panel"
+      );
+
+      addText(
+        diagramData.cost.titlePoint,
+        diagramData.cost.title,
+        "ink-text label",
+        "start"
+      );
+      addText(
+        diagramData.cost.formulaPoint,
+        diagramData.cost.formula,
+        "flow-text formula",
+        "middle"
+      );
+      addText(
+        diagramData.footer.point,
+        diagramData.footer.text,
+        "muted-text small",
+        "middle"
+      );
+
+      status.classList.add("hidden");
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const status = document.getElementById("status");
+      svg.classList.add("failed");
+      status.textContent =
+        "Схема должна показать перенос 0.5 из первого ящика в третий и 0.5 из второго в четвёртый: 0.5 × 2 + 0.5 × 2 = 2.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

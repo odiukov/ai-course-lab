@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Покоординатные ходы по скоррелированному облаку</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --ink: #172033;
+      --muted: #536078;
+      --axis: #8793a8;
+      --cloud-fill: #dbeafe;
+      --cloud-edge: #8bb8ee;
+      --point: #4f83bd;
+      --route: #d34848;
+      --route-halo: #fff5f3;
+      --note-bg: #eef3f9;
+      --note-border: #c3cfdd;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --ink: #edf3fb;
+        --muted: #b7c1d1;
+        --axis: #77849a;
+        --cloud-fill: #183552;
+        --cloud-edge: #4279ad;
+        --point: #70a8da;
+        --route: #ff7770;
+        --route-halo: #402427;
+        --note-bg: #182231;
+        --note-border: #38475c;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      box-sizing: border-box;
+      width: 100%;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--page);
+    }
+
+    .heading {
+      margin: unset;
+      padding: 16px 20px 6px;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .subheading {
+      margin: unset;
+      padding: 0 20px 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    svg {
+      display: none;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--page);
+    }
+
+    .fallback {
+      box-sizing: border-box;
+      margin: 18px 20px 24px;
+      padding: 18px;
+      color: var(--ink);
+      background: var(--note-bg);
+      border: 1px solid var(--note-border);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 1.25;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-arrow {
+      fill: var(--axis);
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 16px;
+      font-style: italic;
+    }
+
+    .cloud-region {
+      fill: var(--cloud-fill);
+      stroke: var(--cloud-edge);
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cloud-point {
+      fill: var(--point);
+      stroke: var(--page);
+      stroke-width: 0.65;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route-halo {
+      fill: none;
+      stroke: var(--route-halo);
+      stroke-width: 8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route {
+      fill: none;
+      stroke: var(--route);
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route-node {
+      fill: var(--page);
+      stroke: var(--route);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route-arrow {
+      fill: var(--route);
+    }
+
+    .leader {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.25;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .small-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram" aria-labelledby="diagram-heading">
+    <h2 class="heading" id="diagram-heading">
+      Покоординатные ходы по скоррелированному облаку
+    </h2>
+    <p class="subheading">
+      Гиббс чередует обновления x и y, поэтому вдоль диагонали возникает лестница.
+    </p>
+
+    <svg
+      id="plot"
+      viewBox="0 0 900 500"
+      width="900"
+      height="500"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description">
+      <title id="svg-title">
+        Узкое диагональное гауссово облако и покоординатная траектория
+      </title>
+      <desc id="svg-description">
+        Вытянутое облако точек пересекает координатную плоскость по диагонали.
+        Красная траектория поднимается через короткие чередующиеся горизонтальные
+        и вертикальные шаги.
+      </desc>
+    </svg>
+
+    <div id="fallback" class="fallback" role="status">
+      Схема должна показать узкое диагональное облако и лестницу из коротких
+      горизонтальных и вертикальных ходов Гиббса.
+    </div>
+  </main>
+
+  <script>
+    const diagramData = [
+      [
+        [-5.25, 0], [5.55, 0], [0, -3.25], [0, 3.55],
+        [[5.55, 0], [5.30, 0.14], [5.30, -0.14]],
+        [[0, 3.55], [-0.14, 3.30], [0.14, 3.30]]
+      ],
+      [
+        [-3.85, -3.30], [-3.45, -3.35], [-3.05, -3.05],
+        [-2.65, -2.80], [-2.20, -2.40], [-1.75, -1.98],
+        [-1.25, -1.48], [-0.75, -1.02], [-0.25, -0.55],
+        [0.25, -0.05], [0.75, 0.42], [1.25, 0.92],
+        [1.75, 1.38], [2.20, 1.82], [2.65, 2.22],
+        [3.05, 2.58], [3.45, 2.90], [3.85, 3.30],
+        [3.45, 3.35], [3.05, 3.05], [2.65, 2.80],
+        [2.20, 2.40], [1.75, 1.98], [1.25, 1.48],
+        [0.75, 1.02], [0.25, 0.55], [-0.25, 0.05],
+        [-0.75, -0.42], [-1.25, -0.92], [-1.75, -1.38],
+        [-2.20, -1.82], [-2.65, -2.22], [-3.05, -2.58],
+        [-3.45, -2.90]
+      ],
+      [
+        [-3.48, -3.05], [-3.20, -3.18], [-3.05, -2.82],
+        [-2.88, -2.72], [-2.72, -2.50], [-2.60, -2.72],
+        [-2.46, -2.25], [-2.28, -2.42], [-2.12, -1.92],
+        [-1.96, -2.12], [-1.82, -1.62], [-1.68, -1.84],
+        [-1.55, -1.32], [-1.38, -1.50], [-1.22, -1.02],
+        [-1.08, -1.22], [-0.92, -0.72], [-0.74, -0.92],
+        [-0.58, -0.42], [-0.42, -0.62], [-0.26, -0.12],
+        [-0.08, -0.32], [0.08, 0.18], [0.24, -0.02],
+        [0.42, 0.48], [0.58, 0.28], [0.74, 0.78],
+        [0.92, 0.58], [1.08, 1.08], [1.26, 0.88],
+        [1.42, 1.38], [1.58, 1.18], [1.76, 1.68],
+        [1.92, 1.48], [2.08, 1.98], [2.26, 1.78],
+        [2.42, 2.28], [2.58, 2.08], [2.76, 2.58],
+        [2.92, 2.38], [3.08, 2.88], [3.25, 2.70]
+      ],
+      [
+        [-3.45, -2.96], [-3.02, -2.96], [-3.02, -2.58],
+        [-2.61, -2.58], [-2.61, -2.18], [-2.20, -2.18],
+        [-2.20, -1.79], [-1.78, -1.79], [-1.78, -1.38],
+        [-1.36, -1.38], [-1.36, -0.98], [-0.94, -0.98],
+        [-0.94, -0.57], [-0.52, -0.57], [-0.52, -0.16],
+        [-0.10, -0.16], [-0.10, 0.25], [0.32, 0.25],
+        [0.32, 0.66], [0.74, 0.66], [0.74, 1.07],
+        [1.16, 1.07], [1.16, 1.48], [1.58, 1.48],
+        [1.58, 1.89], [2.00, 1.89], [2.00, 2.30],
+        [2.42, 2.30], [2.42, 2.71], [2.84, 2.71],
+        [2.84, 3.10]
+      ],
+      [
+        [[2.84, 3.10], [2.68, 2.83], [3.00, 2.83]],
+        [[-2.20, -2.18], [-1.78, -2.18]],
+        [[0.32, 0.25], [0.32, 0.66]]
+      ],
+      [
+        ["start", [-3.45, -2.96], "старт цепи", "start", "below"],
+        ["finish", [2.84, 3.10], "вверх по облаку", "start", "side"],
+        ["horizontal", [-1.99, -2.18], "обновляем x — y фиксирован", "middle", "below"],
+        ["vertical", [0.32, 0.46], "обновляем y — x фиксирован", "start", "side"],
+        ["x-axis", [5.55, 0], "x", "start", "below"],
+        ["y-axis", [0, 3.55], "y", "end", "below"]
+      ],
+      [
+        0, 0.045, 9, 13, 15, 16, 1.25, 1.5, 2, 3.5, 8
+      ]
+    ];
+
+    const origin = Object.freeze({ x: 430, y: 282 });
+    const scale = 61;
+    const labelOffset = 9;
+    const strokeWidths = Object.freeze([1.25, 1.5, 2, 3.5, 8]);
+    const fontSizes = Object.freeze([13, 15, 16]);
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y - y * scale;
+
+    try {
+      const [
+        axes,
+        cloudContour,
+        cloudPoints,
+        routePoints,
+        accents,
+        labels,
+        constants
+      ] = diagramData;
+
+      const [
+        zero,
+        dotRadius,
+        dataLabelOffset,
+        smallFont,
+        labelFont,
+        axisFont,
+        thinStroke,
+        contourStroke,
+        nodeStroke,
+        routeStroke,
+        haloStroke
+      ] = constants;
+
+      const svg = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, content) => {
+        const element = document.createElementNS(namespace, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        if (content !== undefined) {
+          element.textContent = content;
+        }
+        return element;
+      };
+
+      const pointString = points =>
+        points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+
+      const pathString = (points, closePath) =>
+        points.map(([x, y], position) =>
+          `${position ? "L" : "M"} ${sx(x)} ${sy(y)}`
+        ).join(" ") + (closePath ? " Z" : "");
+
+      const [
+        [xAxisStartX, xAxisStartY],
+        [xAxisEndX, xAxisEndY],
+        [yAxisStartX, yAxisStartY],
+        [yAxisEndX, yAxisEndY],
+        xArrow,
+        yArrow
+      ] = axes;
+
+      const axisLayer = make("g", { "aria-hidden": "true" });
+      axisLayer.append(
+        make("line", {
+          class: "axis",
+          x1: sx(xAxisStartX),
+          y1: sy(xAxisStartY),
+          x2: sx(xAxisEndX),
+          y2: sy(xAxisEndY),
+          "stroke-width": thinStroke
+        }),
+        make("line", {
+          class: "axis",
+          x1: sx(yAxisStartX),
+          y1: sy(yAxisStartY),
+          x2: sx(yAxisEndX),
+          y2: sy(yAxisEndY),
+          "stroke-width": thinStroke
+        }),
+        make("polygon", {
+          class: "axis-arrow",
+          points: pointString(xArrow)
+        }),
+        make("polygon", {
+          class: "axis-arrow",
+          points: pointString(yArrow)
+        })
+      );
+
+      const cloudLayer = make("g", { "aria-hidden": "true" });
+      cloudLayer.append(
+        make("path", {
+          class: "cloud-region",
+          d: pathString(cloudContour, true),
+          "stroke-width": contourStroke
+        })
+      );
+
+      const radius = Math.abs(sx(dotRadius) - sx(zero));
+      cloudPoints.forEach(([x, y]) => {
+        cloudLayer.append(
+          make("circle", {
+            class: "cloud-point",
+            cx: sx(x),
+            cy: sy(y),
+            r: radius
+          })
+        );
+      });
+
+      const routeLayer = make("g", { "aria-hidden": "true" });
+      const routePath = pathString(routePoints, false);
+      routeLayer.append(
+        make("path", {
+          class: "route-halo",
+          d: routePath,
+          "stroke-width": haloStroke
+        }),
+        make("path", {
+          class: "route",
+          d: routePath,
+          "stroke-width": routeStroke
+        })
+      );
+
+      routePoints.forEach(([x, y]) => {
+        routeLayer.append(
+          make("circle", {
+            class: "route-node",
+            cx: sx(x),
+            cy: sy(y),
+            r: radius,
+            "stroke-width": nodeStroke
+          })
+        );
+      });
+
+      const [routeArrow, horizontalGuide, verticalGuide] = accents;
+      routeLayer.append(
+        make("polygon", {
+          class: "route-arrow",
+          points: pointString(routeArrow)
+        })
+      );
+
+      const annotationLayer = make("g", { "aria-hidden": "true" });
+      [horizontalGuide, verticalGuide].forEach(guide => {
+        const [[fromX, fromY], [toX, toY]] = guide;
+        annotationLayer.append(
+          make("line", {
+            class: "leader",
+            x1: sx(fromX),
+            y1: sy(fromY),
+            x2: sx(toX),
+            y2: sy(toY),
+            "stroke-width": thinStroke
+          })
+        );
+      });
+
+      labels.forEach(([kind, [x, y], text, anchor, placement]) => {
+        const isAxis = kind.endsWith("axis");
+        const isSmall = kind === "start" || kind === "finish";
+        const className = isAxis
+          ? "axis-label"
+          : isSmall
+            ? "small-label"
+            : "label";
+
+        const dx = placement === "side"
+          ? dataLabelOffset
+          : placement === "left"
+            ? -dataLabelOffset
+            : zero;
+
+        const dy = placement === "below"
+          ? dataLabelOffset + dataLabelOffset
+          : placement === "above"
+            ? -dataLabelOffset
+            : dataLabelOffset;
+
+        annotationLayer.append(
+          make("text", {
+            class: className,
+            x: sx(x),
+            y: sy(y),
+            dx,
+            dy,
+            "text-anchor": anchor,
+            "font-size": isAxis
+              ? axisFont
+              : isSmall
+                ? smallFont
+                : labelFont
+          }, text)
+        );
+      });
+
+      svg.append(axisLayer, cloudLayer, routeLayer, annotationLayer);
+      fallback.style.display = "none";
+      svg.style.display = "block";
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      const svg = document.getElementById("plot");
+      svg.style.display = "none";
+      fallback.style.display = "block";
+      fallback.textContent =
+        "Схема должна была показать узкое диагональное гауссово облако и ломаную траекторию из чередующихся горизонтальных и вертикальных шагов.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

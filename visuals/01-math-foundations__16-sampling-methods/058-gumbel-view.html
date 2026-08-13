@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Мягкий one-hot становится жёстче при снижении tau</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page-bg: ghostwhite;
+      --panel-bg: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --guide: lightslategray;
+      --outline: darkslategray;
+      --first: mediumseagreen;
+      --winner: royalblue;
+      --third: darkorange;
+      --fourth: mediumpurple;
+      --on-color: white;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-bg: midnightblue;
+        --panel-bg: darkslateblue;
+        --ink: whitesmoke;
+        --muted: lightgray;
+        --guide: lightslategray;
+        --outline: lightsteelblue;
+        --first: mediumseagreen;
+        --winner: cornflowerblue;
+        --third: orange;
+        --fourth: violet;
+        --on-color: midnightblue;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: var(--zero);
+      background: var(--page-bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: var(--page-space);
+    }
+
+    h1 {
+      margin: var(--zero) var(--zero) var(--title-gap);
+      font-size: var(--title-size);
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: var(--canvas-max);
+      background: var(--panel-bg);
+      border: var(--stroke) solid var(--outline);
+    }
+
+    .panel {
+      fill: var(--page-bg);
+      stroke: var(--outline);
+      stroke-width: var(--stroke);
+    }
+
+    .vector-outline {
+      fill: none;
+      stroke: var(--outline);
+      stroke-width: var(--stroke);
+    }
+
+    .guide,
+    .arrow-line {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: var(--stroke);
+    }
+
+    .arrow-head {
+      fill: var(--guide);
+    }
+
+    .component-first {
+      fill: var(--first);
+    }
+
+    .component-winner {
+      fill: var(--winner);
+    }
+
+    .component-third {
+      fill: var(--third);
+    }
+
+    .component-fourth {
+      fill: var(--fourth);
+    }
+
+    .ink {
+      fill: var(--ink);
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .inside {
+      fill: var(--on-color);
+      font-weight: bold;
+    }
+
+    .strong {
+      font-weight: bold;
+    }
+
+    .fallback {
+      padding: var(--page-space);
+      min-height: var(--fallback-height);
+      background: var(--panel-bg);
+      border: var(--stroke) solid var(--outline);
+      font-size: var(--body-size);
+    }
+  </style>
+</head>
+<body>
+  <h1>Мягкий one-hot становится жёстче при снижении τ</h1>
+
+  <svg
+    id="diagram"
+    viewBox="0 0 1200 450"
+    width="1200"
+    height="450"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description"
+  >
+    <title id="diagram-title">Снижение температуры в Gumbel-Softmax</title>
+    <desc id="diagram-description">
+      Одни и те же логиты и один набор шума Гумбеля дают всё более острый
+      выходной вектор при снижении температуры от 2.0 до 0.05.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать, как при неизменных логитах и одном наборе
+    шума Гумбеля снижение τ от 2.0 до 0.05 постепенно превращает мягкий
+    выходной вектор в почти жёсткий вектор [0, 1, 0, 0].
+  </div>
+
+  <script>
+    const data = [
+      {
+        canvasMax: 520,
+        pageSpace: 16,
+        titleGap: 10,
+        fallbackHeight: 120,
+        half: 0.5,
+        source: { x: 35, y: 25, w: 440, h: 75 },
+        sourceText: { x: 55, firstY: 55, secondY: 82 },
+        trunk: { x: 560, top: 62.5, bottom: 372 },
+        sourceArrow: { x1: 475, y1: 62.5, x2: 560, y2: 62.5 },
+        temperatureArrow: { x1: 530, y1: 132, x2: 530, y2: 368 },
+        temperatureText: {
+          x: 510,
+          firstY: 222,
+          secondY: 247
+        },
+        bar: { x: 700, w: 445, h: 44 },
+        branchEndX: 680,
+        tauX: 620,
+        tauLift: 10,
+        bracketLeftX: 700,
+        bracketRightX: 1145,
+        bracketDrop: 6,
+        header: { x: 922.5, y: 111 },
+        legend: {
+          y: 35,
+          size: 18,
+          mutedX: 700,
+          mutedTextX: 728,
+          winnerX: 940,
+          winnerTextX: 968,
+          textY: 50
+        },
+        target: { x: 922.5, y: 430 },
+        arrowHead: 12,
+        arrowWing: 7,
+        classes: [
+          "component-first",
+          "component-winner",
+          "component-third",
+          "component-fourth"
+        ]
+      },
+      [
+        { score: -0.7, label: "первая", winner: false },
+        { score: 0, label: "вторая", winner: true },
+        { score: -1.1, label: "третья", winner: false },
+        { score: -1.6, label: "четвёртая", winner: false }
+      ],
+      {
+        tau: 2.0,
+        label: "τ = 2.0",
+        y: 125,
+        status: "",
+        showComponents: true
+      },
+      {
+        tau: 1.0,
+        label: "τ = 1.0",
+        y: 200,
+        status: "жёстче",
+        showComponents: false
+      },
+      {
+        tau: 0.2,
+        label: "τ = 0.2",
+        y: 275,
+        status: "почти one-hot",
+        showComponents: false
+      },
+      {
+        tau: 0.05,
+        label: "τ = 0.05",
+        y: 350,
+        status: "≈ one-hot",
+        showComponents: false
+      }
+    ];
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = 1;
+    const sx = (x) => origin.x + x * scale;
+    const sy = (y) => origin.y + y * scale;
+
+    const labelPadding = 10;
+    const lineThickness = 2;
+    const titleFontSize = 22;
+    const bodyFontSize = 16;
+    const smallFontSize = 14;
+
+    try {
+      const [layout, scoreSet, ...rows] = data;
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      const rootStyle = document.documentElement.style;
+
+      rootStyle.setProperty(
+        "--zero",
+        `${sx(origin.x) - sx(origin.x)}px`
+      );
+      rootStyle.setProperty(
+        "--page-space",
+        `${sx(layout.pageSpace) - sx(origin.x)}px`
+      );
+      rootStyle.setProperty(
+        "--title-gap",
+        `${sy(layout.titleGap) - sy(origin.y)}px`
+      );
+      rootStyle.setProperty(
+        "--fallback-height",
+        `${sy(layout.fallbackHeight) - sy(origin.y)}px`
+      );
+      rootStyle.setProperty(
+        "--canvas-max",
+        `${sy(layout.canvasMax) - sy(origin.y)}px`
+      );
+      rootStyle.setProperty("--stroke", `${lineThickness}px`);
+      rootStyle.setProperty("--title-size", `${titleFontSize}px`);
+      rootStyle.setProperty("--body-size", `${bodyFontSize}px`);
+      rootStyle.setProperty("--small-size", `${smallFontSize}px`);
+
+      const make = (name, attributes, className) => {
+        const element = document.createElementNS(svg.namespaceURI, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        if (className) {
+          element.setAttribute("class", className);
+        }
+        drawing.appendChild(element);
+        return element;
+      };
+
+      const rect = (x, y, w, h, className) =>
+        make(
+          "rect",
+          {
+            x: sx(x),
+            y: sy(y),
+            width: sx(w) - sx(origin.x),
+            height: sy(h) - sy(origin.y)
+          },
+          className
+        );
+
+      const line = (x1, y1, x2, y2, className) =>
+        make(
+          "line",
+          {
+            x1: sx(x1),
+            y1: sy(y1),
+            x2: sx(x2),
+            y2: sy(y2)
+          },
+          className
+        );
+
+      const text = (
+        x,
+        y,
+        value,
+        className,
+        anchor,
+        size,
+        dx,
+        dy
+      ) => {
+        const attributes = {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor,
+          "font-size": `${size}px`
+        };
+
+        if (dx) {
+          attributes.dx = `${dx}px`;
+        }
+        if (dy) {
+          attributes.dy = `${dy}px`;
+        }
+
+        const element = make("text", attributes, className);
+        element.textContent = value;
+        return element;
+      };
+
+      const arrow = (x1, y1, x2, y2) => {
+        line(x1, y1, x2, y2, "arrow-line");
+
+        const length = Math.hypot(x2 - x1, y2 - y1);
+        const ux = (x2 - x1) / length;
+        const uy = (y2 - y1) / length;
+        const baseX = x2 - ux * layout.arrowHead;
+        const baseY = y2 - uy * layout.arrowHead;
+        const leftX = baseX - uy * layout.arrowWing;
+        const leftY = baseY + ux * layout.arrowWing;
+        const rightX = baseX + uy * layout.arrowWing;
+        const rightY = baseY - ux * layout.arrowWing;
+
+        make(
+          "polygon",
+          {
+            points: [
+              `${sx(x2)},${sy(y2)}`,
+              `${sx(leftX)},${sy(leftY)}`,
+              `${sx(rightX)},${sy(rightY)}`
+            ].join(" ")
+          },
+          "arrow-head"
+        );
+      };
+
+      const softmax = (items, tau) => {
+        const maximum = Math.max(...items.map((item) => item.score));
+        const weighted = items.map((item) => ({
+          item,
+          weight: Math.exp((item.score - maximum) / tau)
+        }));
+        const total = weighted
+          .map((entry) => entry.weight)
+          .reduce((left, right) => left + right);
+
+        return weighted.map((entry) => ({
+          item: entry.item,
+          probability: entry.weight / total
+        }));
+      };
+
+      rect(
+        layout.source.x,
+        layout.source.y,
+        layout.source.w,
+        layout.source.h,
+        "panel"
+      );
+
+      text(
+        layout.sourceText.x,
+        layout.sourceText.firstY,
+        "s = логиты + один и тот же шум Гумбеля",
+        "ink strong",
+        "start",
+        bodyFontSize
+      );
+
+      text(
+        layout.sourceText.x,
+        layout.sourceText.secondY,
+        "s не меняется во всех четырёх строках",
+        "muted",
+        "start",
+        smallFontSize
+      );
+
+      arrow(
+        layout.sourceArrow.x1,
+        layout.sourceArrow.y1,
+        layout.sourceArrow.x2,
+        layout.sourceArrow.y2
+      );
+
+      line(
+        layout.trunk.x,
+        layout.trunk.top,
+        layout.trunk.x,
+        layout.trunk.bottom,
+        "guide"
+      );
+
+      arrow(
+        layout.temperatureArrow.x1,
+        layout.temperatureArrow.y1,
+        layout.temperatureArrow.x2,
+        layout.temperatureArrow.y2
+      );
+
+      text(
+        layout.temperatureText.x,
+        layout.temperatureText.firstY,
+        "τ ниже",
+        "ink strong",
+        "end",
+        bodyFontSize,
+        -labelPadding
+      );
+
+      text(
+        layout.temperatureText.x,
+        layout.temperatureText.secondY,
+        "контраст выше",
+        "muted",
+        "end",
+        smallFontSize,
+        -labelPadding
+      );
+
+      rect(
+        layout.legend.mutedX,
+        layout.legend.y,
+        layout.legend.size,
+        layout.legend.size,
+        "component-first"
+      );
+
+      text(
+        layout.legend.mutedTextX,
+        layout.legend.textY,
+        "остальные компоненты",
+        "muted",
+        "start",
+        smallFontSize
+      );
+
+      rect(
+        layout.legend.winnerX,
+        layout.legend.y,
+        layout.legend.size,
+        layout.legend.size,
+        "component-winner"
+      );
+
+      text(
+        layout.legend.winnerTextX,
+        layout.legend.textY,
+        "вторая — победитель",
+        "ink strong",
+        "start",
+        smallFontSize
+      );
+
+      text(
+        layout.header.x,
+        layout.header.y,
+        "выходной вектор",
+        "ink strong",
+        "middle",
+        bodyFontSize
+      );
+
+      for (const row of rows) {
+        const centerY =
+          row.y + layout.bar.h * layout.half;
+
+        arrow(
+          layout.trunk.x,
+          centerY,
+          layout.branchEndX,
+          centerY
+        );
+
+        text(
+          layout.tauX,
+          centerY - layout.tauLift,
+          row.label,
+          "ink strong",
+          "middle",
+          bodyFontSize
+        );
+
+        const probabilities = softmax(scoreSet, row.tau);
+        const classIterator = layout.classes.values();
+        let cursor = layout.bar.x;
+        let winnerCenter = layout.bar.x;
+
+        for (const entry of probabilities) {
+          const width = layout.bar.w * entry.probability;
+          const className = classIterator.next().value;
+
+          rect(cursor, row.y, width, layout.bar.h, className);
+
+          if (entry.item.winner) {
+            winnerCenter = cursor + width * layout.half;
+          }
+
+          if (row.showComponents) {
+            text(
+              cursor + width * layout.half,
+              centerY,
+              entry.item.label,
+              "inside",
+              "middle",
+              smallFontSize,
+              undefined,
+              labelPadding * layout.half
+            );
+          }
+
+          cursor += width;
+        }
+
+        rect(
+          layout.bar.x,
+          row.y,
+          layout.bar.w,
+          layout.bar.h,
+          "vector-outline"
+        );
+
+        text(
+          layout.bracketLeftX,
+          centerY + layout.bracketDrop,
+          "[",
+          "ink strong",
+          "end",
+          bodyFontSize,
+          -labelPadding
+        );
+
+        text(
+          layout.bracketRightX,
+          centerY + layout.bracketDrop,
+          "]",
+          "ink strong",
+          "start",
+          bodyFontSize,
+          labelPadding
+        );
+
+        if (row.status) {
+          text(
+            winnerCenter,
+            centerY,
+            row.status,
+            "inside",
+            "middle",
+            smallFontSize,
+            undefined,
+            labelPadding * layout.half
+          );
+        }
+      }
+
+      text(
+        layout.target.x,
+        layout.target.y,
+        "предел: [0, 1, 0, 0]",
+        "ink strong",
+        "middle",
+        bodyFontSize
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Шар превращается в эллипсоид</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5c6773;
+    --circle:#3b7dd8; --ell:#d2691e; --ax:#8a94a0; --arrow:#4a5560;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e6e9ee; --muted:#9aa5b1;
+      --circle:#6aa8ff; --ell:#ffa657; --ax:#5a636e; --arrow:#9aa5b1;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 4px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 4px 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{padding:10px;color:var(--muted);font-size:13px;line-height:1.45;}
+  text{fill:var(--fg);font-family:inherit;}
+  .lbl{font-size:11px;}
+  .mut{fill:var(--muted);font-size:10px;}
+  .ttl{font-size:12px;font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Шар превращается в эллипсоид</h2>
+  <div id="host">
+    <svg id="svg" viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Единичный круг, поворот V^T, растяжение Sigma, поворот U"></svg>
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var svg = document.getElementById('svg');
+    var NS = 'http://www.w3.org/2000/svg';
+
+    /* ---- данные схемы ---- */
+    var S1 = 2.0, S2 = 0.8;          /* sigma_1, sigma_2 */
+    var ANG_V = -30, ANG_U = 25;     /* повороты, градусы */
+    var R = 1;                       /* радиус единичного круга */
+    var PANELS = [
+      {cx:-8.2, title:'вход: шар', sub:'все векторы длины 1', rot:0,     sx:1,  sy:1,  kind:'circle'},
+      {cx:-2.7, title:'после Vᵀ',  sub:'повёрнут по осям',   rot:ANG_V, sx:1,  sy:1,  kind:'circle'},
+      {cx: 2.8, title:'после Σ',   sub:'растянут в эллипс',  rot:0,     sx:S1, sy:S2, kind:'ell'},
+      {cx: 8.3, title:'после U',   sub:'выходное пространство', rot:ANG_U, sx:S1, sy:S2, kind:'ell'}
+    ];
+    var ARROWS = [
+      {from:-6.0, to:-4.6, lab:'Vᵀ'},
+      {from:-0.5, to: 0.9, lab:'Σ'},
+      {from: 5.0, to: 6.4, lab:'U'}
+    ];
+
+    /* ---- единственный перевод координат ---- */
+    var origin = {x:380, y:132};
+    var scale  = 32;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y - y*scale; }
+
+    /* ---- литералы только пиксельные ---- */
+    var LW = 1.6, LW_THIN = 1, PAD = 6;
+
+    function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function add(e){ svg.appendChild(e); return e; }
+    function line(x1,y1,x2,y2,cls,w){
+      return add(el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:cls,'stroke-width':(w||LW_THIN),'stroke-linecap':'round'}));
+    }
+    function txt(x,y,dx,dy,anchor,cls,s){
+      var t=add(el('text',{x:sx(x)+dx,y:sy(y)+dy,'text-anchor':anchor,class:cls}));
+      t.textContent=s; return t;
+    }
+    /* точка на контуре панели: поворот + масштаб, всё в данных, вывод через sx/sy */
+    function pt(p,t){
+      var a = p.rot*Math.PI/180;
+      var u = p.sx*R*Math.cos(t), v = p.sy*R*Math.sin(t);
+      return {x: p.cx + u*Math.cos(a) - v*Math.sin(a),
+              y: 0    + u*Math.sin(a) + v*Math.cos(a)};
+    }
+    function outline(p,color,w){
+      var d='', N=96;
+      for(var i=0;i<=N;i++){
+        var q=pt(p, i/N*2*Math.PI);
+        d += (i?'L':'M') + sx(q.x) + ' ' + sy(q.y) + ' ';
+      }
+      add(el('path',{d:d+'Z',fill:'none',stroke:color,'stroke-width':w}));
+    }
+    /* стрелка: хвост, наконечник — все вершины через sx/sy */
+    function arrow(x1,x2,y){
+      line(x1,y,x2,y,'var(--arrow)',LW);
+      var h=0.30, wgt=0.16;
+      add(el('polygon',{points:[
+        sx(x2)+','+sy(y),
+        sx(x2-h)+','+sy(y+wgt),
+        sx(x2-h)+','+sy(y-wgt)].join(' '),fill:'var(--arrow)'}));
+    }
+
+    /* ---- панели ---- */
+    PANELS.forEach(function(p){
+      /* локальные оси панели */
+      line(p.cx-2.5, 0, p.cx+2.5, 0, 'var(--ax)', LW_THIN);
+      line(p.cx, -1.6, p.cx, 1.6, 'var(--ax)', LW_THIN);
+
+      /* эталонный единичный круг под эллипсом — видно растяжение */
+      if(p.kind==='ell'){
+        outline({cx:p.cx,rot:0,sx:R,sy:R}, 'var(--ax)', LW_THIN);
+      }
+      outline(p, p.kind==='circle' ? 'var(--circle)' : 'var(--ell)', LW);
+
+      txt(p.cx, 2.05, 0, -PAD, 'middle', 'ttl', p.title);
+      txt(p.cx, -1.95, 0, PAD+4, 'middle', 'mut', p.sub);
+    });
+
+    /* полуоси эллипса на 3-й панели */
+    (function(){
+      var p = PANELS[2];
+      var a = pt(p, 0), b = pt(p, Math.PI/2);
+      line(p.cx, 0, a.x, a.y, 'var(--ell)', LW);
+      line(p.cx, 0, b.x, b.y, 'var(--ell)', LW);
+      txt((p.cx+a.x)/2, 0, 0, PAD+10, 'middle', 'lbl', 'σ₁');
+      txt(p.cx, (0+b.y)/2, -PAD, 3, 'end', 'lbl', 'σ₂');
+    })();
+
+    /* полуоси после поворота U */
+    (function(){
+      var p = PANELS[3];
+      var a = pt(p, 0), b = pt(p, Math.PI/2);
+      line(p.cx, 0, a.x, a.y, 'var(--ell)', LW);
+      line(p.cx, 0, b.x, b.y, 'var(--ell)', LW);
+      txt(a.x, a.y, PAD, -PAD, 'start', 'lbl', 'σ₁');
+      txt(b.x, b.y, -PAD, -PAD, 'end', 'lbl', 'σ₂');
+    })();
+
+    /* ---- стрелки между панелями ---- */
+    ARROWS.forEach(function(a){
+      arrow(a.from, a.to, 0);
+      txt(a.from, 0, 0, -PAD-8, 'start', 'ttl', a.lab);
+    });
+
+    /* ---- легенда строкой под схемой ---- */
+    (function(){
+      var y = -2.9, x0 = -9.6;
+      line(x0, y, x0+0.8, y, 'var(--circle)', LW);
+      txt(x0+0.9, y, PAD, 4, 'start', 'mut', 'единичный круг (все векторы длины 1)');
+      var x1 = -1.4;
+      line(x1, y, x1+0.8, y, 'var(--ell)', LW);
+      txt(x1+0.9, y, PAD, 4, 'start', 'mut', 'эллипс; σ₁, σ₂ — длины полуосей, σ₁ ≥ σ₂');
+      var x2 = 6.6;
+      line(x2, y, x2+0.8, y, 'var(--ax)', LW_THIN);
+      txt(x2+0.9, y, PAD, 4, 'start', 'mut', 'исходный круг');
+    })();
+
+    /* поворот шар не меняет — заметка */
+    txt(-4.35, -2.1, 0, 0, 'middle', 'mut', 'поворот форму не меняет');
+
+  }catch(e){
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она должна показывать четыре ' +
+      'состояния подряд: единичный круг на входе; тот же круг после Vᵀ — повёрнутый, но той же формы; ' +
+      'после Σ — растянутый в эллипс с полуосями σ₁ и σ₂ (σ₁ ≥ σ₂); после U — тот же эллипс, ' +
+      'повёрнутый в выходное пространство. Форму меняет только Σ.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

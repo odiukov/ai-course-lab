@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Разложение продаж мороженого</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #647089;
+      --frame: #cbd3e1;
+      --grid: #e6eaf1;
+      --summer: #fff3cf;
+      --observed: #2563a9;
+      --expected: #92a1b7;
+      --trend: #16805d;
+      --season: #c86818;
+      --residual: #7b4bb7;
+      --zero: #8490a4;
+      --positive: #24734f;
+      --negative: #b74747;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2d;
+        --ink: #edf2fa;
+        --muted: #aeb8ca;
+        --frame: #3b475a;
+        --grid: #2a3444;
+        --summer: #392f1d;
+        --observed: #6eb3ff;
+        --expected: #6f7d92;
+        --trend: #54d3a5;
+        --season: #ffad62;
+        --residual: #c499ff;
+        --zero: #8794a8;
+        --positive: #73d8ad;
+        --negative: #ff9292;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1200px;
+      margin: auto;
+      background: var(--panel);
+    }
+
+    h1 {
+      font-size: 20px;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+    }
+
+    .panel-frame {
+      fill: var(--panel);
+      stroke: var(--frame);
+      stroke-width: 1.5;
+    }
+
+    .summer-band {
+      fill: var(--summer);
+      stroke: none;
+    }
+
+    .guide,
+    .axis {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .axis {
+      stroke: var(--zero);
+      stroke-width: 1.25;
+    }
+
+    .observed,
+    .expected,
+    .trend,
+    .season,
+    .residual {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .observed {
+      stroke: var(--observed);
+      stroke-width: 3;
+    }
+
+    .expected {
+      stroke: var(--expected);
+      stroke-width: 1.5;
+    }
+
+    .trend {
+      stroke: var(--trend);
+      stroke-width: 3;
+    }
+
+    .season {
+      stroke: var(--season);
+      stroke-width: 3;
+    }
+
+    .residual {
+      stroke: var(--residual);
+      stroke-width: 2.5;
+    }
+
+    .point-observed {
+      fill: var(--panel);
+      stroke: var(--observed);
+      stroke-width: 2;
+    }
+
+    .point-residual {
+      fill: var(--panel);
+      stroke: var(--residual);
+      stroke-width: 2;
+    }
+
+    .residual-stem {
+      stroke: var(--residual);
+      stroke-width: 1.5;
+    }
+
+    .panel-title {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .panel-note,
+    .axis-label,
+    .legend-label {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .callout {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .positive {
+      fill: var(--positive);
+    }
+
+    .negative {
+      fill: var(--negative);
+    }
+
+    .formula {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Продажи мороженого: разложение на три компонента</h1>
+    <svg id="chart"
+         viewBox="0 0 1200 440"
+         width="1200"
+         height="440"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Четыре согласованных графика продаж мороженого</title>
+      <desc id="svg-desc">Исходные продажи разложены на растущий тренд, повторяющийся летний цикл и случайный остаток.</desc>
+    </svg>
+    <p id="fallback" class="fallback" hidden></p>
+  </main>
+
+  <script>
+    const data = {
+      origin: { x: 72, y: 28 },
+      scale: { x: 23.6, y: 1 },
+      one: 1,
+      pad: 8,
+      pointRadius: 3.2,
+      plot: { left: 8, right: 45 },
+      panels: [
+        { key: "observed", top: 18, bottom: 102, middle: 60, title: "Исходные продажи", note: "тренд, сезонность и остаток вместе", base: 95, factor: 0.75 },
+        { key: "trend", top: 110, bottom: 194, middle: 152, title: "Тренд", note: "медленно поднимается", base: 190, factor: 0.9 },
+        { key: "season", top: 202, bottom: 286, middle: 244, title: "Сезонность", note: "летний цикл повторяется", base: 244, factor: 1.9 },
+        { key: "residual", top: 294, bottom: 378, middle: 336, title: "Остаток", note: "случайная поправка", base: 336, factor: 4 }
+      ],
+      x: [9, 10.5, 12, 13.5, 15, 16.5, 18, 19.5, 21, 22.5, 24, 25.5, 27, 28.5, 30, 31.5, 33, 34.5, 36, 37.5, 39, 40.5, 42, 43.5],
+      signal: {
+        start: 52,
+        rise: 1.1,
+        season: [-9, -8, -5, 0, 6, 10, 12, 10, 5, 0, -5, -8],
+        residual: [1, -2, 2, -1, 0, 3, -2, 4, -1, 1, -3, 0, -1, 2, -2, 1, 0, -4, 5, -1, 2, -3, 1, -2]
+      },
+      summers: [
+        { left: 15, right: 21 },
+        { left: 33, right: 39 }
+      ],
+      legend: {
+        y: 27,
+        factLine: [9, 10.3],
+        factText: 10.7,
+        expectedLine: [16.2, 17.5],
+        expectedText: 17.9
+      },
+      callouts: {
+        observedPeak: 18,
+        trendEnd: 23,
+        summerPeak: 6,
+        winterLow: 12,
+        residualPositive: 18,
+        residualNegative: 10
+      },
+      footer: { x: 26.5, y: 400 },
+      time: { leftY: 369, rightY: 369 }
+    };
+
+    const origin = { x: data.origin.x, y: data.origin.y };
+    const scale = { x: data.scale.x, y: data.scale.y };
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale.y;
+    }
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function node(name, attributes, content) {
+        const element = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        if (content !== undefined) element.textContent = content;
+        return element;
+      }
+
+      function line(x1, y1, x2, y2, className) {
+        return node("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+      }
+
+      function rectangle(left, top, right, bottom, className) {
+        return node("rect", {
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top),
+          class: className
+        });
+      }
+
+      function text(x, y, content, className, anchor, dx, dy) {
+        return node("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          dx: dx,
+          dy: dy
+        }, content);
+      }
+
+      function polyline(points, className) {
+        return node("polyline", {
+          points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          class: className
+        });
+      }
+
+      function circle(x, y, className) {
+        return node("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: data.pointRadius,
+          class: className
+        });
+      }
+
+      const trendValues = data.x.map((x, index) =>
+        data.signal.start + index * data.signal.rise
+      );
+
+      const seasonValues = data.x.map((x, index) =>
+        data.signal.season[index % data.signal.season.length]
+      );
+
+      const residualValues = data.signal.residual;
+      const expectedValues = trendValues.map((value, index) =>
+        value + seasonValues[index]
+      );
+
+      const observedValues = expectedValues.map((value, index) =>
+        value + residualValues[index]
+      );
+
+      const values = {
+        observed: observedValues,
+        trend: trendValues,
+        season: seasonValues,
+        residual: residualValues
+      };
+
+      function chartY(panel, value) {
+        return panel.base - value * panel.factor;
+      }
+
+      data.panels.forEach(panel => {
+        svg.appendChild(rectangle(
+          data.plot.left,
+          panel.top,
+          data.plot.right,
+          panel.bottom,
+          "panel-frame"
+        ));
+
+        data.summers.forEach(summer => {
+          svg.appendChild(rectangle(
+            summer.left,
+            panel.top,
+            summer.right,
+            panel.bottom,
+            "summer-band"
+          ));
+        });
+
+        svg.appendChild(line(
+          data.plot.left,
+          panel.middle,
+          data.plot.right,
+          panel.middle,
+          panel.key === "season" || panel.key === "residual" ? "axis" : "guide"
+        ));
+
+        svg.appendChild(text(
+          0,
+          panel.middle,
+          panel.title,
+          "panel-title",
+          "start",
+          0,
+          -data.pad
+        ));
+
+        svg.appendChild(text(
+          0,
+          panel.middle,
+          panel.note,
+          "panel-note",
+          "start",
+          0,
+          data.pad
+        ));
+      });
+
+      const observedPanel = data.panels.find(panel => panel.key === "observed");
+      const trendPanel = data.panels.find(panel => panel.key === "trend");
+      const seasonPanel = data.panels.find(panel => panel.key === "season");
+      const residualPanel = data.panels.find(panel => panel.key === "residual");
+
+      const expectedPoints = data.x.map((x, index) => ({
+        x,
+        y: chartY(observedPanel, expectedValues[index])
+      }));
+
+      const observedPoints = data.x.map((x, index) => ({
+        x,
+        y: chartY(observedPanel, observedValues[index])
+      }));
+
+      const trendPoints = data.x.map((x, index) => ({
+        x,
+        y: chartY(trendPanel, trendValues[index])
+      }));
+
+      const seasonPoints = data.x.map((x, index) => ({
+        x,
+        y: chartY(seasonPanel, seasonValues[index])
+      }));
+
+      const residualPoints = data.x.map((x, index) => ({
+        x,
+        y: chartY(residualPanel, residualValues[index])
+      }));
+
+      svg.appendChild(polyline(expectedPoints, "expected"));
+      svg.appendChild(polyline(observedPoints, "observed"));
+      observedPoints.forEach(point => {
+        svg.appendChild(circle(point.x, point.y, "point-observed"));
+      });
+
+      svg.appendChild(polyline(trendPoints, "trend"));
+      svg.appendChild(polyline(seasonPoints, "season"));
+
+      residualPoints.forEach(point => {
+        svg.appendChild(line(
+          point.x,
+          residualPanel.middle,
+          point.x,
+          point.y,
+          "residual-stem"
+        ));
+      });
+      svg.appendChild(polyline(residualPoints, "residual"));
+      residualPoints.forEach(point => {
+        svg.appendChild(circle(point.x, point.y, "point-residual"));
+      });
+
+      svg.appendChild(line(
+        data.legend.factLine[0],
+        data.legend.y,
+        data.legend.factLine[1],
+        data.legend.y,
+        "observed"
+      ));
+      svg.appendChild(text(
+        data.legend.factText,
+        data.legend.y,
+        "фактические продажи",
+        "legend-label",
+        "start",
+        data.pad,
+        0
+      ));
+
+      svg.appendChild(line(
+        data.legend.expectedLine[0],
+        data.legend.y,
+        data.legend.expectedLine[1],
+        data.legend.y,
+        "expected"
+      ));
+      svg.appendChild(text(
+        data.legend.expectedText,
+        data.legend.y,
+        "ожидаемый уровень",
+        "legend-label",
+        "start",
+        data.pad,
+        0
+      ));
+
+      const observedPeak = observedPoints[data.callouts.observedPeak];
+      svg.appendChild(text(
+        observedPeak.x,
+        observedPeak.y,
+        "летний пик стал выше",
+        "callout",
+        "end",
+        -data.pad,
+        -data.pad
+      ));
+
+      const trendEnd = trendPoints[data.callouts.trendEnd];
+      svg.appendChild(text(
+        trendEnd.x,
+        trendEnd.y,
+        "рост города",
+        "callout",
+        "end",
+        -data.pad,
+        -data.pad
+      ));
+
+      const summerPeak = seasonPoints[data.callouts.summerPeak];
+      svg.appendChild(text(
+        summerPeak.x,
+        summerPeak.y,
+        "летом добавляет",
+        "callout",
+        "middle",
+        0,
+        -data.pad
+      ));
+
+      const winterLow = seasonPoints[data.callouts.winterLow];
+      svg.appendChild(text(
+        winterLow.x,
+        winterLow.y,
+        "зимой убавляет",
+        "callout",
+        "middle",
+        0,
+        data.pad
+      ));
+
+      const positivePoint = residualPoints[data.callouts.residualPositive];
+      svg.appendChild(text(
+        positivePoint.x,
+        positivePoint.y,
+        "выше ожидания — положительный",
+        "callout positive",
+        "end",
+        -data.pad,
+        -data.pad
+      ));
+
+      const negativePoint = residualPoints[data.callouts.residualNegative];
+      svg.appendChild(text(
+        negativePoint.x,
+        negativePoint.y,
+        "ниже ожидания — отрицательный",
+        "callout negative",
+        "start",
+        data.pad,
+        data.pad
+      ));
+
+      svg.appendChild(text(
+        data.plot.left,
+        data.time.leftY,
+        "раньше",
+        "axis-label",
+        "start",
+        data.pad,
+        0
+      ));
+
+      svg.appendChild(text(
+        data.plot.right,
+        data.time.rightY,
+        "позже  →",
+        "axis-label",
+        "end",
+        -data.pad,
+        0
+      ));
+
+      svg.appendChild(text(
+        data.footer.x,
+        data.footer.y,
+        "Исходные продажи = тренд + сезонность + остаток",
+        "formula",
+        "middle",
+        0,
+        0
+      ));
+
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      svg.replaceChildren();
+      fallback.hidden = false;
+      fallback.textContent = "Схема должна показать исходные продажи мороженого, растущий тренд, повторяющийся летний сезонный цикл и случайный остаток.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

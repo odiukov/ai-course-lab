@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ошибка вокруг порога интерполяции</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fffdf8;
+      --ink: #25272b;
+      --muted: #666a73;
+      --axis: #474b54;
+      --grid: #d8d4ca;
+      --test: #c83f58;
+      --train: #2878b8;
+      --threshold: #f6dfb2;
+      --threshold-edge: #d09a35;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    body {
+      width: 100%;
+      padding: 12px 16px 10px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      text-align: center;
+      font-size: 22px;
+      line-height: 28px;
+      font-weight: 720;
+      letter-spacing: -0.01em;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      overflow: visible;
+      background: var(--bg);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .axis-head {
+      fill: var(--axis);
+      stroke: none;
+    }
+
+    .guide {
+      stroke: var(--grid);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .threshold-band {
+      fill: var(--threshold);
+      stroke: none;
+    }
+
+    .threshold-line {
+      stroke: var(--threshold-edge);
+      fill: none;
+    }
+
+    .test-curve {
+      stroke: var(--test);
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .train-curve {
+      stroke: var(--train);
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .test-point {
+      fill: var(--bg);
+      stroke: var(--test);
+    }
+
+    .leader {
+      stroke: var(--muted);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .test-text {
+      fill: var(--test);
+      font-weight: 700;
+    }
+
+    .train-text {
+      fill: var(--train);
+      font-weight: 700;
+    }
+
+    .threshold-text {
+      fill: #8c5d08;
+      font-weight: 720;
+    }
+
+    .halo {
+      paint-order: stroke;
+      stroke: var(--bg);
+      stroke-linejoin: round;
+    }
+
+    #fallback {
+      margin: 20px auto;
+      max-width: 760px;
+      color: var(--ink);
+      font-size: 17px;
+      line-height: 25px;
+      text-align: center;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #17191d;
+        --ink: #f2efe8;
+        --muted: #b6b2aa;
+        --axis: #d2cec5;
+        --grid: #3d4149;
+        --test: #ff7188;
+        --train: #69b9ef;
+        --threshold: #49391f;
+        --threshold-edge: #e3ab45;
+      }
+
+      .threshold-text {
+        fill: #f2bf62;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Ошибка вокруг порога интерполяции</h1>
+    <svg id="chart"
+         viewBox="0 0 1000 460"
+         width="1000"
+         height="460"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-desc">
+      <title id="diagram-title">Двойной спуск тестовой ошибки</title>
+      <desc id="diagram-desc">
+        Тестовая ошибка сначала падает до классического минимума, затем резко
+        растёт около порога p примерно равно n и снова падает в области p
+        значительно больше n. Обучающая ошибка к порогу становится нулевой.
+      </desc>
+    </svg>
+    <p id="fallback" hidden>
+      Схема должна была показать первое падение тестовой ошибки, классический
+      минимум, резкий пик около p ≈ n и второе падение при p ≫ n.
+    </p>
+  </main>
+
+  <script>
+    const data = {
+      canvas: { width: 1000, height: 460 },
+      zero: 0,
+      axes: {
+        x: { from: { x: 0, y: 0 }, to: { x: 10.65, y: 0 } },
+        y: { from: { x: 0, y: 0 }, to: { x: 0, y: 5.62 } }
+      },
+      arrowheads: {
+        x: [
+          { x: 10.65, y: 0 },
+          { x: 10.42, y: 0.13 },
+          { x: 10.42, y: -0.13 }
+        ],
+        y: [
+          { x: 0, y: 5.62 },
+          { x: -0.13, y: 5.39 },
+          { x: 0.13, y: 5.39 }
+        ]
+      },
+      threshold: {
+        left: 5.68,
+        right: 6.32,
+        bottom: 0,
+        top: 5.48,
+        center: 6
+      },
+      guides: [
+        { from: { x: 6, y: 0 }, to: { x: 6, y: 5.48 } }
+      ],
+      ticks: [
+        {
+          from: { x: 6, y: 0.12 },
+          to: { x: 6, y: -0.12 },
+          label: "p ≈ n",
+          at: { x: 6, y: -0.43 },
+          anchor: "middle",
+          dx: 0,
+          dy: 0,
+          className: "threshold-text halo"
+        },
+        {
+          from: { x: 9, y: 0.12 },
+          to: { x: 9, y: -0.12 },
+          label: "p ≫ n",
+          at: { x: 9, y: -0.43 },
+          anchor: "middle",
+          dx: 0,
+          dy: 0,
+          className: "muted halo"
+        }
+      ],
+      testPath: {
+        start: { x: 0.35, y: 4.35 },
+        curves: [
+          {
+            c1: { x: 0.85, y: 3.35 },
+            c2: { x: 1.75, y: 1.74 },
+            end: { x: 2.72, y: 1.58 }
+          },
+          {
+            c1: { x: 3.55, y: 1.45 },
+            c2: { x: 4.72, y: 2.34 },
+            end: { x: 5.32, y: 3.08 }
+          },
+          {
+            c1: { x: 5.62, y: 3.65 },
+            c2: { x: 5.82, y: 5.08 },
+            end: { x: 6, y: 5.18 }
+          },
+          {
+            c1: { x: 6.18, y: 5.08 },
+            c2: { x: 6.36, y: 3.62 },
+            end: { x: 6.78, y: 2.82 }
+          },
+          {
+            c1: { x: 7.42, y: 1.86 },
+            c2: { x: 8.42, y: 1.38 },
+            end: { x: 9.18, y: 1.28 }
+          },
+          {
+            c1: { x: 9.62, y: 1.23 },
+            c2: { x: 9.98, y: 1.2 },
+            end: { x: 10.28, y: 1.18 }
+          }
+        ]
+      },
+      trainPath: {
+        start: { x: 0.35, y: 3.55 },
+        curves: [
+          {
+            c1: { x: 1.18, y: 2.79 },
+            c2: { x: 2.15, y: 1.79 },
+            end: { x: 3.12, y: 1.04 }
+          },
+          {
+            c1: { x: 4.16, y: 0.42 },
+            c2: { x: 5.18, y: 0.08 },
+            end: { x: 6, y: 0.08 }
+          },
+          {
+            c1: { x: 7.12, y: 0.08 },
+            c2: { x: 8.72, y: 0.08 },
+            end: { x: 10.28, y: 0.08 }
+          }
+        ]
+      },
+      markedPoints: [
+        { x: 2.72, y: 1.58 },
+        { x: 6, y: 5.18 }
+      ],
+      leaders: [
+        {
+          from: { x: 2.72, y: 1.72 },
+          to: { x: 2.72, y: 2.2 }
+        },
+        {
+          from: { x: 6, y: 5.29 },
+          to: { x: 6, y: 5.49 }
+        },
+        {
+          from: { x: 7.72, y: 2.62 },
+          to: { x: 8.12, y: 2.05 }
+        }
+      ],
+      labels: [
+        {
+          text: "тестовая ошибка",
+          at: { x: 0.48, y: 4.42 },
+          anchor: "start",
+          dx: 10,
+          dy: -10,
+          className: "test-text halo",
+          fontSize: 18
+        },
+        {
+          text: "обучающая ошибка → 0",
+          at: { x: 4.55, y: 0.42 },
+          anchor: "end",
+          dx: -10,
+          dy: -10,
+          className: "train-text halo",
+          fontSize: 17
+        },
+        {
+          text: "классический минимум",
+          at: { x: 2.72, y: 2.24 },
+          anchor: "middle",
+          dx: 0,
+          dy: -10,
+          className: "muted halo",
+          fontSize: 16
+        },
+        {
+          text: "пик test около p ≈ n",
+          at: { x: 6, y: 5.54 },
+          anchor: "middle",
+          dx: 0,
+          dy: -10,
+          className: "threshold-text halo",
+          fontSize: 18
+        },
+        {
+          text: "второе падение",
+          at: { x: 7.66, y: 2.7 },
+          anchor: "end",
+          dx: -10,
+          dy: -10,
+          className: "test-text halo",
+          fontSize: 17
+        },
+        {
+          text: "ошибка",
+          at: { x: 0, y: 5.68 },
+          anchor: "start",
+          dx: 10,
+          dy: -10,
+          className: "muted halo",
+          fontSize: 16
+        },
+        {
+          text: "число параметров p",
+          at: { x: 10.6, y: -0.7 },
+          anchor: "end",
+          dx: 0,
+          dy: 0,
+          className: "muted halo",
+          fontSize: 16
+        }
+      ],
+      legend: {
+        y: -1.23,
+        testLine: {
+          from: { x: 0.72, y: -1.23 },
+          to: { x: 1.32, y: -1.23 }
+        },
+        testLabel: {
+          text: "test: два спуска",
+          at: { x: 1.32, y: -1.23 },
+          anchor: "start",
+          dx: 10,
+          dy: 0
+        },
+        trainLine: {
+          from: { x: 5.45, y: -1.23 },
+          to: { x: 6.05, y: -1.23 }
+        },
+        trainLabel: {
+          text: "train: ноль у порога",
+          at: { x: 6.05, y: -1.23 },
+          anchor: "start",
+          dx: 10,
+          dy: 0
+        }
+      },
+      styles: {
+        axisWidth: 2,
+        guideWidth: 2,
+        thresholdWidth: 2,
+        curveWidth: 5,
+        trainWidth: 4,
+        leaderWidth: 2,
+        pointWidth: 3,
+        pointRadius: 0.08,
+        trainDash: "12 8",
+        haloWidth: 6,
+        tickFontSize: 16,
+        legendFontSize: 16
+      },
+      ns: "http://www.w3.org/2000/svg"
+    };
+
+    const origin = Object.freeze({ x: 110, y: 354 });
+    const scale = Object.freeze({ x: 78, y: 52 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const chart = document.getElementById("chart");
+
+      const make = (name, attributes, className) => {
+        const node = document.createElementNS(data.ns, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, value);
+        }
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const line = (segment, className, width) => make("line", {
+        x1: sx(segment.from.x),
+        y1: sy(segment.from.y),
+        x2: sx(segment.to.x),
+        y2: sy(segment.to.y),
+        "stroke-width": width
+      }, className);
+
+      const polygon = (points, className) => make("polygon", {
+        points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+      }, className);
+
+      const pathData = path => {
+        let value = `M ${sx(path.start.x)} ${sy(path.start.y)}`;
+        for (const curve of path.curves) {
+          value += ` C ${sx(curve.c1.x)} ${sy(curve.c1.y)},`;
+          value += ` ${sx(curve.c2.x)} ${sy(curve.c2.y)},`;
+          value += ` ${sx(curve.end.x)} ${sy(curve.end.y)}`;
+        }
+        return value;
+      };
+
+      const textNode = (label, fontSize) => {
+        const node = make("text", {
+          x: sx(label.at.x),
+          y: sy(label.at.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.anchor,
+          "dominant-baseline": "middle",
+          "font-size": label.fontSize || fontSize,
+          "stroke-width": data.styles.haloWidth
+        }, label.className);
+        node.textContent = label.text;
+        return node;
+      };
+
+      const band = make("rect", {
+        x: sx(data.threshold.left),
+        y: sy(data.threshold.top),
+        width: sx(data.threshold.right) - sx(data.threshold.left),
+        height: sy(data.threshold.bottom) - sy(data.threshold.top)
+      }, "threshold-band");
+      chart.appendChild(band);
+
+      for (const guide of data.guides) {
+        chart.appendChild(line(
+          guide,
+          "threshold-line",
+          data.styles.thresholdWidth
+        ));
+      }
+
+      chart.appendChild(line(
+        data.axes.x,
+        "axis",
+        data.styles.axisWidth
+      ));
+      chart.appendChild(line(
+        data.axes.y,
+        "axis",
+        data.styles.axisWidth
+      ));
+      chart.appendChild(polygon(data.arrowheads.x, "axis-head"));
+      chart.appendChild(polygon(data.arrowheads.y, "axis-head"));
+
+      for (const tick of data.ticks) {
+        chart.appendChild(line(
+          { from: tick.from, to: tick.to },
+          "axis",
+          data.styles.axisWidth
+        ));
+        chart.appendChild(textNode(tick, data.styles.tickFontSize));
+      }
+
+      const train = make("path", {
+        d: pathData(data.trainPath),
+        "stroke-width": data.styles.trainWidth,
+        "stroke-dasharray": data.styles.trainDash
+      }, "train-curve");
+      chart.appendChild(train);
+
+      const test = make("path", {
+        d: pathData(data.testPath),
+        "stroke-width": data.styles.curveWidth
+      }, "test-curve");
+      chart.appendChild(test);
+
+      for (const point of data.markedPoints) {
+        chart.appendChild(make("circle", {
+          cx: sx(point.x),
+          cy: sy(point.y),
+          r: sx(data.styles.pointRadius) - sx(data.zero),
+          "stroke-width": data.styles.pointWidth
+        }, "test-point"));
+      }
+
+      for (const leader of data.leaders) {
+        chart.appendChild(line(
+          leader,
+          "leader",
+          data.styles.leaderWidth
+        ));
+      }
+
+      for (const label of data.labels) {
+        chart.appendChild(textNode(label, label.fontSize));
+      }
+
+      chart.appendChild(line(
+        data.legend.testLine,
+        "test-curve",
+        data.styles.curveWidth
+      ));
+      chart.appendChild(textNode(
+        {
+          ...data.legend.testLabel,
+          className: "test-text halo"
+        },
+        data.styles.legendFontSize
+      ));
+
+      const legendTrain = line(
+        data.legend.trainLine,
+        "train-curve",
+        data.styles.trainWidth
+      );
+      legendTrain.setAttribute("stroke-dasharray", data.styles.trainDash);
+      chart.appendChild(legendTrain);
+      chart.appendChild(textNode(
+        {
+          ...data.legend.trainLabel,
+          className: "train-text halo"
+        },
+        data.styles.legendFontSize
+      ));
+    } catch (error) {
+      document.getElementById("chart").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

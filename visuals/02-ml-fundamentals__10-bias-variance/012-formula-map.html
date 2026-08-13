@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карта разложения ожидаемой ошибки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ee;
+      --panel: #fffdf8;
+      --panel-strong: #ffffff;
+      --ink: #20242b;
+      --muted: #626a76;
+      --line: #8a929d;
+      --branch: #69727e;
+      --bias: #e8a23a;
+      --bias-soft: #fff0d5;
+      --variance: #4b8ed8;
+      --variance-soft: #deedff;
+      --noise: #8a68c7;
+      --noise-soft: #eee6ff;
+      --bar-text: #17202a;
+      --shadow: #17202a18;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #171a20;
+        --panel: #20242c;
+        --panel-strong: #272c35;
+        --ink: #f2f4f7;
+        --muted: #b8c0cb;
+        --line: #747d89;
+        --branch: #a4adb8;
+        --bias: #e6a342;
+        --bias-soft: #49371f;
+        --variance: #63a5ec;
+        --variance-soft: #213b58;
+        --noise: #a98ae1;
+        --noise-soft: #3b3153;
+        --bar-text: #10151b;
+        --shadow: #00000045;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      padding: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      background: var(--page);
+    }
+
+    .heading {
+      margin: unset;
+      color: var(--ink);
+      background: var(--page);
+      font-size: 22px;
+      line-height: normal;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--page);
+    }
+
+    .card,
+    .formula-card {
+      stroke: var(--line);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .formula-card {
+      fill: var(--panel-strong);
+    }
+
+    .bias-card {
+      fill: var(--bias-soft);
+    }
+
+    .variance-card {
+      fill: var(--variance-soft);
+    }
+
+    .noise-card {
+      fill: var(--noise-soft);
+    }
+
+    .branch {
+      fill: none;
+      stroke: var(--branch);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .junction {
+      fill: var(--panel-strong);
+      stroke: var(--branch);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    text {
+      font-family: inherit;
+      fill: var(--ink);
+      text-rendering: geometricPrecision;
+    }
+
+    .formula {
+      font-size: 25px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .formula-caption {
+      font-size: 13px;
+      fill: var(--muted);
+      dominant-baseline: middle;
+    }
+
+    .term-bias,
+    .card-bias {
+      fill: var(--bias);
+    }
+
+    .term-variance,
+    .card-variance {
+      fill: var(--variance);
+    }
+
+    .term-noise,
+    .card-noise {
+      fill: var(--noise);
+    }
+
+    .card-symbol {
+      font-size: 21px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .card-label {
+      font-size: 16px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .card-note {
+      font-size: 12px;
+      fill: var(--muted);
+      dominant-baseline: middle;
+    }
+
+    .comparison-title {
+      font-size: 17px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .model-name {
+      font-size: 15px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .segment {
+      stroke: var(--panel-strong);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .segment-bias {
+      fill: var(--bias);
+    }
+
+    .segment-variance {
+      fill: var(--variance);
+    }
+
+    .segment-noise {
+      fill: var(--noise);
+    }
+
+    .segment-text {
+      fill: var(--bar-text);
+      font-size: 14px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .total {
+      font-size: 16px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .closing-note {
+      font-size: 13px;
+      fill: var(--muted);
+      dominant-baseline: middle;
+    }
+
+    #fallback {
+      background: var(--panel);
+      color: var(--ink);
+      border: 1.5px solid var(--line);
+      font-size: 16px;
+      line-height: normal;
+      text-align: center;
+    }
+
+    #fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-heading">
+    <h1 class="heading" id="diagram-heading">Карта разложения ожидаемой ошибки</h1>
+    <svg
+      id="diagram"
+      viewBox="0 0 960 470"
+      width="960"
+      height="470"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Expected Error раскладывается на Bias², Variance и σ²</title>
+      <desc id="svg-description">
+        Две модели имеют одинаковую ожидаемую ошибку 0,75, но разные доли
+        среднего промаха и разброса моделей. Неустранимый шум равен 0,25.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+    <div id="fallback" hidden>
+      Схема должна была показать: Expected Error = Bias² + Variance + σ²,
+      то есть средний промах, разброс моделей и неустранимый шум. У двух
+      моделей итог равен 0,75, хотя внутреннее разложение различается.
+    </div>
+  </figure>
+
+  <script>
+    const diagramData = {
+      zero: 0,
+      origin: { x: 45, y: 10 },
+      scale: { x: 11.5, y: 8.2 },
+      geometry: {
+        radius: 0.42,
+        formula: { x: 6, y: 2, w: 66, h: 8.5 },
+        formulaText: { x: 39, y: 5.3 },
+        formulaCaption: { x: 39, y: 8.2 },
+        branchStem: { x1: 39, y1: 10.5, x2: 39, y2: 13.3 },
+        branchBus: { x1: 13.5, y1: 13.3, x2: 64.5, y2: 13.3 },
+        cards: [
+          {
+            x: 3, y: 16, w: 21, h: 11,
+            center: 13.5,
+            symbolY: 18.7,
+            labelY: 22,
+            noteY: 24.8,
+            symbol: "Bias²",
+            label: "средний промах",
+            note: "систематическая часть",
+            cardClass: "bias-card",
+            symbolClass: "card-bias"
+          },
+          {
+            x: 28.5, y: 16, w: 21, h: 11,
+            center: 39,
+            symbolY: 18.7,
+            labelY: 22,
+            noteY: 24.8,
+            symbol: "Variance",
+            label: "разброс моделей",
+            note: "между выборками",
+            cardClass: "variance-card",
+            symbolClass: "card-variance"
+          },
+          {
+            x: 54, y: 16, w: 21, h: 11,
+            center: 64.5,
+            symbolY: 18.7,
+            labelY: 22,
+            noteY: 24.8,
+            symbol: "σ²",
+            label: "неустранимый шум",
+            note: "нижний предел ошибки",
+            cardClass: "noise-card",
+            symbolClass: "card-noise"
+          }
+        ],
+        dropTop: 13.3,
+        dropBottom: 16,
+        comparisonTitle: { x: 39, y: 30.5 },
+        bar: { x: 15, w: 60, h: 5.8 },
+        modelNameX: 13.7,
+        totalX: 75.3,
+        closingNote: { x: 45, y: 52.8 }
+      },
+      formulaParts: [
+        { text: "Expected Error = ", className: "" },
+        { text: "Bias²", className: "term-bias" },
+        { text: " + ", className: "" },
+        { text: "Variance", className: "term-variance" },
+        { text: " + ", className: "" },
+        { text: "σ²", className: "term-noise" }
+      ],
+      labels: {
+        none: 0,
+        left: -10,
+        right: 12
+      },
+      models: [
+        {
+          name: "первая модель",
+          y: 35,
+          totalValue: 0.75,
+          totalLabel: "0,75",
+          parts: [
+            {
+              value: 0.20,
+              label: "B²  0,20",
+              className: "segment-bias"
+            },
+            {
+              value: 0.30,
+              label: "V  0,30",
+              className: "segment-variance"
+            },
+            {
+              value: 0.25,
+              label: "σ²  0,25",
+              className: "segment-noise"
+            }
+          ]
+        },
+        {
+          name: "вторая модель",
+          y: 44,
+          totalValue: 0.75,
+          totalLabel: "0,75",
+          parts: [
+            {
+              value: 0.40,
+              label: "B²  0,40",
+              className: "segment-bias"
+            },
+            {
+              value: 0.10,
+              label: "V  0,10",
+              className: "segment-variance"
+            },
+            {
+              value: 0.25,
+              label: "σ²  0,25",
+              className: "segment-noise"
+            }
+          ]
+        }
+      ]
+    };
+
+    const origin = diagramData.origin;
+    const scale = diagramData.scale;
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale.y;
+    }
+
+    try {
+      const namespace = "http://www.w3.org/2000/svg";
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      const geometry = diagramData.geometry;
+
+      function make(tag, attributes, text) {
+        const node = document.createElementNS(namespace, tag);
+
+        for (const [name, value] of Object.entries(attributes)) {
+          node.setAttribute(name, String(value));
+        }
+
+        if (text !== undefined) {
+          node.textContent = text;
+        }
+
+        return node;
+      }
+
+      function rectangle(box, className) {
+        return make("rect", {
+          x: sx(box.x),
+          y: sy(box.y),
+          width: sx(box.x + box.w) - sx(box.x),
+          height: sy(box.y + box.h) - sy(box.y),
+          class: className
+        });
+      }
+
+      function line(segment, className) {
+        return make("line", {
+          x1: sx(segment.x1),
+          y1: sy(segment.y1),
+          x2: sx(segment.x2),
+          y2: sy(segment.y2),
+          class: className
+        });
+      }
+
+      function textAt(specification, content, className, anchor, dx, dy) {
+        return make("text", {
+          x: sx(specification.x) + dx,
+          y: sy(specification.y) + dy,
+          class: className,
+          "text-anchor": anchor
+        }, content);
+      }
+
+      drawing.appendChild(
+        rectangle(geometry.formula, "formula-card")
+      );
+
+      const formula = make("text", {
+        x: sx(geometry.formulaText.x),
+        y: sy(geometry.formulaText.y),
+        class: "formula",
+        "text-anchor": "middle"
+      });
+
+      for (const part of diagramData.formulaParts) {
+        formula.appendChild(
+          make("tspan", { class: part.className }, part.text)
+        );
+      }
+
+      drawing.appendChild(formula);
+
+      drawing.appendChild(
+        textAt(
+          geometry.formulaCaption,
+          "точная сумма трёх непересекающихся частей",
+          "formula-caption",
+          "middle",
+          diagramData.labels.none,
+          diagramData.labels.none
+        )
+      );
+
+      drawing.appendChild(
+        line(geometry.branchStem, "branch")
+      );
+
+      drawing.appendChild(
+        line(geometry.branchBus, "branch")
+      );
+
+      for (const card of geometry.cards) {
+        drawing.appendChild(
+          line({
+            x1: card.center,
+            y1: geometry.dropTop,
+            x2: card.center,
+            y2: geometry.dropBottom
+          }, "branch")
+        );
+
+        drawing.appendChild(
+          make("circle", {
+            cx: sx(card.center),
+            cy: sy(geometry.dropTop),
+            r: sx(geometry.radius) - sx(diagramData.zero),
+            class: "junction"
+          })
+        );
+
+        drawing.appendChild(
+          rectangle(card, "card " + card.cardClass)
+        );
+
+        drawing.appendChild(
+          textAt(
+            { x: card.center, y: card.symbolY },
+            card.symbol,
+            "card-symbol " + card.symbolClass,
+            "middle",
+            diagramData.labels.none,
+            diagramData.labels.none
+          )
+        );
+
+        drawing.appendChild(
+          textAt(
+            { x: card.center, y: card.labelY },
+            card.label,
+            "card-label",
+            "middle",
+            diagramData.labels.none,
+            diagramData.labels.none
+          )
+        );
+
+        drawing.appendChild(
+          textAt(
+            { x: card.center, y: card.noteY },
+            card.note,
+            "card-note",
+            "middle",
+            diagramData.labels.none,
+            diagramData.labels.none
+          )
+        );
+      }
+
+      drawing.appendChild(
+        textAt(
+          geometry.comparisonTitle,
+          "Одинаковый итог 0,75 — разная внутренняя структура",
+          "comparison-title",
+          "middle",
+          diagramData.labels.none,
+          diagramData.labels.none
+        )
+      );
+
+      for (const model of diagramData.models) {
+        const bar = {
+          x: geometry.bar.x,
+          y: model.y,
+          w: geometry.bar.w,
+          h: geometry.bar.h
+        };
+
+        drawing.appendChild(
+          textAt(
+            {
+              x: geometry.modelNameX,
+              y: model.y + geometry.bar.h / geometry.cards.length
+            },
+            model.name,
+            "model-name",
+            "end",
+            diagramData.labels.left,
+            diagramData.labels.none
+          )
+        );
+
+        let cursor = bar.x;
+
+        for (const part of model.parts) {
+          const partWidth = bar.w * part.value / model.totalValue;
+          const segment = {
+            x: cursor,
+            y: bar.y,
+            w: partWidth,
+            h: bar.h
+          };
+
+          drawing.appendChild(
+            rectangle(segment, "segment " + part.className)
+          );
+
+          drawing.appendChild(
+            textAt(
+              {
+                x: cursor + partWidth / geometry.cards.length,
+                y: bar.y + bar.h / geometry.cards.length
+              },
+              part.label,
+              "segment-text",
+              "middle",
+              diagramData.labels.none,
+              diagramData.labels.none
+            )
+          );
+
+          cursor += partWidth;
+        }
+
+        drawing.appendChild(
+          textAt(
+            {
+              x: geometry.totalX,
+              y: model.y + geometry.bar.h / geometry.cards.length
+            },
+            "= " + model.totalLabel,
+            "total",
+            "start",
+            diagramData.labels.right,
+            diagramData.labels.none
+          )
+        );
+      }
+
+      drawing.appendChild(
+        textAt(
+          geometry.closingNote,
+          "Каждый участок входит в итог ровно один раз — без остатка",
+          "closing-note",
+          "middle",
+          diagramData.labels.none,
+          diagramData.labels.none
+        )
+      );
+
+      fallback.hidden = true;
+      svg.hidden = false;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

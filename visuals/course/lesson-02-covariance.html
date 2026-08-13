@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Урок 2 — Ковариация</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171c22; --line: #2a323c;
+    --text: #e6edf3; --dim: #8b98a5;
+    --a: #4dabf7; --ok: #51cf66; --bad: #ff6b6b; --or: #ff922b; --vio: #b197fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px;
+  }
+  svg { display: block; touch-action: none; }
+  .panel { min-width: 340px; flex: 1; max-width: 460px; }
+
+  table { border-collapse: collapse; width: 100%; font: 13px ui-monospace, monospace; }
+  th, td { padding: 5px 6px; text-align: right; border-bottom: 1px solid #222a33; }
+  th { color: var(--dim); font-weight: 600; text-align: right; }
+  td.who { text-align: left; color: var(--dim); }
+  td.pos { color: var(--ok); }
+  td.neg { color: var(--bad); }
+  tr.total td { border-top: 2px solid var(--line); border-bottom: none; padding-top: 8px; font-weight: 700; }
+
+  .big { font: 19px ui-monospace, monospace; font-weight: 700; margin-top: 14px; }
+  .big.pos { color: var(--ok); }
+  .big.neg { color: var(--bad); }
+  .big.zero { color: var(--dim); }
+  .verdict { font-size: 13px; color: var(--dim); margin-top: 6px; min-height: 20px; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  button {
+    background: #222a33; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 11px; font: 12px ui-monospace, monospace; cursor: pointer;
+  }
+  button:hover { border-color: var(--a); color: var(--a); }
+  .legend { font-size: 12px; color: var(--dim); margin-top: 12px; line-height: 1.8; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+
+<h1>Ковариация — таскай точки</h1>
+<p class="sub">Каждая точка — человек. По горизонтали рост, по вертикали вес. Пунктирные линии — средние.</p>
+
+<div class="wrap">
+  <div class="card">
+    <svg id="plot" width="430" height="430"></svg>
+    <div class="legend">
+      <span class="sw" style="background:#51cf66"></span>согласен с правилом (плюсовой голос) &nbsp;
+      <span class="sw" style="background:#ff6b6b"></span>против (минусовой голос)
+    </div>
+  </div>
+
+  <div class="card panel">
+    <table id="tbl"></table>
+    <div class="big" id="cov"></div>
+    <div class="verdict" id="verdict"></div>
+
+    <div class="row">
+      <button data-p="rw">рост / вес</button>
+      <button data-p="none">связи нет</button>
+      <button data-p="neg">телефон / сон</button>
+    </div>
+    <div class="legend" style="margin-top:14px">
+      Четверти графика: правая-верхняя и левая-нижняя дают
+      <b style="color:#51cf66">плюс</b>, две другие —
+      <b style="color:#ff6b6b">минус</b>. Перетащи точку через пунктир и
+      смотри, как меняется её голос.
+    </div>
+  </div>
+</div>
+
+<script>
+const S = 430, PAD = 46, NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('plot');
+const tbl = document.getElementById('tbl');
+const covEl = document.getElementById('cov');
+const verdictEl = document.getElementById('verdict');
+
+const NAMES = ['Аня', 'Боря', 'Вова', 'Галя', 'Дима'];
+const PRESETS = {
+  rw:   [[160,55],[165,52],[170,65],[175,60],[180,68]],
+  none: [[160,62],[165,58],[170,64],[175,57],[180,59]],
+  neg:  [[160,68],[165,65],[170,60],[175,55],[180,52]]
+};
+let P = PRESETS.rw.map(p => p.slice());
+
+// диапазоны осей
+const X0 = 155, X1 = 185, Y0 = 45, Y1 = 75;
+const sx = v => PAD + (v - X0) / (X1 - X0) * (S - PAD * 1.4);
+const sy = v => S - PAD - (v - Y0) / (Y1 - Y0) * (S - PAD * 1.4);
+const ux = px => X0 + (px - PAD) / (S - PAD * 1.4) * (X1 - X0);
+const uy = py => Y0 + (S - PAD - py) / (S - PAD * 1.4) * (Y1 - Y0);
+
+function el(t, a, txt) {
+  const n = document.createElementNS(NS, t);
+  for (const k in a) n.setAttribute(k, a[k]);
+  if (txt !== undefined) n.textContent = txt;
+  return n;
+}
+const mean = arr => arr.reduce((s, v) => s + v, 0) / arr.length;
+
+function stats() {
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
+  const mx = mean(xs), my = mean(ys);
+  const dx = xs.map(v => v - mx), dy = ys.map(v => v - my);
+  const prod = dx.map((d, i) => d * dy[i]);
+  const sum = prod.reduce((s, v) => s + v, 0);
+  return { mx, my, dx, dy, prod, sum, cov: sum / P.length };
+}
+
+function draw() {
+  const st = stats();
+  svg.innerHTML = '';
+
+  svg.appendChild(el('rect', { x: 0, y: 0, width: S, height: S, fill: '#12181e', rx: 8 }));
+
+  const cx = sx(st.mx), cy = sy(st.my);
+
+  // четверти
+  const q = (x, y, w, h, fill) => svg.appendChild(el('rect', { x, y, width: w, height: h, fill, opacity: .09 }));
+  q(cx, 0, S - cx, cy, '#51cf66');             // правая-верхняя: +,+
+  q(0, cy, cx, S - cy, '#51cf66');             // левая-нижняя:  -,-
+  q(0, 0, cx, cy, '#ff6b6b');                  // левая-верхняя: -,+
+  q(cx, cy, S - cx, S - cy, '#ff6b6b');        // правая-нижняя: +,-
+
+  // оси средних
+  svg.appendChild(el('line', { x1: cx, y1: 8, x2: cx, y2: S - 8, stroke: '#5c6773', 'stroke-dasharray': '5 4' }));
+  svg.appendChild(el('line', { x1: 8, y1: cy, x2: S - 8, y2: cy, stroke: '#5c6773', 'stroke-dasharray': '5 4' }));
+  svg.appendChild(el('text', { x: cx + 6, y: 18, fill: '#8b98a5', 'font-size': 11,
+    'font-family': 'ui-monospace, monospace' }, `средний рост ${st.mx.toFixed(1)}`));
+  svg.appendChild(el('text', { x: 10, y: cy - 7, fill: '#8b98a5', 'font-size': 11,
+    'font-family': 'ui-monospace, monospace' }, `средний вес ${st.my.toFixed(1)}`));
+
+  // подписи осей
+  svg.appendChild(el('text', { x: S / 2, y: S - 10, fill: '#8b98a5', 'font-size': 12,
+    'text-anchor': 'middle', 'font-family': 'ui-monospace, monospace' }, 'рост, см →'));
+  svg.appendChild(el('text', { x: 14, y: S / 2, fill: '#8b98a5', 'font-size': 12,
+    'text-anchor': 'middle', 'font-family': 'ui-monospace, monospace',
+    transform: `rotate(-90 14 ${S / 2})` }, 'вес, кг →'));
+
+  // точки
+  P.forEach((p, i) => {
+    const x = sx(p[0]), y = sy(p[1]);
+    const pos = st.prod[i] >= 0;
+    // связь с центром
+    svg.appendChild(el('line', {
+      x1: cx, y1: cy, x2: x, y2: y,
+      stroke: pos ? '#51cf66' : '#ff6b6b', 'stroke-width': 1.2, opacity: .45
+    }));
+    svg.appendChild(el('circle', {
+      cx: x, cy: y, r: 9, fill: pos ? '#51cf66' : '#ff6b6b',
+      stroke: '#0f1216', 'stroke-width': 2, 'data-i': i, style: 'cursor:grab'
+    }));
+    svg.appendChild(el('text', {
+      x: x, y: y - 15, fill: '#e6edf3', 'font-size': 11, 'text-anchor': 'middle',
+      'font-family': 'ui-monospace, monospace', 'pointer-events': 'none'
+    }, NAMES[i]));
+  });
+
+  renderTable(st);
+}
+
+function renderTable(st) {
+  const f = n => (Math.round(n * 10) / 10).toString();
+  let h = `<tr><th style="text-align:left">кто</th><th>рост</th><th>вес</th>` +
+          `<th>откл.р</th><th>откл.в</th><th>произв.</th></tr>`;
+  P.forEach((p, i) => {
+    const cls = st.prod[i] >= 0 ? 'pos' : 'neg';
+    h += `<tr><td class="who">${NAMES[i]}</td><td>${f(p[0])}</td><td>${f(p[1])}</td>` +
+         `<td>${f(st.dx[i])}</td><td>${f(st.dy[i])}</td>` +
+         `<td class="${cls}">${st.prod[i] >= 0 ? '+' : ''}${f(st.prod[i])}</td></tr>`;
+  });
+  h += `<tr class="total"><td class="who" colspan="5">сумма голосов</td>` +
+       `<td class="${st.sum >= 0 ? 'pos' : 'neg'}">${st.sum >= 0 ? '+' : ''}${f(st.sum)}</td></tr>`;
+  tbl.innerHTML = h;
+
+  const c = st.cov;
+  const kind = Math.abs(c) < 3 ? 'zero' : (c > 0 ? 'pos' : 'neg');
+  covEl.className = 'big ' + kind;
+  covEl.textContent = `ковариация = ${f(st.sum)} / 5 = ${f(c)}`;
+  verdictEl.textContent =
+    kind === 'pos' ? 'выше → тяжелее: признаки растут вместе' :
+    kind === 'neg' ? 'выше → легче: один растёт, другой падает' :
+                     'связи почти нет: голоса гасят друг друга';
+}
+
+/* перетаскивание */
+let drag = null;
+function pt(e) {
+  const r = svg.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+svg.addEventListener('mousedown', e => {
+  const i = e.target.getAttribute && e.target.getAttribute('data-i');
+  if (i !== null && i !== undefined) drag = +i;
+});
+svg.addEventListener('touchstart', e => {
+  const i = e.target.getAttribute && e.target.getAttribute('data-i');
+  if (i !== null && i !== undefined) { drag = +i; e.preventDefault(); }
+}, { passive: false });
+
+function move(e) {
+  if (drag === null) return;
+  e.preventDefault();
+  const p = pt(e);
+  P[drag][0] = Math.min(X1, Math.max(X0, Math.round(ux(p.x))));
+  P[drag][1] = Math.min(Y1, Math.max(Y0, Math.round(uy(p.y))));
+  draw();
+}
+window.addEventListener('mousemove', move);
+window.addEventListener('touchmove', move, { passive: false });
+window.addEventListener('mouseup', () => drag = null);
+window.addEventListener('touchend', () => drag = null);
+
+document.querySelectorAll('button[data-p]').forEach(b => {
+  b.addEventListener('click', () => {
+    P = PRESETS[b.dataset.p].map(p => p.slice());
+    draw();
+  });
+});
+
+draw();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

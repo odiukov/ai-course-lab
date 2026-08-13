@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>float16 и bfloat16 бит к биту</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --border: #cbd5e1;
+      --text: #172033;
+      --muted: #526078;
+      --sign: #cbd5e1;
+      --sign-text: #263449;
+      --exponent: #67d4e8;
+      --exponent-text: #073b4c;
+      --mantissa: #b7a3f3;
+      --mantissa-text: #2f1760;
+      --transfer: #f59e0b;
+      --transfer-soft: #fef3c7;
+      --transfer-text: #78350f;
+      --rule: #94a3b8;
+      --summary: #eef2ff;
+      --summary-border: #a5b4fc;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --border: #334155;
+        --text: #f1f5f9;
+        --muted: #b8c3d4;
+        --sign: #64748b;
+        --sign-text: #f8fafc;
+        --exponent: #168aa2;
+        --exponent-text: #ecfeff;
+        --mantissa: #7561bd;
+        --mantissa-text: #faf5ff;
+        --transfer: #fbbf24;
+        --transfer-soft: #57360b;
+        --transfer-text: #fff7d6;
+        --rule: #64748b;
+        --summary: #1e293b;
+        --summary-border: #6366f1;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+
+    h2 {
+      margin: 0;
+      padding: 0 0 12px;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 16px;
+      dominant-baseline: middle;
+    }
+
+    .row-name {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .maximum {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .part-label,
+    .legend-label {
+      font-size: 14px;
+    }
+
+    .part-label {
+      fill: var(--muted);
+      font-weight: bold;
+    }
+
+    .cell-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .transfer-label {
+      fill: var(--transfer-text);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .summary-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .segment,
+    .bar-outline,
+    .bit-divider,
+    .transfer-outline,
+    .transfer-arrow,
+    .summary-box {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .segment {
+      stroke: var(--bg);
+      stroke-width: 2px;
+    }
+
+    .segment-sign {
+      fill: var(--sign);
+    }
+
+    .segment-exponent {
+      fill: var(--exponent);
+    }
+
+    .segment-mantissa {
+      fill: var(--mantissa);
+    }
+
+    .bar-outline {
+      fill: none;
+      stroke: var(--text);
+      stroke-width: 2px;
+    }
+
+    .bit-divider {
+      stroke: var(--bg);
+      stroke-width: 1px;
+    }
+
+    .transfer-fill {
+      fill: var(--transfer-soft);
+    }
+
+    .transfer-outline {
+      fill: none;
+      stroke: var(--transfer);
+      stroke-width: 2px;
+    }
+
+    .transfer-arrow {
+      stroke: var(--transfer);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--transfer);
+    }
+
+    .summary-box {
+      fill: var(--summary);
+      stroke: var(--summary-border);
+      stroke-width: 1px;
+    }
+
+    .legend-swatch {
+      stroke: var(--text);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .legend-exponent {
+      fill: var(--exponent);
+    }
+
+    .legend-mantissa {
+      fill: var(--mantissa);
+    }
+
+    [hidden] {
+      display: none;
+    }
+
+    .fallback {
+      padding: 16px;
+      border: 1px solid var(--transfer);
+      color: var(--text);
+      font-size: 16px;
+      background: var(--transfer-soft);
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h2 id="diagram-title">Как float16 и bfloat16 делят одинаковые 16 бит</h2>
+    <svg
+      id="diagram"
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 720 420"
+      width="720"
+      height="420"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-desc"
+    >
+      <desc id="diagram-desc">
+        Сравнение двух шестнадцатибитных форматов: float16 использует один бит
+        знака, пять бит экспоненты и десять бит мантиссы, а bfloat16 — один,
+        восемь и семь. Три бита переходят от мантиссы к экспоненте.
+      </desc>
+    </svg>
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать две полоски по 16 бит: float16 = 1 + 5 + 10
+      с максимумом 65 504 и bfloat16 = 1 + 8 + 7 с максимумом 3.4e38.
+      У bfloat16 три бита мантиссы отданы экспоненте.
+    </div>
+  </figure>
+
+  <script>
+    const CANVAS = {
+      width: 720,
+      height: 420,
+      viewBox: "0 0 720 420"
+    };
+
+    const DATA = [{
+      bars: [
+        {
+          name: "float16 · 16 бит",
+          maximum: "максимум: 65 504",
+          nameAnchor: { x: 0, y: 28, dx: 0, dy: 0, side: "start" },
+          maximumAnchor: { x: 16, y: 28, dx: 0, dy: 0, side: "end" },
+          top: 48,
+          bottom: 92,
+          labelY: 116,
+          segments: [
+            {
+              start: 0,
+              end: 1,
+              center: 0.5,
+              kind: "sign",
+              inside: "1",
+              below: "знак · 1",
+              belowSide: "start",
+              belowDx: 0,
+              belowDy: 0
+            },
+            {
+              start: 1,
+              end: 6,
+              center: 3.5,
+              kind: "exponent",
+              inside: "5",
+              below: "экспонента · 5",
+              belowSide: "middle",
+              belowDx: 0,
+              belowDy: 0
+            },
+            {
+              start: 6,
+              end: 16,
+              center: 11,
+              kind: "mantissa",
+              inside: "10",
+              below: "мантисса · 10",
+              belowSide: "middle",
+              belowDx: 0,
+              belowDy: 0
+            }
+          ],
+          transfer: { start: 6, end: 9 }
+        },
+        {
+          name: "bfloat16 · 16 бит",
+          maximum: "максимум: 3.4e38",
+          nameAnchor: { x: 0, y: 188, dx: 0, dy: 0, side: "start" },
+          maximumAnchor: { x: 16, y: 188, dx: 0, dy: 0, side: "end" },
+          top: 208,
+          bottom: 252,
+          labelY: 276,
+          segments: [
+            {
+              start: 0,
+              end: 1,
+              center: 0.5,
+              kind: "sign",
+              inside: "1",
+              below: "знак · 1",
+              belowSide: "start",
+              belowDx: 0,
+              belowDy: 0
+            },
+            {
+              start: 1,
+              end: 9,
+              center: 5,
+              kind: "exponent",
+              inside: "8",
+              below: "экспонента · 8",
+              belowSide: "middle",
+              belowDx: 0,
+              belowDy: 0
+            },
+            {
+              start: 9,
+              end: 16,
+              center: 12.5,
+              kind: "mantissa",
+              inside: "7",
+              below: "мантисса · 7",
+              belowSide: "middle",
+              belowDx: 0,
+              belowDy: 0
+            }
+          ],
+          transfer: { start: 6, end: 9 }
+        }
+      ],
+      bitBoundaries: [
+        1, 2, 3, 4, 5, 6, 7, 8,
+        9, 10, 11, 12, 13, 14, 15
+      ],
+      exchange: {
+        line: {
+          from: { x: 7.5, y: 126 },
+          to: { x: 7.5, y: 178 }
+        },
+        head: [
+          { x: 7.25, y: 172 },
+          { x: 7.5, y: 178 },
+          { x: 7.75, y: 172 }
+        ],
+        label: {
+          text: "те же 3 бита: мантисса → экспонента",
+          x: 8,
+          y: 151,
+          dx: 12,
+          dy: 0,
+          side: "start"
+        }
+      },
+      legend: [
+        {
+          box: { left: 0, right: 0.45, top: 314, bottom: 330 },
+          kind: "exponent",
+          label: {
+            text: "экспонента → диапазон",
+            x: 0.65,
+            y: 322,
+            dx: 0,
+            dy: 0,
+            side: "start"
+          }
+        },
+        {
+          box: { left: 8.2, right: 8.65, top: 314, bottom: 330 },
+          kind: "mantissa",
+          label: {
+            text: "мантисса → точность",
+            x: 8.85,
+            y: 322,
+            dx: 0,
+            dy: 0,
+            side: "start"
+          }
+        }
+      ],
+      summary: {
+        box: { left: 0, right: 16, top: 352, bottom: 400 },
+        label: {
+          text: "16 бит в обоих форматах: шире диапазон ↔ грубее точность",
+          x: 8,
+          y: 376,
+          dx: 0,
+          dy: 0,
+          side: "middle"
+        }
+      }
+    }];
+
+    const origin = Object.freeze({ x: 72, y: 0 });
+    const scale = Object.freeze({ x: 36, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const [diagramData] = DATA;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      svg.setAttribute("viewBox", CANVAS.viewBox);
+      svg.setAttribute("width", String(CANVAS.width));
+      svg.setAttribute("height", String(CANVAS.height));
+
+      const make = (tag, attributes, text) => {
+        const node = document.createElementNS(NS, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          node.setAttribute(name, String(value));
+        });
+        if (text !== undefined) {
+          node.textContent = text;
+        }
+        return node;
+      };
+
+      const addText = (label, className) => {
+        const node = make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.side,
+          class: className
+        }, label.text);
+        svg.appendChild(node);
+      };
+
+      diagramData.bars.forEach(bar => {
+        addText({
+          text: bar.name,
+          x: bar.nameAnchor.x,
+          y: bar.nameAnchor.y,
+          dx: bar.nameAnchor.dx,
+          dy: bar.nameAnchor.dy,
+          side: bar.nameAnchor.side
+        }, "row-name");
+
+        addText({
+          text: bar.maximum,
+          x: bar.maximumAnchor.x,
+          y: bar.maximumAnchor.y,
+          dx: bar.maximumAnchor.dx,
+          dy: bar.maximumAnchor.dy,
+          side: bar.maximumAnchor.side
+        }, "maximum");
+
+        bar.segments.forEach(segment => {
+          svg.appendChild(make("rect", {
+            x: sx(segment.start),
+            y: sy(bar.top),
+            width: sx(segment.end) - sx(segment.start),
+            height: sy(bar.bottom) - sy(bar.top),
+            class: `segment segment-${segment.kind}`
+          }));
+
+          addText({
+            text: segment.inside,
+            x: segment.center,
+            y: bar.top + (bar.bottom - bar.top) / scale.y / scale.x * scale.x / scale.y,
+            dx: 0,
+            dy: 0,
+            side: "middle"
+          }, `cell-label cell-${segment.kind}`);
+
+          addText({
+            text: segment.below,
+            x: segment.belowSide === "start" ? segment.start : segment.center,
+            y: bar.labelY,
+            dx: segment.belowDx,
+            dy: segment.belowDy,
+            side: segment.belowSide
+          }, "part-label");
+        });
+
+        svg.appendChild(make("rect", {
+          x: sx(bar.transfer.start),
+          y: sy(bar.top),
+          width: sx(bar.transfer.end) - sx(bar.transfer.start),
+          height: sy(bar.bottom) - sy(bar.top),
+          class: "transfer-fill"
+        }));
+
+        diagramData.bitBoundaries.forEach(boundary => {
+          svg.appendChild(make("line", {
+            x1: sx(boundary),
+            y1: sy(bar.top),
+            x2: sx(boundary),
+            y2: sy(bar.bottom),
+            class: "bit-divider"
+          }));
+        });
+
+        svg.appendChild(make("rect", {
+          x: sx(bar.transfer.start),
+          y: sy(bar.top),
+          width: sx(bar.transfer.end) - sx(bar.transfer.start),
+          height: sy(bar.bottom) - sy(bar.top),
+          class: "transfer-outline"
+        }));
+
+        svg.appendChild(make("rect", {
+          x: sx(0),
+          y: sy(bar.top),
+          width: sx(16) - sx(0),
+          height: sy(bar.bottom) - sy(bar.top),
+          class: "bar-outline"
+        }));
+      });
+
+      svg.appendChild(make("line", {
+        x1: sx(diagramData.exchange.line.from.x),
+        y1: sy(diagramData.exchange.line.from.y),
+        x2: sx(diagramData.exchange.line.to.x),
+        y2: sy(diagramData.exchange.line.to.y),
+        class: "transfer-arrow"
+      }));
+
+      svg.appendChild(make("polygon", {
+        points: diagramData.exchange.head
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" "),
+        class: "arrow-head"
+      }));
+
+      addText(diagramData.exchange.label, "transfer-label");
+
+      diagramData.legend.forEach(item => {
+        svg.appendChild(make("rect", {
+          x: sx(item.box.left),
+          y: sy(item.box.top),
+          width: sx(item.box.right) - sx(item.box.left),
+          height: sy(item.box.bottom) - sy(item.box.top),
+          class: `legend-swatch legend-${item.kind}`
+        }));
+        addText(item.label, "legend-label");
+      });
+
+      svg.appendChild(make("rect", {
+        x: sx(diagramData.summary.box.left),
+        y: sy(diagramData.summary.box.top),
+        width: sx(diagramData.summary.box.right) - sx(diagramData.summary.box.left),
+        height: sy(diagramData.summary.box.bottom) - sy(diagramData.summary.box.top),
+        class: "summary-box"
+      }));
+
+      addText(diagramData.summary.label, "summary-label");
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

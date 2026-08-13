@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пять честных обучений при 5-fold cross-validation</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --row: #f1f4f8;
+    --text: #172033;
+    --muted: #5b6577;
+    --line: #667085;
+    --train: #176b54;
+    --test: #b6483d;
+    --pipeline: #e6f1ff;
+    --pipeline-stroke: #3974b8;
+    --score: #e8f6ed;
+    --score-stroke: #348255;
+    --join: #263b58;
+    --c1: #66a6e8;
+    --c2: #70bd91;
+    --c3: #f0b75b;
+    --c4: #b590df;
+    --c5: #e47f82;
+    --block-text: #172033;
+    --hatch: #7d2722;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151e;
+      --panel: #171e29;
+      --row: #1d2633;
+      --text: #edf2f8;
+      --muted: #b5c0cf;
+      --line: #a8b4c4;
+      --train: #7dddb8;
+      --test: #ff9a8f;
+      --pipeline: #193653;
+      --pipeline-stroke: #76b9ff;
+      --score: #173d2a;
+      --score-stroke: #75d59c;
+      --join: #c8d7ea;
+      --c1: #70afea;
+      --c2: #78c99a;
+      --c3: #eec06d;
+      --c4: #bca0e3;
+      --c5: #eb9294;
+      --block-text: #111722;
+      --hatch: #631d1a;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: unset;
+    padding: unset;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    background: var(--panel);
+  }
+
+  .heading {
+    margin: unset;
+    padding: unset;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: normal;
+  }
+
+  .subheading {
+    margin: unset;
+    padding: unset;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+    color: var(--text);
+  }
+
+  .row-bg {
+    fill: var(--row);
+  }
+
+  .separator {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .route {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .train-route {
+    stroke: var(--train);
+  }
+
+  .test-route {
+    stroke: var(--test);
+  }
+
+  .model-route {
+    stroke: var(--join);
+  }
+
+  .arrow-train {
+    fill: var(--train);
+  }
+
+  .arrow-test {
+    fill: var(--test);
+  }
+
+  .block {
+    stroke: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .held-out {
+    stroke: var(--test);
+    stroke-width: 3px;
+  }
+
+  .c1 { fill: var(--c1); }
+  .c2 { fill: var(--c2); }
+  .c3 { fill: var(--c3); }
+  .c4 { fill: var(--c4); }
+  .c5 { fill: var(--c5); }
+
+  .pipeline-box {
+    fill: var(--pipeline);
+    stroke: var(--pipeline-stroke);
+    stroke-width: 2px;
+  }
+
+  .score-box {
+    fill: var(--score);
+    stroke: var(--score-stroke);
+    stroke-width: 2px;
+  }
+
+  .fold-label {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .block-label {
+    fill: var(--block-text);
+    font-size: 13px;
+    font-weight: bold;
+    dominant-baseline: middle;
+  }
+
+  .box-label {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+    dominant-baseline: middle;
+  }
+
+  .header-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .route-label {
+    fill: var(--train);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .fresh-label {
+    fill: var(--pipeline-stroke);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .legend-label {
+    fill: var(--muted);
+    font-size: 12px;
+    dominant-baseline: middle;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1 class="heading">Пять честных обучений при 5-fold cross-validation</h1>
+  <p class="subheading">В каждом фолде scaler и модель начинают обучение заново.</p>
+  <svg id="diagram"
+       viewBox="0 0 1200 458"
+       width="1200"
+       height="458"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Пять независимых раундов кросс-валидации</title>
+    <desc id="svg-desc">Пять строк показывают, как четыре части данных обучают новый scaler и новую модель, а пятая часть используется только для transform и оценки.</desc>
+  </svg>
+</main>
+
+<script>
+"use strict";
+
+/* Все исходные данные и геометрия схемы объявлены до построения. */
+const folds = Object.freeze([
+  Object.freeze({ label: "Фолд 1", y: 70, heldOut: 0 }),
+  Object.freeze({ label: "Фолд 2", y: 148, heldOut: 1 }),
+  Object.freeze({ label: "Фолд 3", y: 226, heldOut: 2 }),
+  Object.freeze({ label: "Фолд 4", y: 304, heldOut: 3 }),
+  Object.freeze({ label: "Фолд 5", y: 382, heldOut: 4 })
+]);
+
+const parts = Object.freeze([
+  Object.freeze({ label: "1", className: "c1" }),
+  Object.freeze({ label: "2", className: "c2" }),
+  Object.freeze({ label: "3", className: "c3" }),
+  Object.freeze({ label: "4", className: "c4" }),
+  Object.freeze({ label: "5", className: "c5" })
+]);
+
+const geometry = Object.freeze({
+  canvasRight: 1200,
+  rowX: 8,
+  rowWidth: 1184,
+  rowTop: 37,
+  rowHeight: 70,
+  rowGapHalf: 4,
+  foldX: 24,
+  foldTextY: 5,
+  blocksX: 130,
+  blockWidth: 42,
+  blockGap: 7,
+  blockTop: 14,
+  blockHeight: 28,
+  trainBusY: 24,
+  trainStemTop: 14,
+  fitX: 455,
+  fitWidth: 120,
+  modelX: 600,
+  modelWidth: 120,
+  upperBoxY: 30,
+  boxHeight: 28,
+  arrowGap: 10,
+  arrowLength: 15,
+  arrowHead: 8,
+  arrowHalf: 5,
+  transformX: 765,
+  transformWidth: 145,
+  scoreX: 950,
+  scoreWidth: 110,
+  lowerBoxY: 10,
+  testBusY: 24,
+  joinX: 930,
+  trainLabelX: 405,
+  trainLabelY: 31,
+  freshLabelX: 587,
+  freshLabelY: 35,
+  dataHeaderX: 235,
+  processHeaderX: 585,
+  resultHeaderX: 1005,
+  headerY: 19,
+  legendY: 444,
+  legendTrainX: 235,
+  legendTestX: 575,
+  legendBlockWidth: 28,
+  legendBlockHeight: 18,
+  legendTextGap: 12,
+  legendTrainTextX: 278,
+  legendTestTextX: 618,
+  fallbackX: 600,
+  fallbackY: 225,
+  hatchSize: 9,
+  hatchOffset: 9
+});
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const node = (name, attributes, parent = svg) => {
+    const element = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, String(value));
+    }
+    parent.appendChild(element);
+    return element;
+  };
+
+  const text = (value, x, y, className, anchor = "middle", parent = svg) => {
+    const element = node("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, parent);
+    element.textContent = value;
+    return element;
+  };
+
+  const rect = (x, y, width, height, className, parent = svg, extra = {}) =>
+    node("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(width) - sx(0),
+      height: sy(height) - sy(0),
+      class: className,
+      ...extra
+    }, parent);
+
+  const line = (x1, y1, x2, y2, className, parent = svg) =>
+    node("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    }, parent);
+
+  const path = (points, className, parent = svg) => {
+    const commands = points.map((point, index) =>
+      `${index === 0 ? "M" : "L"} ${sx(point.x)} ${sy(point.y)}`
+    ).join(" ");
+    return node("path", { d: commands, class: className }, parent);
+  };
+
+  const arrowHead = (x, y, className, parent = svg) =>
+    node("polygon", {
+      points: [
+        `${sx(x)},${sy(y)}`,
+        `${sx(x - geometry.arrowHead)},${sy(y - geometry.arrowHalf)}`,
+        `${sx(x - geometry.arrowHead)},${sy(y + geometry.arrowHalf)}`
+      ].join(" "),
+      class: className
+    }, parent);
+
+  const horizontalArrow = (x1, y, x2, routeClass, headClass, parent = svg) => {
+    line(x1, y, x2 - geometry.arrowHead, y, `route ${routeClass}`, parent);
+    arrowHead(x2, y, headClass, parent);
+  };
+
+  const defs = node("defs", {});
+  const pattern = node("pattern", {
+    id: "test-hatch",
+    patternUnits: "userSpaceOnUse",
+    width: sx(geometry.hatchSize) - sx(0),
+    height: sy(geometry.hatchSize) - sy(0)
+  }, defs);
+
+  path([
+    { x: -geometry.hatchOffset, y: geometry.hatchOffset },
+    { x: geometry.hatchOffset, y: -geometry.hatchOffset }
+  ], "test-route route", pattern);
+
+  path([
+    { x: 0, y: geometry.hatchOffset },
+    { x: geometry.hatchOffset, y: 0 }
+  ], "test-route route", pattern);
+
+  path([
+    { x: 0, y: geometry.hatchOffset + geometry.hatchOffset },
+    { x: geometry.hatchOffset + geometry.hatchOffset, y: 0 }
+  ], "test-route route", pattern);
+
+  text("5 частей данных", geometry.dataHeaderX, geometry.headerY, "header-label");
+  text("новый pipeline в каждом фолде", geometry.processHeaderX, geometry.headerY, "header-label");
+  text("честная оценка", geometry.resultHeaderX, geometry.headerY, "header-label");
+
+  folds.forEach((fold, foldIndex) => {
+    const group = node("g", {
+      "aria-label": `${fold.label}: часть ${fold.heldOut + 1} отложена для проверки`
+    });
+
+    rect(
+      geometry.rowX,
+      fold.y - geometry.rowTop,
+      geometry.rowWidth,
+      geometry.rowHeight,
+      "row-bg",
+      group
+    );
+
+    if (foldIndex !== folds.length - 1) {
+      line(
+        geometry.rowX,
+        fold.y + geometry.rowTop,
+        geometry.canvasRight - geometry.rowX,
+        fold.y + geometry.rowTop,
+        "separator",
+        group
+      );
+    }
+
+    text(
+      fold.label,
+      geometry.foldX,
+      fold.y + geometry.foldTextY,
+      "fold-label",
+      "start",
+      group
+    );
+
+    const trainingCenters = [];
+    let heldOutCenter = sx(0);
+
+    parts.forEach((part, partIndex) => {
+      const blockX = geometry.blocksX +
+        partIndex * (geometry.blockWidth + geometry.blockGap);
+      const blockY = fold.y - geometry.blockTop;
+      const centerX = blockX + geometry.blockWidth / scale.x / (scale.x + scale.x);
+
+      rect(
+        blockX,
+        blockY,
+        geometry.blockWidth,
+        geometry.blockHeight,
+        `block ${part.className}${partIndex === fold.heldOut ? " held-out" : ""}`,
+        group
+      );
+
+      if (partIndex === fold.heldOut) {
+        rect(
+          blockX,
+          blockY,
+          geometry.blockWidth,
+          geometry.blockHeight,
+          "held-out",
+          group,
+          { fill: "url(#test-hatch)" }
+        );
+        heldOutCenter = centerX;
+      } else {
+        trainingCenters.push(centerX);
+      }
+
+      text(
+        part.label,
+        centerX,
+        fold.y,
+        "block-label",
+        "middle",
+        group
+      );
+    });
+
+    const firstTrainingCenter = Math.min(...trainingCenters);
+    const lastTrainingCenter = Math.max(...trainingCenters);
+    const upperY = fold.y - geometry.trainBusY;
+    const fitCenterY = fold.y - geometry.upperBoxY +
+      geometry.boxHeight / scale.y / (scale.y + scale.y);
+    const lowerY = fold.y + geometry.testBusY;
+    const lowerCenterY = fold.y + geometry.lowerBoxY +
+      geometry.boxHeight / scale.y / (scale.y + scale.y);
+
+    trainingCenters.forEach(centerX => {
+      line(
+        centerX,
+        fold.y - geometry.trainStemTop,
+        centerX,
+        upperY,
+        "route train-route",
+        group
+      );
+    });
+
+    line(
+      firstTrainingCenter,
+      upperY,
+      lastTrainingCenter,
+      upperY,
+      "route train-route",
+      group
+    );
+
+    horizontalArrow(
+      lastTrainingCenter,
+      upperY,
+      geometry.fitX,
+      "train-route",
+      "arrow-train",
+      group
+    );
+
+    text(
+      "4 части → fit",
+      geometry.trainLabelX,
+      fold.y + geometry.trainLabelY,
+      "route-label",
+      "end",
+      group
+    );
+
+    rect(
+      geometry.fitX,
+      fold.y - geometry.upperBoxY,
+      geometry.fitWidth,
+      geometry.boxHeight,
+      "pipeline-box",
+      group
+    );
+
+    text(
+      "fit scaler",
+      geometry.fitX + geometry.fitWidth / scale.x / (scale.x + scale.x),
+      fitCenterY,
+      "box-label",
+      "middle",
+      group
+    );
+
+    horizontalArrow(
+      geometry.fitX + geometry.fitWidth + geometry.arrowGap,
+      fitCenterY,
+      geometry.modelX,
+      "train-route",
+      "arrow-train",
+      group
+    );
+
+    rect(
+      geometry.modelX,
+      fold.y - geometry.upperBoxY,
+      geometry.modelWidth,
+      geometry.boxHeight,
+      "pipeline-box",
+      group
+    );
+
+    text(
+      "fit модели",
+      geometry.modelX + geometry.modelWidth / scale.x / (scale.x + scale.x),
+      fitCenterY,
+      "box-label",
+      "middle",
+      group
+    );
+
+    text(
+      "новый, необученный",
+      geometry.freshLabelX,
+      fold.y + geometry.freshLabelY,
+      "fresh-label",
+      "middle",
+      group
+    );
+
+    path([
+      { x: heldOutCenter, y: fold.y + geometry.blockTop },
+      { x: heldOutCenter, y: lowerY },
+      { x: geometry.transformX - geometry.arrowLength, y: lowerY },
+      { x: geometry.transformX - geometry.arrowLength, y: lowerCenterY }
+    ], "route test-route", group);
+
+    horizontalArrow(
+      geometry.transformX - geometry.arrowLength,
+      lowerCenterY,
+      geometry.transformX,
+      "test-route",
+      "arrow-test",
+      group
+    );
+
+    rect(
+      geometry.transformX,
+      fold.y + geometry.lowerBoxY,
+      geometry.transformWidth,
+      geometry.boxHeight,
+      "pipeline-box",
+      group
+    );
+
+    text(
+      "только transform",
+      geometry.transformX + geometry.transformWidth / scale.x / (scale.x + scale.x),
+      lowerCenterY,
+      "box-label",
+      "middle",
+      group
+    );
+
+    path([
+      {
+        x: geometry.modelX + geometry.modelWidth,
+        y: fitCenterY
+      },
+      {
+        x: geometry.joinX,
+        y: fitCenterY
+      },
+      {
+        x: geometry.joinX,
+        y: lowerCenterY
+      }
+    ], "route model-route", group);
+
+    line(
+      geometry.transformX + geometry.transformWidth,
+      lowerCenterY,
+      geometry.joinX,
+      lowerCenterY,
+      "route test-route",
+      group
+    );
+
+    horizontalArrow(
+      geometry.joinX,
+      lowerCenterY,
+      geometry.scoreX,
+      "model-route",
+      "arrow-test",
+      group
+    );
+
+    rect(
+      geometry.scoreX,
+      fold.y + geometry.lowerBoxY,
+      geometry.scoreWidth,
+      geometry.boxHeight,
+      "score-box",
+      group
+    );
+
+    text(
+      "оценка",
+      geometry.scoreX + geometry.scoreWidth / scale.x / (scale.x + scale.x),
+      lowerCenterY,
+      "box-label",
+      "middle",
+      group
+    );
+  });
+
+  rect(
+    geometry.legendTrainX,
+    geometry.legendY - geometry.legendBlockHeight / scale.y / (scale.y + scale.y),
+    geometry.legendBlockWidth,
+    geometry.legendBlockHeight,
+    "block c2"
+  );
+
+  text(
+    "4 сплошные части: fit scaler и модели",
+    geometry.legendTrainTextX,
+    geometry.legendY,
+    "legend-label",
+    "start"
+  );
+
+  rect(
+    geometry.legendTestX,
+    geometry.legendY - geometry.legendBlockHeight / scale.y / (scale.y + scale.y),
+    geometry.legendBlockWidth,
+    geometry.legendBlockHeight,
+    "block c5 held-out",
+    svg,
+    { fill: "url(#test-hatch)" }
+  );
+
+  text(
+    "1 штрихованная часть: только transform и оценка",
+    geometry.legendTestTextX,
+    geometry.legendY,
+    "legend-label",
+    "start"
+  );
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const fallback = document.createElementNS(ns, "text");
+  fallback.setAttribute("x", sx(geometry.fallbackX));
+  fallback.setAttribute("y", sy(geometry.fallbackY));
+  fallback.setAttribute("text-anchor", "middle");
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = "Схема: в каждом из 5 фолдов 4 части обучают новый pipeline, а 1 часть проходит только transform и оценку.";
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
