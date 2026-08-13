@@ -9,6 +9,7 @@
 библиотеки Pyodide хватает на все упражнения: numpy и прочего в них нет.
 """
 
+import inspect
 import json
 import math
 import os
@@ -127,11 +128,70 @@ def _parametrize(argnames, argvalues, **kwargs):
     return decorate
 
 
+def _fixture(function=None, autouse=False, **kwargs):
+    """Помечает функцию фикстурой.
+
+    Работает в обеих формах записи — и `@pytest.fixture`, и `@pytest.fixture()`.
+    Значение потом подставит прогонщик: он смотрит, какие аргументы просит тест.
+
+    `autouse=True` означает «отработать перед каждым тестом, даже если никто не
+    просил»: такими обычно чистят общее состояние между тестами, и без них
+    тесты начинают видеть следы соседей.
+    """
+
+    def mark(target):
+        target._is_fixture = True
+        target._autouse = bool(autouse)
+        return target
+
+    return mark(function) if function is not None else mark
+
+
+def run_autouse(module):
+    """Отрабатывает фикстуры, которые просят звать их всегда."""
+
+    started = []
+    for name in dir(module):
+        source = getattr(module, name, None)
+        if not getattr(source, "_is_fixture", False) or not getattr(source, "_autouse", False):
+            continue
+        produced = source()
+        if inspect.isgenerator(produced):
+            started.append(produced)
+            next(produced)
+    return started
+
+
+def resolve_fixtures(module, test):
+    """Значения аргументов теста: каждый берётся у одноимённой фикстуры.
+
+    Фикстура с yield отдаёт значение и хочет доработать после теста — такие
+    возвращаются вторым списком, чтобы прогонщик их закрыл.
+    """
+
+    values = []
+    started = []
+    for name in inspect.signature(test).parameters:
+        source = getattr(module, name, None)
+        if source is None or not getattr(source, "_is_fixture", False):
+            raise AssertionError("тест просит фикстуру {!r}, которой нет".format(name))
+
+        produced = source()
+        if inspect.isgenerator(produced):
+            started.append(produced)
+            values.append(next(produced))
+        else:
+            values.append(produced)
+
+    return values, started
+
+
 def install_pytest_stub():
     module = types.ModuleType("pytest")
     module.approx = lambda expected, rel=None, abs=None: Approx(expected, rel, abs)
     module.raises = lambda expected, match=None: RaisesContext(expected, match)
     module.fail = lambda message="": (_ for _ in ()).throw(AssertionError(message))
+    module.fixture = _fixture
 
     mark = types.SimpleNamespace(parametrize=_parametrize)
     module.mark = mark
@@ -201,7 +261,14 @@ def run(code, fn, functions, workdir="/exercise"):
         if not callable(test):
             continue
         try:
-            test()
+            started = run_autouse(module)
+            values, requested = resolve_fixtures(module, test)
+            started.extend(requested)
+            try:
+                test(*values)
+            finally:
+                for generator in started:
+                    generator.close()
             results.append({"name": name, "passed": True, "message": ""})
         except Exception as error:  # noqa: BLE001 — падение теста это результат
             message = "".join(traceback.format_exception_only(type(error), error)).strip()
