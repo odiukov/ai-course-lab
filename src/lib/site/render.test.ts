@@ -149,13 +149,15 @@ describe("renderLessonIndexPage", () => {
     expect(html).toContain("готово 1 шагов из 3");
   });
 
-  it("links on to the next lesson", () => {
+  it("does not offer the next lesson before this one is read", () => {
+    // Следующий урок предлагается в конце последнего шага, а не в шапке:
+    // на входе в урок такая кнопка зовёт мимо него.
     const html = renderLessonIndexPage(model(allWritten), {
       basePath: "/base",
       nextLesson: { slug: "lesson-b", title: "Следующий" },
     });
 
-    expect(html).toContain('href="/base/lesson/lesson-b/"');
+    expect(html).not.toContain('href="/base/lesson/lesson-b/"');
   });
 
   it("offers a resume button the script can point at the first unread step", () => {

@@ -190,8 +190,10 @@ ${practice}
 </article>
 <nav class="step-nav">
 ${back}
+<span class="step-nav-forward">
 ${forward}
 ${onward}
+</span>
 </nav>
 </main>
 </div>
@@ -225,17 +227,12 @@ export function renderLessonIndexPage(model: LessonModel, options: RenderOptions
 
   const lessonData = encodeJson({ slug: model.slug, plannedCount: model.plannedCount });
 
-  const onward = options.nextLesson
-    ? `<a class="nav-button" href="${lessonUrl(options.basePath, options.nextLesson.slug)}">Следующий урок: ${escapeHtml(options.nextLesson.title)} →</a>`
-    : "";
-
   const page = `<header class="lesson-header">
 <a class="back" href="${options.basePath}/">← к списку уроков</a>
 <h1>${escapeHtml(model.title)}</h1>
 <p class="lesson-meta"><span data-read-count>${model.plannedCount} шагов</span></p>
 <p class="lesson-actions">
 <a class="nav-button is-primary" data-resume href="#" hidden>Начать урок</a>
-${onward}
 </p>
 ${gap}
 </header>
