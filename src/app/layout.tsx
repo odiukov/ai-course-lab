@@ -1,4 +1,8 @@
 import type { Metadata } from "next";
+// Стили KaTeX подключены здесь, а не в StepBody: компонент, который тянет за
+// собой CSS, нельзя отрендерить вне Next — а сборка статического сайта делает
+// ровно это.
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
