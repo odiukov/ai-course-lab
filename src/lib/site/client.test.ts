@@ -230,6 +230,27 @@ describe("практика", () => {
     expect(value).not.toContain("def dot");
   });
 
+  it("забирает в блок функции обломок без отступа", async () => {
+    // Строка, случайно оставшаяся у левого края, ломала файл навсегда: она
+    // считалась началом следующей функции, оставалась снаружи блока и
+    // переживала любую правку — при том, что в редакторе её не видно.
+    const broken = template.replace(
+      "def magnitude(v):\n    raise NotImplementedError",
+      "def magnitude(v):\n    return math.sqrt(sum(x * x\nfor x in v))",
+    );
+    const window = await openPractice(broken);
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    expect(area.value).toContain("for x in v))");
+
+    area.value = "def magnitude(v):\n    return 3";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    const saved = window.localStorage.getItem(`course-exercise:${panel.slug}`)!;
+    expect(saved).not.toContain("for x in v))");
+    expect(saved).toContain("def dot(a, b):");
+  });
+
   it("возвращает написанный раньше код", async () => {
     // Код живёт в браузере: вернулся через неделю — он на месте.
     const window = await openPractice(template.replace("raise NotImplementedError", "return 1"));
