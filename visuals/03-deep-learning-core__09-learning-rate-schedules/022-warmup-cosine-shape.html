@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Две фазы: warmup + cosine</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --text: #172033;
+      --muted: #536178;
+      --axis: #334155;
+      --grid: #cbd5e1;
+      --warm: #e56a19;
+      --warm-soft: #fff0e5;
+      --cosine: #2563c7;
+      --cosine-soft: #e8f1ff;
+      --shared: #8b4bb7;
+      --shared-soft: #f3eafa;
+      --point: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --text: #eef3fb;
+        --muted: #aebbd0;
+        --axis: #c7d2e3;
+        --grid: #43516a;
+        --warm: #ff9a52;
+        --warm-soft: #3a241b;
+        --cosine: #75a9ff;
+        --cosine-soft: #172b4d;
+        --shared: #d096f0;
+        --shared-soft: #34223f;
+        --point: #111827;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      background: var(--bg);
+    }
+
+    .heading {
+      margin: unset;
+      font-size: 22px;
+      font-weight: bold;
+      line-height: 1.25;
+    }
+
+    .subheading {
+      margin: unset;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      overflow: visible;
+      background: var(--bg);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .guide {
+      stroke: var(--grid);
+      stroke-width: 1.5;
+      fill: none;
+    }
+
+    .boundary {
+      stroke: var(--warm);
+      stroke-width: 1.5;
+      fill: none;
+    }
+
+    .warm-curve {
+      stroke: var(--warm);
+      stroke-width: 5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .cosine-curve {
+      stroke: var(--cosine);
+      stroke-width: 5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .phase-warm {
+      stroke: var(--warm);
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .phase-cosine {
+      stroke: var(--cosine);
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .shared-line {
+      stroke: var(--shared);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .leader {
+      stroke: var(--muted);
+      stroke-width: 1.5;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .point-warm,
+    .point-cosine,
+    .point-shared {
+      stroke-width: 3;
+      fill: var(--point);
+    }
+
+    .point-warm {
+      stroke: var(--warm);
+    }
+
+    .point-cosine {
+      stroke: var(--cosine);
+    }
+
+    .point-shared {
+      stroke: var(--shared);
+    }
+
+    .axis-head {
+      fill: var(--axis);
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .value-label {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .note {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .small-note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .warm-text {
+      fill: var(--warm);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .cosine-text {
+      fill: var(--cosine);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .shared-text {
+      fill: var(--shared);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      margin: unset;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure">
+    <h1 class="heading">Две фазы: warmup + cosine</h1>
+    <p class="subheading">
+      Короткий линейный разгон сменяется долгим плавным затуханием без скачка.
+    </p>
+
+    <svg
+      id="chart"
+      viewBox="0 0 960 390"
+      width="960"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="chart-title chart-description"
+    >
+      <title id="chart-title">Linear warmup и cosine decay</title>
+      <desc id="chart-description">
+        Learning rate линейно растёт от нуля до lr_max за первые пять процентов
+        шагов, после чего непрерывно уменьшается по косинусной кривой до lr_min.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="fallback" class="fallback">
+      Схема показывает короткий линейный подъём от 0 до lr_max за первые 5%
+      шагов и длинную непрерывную косинусную дугу до lr_min.
+    </p>
+  </figure>
+
+  <script>
+    const data = [
+      [0, 0.05, 1, 0.12, 0.56],
+      [1.08, 1.2, -0.34, -0.13, -0.22, -0.31],
+      [-0.18, -0.02, 0.025, 0.1, 0.3, 0.5, 0.68, 0.78, 0.86, 1.08],
+      [1, 2, 64, 0.5, 0.06, 0.018, 0.028, 0.035],
+      [0, 10, -10, 14, -14, 20, -20]
+    ];
+    const origin = { x: 150, y: 286 };
+    const scale = { x: 690, y: -205 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [
+        [zero, warmupEnd, totalEnd, lrMin, sharedLr],
+        [xAxisEnd, yAxisEnd, lowerEdge, axisLabelY, phaseLineY, phaseLabelY],
+        [leftNoteX, leftLabelX, warmMid, peakLabelX, noteX, halfX, noteY,
+          decayLabelY, peakLabelY, rightLabelX],
+        [one, two, samples, half, labelGapY, arrowWidth, arrowHeight, pointSize],
+        [noPad, padRight, padLeft, padDown, padUp, padFarDown, padFarUp]
+      ] = data;
+
+      const svg = document.getElementById("chart");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      const ns = "http://www.w3.org/2000/svg";
+
+      function add(name, attributes, parent = drawing) {
+        const element = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        parent.appendChild(element);
+        return element;
+      }
+
+      function line(x1, y1, x2, y2, className) {
+        return add("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className,
+          "vector-effect": "non-scaling-stroke"
+        });
+      }
+
+      function text(x, y, value, className, anchor, dx, dy) {
+        const element = add("text", {
+          x: sx(x) + dx,
+          y: sy(y) + dy,
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        });
+        element.textContent = value;
+        return element;
+      }
+
+      function point(x, y, className) {
+        return add("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: Math.abs(sx(pointSize) - sx(zero)),
+          class: className,
+          "vector-effect": "non-scaling-stroke"
+        });
+      }
+
+      function polygon(points, className) {
+        return add("polygon", {
+          points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: className
+        });
+      }
+
+      function path(points, className) {
+        const commands = points.map(([x, y], index) => {
+          const command = index === zero ? "M" : "L";
+          return `${command}${sx(x)},${sy(y)}`;
+        }).join(" ");
+        return add("path", {
+          d: commands,
+          class: className,
+          "vector-effect": "non-scaling-stroke"
+        });
+      }
+
+      line(zero, zero, xAxisEnd, zero, "axis");
+      line(zero, zero, zero, yAxisEnd, "axis");
+
+      polygon([
+        [xAxisEnd, zero],
+        [xAxisEnd - arrowHeight, arrowWidth],
+        [xAxisEnd - arrowHeight, zero - arrowWidth]
+      ], "axis-head");
+
+      polygon([
+        [zero, yAxisEnd],
+        [zero - arrowWidth, yAxisEnd - arrowHeight],
+        [arrowWidth, yAxisEnd - arrowHeight]
+      ], "axis-head");
+
+      line(zero, one, warmupEnd, one, "guide");
+      line(zero, lrMin, totalEnd, lrMin, "guide");
+      line(warmupEnd, zero, warmupEnd, one, "boundary");
+
+      const warmupPoints = [
+        [zero, zero],
+        [warmupEnd, one]
+      ];
+      path(warmupPoints, "warm-curve");
+
+      const cosinePoints = [];
+      for (let index = zero; index <= samples; index += one) {
+        const progress = index / samples;
+        const x = warmupEnd + progress * (totalEnd - warmupEnd);
+        const y = lrMin + half * (one - lrMin) *
+          (one + Math.cos(Math.PI * progress));
+        cosinePoints.push([x, y]);
+      }
+      path(cosinePoints, "cosine-curve");
+
+      point(warmupEnd, one, "point-warm");
+      point(totalEnd, lrMin, "point-cosine");
+
+      const sharedWarmX = warmupEnd * sharedLr;
+      const cosineRatio = two * (sharedLr - lrMin) / (one - lrMin) - one;
+      const sharedProgress = Math.acos(cosineRatio) / Math.PI;
+      const sharedCosineX =
+        warmupEnd + sharedProgress * (totalEnd - warmupEnd);
+
+      line(sharedWarmX, sharedLr, sharedCosineX, sharedLr, "shared-line");
+      point(sharedWarmX, sharedLr, "point-shared");
+      point(sharedCosineX, sharedLr, "point-shared");
+
+      line(zero, phaseLineY, warmupEnd, phaseLineY, "phase-warm");
+      line(warmupEnd, phaseLineY, totalEnd, phaseLineY, "phase-cosine");
+      line(zero, phaseLineY - arrowWidth, zero, phaseLineY + arrowWidth,
+        "phase-warm");
+      line(warmupEnd, phaseLineY - arrowWidth, warmupEnd,
+        phaseLineY + arrowWidth, "phase-warm");
+      line(totalEnd, phaseLineY - arrowWidth, totalEnd,
+        phaseLineY + arrowWidth, "phase-cosine");
+
+      line(leftLabelX, decayLabelY, warmMid, sharedLr + labelGapY, "leader");
+      text(leftLabelX, decayLabelY, "короткий linear warmup",
+        "warm-text", "end", padLeft, noPad);
+      text(leftLabelX, decayLabelY - labelGapY, "быстрый подъём",
+        "small-note", "end", padLeft, noPad);
+
+      line(noteX, noteY, halfX, sharedLr + labelGapY, "leader");
+      text(noteX, noteY, "долгий cosine decay",
+        "cosine-text", "middle", noPad, padUp);
+      text(noteX, noteY - labelGapY, "плавный спуск",
+        "small-note", "middle", noPad, padUp);
+
+      line(peakLabelX, peakLabelY, warmupEnd, one, "leader");
+      text(peakLabelX, peakLabelY, "lr_max",
+        "value-label", "start", padRight, padUp);
+      text(peakLabelX, peakLabelY - labelGapY, "смена фазы без скачка",
+        "small-note", "start", padRight, padUp);
+
+      text(sharedWarmX, sharedLr, "разгон",
+        "shared-text", "start", padRight, padFarDown);
+      text(sharedCosineX, sharedLr, "уточнение",
+        "shared-text", "start", padRight, padFarUp);
+
+      text(leftNoteX, sharedLr, "одинаковый LR",
+        "shared-text", "start", noPad, padUp);
+
+      text(leftLabelX, one, "lr_max",
+        "value-label", "end", padLeft, noPad);
+      text(leftLabelX, lrMin, "lr_min",
+        "value-label", "end", padLeft, noPad);
+      text(leftLabelX, zero, "0",
+        "axis-label", "end", padLeft, padDown);
+
+      text(warmupEnd, axisLabelY, "первые 5% шагов",
+        "warm-text", "middle", noPad, padDown);
+      text(xAxisEnd, axisLabelY, "шаги обучения",
+        "axis-label", "end", noPad, padDown);
+      text(leftLabelX, yAxisEnd, "learning rate",
+        "axis-label", "end", padLeft, noPad);
+
+      text(zero, phaseLabelY, "LINEAR WARMUP",
+        "warm-text", "start", noPad, noPad);
+      text(rightLabelX, phaseLabelY, "COSINE DECAY",
+        "cosine-text", "end", noPad, noPad);
+
+      text(halfX, lowerEdge,
+        "одно значение LR встречается дважды: сначала разгон, затем уточнение",
+        "shared-text", "middle", noPad, noPad);
+
+      fallback.hidden = true;
+    } catch (error) {
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      if (drawing) drawing.replaceChildren();
+      if (fallback) {
+        fallback.hidden = false;
+        fallback.textContent =
+          "Схема должна была показать линейный подъём от 0 до lr_max за первые 5% шагов, а затем непрерывную косинусную дугу до lr_min.";
+      }
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

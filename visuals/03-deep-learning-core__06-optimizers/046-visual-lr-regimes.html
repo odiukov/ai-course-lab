@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Три режима learning rate</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --surface: #ffffff;
+      --panel: #f4f6fa;
+      --ink: #172033;
+      --muted: #667085;
+      --axis: #7b8496;
+      --grid: #dce1e9;
+      --high: #d83a52;
+      --high-soft: #fff0f2;
+      --right: #16845b;
+      --right-soft: #eaf8f2;
+      --low: #b77905;
+      --low-soft: #fff7df;
+      --border: #cdd3dd;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --surface: #171c26;
+        --panel: #1e2531;
+        --ink: #f1f4f9;
+        --muted: #a9b1c1;
+        --axis: #9aa5b8;
+        --grid: #343d4d;
+        --high: #ff667d;
+        --high-soft: #351d25;
+        --right: #4ed6a0;
+        --right-soft: #18352c;
+        --low: #f0b94c;
+        --low-soft: #352c17;
+        --border: #3c4657;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+
+    .figure-title {
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+      margin: unset;
+    }
+
+    .figure-subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+      margin: unset;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 390px;
+      background: var(--surface);
+      font-family: inherit;
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--border);
+      stroke-width: 1px;
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 1px;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 1.5px;
+      stroke-linecap: round;
+    }
+
+    .curve {
+      fill: none;
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .curve-high,
+    .mark-high {
+      stroke: var(--high);
+    }
+
+    .curve-right,
+    .mark-right {
+      stroke: var(--right);
+    }
+
+    .curve-low,
+    .mark-low {
+      stroke: var(--low);
+    }
+
+    .start-dot {
+      fill: var(--surface);
+      stroke: var(--ink);
+      stroke-width: 2px;
+    }
+
+    .end-dot {
+      fill: var(--surface);
+      stroke-width: 3px;
+    }
+
+    .panel-title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .threshold {
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .threshold-high,
+    .label-high {
+      fill: var(--high);
+    }
+
+    .threshold-right,
+    .label-right {
+      fill: var(--right);
+    }
+
+    .threshold-low,
+    .label-low {
+      fill: var(--low);
+    }
+
+    .axis-label,
+    .start-label {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .result-label {
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .note {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .note-muted {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .divider {
+      stroke: var(--border);
+      stroke-width: 1px;
+    }
+
+    .fallback {
+      color: var(--ink);
+      font-size: 14px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="figure-title figure-subtitle">
+    <figcaption>
+      <h1 class="figure-title" id="figure-title">Три режима learning rate</h1>
+      <p class="figure-subtitle" id="figure-subtitle">
+        Одинаковые модели, разные размеры шага
+      </p>
+    </figcaption>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 390"
+      width="1200"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Три графика loss: расходящееся обучение, устойчивое падение и почти плоское снижение"
+    >
+      <g id="graph"></g>
+    </svg>
+
+    <p id="fallback" class="fallback">
+      Схема должна была показать три кривые loss: взрыв и NaN при слишком
+      большом learning rate, устойчивое падение при подходящем и почти
+      плоское снижение при слишком маленьком.
+    </p>
+  </figure>
+
+  <script>
+    const DATA = [
+      {
+        zero: 0,
+        panelY: [0, 29],
+        chartY: [7, 25],
+        gridY: [12, 18, 24],
+        dividerY: 31.5,
+        footerY: 34,
+        footerDetailY: 36.5,
+        radius: 0.42,
+        cross: 0.48
+      },
+      {
+        tone: "high",
+        box: [2, 36],
+        chartX: [5, 33],
+        title: {
+          text: "Слишком большой",
+          at: [19, 2.2],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        threshold: {
+          text: "lr > 0.01",
+          at: [19, 4.5],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        points: [
+          [5, 12],
+          [8, 13],
+          [11, 10],
+          [14, 16],
+          [17, 8.8],
+          [20, 19],
+          [23, 8.1],
+          [26, 22],
+          [29, 7.7],
+          [32, 7.4]
+        ],
+        start: {
+          text: "старт",
+          at: [5, 12],
+          dx: 8,
+          dy: -9,
+          anchor: "start"
+        },
+        result: {
+          text: "рост loss → NaN",
+          at: [32, 7.4],
+          dx: -7,
+          dy: 17,
+          anchor: "end"
+        },
+        summary: {
+          text: "Обучение расходится",
+          at: [19, 27.4],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        marker: "cross"
+      },
+      {
+        tone: "right",
+        box: [41, 75],
+        chartX: [44, 72],
+        title: {
+          text: "Подходящий",
+          at: [58, 2.2],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        threshold: {
+          text: "шаг заметный и устойчивый",
+          at: [58, 4.5],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        points: [
+          [44, 12],
+          [47, 13.2],
+          [50, 14.7],
+          [53, 16.4],
+          [56, 18.1],
+          [59, 20],
+          [62, 21.4],
+          [65, 22.5],
+          [68, 23.4],
+          [71, 24]
+        ],
+        start: {
+          text: "старт",
+          at: [44, 12],
+          dx: 8,
+          dy: -9,
+          anchor: "start"
+        },
+        result: {
+          text: "хороший минимум",
+          at: [71, 24],
+          dx: -7,
+          dy: -10,
+          anchor: "end"
+        },
+        summary: {
+          text: "Loss уверенно падает",
+          at: [58, 27.4],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        marker: "dot"
+      },
+      {
+        tone: "low",
+        box: [80, 114],
+        chartX: [83, 111],
+        title: {
+          text: "Слишком маленький",
+          at: [97, 2.2],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        threshold: {
+          text: "lr < 0.00001",
+          at: [97, 4.5],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        points: [
+          [83, 12],
+          [86, 12.08],
+          [89, 12.16],
+          [92, 12.26],
+          [95, 12.37],
+          [98, 12.49],
+          [101, 12.62],
+          [104, 12.76],
+          [107, 12.91],
+          [110, 13.07]
+        ],
+        start: {
+          text: "старт",
+          at: [83, 12],
+          dx: 8,
+          dy: -9,
+          anchor: "start"
+        },
+        result: {
+          text: "почти без изменений",
+          at: [110, 13.07],
+          dx: -7,
+          dy: 19,
+          anchor: "end"
+        },
+        summary: {
+          text: "Обучение почти стоит",
+          at: [97, 27.4],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        marker: "dot"
+      }
+    ];
+
+    const origin = { x: 40, y: 10 };
+    const scale = { x: 10, y: 10 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [layout, ...panels] = DATA;
+      const graph = document.getElementById("graph");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, parent = graph) => {
+        const element = document.createElementNS(namespace, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        parent.appendChild(element);
+        return element;
+      };
+
+      const line = (x1, y1, x2, y2, className, parent = graph) =>
+        make(
+          "line",
+          {
+            x1: sx(x1),
+            y1: sy(y1),
+            x2: sx(x2),
+            y2: sy(y2),
+            class: className
+          },
+          parent
+        );
+
+      const label = (spec, className, parent = graph) => {
+        const text = make(
+          "text",
+          {
+            x: sx(spec.at[layout.zero]),
+            y: sy(spec.at.at(-1)),
+            dx: spec.dx,
+            dy: spec.dy,
+            "text-anchor": spec.anchor,
+            class: className
+          },
+          parent
+        );
+        text.textContent = spec.text;
+        return text;
+      };
+
+      const curvePath = points => {
+        const [first, ...rest] = points;
+        return rest.reduce(
+          (path, point) =>
+            `${path} L ${sx(point[layout.zero])} ${sy(point.at(-1))}`,
+          `M ${sx(first[layout.zero])} ${sy(first.at(-1))}`
+        );
+      };
+
+      panels.forEach(panel => {
+        const group = make("g", {
+          "aria-label": `${panel.title.text}: ${panel.summary.text}`
+        });
+
+        make(
+          "rect",
+          {
+            x: sx(panel.box[layout.zero]),
+            y: sy(layout.panelY[layout.zero]),
+            width: sx(panel.box.at(-1)) - sx(panel.box[layout.zero]),
+            height: sy(layout.panelY.at(-1)) - sy(layout.panelY[layout.zero]),
+            class: "panel"
+          },
+          group
+        );
+
+        layout.gridY.forEach(y => {
+          line(
+            panel.chartX[layout.zero],
+            y,
+            panel.chartX.at(-1),
+            y,
+            "grid",
+            group
+          );
+        });
+
+        line(
+          panel.chartX[layout.zero],
+          layout.chartY[layout.zero],
+          panel.chartX[layout.zero],
+          layout.chartY.at(-1),
+          "axis",
+          group
+        );
+
+        line(
+          panel.chartX[layout.zero],
+          layout.chartY.at(-1),
+          panel.chartX.at(-1),
+          layout.chartY.at(-1),
+          "axis",
+          group
+        );
+
+        label(panel.title, "panel-title", group);
+        label(
+          panel.threshold,
+          `threshold threshold-${panel.tone}`,
+          group
+        );
+
+        const lossLabel = {
+          text: "loss",
+          at: [panel.chartX[layout.zero], layout.chartY[layout.zero]],
+          dx: -8,
+          dy: -7,
+          anchor: "start"
+        };
+
+        const stepsLabel = {
+          text: "шаги",
+          at: [panel.chartX.at(-1), layout.chartY.at(-1)],
+          dx: 0,
+          dy: 18,
+          anchor: "end"
+        };
+
+        label(lossLabel, "axis-label", group);
+        label(stepsLabel, "axis-label", group);
+
+        make(
+          "path",
+          {
+            d: curvePath(panel.points),
+            class: `curve curve-${panel.tone}`
+          },
+          group
+        );
+
+        const [startPoint] = panel.points;
+        const endPoint = panel.points.at(-1);
+        const radius = sx(layout.radius) - sx(layout.zero);
+
+        make(
+          "circle",
+          {
+            cx: sx(startPoint[layout.zero]),
+            cy: sy(startPoint.at(-1)),
+            r: radius,
+            class: "start-dot"
+          },
+          group
+        );
+
+        label(panel.start, "start-label", group);
+
+        if (panel.marker === "cross") {
+          line(
+            endPoint[layout.zero] - layout.cross,
+            endPoint.at(-1) - layout.cross,
+            endPoint[layout.zero] + layout.cross,
+            endPoint.at(-1) + layout.cross,
+            `mark-${panel.tone}`,
+            group
+          );
+          line(
+            endPoint[layout.zero] - layout.cross,
+            endPoint.at(-1) + layout.cross,
+            endPoint[layout.zero] + layout.cross,
+            endPoint.at(-1) - layout.cross,
+            `mark-${panel.tone}`,
+            group
+          );
+        } else {
+          make(
+            "circle",
+            {
+              cx: sx(endPoint[layout.zero]),
+              cy: sy(endPoint.at(-1)),
+              r: radius,
+              class: `end-dot mark-${panel.tone}`
+            },
+            group
+          );
+        }
+
+        label(
+          panel.result,
+          `result-label label-${panel.tone}`,
+          group
+        );
+        label(
+          panel.summary,
+          `result-label label-${panel.tone}`,
+          group
+        );
+      });
+
+      line(
+        panels.at(layout.zero).box[layout.zero],
+        layout.dividerY,
+        panels.at(-1).box.at(-1),
+        layout.dividerY,
+        "divider"
+      );
+
+      label(
+        {
+          text: "Одна модель · одна точка старта · одинаковое число шагов",
+          at: [
+            (panels.at(layout.zero).box[layout.zero] +
+              panels.at(-1).box.at(-1)) /
+              panels.length,
+            layout.footerY
+          ],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        "note"
+      );
+
+      label(
+        {
+          text: "Сравнивай поведение loss, а не сами числа learning rate",
+          at: [
+            (panels.at(layout.zero).box[layout.zero] +
+              panels.at(-1).box.at(-1)) /
+              panels.length,
+            layout.footerDetailY
+          ],
+          dx: 0,
+          dy: 0,
+          anchor: "middle"
+        },
+        "note-muted"
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      const graph = document.getElementById("graph");
+      const fallback = document.getElementById("fallback");
+      graph.replaceChildren();
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

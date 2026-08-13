@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Расходимость, ползание и колебания</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5b6475;
+      --border: #cbd3df;
+      --contour: #9aa8ba;
+      --level-one: #e8edf4;
+      --level-two: #dce5ef;
+      --level-three: #ceddea;
+      --level-four: #bfd5e4;
+      --level-five: #aad0df;
+      --minimum: #18364b;
+      --diverge: #c43d45;
+      --creep: #9a6b12;
+      --oscillate: #176b57;
+      --point-stroke: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10151d;
+        --panel: #171e28;
+        --ink: #edf2f8;
+        --muted: #bac4d2;
+        --border: #3d4858;
+        --contour: #64758a;
+        --level-one: #202a36;
+        --level-two: #243341;
+        --level-three: #283d4c;
+        --level-four: #2c4857;
+        --level-five: #305766;
+        --minimum: #e9f7ff;
+        --diverge: #ff7d84;
+        --creep: #f2bd55;
+        --oscillate: #62d6b4;
+        --point-stroke: #171e28;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      margin: auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: unset;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    header p {
+      margin: unset;
+      padding-top: 4px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    .contour {
+      stroke: var(--contour);
+      stroke-width: 2px;
+    }
+
+    .level-one { fill: var(--level-one); }
+    .level-two { fill: var(--level-two); }
+    .level-three { fill: var(--level-three); }
+    .level-four { fill: var(--level-four); }
+    .level-five { fill: var(--level-five); }
+
+    .trajectory {
+      fill: none;
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .diverge-stroke { stroke: var(--diverge); }
+    .creep-stroke { stroke: var(--creep); }
+    .oscillate-stroke { stroke: var(--oscillate); }
+
+    .diverge-fill { fill: var(--diverge); }
+    .creep-fill { fill: var(--creep); }
+    .oscillate-fill { fill: var(--oscillate); }
+
+    .step-point {
+      stroke: var(--point-stroke);
+      stroke-width: 2px;
+    }
+
+    .minimum-ring {
+      fill: var(--panel);
+      stroke: var(--minimum);
+      stroke-width: 3px;
+    }
+
+    .minimum-cross {
+      stroke: var(--minimum);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .start-ring {
+      fill: var(--panel);
+      stroke: var(--ink);
+      stroke-width: 3px;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: 650;
+    }
+
+    .surface-label {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .legend-text {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .legend-line {
+      stroke-width: 5px;
+      stroke-linecap: round;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 18px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 17px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title diagram-subtitle">
+    <header>
+      <h1 id="diagram-title">Одна поверхность — три неудачных режима шага</h1>
+      <p id="diagram-subtitle">Вид сверху: чем ближе к центру чаши, тем меньше ошибка</p>
+    </header>
+
+    <svg id="diagram" viewBox="0 0 1200 430"
+         width="1200" height="430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-label="Три траектории из общего старта: расходимость, ползание и колебания около минимума">
+      <g id="scene"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать три траектории на одной поверхности:
+      lr=1.0 перелетает минимум и удаляется, lr=0.0001 почти стоит даже за
+      100 эпох, а постоянный lr=0.01 прыгает через дно из стороны в сторону.
+    </p>
+  </figure>
+
+  <script>
+    "use strict";
+
+    const data = {
+      zero: 0,
+      canvas: { width: 1200, height: 430 },
+      origin: { x: 600, y: 190 },
+      scale: { x: 100, y: 50 },
+
+      surfaceCenter: { x: 0, y: 0 },
+      contours: [
+        { rx: 5, ry: 3.1, className: "level-one" },
+        { rx: 4.05, ry: 2.45, className: "level-two" },
+        { rx: 3.1, ry: 1.82, className: "level-three" },
+        { rx: 2.12, ry: 1.18, className: "level-four" },
+        { rx: 1.12, ry: 0.61, className: "level-five" }
+      ],
+
+      start: { x: -4.1, y: 2.2 },
+      minimum: { x: 0, y: 0 },
+
+      paths: [
+        {
+          kind: "diverge",
+          strokeClass: "diverge-stroke",
+          fillClass: "diverge-fill",
+          points: [
+            { x: -4.1, y: 2.2 },
+            { x: 2.25, y: -0.8 },
+            { x: -3.05, y: 1.2 },
+            { x: 3.45, y: 1.65 },
+            { x: -4.6, y: 2.65 },
+            { x: 4.65, y: 2.95 }
+          ],
+          arrow: [
+            { x: 4.65, y: 2.95 },
+            { x: 4.32, y: 2.66 },
+            { x: 4.22, y: 3.08 }
+          ]
+        },
+        {
+          kind: "oscillate",
+          strokeClass: "oscillate-stroke",
+          fillClass: "oscillate-fill",
+          points: [
+            { x: -4.1, y: 2.2 },
+            { x: -2.9, y: 1.4 },
+            { x: -1.52, y: 0.62 },
+            { x: 0.82, y: -0.18 },
+            { x: -0.72, y: 0.14 },
+            { x: 0.68, y: -0.13 },
+            { x: -0.64, y: 0.12 },
+            { x: 0.61, y: -0.11 }
+          ],
+          arrow: [
+            { x: 0.61, y: -0.11 },
+            { x: 0.32, y: -0.24 },
+            { x: 0.35, y: 0.04 }
+          ]
+        },
+        {
+          kind: "creep",
+          strokeClass: "creep-stroke",
+          fillClass: "creep-fill",
+          points: [
+            { x: -4.1, y: 2.2 },
+            { x: -4.05, y: 2.17 },
+            { x: -4, y: 2.14 },
+            { x: -3.95, y: 2.11 },
+            { x: -3.9, y: 2.08 },
+            { x: -3.85, y: 2.05 },
+            { x: -3.8, y: 2.02 },
+            { x: -3.75, y: 1.99 },
+            { x: -3.7, y: 1.96 }
+          ],
+          arrow: [
+            { x: -3.7, y: 1.96 },
+            { x: -3.92, y: 2.13 },
+            { x: -4, y: 1.9 }
+          ]
+        }
+      ],
+
+      pointRadius: 0.065,
+      startRadius: 0.105,
+      minimumRadius: 0.12,
+
+      minimumMark: {
+        horizontal: [
+          { x: -0.18, y: 0 },
+          { x: 0.18, y: 0 }
+        ],
+        vertical: [
+          { x: 0, y: -0.36 },
+          { x: 0, y: 0.36 }
+        ]
+      },
+
+      labels: [
+        {
+          text: "поверхность ошибки",
+          anchor: { x: -5.12, y: 3.14 },
+          dx: 0,
+          dy: -5,
+          textAnchor: "start",
+          className: "surface-label"
+        },
+        {
+          text: "общий старт",
+          anchor: { x: -4.1, y: 2.2 },
+          dx: -14,
+          dy: -15,
+          textAnchor: "end",
+          className: "label"
+        },
+        {
+          text: "минимум",
+          anchor: { x: 0, y: 0 },
+          dx: 16,
+          dy: 27,
+          textAnchor: "start",
+          className: "label"
+        }
+      ],
+
+      legend: [
+        {
+          y: -3.48,
+          text: "lr=1.0 — расходимость: перелёты становятся шире",
+          strokeClass: "diverge-stroke",
+          fillClass: "diverge-fill"
+        },
+        {
+          y: -3.88,
+          text: "lr=0.0001 — ползание: за 100 эпох почти нет пути",
+          strokeClass: "creep-stroke",
+          fillClass: "creep-fill"
+        },
+        {
+          y: -4.28,
+          text: "постоянный lr=0.01 — колебания вокруг дна",
+          strokeClass: "oscillate-stroke",
+          fillClass: "oscillate-fill"
+        }
+      ],
+
+      legendGeometry: {
+        lineStartX: -4.72,
+        lineEndX: -4.18,
+        dotX: -4.45,
+        textX: -4.02,
+        textDy: 6,
+        dotRadius: 0.065
+      }
+    };
+
+    const origin = Object.freeze(data.origin);
+    const scale = Object.freeze(data.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svgNamespace = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+      const diagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      const make = (name, attributes, text) => {
+        const node = document.createElementNS(svgNamespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (text !== undefined) {
+          node.textContent = text;
+        }
+        return node;
+      };
+
+      const mappedPoints = points =>
+        points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+      const radiusFromX = radius =>
+        Math.abs(sx(radius) - sx(data.zero));
+
+      const radiusFromY = radius =>
+        Math.abs(sy(radius) - sy(data.zero));
+
+      const surfaceGroup = make("g", {
+        "aria-label": "Линии уровня одной поверхности ошибки"
+      });
+
+      data.contours.forEach(contour => {
+        surfaceGroup.appendChild(make("ellipse", {
+          cx: sx(data.surfaceCenter.x),
+          cy: sy(data.surfaceCenter.y),
+          rx: radiusFromX(contour.rx),
+          ry: radiusFromY(contour.ry),
+          class: `contour ${contour.className}`
+        }));
+      });
+
+      scene.appendChild(surfaceGroup);
+
+      const pathGroup = make("g", {
+        "aria-label": "Траектории обновлений"
+      });
+
+      data.paths.forEach(path => {
+        const group = make("g", {
+          "data-trajectory": path.kind
+        });
+
+        group.appendChild(make("polyline", {
+          points: mappedPoints(path.points),
+          class: `trajectory ${path.strokeClass}`
+        }));
+
+        path.points.forEach(point => {
+          group.appendChild(make("circle", {
+            cx: sx(point.x),
+            cy: sy(point.y),
+            r: radiusFromX(data.pointRadius),
+            class: `step-point ${path.fillClass}`
+          }));
+        });
+
+        group.appendChild(make("polygon", {
+          points: mappedPoints(path.arrow),
+          class: path.fillClass
+        }));
+
+        pathGroup.appendChild(group);
+      });
+
+      scene.appendChild(pathGroup);
+
+      const minimumGroup = make("g", {
+        "aria-label": "Минимум поверхности"
+      });
+
+      minimumGroup.appendChild(make("circle", {
+        cx: sx(data.minimum.x),
+        cy: sy(data.minimum.y),
+        r: radiusFromX(data.minimumRadius),
+        class: "minimum-ring"
+      }));
+
+      minimumGroup.appendChild(make("line", {
+        x1: sx(data.minimumMark.horizontal[Symbol.iterator]().next().value.x),
+        y1: sy(data.minimumMark.horizontal[Symbol.iterator]().next().value.y),
+        x2: sx(data.minimumMark.horizontal.at(-1).x),
+        y2: sy(data.minimumMark.horizontal.at(-1).y),
+        class: "minimum-cross"
+      }));
+
+      minimumGroup.appendChild(make("line", {
+        x1: sx(data.minimumMark.vertical[Symbol.iterator]().next().value.x),
+        y1: sy(data.minimumMark.vertical[Symbol.iterator]().next().value.y),
+        x2: sx(data.minimumMark.vertical.at(-1).x),
+        y2: sy(data.minimumMark.vertical.at(-1).y),
+        class: "minimum-cross"
+      }));
+
+      scene.appendChild(minimumGroup);
+
+      scene.appendChild(make("circle", {
+        cx: sx(data.start.x),
+        cy: sy(data.start.y),
+        r: radiusFromX(data.startRadius),
+        class: "start-ring"
+      }));
+
+      const labelGroup = make("g", {
+        "aria-label": "Подписи ключевых точек"
+      });
+
+      data.labels.forEach(label => {
+        labelGroup.appendChild(make("text", {
+          x: sx(label.anchor.x) + label.dx,
+          y: sy(label.anchor.y) + label.dy,
+          "text-anchor": label.textAnchor,
+          class: label.className
+        }, label.text));
+      });
+
+      scene.appendChild(labelGroup);
+
+      const legendGroup = make("g", {
+        "aria-label": "Расшифровка трёх траекторий"
+      });
+
+      data.legend.forEach(item => {
+        legendGroup.appendChild(make("line", {
+          x1: sx(data.legendGeometry.lineStartX),
+          y1: sy(item.y),
+          x2: sx(data.legendGeometry.lineEndX),
+          y2: sy(item.y),
+          class: `legend-line ${item.strokeClass}`
+        }));
+
+        legendGroup.appendChild(make("circle", {
+          cx: sx(data.legendGeometry.dotX),
+          cy: sy(item.y),
+          r: radiusFromX(data.legendGeometry.dotRadius),
+          class: `step-point ${item.fillClass}`
+        }));
+
+        legendGroup.appendChild(make("text", {
+          x: sx(data.legendGeometry.textX),
+          y: sy(item.y) + data.legendGeometry.textDy,
+          "text-anchor": "start",
+          class: "legend-text"
+        }, item.text));
+      });
+
+      scene.appendChild(legendGroup);
+      fallback.hidden = true;
+      diagram.hidden = false;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

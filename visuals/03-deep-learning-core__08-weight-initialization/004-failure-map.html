@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Три неудачных старта глубокой сети</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --panel: whitesmoke;
+    --panel-alt: aliceblue;
+    --ink: midnightblue;
+    --muted: slategray;
+    --guide: lightsteelblue;
+    --border: silver;
+    --zero-a: steelblue;
+    --zero-b: mediumseagreen;
+    --zero-c: darkorange;
+    --small-a: royalblue;
+    --small-b: mediumseagreen;
+    --small-c: darkorange;
+    --large-a: crimson;
+    --large-b: darkorange;
+    --large-c: firebrick;
+    --danger: darkred;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --panel: darkslategray;
+      --panel-alt: rgb(25, 45, 66);
+      --ink: white;
+      --muted: lightsteelblue;
+      --guide: slategray;
+      --border: lightslategray;
+      --zero-a: lightskyblue;
+      --zero-b: aquamarine;
+      --zero-c: moccasin;
+      --small-a: lightskyblue;
+      --small-b: aquamarine;
+      --small-c: moccasin;
+      --large-a: lightcoral;
+      --large-b: orange;
+      --large-c: salmon;
+      --danger: mistyrose;
+    }
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+
+  .figure {
+    box-sizing: border-box;
+    width: 100%;
+    max-height: 520px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: var(--page);
+  }
+
+  h2 {
+    font-size: 20px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--page);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .panel-title {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .panel-subtitle,
+  .layer-label,
+  .legend {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .annotation {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .danger-label {
+    fill: var(--danger);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1px;
+  }
+
+  .panel.alt {
+    fill: var(--panel-alt);
+  }
+
+  .guide {
+    stroke: var(--guide);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .baseline {
+    stroke: var(--muted);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .trace,
+  .node,
+  .connector {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .zero-a {
+    stroke: var(--zero-a);
+    stroke-width: 8px;
+  }
+
+  .zero-b {
+    stroke: var(--zero-b);
+    stroke-width: 5px;
+  }
+
+  .zero-c {
+    stroke: var(--zero-c);
+    stroke-width: 2px;
+  }
+
+  .small-a {
+    stroke: var(--small-a);
+    stroke-width: 3px;
+  }
+
+  .small-b {
+    stroke: var(--small-b);
+    stroke-width: 3px;
+  }
+
+  .small-c {
+    stroke: var(--small-c);
+    stroke-width: 3px;
+  }
+
+  .large-a {
+    stroke: var(--large-a);
+    stroke-width: 3px;
+  }
+
+  .large-b {
+    stroke: var(--large-b);
+    stroke-width: 3px;
+  }
+
+  .large-c {
+    stroke: var(--large-c);
+    stroke-width: 3px;
+  }
+
+  .node {
+    fill: var(--page);
+  }
+
+  .connector {
+    stroke: var(--danger);
+    stroke-width: 2px;
+  }
+
+  .fallback {
+    padding: 12px;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h2>Три неудачных старта глубокой сети</h2>
+  <div id="diagram-host">
+    <svg id="diagram" viewBox="0 0 960 420" width="960" height="420"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <title id="diagram-title">Три цепочки глубокой сети по 20 слоёв</title>
+      <desc id="diagram-description">Нулевые веса сохраняют одинаковые нейроны, маленькие веса гасят сигнал к десятому слою, большие веса приводят к переполнению к двадцатому слою.</desc>
+    </svg>
+    <noscript>
+      <p class="fallback">Схема должна показать три цепочки по 20 слоёв: одинаковые нейроны при нулевых весах, исчезновение сигнала к слою 10 при маленьких весах и переполнение к слою 20 при больших весах.</p>
+    </noscript>
+  </div>
+</main>
+
+<script>
+(() => {
+  const diagramData = Object.freeze({
+    constants: [0, 1, 2, 3],
+    bounds: [18, 942],
+    layers: [
+      210, 244, 278, 312, 346, 380, 414, 448, 482, 516,
+      550, 584, 618, 652, 686, 720, 754, 788, 822, 856
+    ],
+    layerLabels: [
+      {index: 0, text: "слой 1", x: 210, y: 24, dx: 0, dy: 0},
+      {index: 9, text: "слой 10", x: 516, y: 24, dx: 0, dy: 0},
+      {index: 19, text: "слой 20", x: 856, y: 24, dx: 0, dy: 0}
+    ],
+    guide: {top: 34, bottom: 391},
+    panels: [
+      {
+        x: 18, y: 43, width: 924, height: 102, alt: false,
+        title: {text: "НУЛЕВЫЕ ВЕСА", x: 32, y: 79, dx: 0, dy: 0},
+        subtitle: {text: "одинаковые нейроны", x: 32, y: 104, dx: 0, dy: 0},
+        baseline: 101,
+        note: {text: "все следы совпали", x: 856, y: 70, dx: 0, dy: 0}
+      },
+      {
+        x: 18, y: 153, width: 924, height: 111, alt: true,
+        title: {text: "МАЛЕНЬКИЕ ВЕСА", x: 32, y: 190, dx: 0, dy: 0},
+        subtitle: {text: "сигнал затухает", x: 32, y: 215, dx: 0, dy: 0},
+        baseline: 211,
+        note: {text: "к слою 10: почти 0", x: 516, y: 174, dx: 0, dy: 0}
+      },
+      {
+        x: 18, y: 272, width: 924, height: 119, alt: false,
+        title: {text: "БОЛЬШИЕ ВЕСА", x: 32, y: 309, dx: 0, dy: 0},
+        subtitle: {text: "сигнал взрывается", x: 32, y: 334, dx: 0, dy: 0},
+        baseline: 333,
+        note: {text: "к слою 20: ∞", x: 856, y: 292, dx: 0, dy: 0}
+      }
+    ],
+    zero: {
+      values: [
+        101, 101, 101, 101, 101, 101, 101, 101, 101, 101,
+        101, 101, 101, 101, 101, 101, 101, 101, 101, 101
+      ],
+      traces: [
+        {className: "zero-a", radius: 8},
+        {className: "zero-b", radius: 5},
+        {className: "zero-c", radius: 2}
+      ]
+    },
+    small: {
+      traces: [
+        {
+          className: "small-a",
+          values: [
+            190, 195, 199, 202, 205, 207, 208, 209, 210, 211,
+            211, 211, 211, 211, 211, 211, 211, 211, 211, 211
+          ]
+        },
+        {
+          className: "small-b",
+          values: [
+            211, 211, 211, 211, 211, 211, 211, 211, 211, 211,
+            211, 211, 211, 211, 211, 211, 211, 211, 211, 211
+          ]
+        },
+        {
+          className: "small-c",
+          values: [
+            232, 227, 223, 220, 217, 215, 214, 213, 212, 211,
+            211, 211, 211, 211, 211, 211, 211, 211, 211, 211
+          ]
+        }
+      ],
+      radius: 3
+    },
+    large: {
+      traces: [
+        {
+          className: "large-a",
+          values: [
+            331, 329, 326, 322, 318, 313, 307, 301, 294, 286,
+            278, 270, 260, 249, 237, 224, 210, 195, 179, 162
+          ]
+        },
+        {
+          className: "large-b",
+          values: [
+            333, 333, 333, 333, 333, 333, 333, 333, 333, 333,
+            333, 333, 333, 333, 333, 333, 333, 333, 333, 333
+          ]
+        },
+        {
+          className: "large-c",
+          values: [
+            335, 337, 340, 344, 348, 353, 359, 365, 372, 380,
+            388, 396, 406, 417, 429, 442, 456, 471, 487, 504
+          ]
+        }
+      ],
+      visibleBottom: 382,
+      radius: 3,
+      overflowBox: {x: 847, y: 279, width: 18, height: 107},
+      connector: {x1: 856, y1: 282, x2: 856, y2: 376}
+    },
+    legend: {
+      text: "Один вход · 20 слоёв · меняется только начальный масштаб весов",
+      x: 480, y: 409, dx: 0, dy: 0
+    }
+  });
+
+  const origin = Object.freeze({x: 0, y: 0});
+  const scale = 1;
+
+  const sx = x => origin.x + x * scale;
+  const sy = y => origin.y + y * scale;
+
+  try {
+    const svg = document.getElementById("diagram");
+    const host = document.getElementById("diagram-host");
+    const NS = "http://www.w3.org/2000/svg";
+    const C = diagramData.constants;
+    const ZERO = C[0];
+    const ONE = C[1];
+
+    const add = (tag, attributes, textValue) => {
+      const element = document.createElementNS(NS, tag);
+      Object.entries(attributes).forEach(([name, value]) => {
+        element.setAttribute(name, String(value));
+      });
+      if (textValue !== undefined) {
+        element.textContent = textValue;
+      }
+      svg.appendChild(element);
+      return element;
+    };
+
+    const addText = (item, className, anchor) => add("text", {
+      x: sx(item.x) + item.dx,
+      y: sy(item.y) + item.dy,
+      class: className,
+      "text-anchor": anchor
+    }, item.text);
+
+    const pathFrom = values => values.map((value, index) => {
+      const command = index === ZERO ? "M" : "L";
+      return `${command} ${sx(diagramData.layers[index])} ${sy(value)}`;
+    }).join(" ");
+
+    diagramData.panels.forEach(panel => {
+      add("rect", {
+        x: sx(panel.x),
+        y: sy(panel.y),
+        width: sx(panel.x + panel.width) - sx(panel.x),
+        height: sy(panel.y + panel.height) - sy(panel.y),
+        class: panel.alt ? "panel alt" : "panel"
+      });
+    });
+
+    diagramData.layerLabels.forEach(label => {
+      const layerX = diagramData.layers[label.index];
+      add("line", {
+        x1: sx(layerX),
+        y1: sy(diagramData.guide.top),
+        x2: sx(layerX),
+        y2: sy(diagramData.guide.bottom),
+        class: "guide"
+      });
+      addText(label, "layer-label", "middle");
+    });
+
+    diagramData.panels.forEach(panel => {
+      add("line", {
+        x1: sx(diagramData.layers[ZERO]),
+        y1: sy(panel.baseline),
+        x2: sx(diagramData.layers[diagramData.layers.length - ONE]),
+        y2: sy(panel.baseline),
+        class: "baseline"
+      });
+      addText(panel.title, "panel-title", "start");
+      addText(panel.subtitle, "panel-subtitle", "start");
+      addText(
+        panel.note,
+        panel === diagramData.panels[ONE] ? "annotation" : "annotation",
+        "end"
+      );
+    });
+
+    diagramData.zero.traces.forEach(trace => {
+      add("path", {
+        d: pathFrom(diagramData.zero.values),
+        class: `trace ${trace.className}`
+      });
+
+      diagramData.layers.forEach((layerX, index) => {
+        add("circle", {
+          cx: sx(layerX),
+          cy: sy(diagramData.zero.values[index]),
+          r: Math.abs(sx(trace.radius) - sx(ZERO)),
+          class: `node ${trace.className}`
+        });
+      });
+    });
+
+    diagramData.small.traces.forEach(trace => {
+      add("path", {
+        d: pathFrom(trace.values),
+        class: `trace ${trace.className}`
+      });
+
+      diagramData.layers.forEach((layerX, index) => {
+        add("circle", {
+          cx: sx(layerX),
+          cy: sy(trace.values[index]),
+          r: Math.abs(sx(diagramData.small.radius) - sx(ZERO)),
+          class: `node ${trace.className}`
+        });
+      });
+    });
+
+    diagramData.large.traces.forEach(trace => {
+      const visibleValues = trace.values.map(value =>
+        value > diagramData.large.visibleBottom
+          ? diagramData.large.visibleBottom
+          : value
+      );
+
+      add("path", {
+        d: pathFrom(visibleValues),
+        class: `trace ${trace.className}`
+      });
+
+      diagramData.layers.forEach((layerX, index) => {
+        add("circle", {
+          cx: sx(layerX),
+          cy: sy(visibleValues[index]),
+          r: Math.abs(sx(diagramData.large.radius) - sx(ZERO)),
+          class: `node ${trace.className}`
+        });
+      });
+    });
+
+    const overflow = diagramData.large.overflowBox;
+    add("rect", {
+      x: sx(overflow.x),
+      y: sy(overflow.y),
+      width: sx(overflow.x + overflow.width) - sx(overflow.x),
+      height: sy(overflow.y + overflow.height) - sy(overflow.y),
+      class: "connector"
+    });
+
+    const connector = diagramData.large.connector;
+    add("line", {
+      x1: sx(connector.x1),
+      y1: sy(connector.y1),
+      x2: sx(connector.x2),
+      y2: sy(connector.y2),
+      class: "connector"
+    });
+
+    addText(diagramData.panels[C[2]].note, "annotation danger-label", "end");
+    addText(diagramData.legend, "legend", "middle");
+  } catch (error) {
+    const host = document.getElementById("diagram-host");
+    host.textContent = "";
+    const fallback = document.createElement("p");
+    fallback.className = "fallback";
+    fallback.textContent = "Схема должна показать три цепочки по 20 слоёв: нулевые веса оставляют нейроны одинаковыми, маленькие гасят сигнал к слою 10, а большие переполняют числа к слою 20.";
+    host.appendChild(fallback);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

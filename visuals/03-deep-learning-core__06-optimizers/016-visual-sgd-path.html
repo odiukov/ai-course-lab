@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как SGD скачет между стенками долины</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #fffdf7;
+    --surface: #fffaf0;
+    --text: #25231f;
+    --muted: #696357;
+    --axis: #827a6c;
+    --outer: #f5df94;
+    --middle: #f8e9b6;
+    --inner: #fff3cf;
+    --floor: #fff9e9;
+    --contour: #b58b22;
+    --route: #c43d2f;
+    --route-fill: #fffaf0;
+    --progress: #276b61;
+    --minimum: #275f57;
+    --frame: #d8cda9;
+    --fallback: #8f2f28;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #171712;
+      --surface: #211f19;
+      --text: #f4efdf;
+      --muted: #c5bcaa;
+      --axis: #a99f8c;
+      --outer: #5a481d;
+      --middle: #6b5722;
+      --inner: #79642a;
+      --floor: #2d291d;
+      --contour: #d8b34d;
+      --route: #ff7969;
+      --route-fill: #211f19;
+      --progress: #72c6b5;
+      --minimum: #8ad6c5;
+      --frame: #514a39;
+      --fallback: #ff9388;
+    }
+  }
+
+  body {
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    max-width: 960px;
+    margin: auto;
+  }
+
+  h1 {
+    font-size: 24px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    background: var(--surface);
+    border: 2px solid var(--frame);
+  }
+
+  .contour {
+    stroke: var(--contour);
+    stroke-width: 2px;
+  }
+
+  .outer { fill: var(--outer); }
+  .middle { fill: var(--middle); }
+  .inner { fill: var(--inner); }
+  .floor { fill: var(--floor); }
+
+  .axis {
+    fill: none;
+    stroke: var(--axis);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .axis-head {
+    fill: var(--axis);
+  }
+
+  .progress {
+    fill: none;
+    stroke: var(--progress);
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .progress-head {
+    fill: var(--progress);
+  }
+
+  .trajectory {
+    fill: none;
+    stroke: var(--route);
+    stroke-width: 5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .trajectory-head {
+    fill: var(--route);
+  }
+
+  .step-dot {
+    fill: var(--route-fill);
+    stroke: var(--route);
+    stroke-width: 3px;
+  }
+
+  .minimum-ring {
+    fill: var(--floor);
+    stroke: var(--minimum);
+    stroke-width: 4px;
+  }
+
+  .minimum-core {
+    fill: var(--minimum);
+  }
+
+  .callout {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .label {
+    fill: var(--text);
+    stroke: var(--surface);
+    stroke-width: 5px;
+    paint-order: stroke;
+    stroke-linejoin: round;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .label.secondary {
+    fill: var(--muted);
+    font-size: 16px;
+  }
+
+  #fallback {
+    color: var(--fallback);
+    background: var(--surface);
+    border: 2px solid var(--frame);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Как SGD скачет между стенками долины</h1>
+
+  <svg id="diagram"
+       viewBox="0 0 960 420"
+       width="960"
+       height="420"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Зигзагообразная траектория SGD в узкой долине</title>
+    <desc id="svg-description">SGD часто пересекает крутые стенки долины и лишь понемногу продвигается вдоль неё к минимуму.</desc>
+    <g id="drawing"></g>
+  </svg>
+
+  <div id="fallback" hidden>
+    Схема должна показывать узкую вытянутую долину: SGD зигзагом прыгает между её стенками и медленно движется к минимуму.
+  </div>
+
+  <noscript>
+    Схема должна показывать узкую вытянутую долину: SGD зигзагом прыгает между её стенками и медленно движется к минимуму.
+  </noscript>
+</main>
+
+<script>
+const data = Object.freeze([
+  {
+    type: "settings",
+    origin: { x: 72, y: 208 },
+    scale: { x: 72, y: 72 },
+    zero: 0,
+    namespace: "http://www.w3.org/2000/svg"
+  },
+  {
+    type: "contour",
+    className: "contour outer",
+    points: [
+      { x: 0.28, y: 0 },
+      { x: 1.25, y: 2.35 },
+      { x: 8.95, y: 2.35 },
+      { x: 11.62, y: 0 },
+      { x: 8.95, y: -2.35 },
+      { x: 1.25, y: -2.35 }
+    ]
+  },
+  {
+    type: "contour",
+    className: "contour middle",
+    points: [
+      { x: 0.72, y: 0 },
+      { x: 1.65, y: 1.74 },
+      { x: 9.35, y: 1.74 },
+      { x: 11.38, y: 0 },
+      { x: 9.35, y: -1.74 },
+      { x: 1.65, y: -1.74 }
+    ]
+  },
+  {
+    type: "contour",
+    className: "contour inner",
+    points: [
+      { x: 1.18, y: 0 },
+      { x: 2.15, y: 1.16 },
+      { x: 9.7, y: 1.16 },
+      { x: 11.15, y: 0 },
+      { x: 9.7, y: -1.16 },
+      { x: 2.15, y: -1.16 }
+    ]
+  },
+  {
+    type: "contour",
+    className: "contour floor",
+    points: [
+      { x: 1.86, y: 0 },
+      { x: 2.9, y: 0.62 },
+      { x: 10.02, y: 0.62 },
+      { x: 10.94, y: 0 },
+      { x: 10.02, y: -0.62 },
+      { x: 2.9, y: -0.62 }
+    ]
+  },
+  {
+    type: "line",
+    className: "axis",
+    from: { x: 0, y: 0 },
+    to: { x: 11.72, y: 0 }
+  },
+  {
+    type: "polygon",
+    className: "axis-head",
+    points: [
+      { x: 11.72, y: 0 },
+      { x: 11.48, y: 0.12 },
+      { x: 11.48, y: -0.12 }
+    ]
+  },
+  {
+    type: "line",
+    className: "axis",
+    from: { x: 0, y: -2.34 },
+    to: { x: 0, y: 2.34 }
+  },
+  {
+    type: "polygon",
+    className: "axis-head",
+    points: [
+      { x: 0, y: 2.34 },
+      { x: -0.12, y: 2.1 },
+      { x: 0.12, y: 2.1 }
+    ]
+  },
+  {
+    type: "polygon",
+    className: "axis-head",
+    points: [
+      { x: 0, y: -2.34 },
+      { x: -0.12, y: -2.1 },
+      { x: 0.12, y: -2.1 }
+    ]
+  },
+  {
+    type: "line",
+    className: "progress",
+    from: { x: 2.08, y: -1.88 },
+    to: { x: 8.62, y: -1.88 }
+  },
+  {
+    type: "polygon",
+    className: "progress-head",
+    points: [
+      { x: 8.62, y: -1.88 },
+      { x: 8.26, y: -1.7 },
+      { x: 8.26, y: -2.06 }
+    ]
+  },
+  {
+    type: "trajectory",
+    className: "trajectory",
+    radius: 0.075,
+    points: [
+      { x: 1.08, y: 1.42 },
+      { x: 1.58, y: -1.32 },
+      { x: 2.08, y: 1.24 },
+      { x: 2.62, y: -1.14 },
+      { x: 3.2, y: 1.04 },
+      { x: 3.82, y: -0.94 },
+      { x: 4.5, y: 0.84 },
+      { x: 5.24, y: -0.72 },
+      { x: 6.04, y: 0.61 },
+      { x: 6.92, y: -0.48 },
+      { x: 7.86, y: 0.36 },
+      { x: 8.82, y: -0.24 },
+      { x: 9.72, y: 0.14 },
+      { x: 10.48, y: 0.02 }
+    ]
+  },
+  {
+    type: "polygon",
+    className: "trajectory-head",
+    points: [
+      { x: 10.58, y: 0 },
+      { x: 10.25, y: 0.17 },
+      { x: 10.27, y: -0.15 }
+    ]
+  },
+  {
+    type: "minimum",
+    at: { x: 10.66, y: 0 },
+    outerRadius: 0.16,
+    innerRadius: 0.065
+  },
+  {
+    type: "line",
+    className: "callout",
+    from: { x: 2.92, y: 2.02 },
+    to: { x: 2.5, y: 1.55 }
+  },
+  {
+    type: "line",
+    className: "callout",
+    from: { x: 7.18, y: 1.85 },
+    to: { x: 6.92, y: 0.48 }
+  },
+  {
+    type: "label",
+    className: "label secondary",
+    at: { x: 0.02, y: 2.26 },
+    dx: 14,
+    dy: 4,
+    anchor: "start",
+    text: "поперёк долины"
+  },
+  {
+    type: "label",
+    className: "label secondary",
+    at: { x: 11.62, y: 0 },
+    dx: -8,
+    dy: -15,
+    anchor: "end",
+    text: "вдоль долины"
+  },
+  {
+    type: "label",
+    className: "label",
+    at: { x: 2.92, y: 2.02 },
+    dx: 0,
+    dy: -10,
+    anchor: "middle",
+    text: "крутые стенки"
+  },
+  {
+    type: "label",
+    className: "label",
+    at: { x: 7.18, y: 1.85 },
+    dx: 10,
+    dy: -9,
+    anchor: "start",
+    text: "прыжки SGD поперёк"
+  },
+  {
+    type: "label",
+    className: "label",
+    at: { x: 2.08, y: -1.88 },
+    dx: 0,
+    dy: 25,
+    anchor: "start",
+    text: "медленное движение к минимуму"
+  },
+  {
+    type: "label",
+    className: "label",
+    at: { x: 10.66, y: 0 },
+    dx: -16,
+    dy: 34,
+    anchor: "end",
+    text: "минимум"
+  }
+]);
+
+const [settings, ...items] = data;
+const origin = Object.freeze(settings.origin);
+const scale = Object.freeze(settings.scale);
+
+const toPx = point => Object.freeze({
+  x: origin.x + point.x * scale.x,
+  y: origin.y - point.y * scale.y
+});
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const namespace = settings.namespace;
+  const zero = settings.zero;
+
+  const make = (name, attributes) => {
+    const node = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, String(value));
+    }
+    return node;
+  };
+
+  const pointsValue = points => points
+    .map(point => {
+      const placed = toPx(point);
+      return `${placed.x},${placed.y}`;
+    })
+    .join(" ");
+
+  for (const item of items) {
+    if (item.type === "contour") {
+      const [start, upperA, upperB, end, lowerA, lowerB] = item.points;
+      const s = toPx(start);
+      const ua = toPx(upperA);
+      const ub = toPx(upperB);
+      const e = toPx(end);
+      const la = toPx(lowerA);
+      const lb = toPx(lowerB);
+      const path = make("path", {
+        class: item.className,
+        d: `M ${s.x} ${s.y} C ${ua.x} ${ua.y} ${ub.x} ${ub.y} ${e.x} ${e.y} C ${la.x} ${la.y} ${lb.x} ${lb.y} ${s.x} ${s.y} Z`
+      });
+      drawing.append(path);
+    }
+
+    if (item.type === "line") {
+      const from = toPx(item.from);
+      const to = toPx(item.to);
+      drawing.append(make("line", {
+        class: item.className,
+        x1: from.x,
+        y1: from.y,
+        x2: to.x,
+        y2: to.y
+      }));
+    }
+
+    if (item.type === "polygon") {
+      drawing.append(make("polygon", {
+        class: item.className,
+        points: pointsValue(item.points)
+      }));
+    }
+
+    if (item.type === "trajectory") {
+      drawing.append(make("polyline", {
+        class: item.className,
+        points: pointsValue(item.points)
+      }));
+
+      for (const point of item.points) {
+        const center = toPx(point);
+        const edge = toPx({
+          x: point.x + item.radius,
+          y: point.y
+        });
+        drawing.append(make("circle", {
+          class: "step-dot",
+          cx: center.x,
+          cy: center.y,
+          r: Math.abs(edge.x - center.x)
+        }));
+      }
+    }
+
+    if (item.type === "minimum") {
+      const center = toPx(item.at);
+      const outerEdge = toPx({
+        x: item.at.x + item.outerRadius,
+        y: item.at.y
+      });
+      const innerEdge = toPx({
+        x: item.at.x + item.innerRadius,
+        y: item.at.y
+      });
+
+      drawing.append(make("circle", {
+        class: "minimum-ring",
+        cx: center.x,
+        cy: center.y,
+        r: Math.abs(outerEdge.x - center.x)
+      }));
+
+      drawing.append(make("circle", {
+        class: "minimum-core",
+        cx: center.x,
+        cy: center.y,
+        r: Math.abs(innerEdge.x - center.x)
+      }));
+    }
+
+    if (item.type === "label") {
+      const anchor = toPx(item.at);
+      const label = make("text", {
+        class: item.className,
+        x: anchor.x,
+        y: anchor.y,
+        dx: item.dx,
+        dy: item.dy,
+        "text-anchor": item.anchor
+      });
+      label.textContent = item.text;
+      drawing.append(label);
+    }
+  }
+
+  const mappedOrigin = toPx({ x: zero, y: zero });
+  if (!Number.isFinite(mappedOrigin.x) || !Number.isFinite(mappedOrigin.y)) {
+    throw new Error("Некорректное преобразование координат");
+  }
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  if (svg) svg.hidden = true;
+  if (fallback) {
+    fallback.hidden = false;
+    fallback.textContent =
+      "Схема должна показывать узкую вытянутую долину: SGD зигзагом прыгает между её стенками и медленно движется к минимуму.";
+  }
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

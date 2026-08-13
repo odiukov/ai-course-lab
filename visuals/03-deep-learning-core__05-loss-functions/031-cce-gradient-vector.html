@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Градиент переносит массу к истинному классу</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: ghostwhite;
+  --panel: white;
+  --ink: midnightblue;
+  --muted: slategray;
+  --rule: lightsteelblue;
+  --track: lavender;
+  --blue: royalblue;
+  --blue-soft: aliceblue;
+  --true: seagreen;
+  --true-soft: honeydew;
+  --wrong: indianred;
+  --wrong-soft: mistyrose;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+figure {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+figcaption {
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+}
+.title {
+  font-size: 20px;
+  font-weight: bold;
+  text-align: center;
+}
+.subtitle {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 440px;
+  background: var(--panel);
+}
+text {
+  fill: var(--ink);
+  font-size: 14px;
+  font-family: inherit;
+}
+.summary {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: bold;
+}
+.heading {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: bold;
+}
+.row-name { font-size: 14px; }
+.row-name.true-name {
+  fill: var(--true);
+  font-weight: bold;
+}
+.number {
+  font-size: 15px;
+  font-weight: bold;
+}
+.logit-box {
+  fill: var(--blue-soft);
+  stroke: var(--blue);
+  stroke-width: 2;
+}
+.prob-track {
+  fill: var(--track);
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+.prob-fill { fill: var(--blue); }
+.grad-true {
+  fill: var(--true-soft);
+  stroke: var(--true);
+  stroke-width: 2;
+}
+.grad-wrong {
+  fill: var(--wrong-soft);
+  stroke: var(--wrong);
+  stroke-width: 2;
+}
+.true-text { fill: var(--true); }
+.wrong-text { fill: var(--wrong); }
+.row-rule {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+.divider {
+  stroke: var(--rule);
+  stroke-width: 2;
+}
+.flow-blue {
+  stroke: var(--blue);
+  stroke-width: 2;
+  fill: var(--blue);
+}
+.flow-true {
+  stroke: var(--true);
+  stroke-width: 3;
+  fill: var(--true);
+}
+.flow-wrong {
+  stroke: var(--wrong);
+  stroke-width: 3;
+  fill: var(--wrong);
+}
+.bottom-band {
+  fill: var(--blue-soft);
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+.small-chip-wrong {
+  fill: var(--wrong-soft);
+  stroke: var(--wrong);
+  stroke-width: 2;
+}
+.small-chip-true {
+  fill: var(--true-soft);
+  stroke: var(--true);
+  stroke-width: 2;
+}
+.command { font-size: 13px; font-weight: bold; }
+.fallback {
+  color: var(--ink);
+  background: var(--panel);
+  font-size: 15px;
+  text-align: center;
+}
+[hidden] { display: none; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: midnightblue;
+    --panel: darkslateblue;
+    --ink: white;
+    --muted: lightsteelblue;
+    --rule: slateblue;
+    --track: slategray;
+    --blue: lightskyblue;
+    --blue-soft: midnightblue;
+    --true: mediumaquamarine;
+    --true-soft: darkslategray;
+    --wrong: lightcoral;
+    --wrong-soft: maroon;
+  }
+}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title diagram-subtitle">
+  <figcaption>
+    <div class="title" id="diagram-title">Градиент переносит массу к истинному классу</div>
+    <div class="subtitle" id="diagram-subtitle">Softmax даёт вероятности, а градиент указывает, какие логиты двигать</div>
+  </figcaption>
+
+  <svg id="diagram"
+       viewBox="0 0 960 440"
+       width="960"
+       height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Переход от логитов к вероятностям и градиенту</title>
+    <desc id="svg-desc">Для логитов 2, 1, 0 softmax даёт вероятности 0.665, 0.245, 0.090. При первом истинном классе градиент равен минус 0.335, 0.245, 0.090.</desc>
+  </svg>
+
+  <div id="fallback" class="fallback" hidden>
+    Логиты [2, 1, 0] дают вероятности [0.665, 0.245, 0.090].
+    Для первого истинного класса градиент равен [−0.335, 0.245, 0.090]:
+    истинный логит растёт, остальные уменьшаются.
+  </div>
+  <noscript>
+    <div class="fallback">
+      Логиты [2, 1, 0] дают вероятности [0.665, 0.245, 0.090],
+      а градиент для первого истинного класса равен [−0.335, 0.245, 0.090].
+    </div>
+  </noscript>
+</figure>
+
+<script>
+const data = [
+  {
+    originX: 40,
+    originY: 25,
+    scaleX: 10,
+    scaleY: 10,
+    zero: 0,
+    labelPad: 8,
+    summaryX: 46,
+    summaryY: 1.3,
+    headerY: 5,
+    dividerY: 6.4,
+    rowLineStartX: 0,
+    rowLineEndX: 89,
+    rowLineOffsetY: 4.2,
+    classX: 0,
+    logitX: 18,
+    logitW: 7,
+    boxH: 5.2,
+    boxHalfH: 2.6,
+    softArrowStartX: 25.7,
+    softArrowEndX: 31,
+    probabilityX: 32,
+    probabilityW: 20,
+    probabilityValueX: 53.5,
+    gradientArrowStartX: 59,
+    gradientArrowEndX: 63,
+    gradientX: 64,
+    gradientW: 12,
+    commandArrowX: 79,
+    commandTextX: 81,
+    commandArrowHalfH: 1.4,
+    headLength: 0.9,
+    headHalfWidth: 0.55,
+    classHeaderX: 0,
+    logitHeaderX: 18,
+    softmaxHeaderX: 28.5,
+    probabilityHeaderX: 32,
+    gradientHeaderX: 64,
+    commandHeaderX: 79,
+    bottomX: 0,
+    bottomY: 33.2,
+    bottomW: 89,
+    bottomH: 7.1,
+    bottomCenterY: 36.7,
+    bottomLabelX: 1.2,
+    wrongChipOneX: 23,
+    wrongChipTwoX: 34,
+    wrongChipY: 34.6,
+    wrongChipW: 7,
+    wrongChipH: 4.2,
+    trueChipX: 48,
+    trueChipY: 34.6,
+    trueChipW: 8,
+    trueChipH: 4.2,
+    firstTransferStartX: 30.5,
+    firstTransferStartY: 35.7,
+    firstTransferEndX: 47.3,
+    firstTransferEndY: 36,
+    secondTransferStartX: 41.5,
+    secondTransferStartY: 37.6,
+    secondTransferEndX: 47.3,
+    secondTransferEndY: 37.1,
+    bottomMessageX: 57,
+    minus: "−",
+    comma: ", ",
+    arrow: " → ",
+    logitsPrefix: "логиты [",
+    probabilitiesPrefix: "]   → softmax →   вероятности [",
+    gradientPrefix: "]   → p − y →   градиент [",
+    suffix: "]"
+  },
+  [
+    {
+      name: "Класс 1 · истинный",
+      logit: 2,
+      probability: 0.665,
+      gradient: -0.335,
+      y: 11.5,
+      decimals: 3,
+      truth: true,
+      command: "увеличить z₁",
+      chip: "z₁ ↑"
+    },
+    {
+      name: "Класс 2",
+      logit: 1,
+      probability: 0.245,
+      gradient: 0.245,
+      y: 20.2,
+      decimals: 3,
+      truth: false,
+      command: "уменьшить z₂",
+      chip: "z₂ ↓"
+    },
+    {
+      name: "Класс 3",
+      logit: 0,
+      probability: 0.090,
+      gradient: 0.090,
+      y: 28.9,
+      decimals: 3,
+      truth: false,
+      command: "уменьшить z₃",
+      chip: "z₃ ↓"
+    }
+  ]
+];
+
+const [layout, rows] = data;
+const origin = Object.freeze({ x: layout.originX, y: layout.originY });
+const scale = Object.freeze({ x: layout.scaleX, y: layout.scaleY });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const fallback = document.getElementById("fallback");
+const namespace = "http://www.w3.org/2000/svg";
+
+function node(tag, attributes, content) {
+  const element = document.createElementNS(namespace, tag);
+  Object.entries(attributes).forEach(([name, value]) => {
+    element.setAttribute(name, String(value));
+  });
+  if (content !== undefined) element.textContent = content;
+  svg.appendChild(element);
+  return element;
+}
+
+function line(x1, y1, x2, y2, className) {
+  return node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className
+  });
+}
+
+function rectangle(x, y, width, height, className) {
+  return node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + width) - sx(x),
+    height: sy(y + height) - sy(y),
+    class: className
+  });
+}
+
+function text(x, y, content, className, anchor, baseline, dx) {
+  const attributes = {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": baseline
+  };
+  if (dx !== undefined) attributes.dx = dx;
+  return node("text", attributes, content);
+}
+
+function arrow(x1, y1, x2, y2, className) {
+  const deltaX = x2 - x1;
+  const deltaY = y2 - y1;
+  const length = Math.hypot(deltaX, deltaY);
+  const unitX = deltaX / length;
+  const unitY = deltaY / length;
+  const baseX = x2 - unitX * layout.headLength;
+  const baseY = y2 - unitY * layout.headLength;
+  const sideX = -unitY * layout.headHalfWidth;
+  const sideY = unitX * layout.headHalfWidth;
+
+  line(x1, y1, baseX, baseY, className);
+  node("polygon", {
+    points: [
+      [sx(x2), sy(y2)],
+      [sx(baseX + sideX), sy(baseY + sideY)],
+      [sx(baseX - sideX), sy(baseY - sideY)]
+    ].map(point => point.join(layout.comma)).join(" "),
+    class: className
+  });
+}
+
+function formatted(value, decimals) {
+  return value < layout.zero
+    ? layout.minus + Math.abs(value).toFixed(decimals)
+    : value.toFixed(decimals);
+}
+
+try {
+  const logits = rows.map(row => String(row.logit)).join(layout.comma);
+  const probabilities = rows
+    .map(row => row.probability.toFixed(row.decimals))
+    .join(layout.comma);
+  const gradients = rows
+    .map(row => formatted(row.gradient, row.decimals))
+    .join(layout.comma);
+
+  const summary =
+    layout.logitsPrefix + logits +
+    layout.probabilitiesPrefix + probabilities +
+    layout.gradientPrefix + gradients +
+    layout.suffix;
+
+  text(
+    layout.summaryX,
+    layout.summaryY,
+    summary,
+    "summary",
+    "middle",
+    "middle"
+  );
+
+  text(layout.classHeaderX, layout.headerY, "Класс", "heading", "start", "middle");
+  text(layout.logitHeaderX, layout.headerY, "Логит z", "heading", "start", "middle");
+  text(layout.softmaxHeaderX, layout.headerY, "softmax", "heading", "middle", "middle");
+  text(layout.probabilityHeaderX, layout.headerY, "Вероятность p", "heading", "start", "middle");
+  text(layout.gradientHeaderX, layout.headerY, "Градиент p − y", "heading", "start", "middle");
+  text(layout.commandHeaderX, layout.headerY, "При вычитании", "heading", "start", "middle");
+
+  line(
+    layout.rowLineStartX,
+    layout.dividerY,
+    layout.rowLineEndX,
+    layout.dividerY,
+    "divider"
+  );
+
+  rows.forEach(row => {
+    const boxY = row.y - layout.boxHalfH;
+    const probabilityWidth = layout.probabilityW * row.probability;
+    const commandArrowEndY = row.truth
+      ? row.y - layout.commandArrowHalfH
+      : row.y + layout.commandArrowHalfH;
+
+    line(
+      layout.rowLineStartX,
+      row.y + layout.rowLineOffsetY,
+      layout.rowLineEndX,
+      row.y + layout.rowLineOffsetY,
+      "row-rule"
+    );
+
+    text(
+      layout.classX,
+      row.y,
+      row.name,
+      row.truth ? "row-name true-name" : "row-name",
+      "start",
+      "middle"
+    );
+
+    rectangle(
+      layout.logitX,
+      boxY,
+      layout.logitW,
+      layout.boxH,
+      "logit-box"
+    );
+    text(
+      layout.logitX + layout.logitW / layout.boxHalfH,
+      row.y,
+      String(row.logit),
+      "number",
+      "middle",
+      "middle"
+    );
+
+    arrow(
+      layout.softArrowStartX,
+      row.y,
+      layout.softArrowEndX,
+      row.y,
+      "flow-blue"
+    );
+
+    rectangle(
+      layout.probabilityX,
+      boxY,
+      layout.probabilityW,
+      layout.boxH,
+      "prob-track"
+    );
+    rectangle(
+      layout.probabilityX,
+      boxY,
+      probabilityWidth,
+      layout.boxH,
+      "prob-fill"
+    );
+    text(
+      layout.probabilityValueX,
+      row.y,
+      row.probability.toFixed(row.decimals),
+      "number",
+      "start",
+      "middle"
+    );
+
+    arrow(
+      layout.gradientArrowStartX,
+      row.y,
+      layout.gradientArrowEndX,
+      row.y,
+      row.truth ? "flow-true" : "flow-wrong"
+    );
+
+    rectangle(
+      layout.gradientX,
+      boxY,
+      layout.gradientW,
+      layout.boxH,
+      row.truth ? "grad-true" : "grad-wrong"
+    );
+    text(
+      layout.gradientX + layout.gradientW / layout.boxHalfH,
+      row.y,
+      formatted(row.gradient, row.decimals),
+      row.truth ? "number true-text" : "number wrong-text",
+      "middle",
+      "middle"
+    );
+
+    arrow(
+      layout.commandArrowX,
+      row.y,
+      layout.commandArrowX,
+      commandArrowEndY,
+      row.truth ? "flow-true" : "flow-wrong"
+    );
+    text(
+      layout.commandTextX,
+      row.y,
+      row.command,
+      row.truth ? "command true-text" : "command wrong-text",
+      "start",
+      "middle"
+    );
+  });
+
+  rectangle(
+    layout.bottomX,
+    layout.bottomY,
+    layout.bottomW,
+    layout.bottomH,
+    "bottom-band"
+  );
+
+  text(
+    layout.bottomLabelX,
+    layout.bottomCenterY,
+    "После шага оптимизатора:",
+    "heading",
+    "start",
+    "middle"
+  );
+
+  rectangle(
+    layout.wrongChipOneX,
+    layout.wrongChipY,
+    layout.wrongChipW,
+    layout.wrongChipH,
+    "small-chip-wrong"
+  );
+  text(
+    layout.wrongChipOneX + layout.wrongChipW / layout.boxHalfH,
+    layout.bottomCenterY,
+    rows.filter(row => !row.truth).map(row => row.chip).shift(),
+    "command wrong-text",
+    "middle",
+    "middle"
+  );
+
+  rectangle(
+    layout.wrongChipTwoX,
+    layout.wrongChipY,
+    layout.wrongChipW,
+    layout.wrongChipH,
+    "small-chip-wrong"
+  );
+  text(
+    layout.wrongChipTwoX + layout.wrongChipW / layout.boxHalfH,
+    layout.bottomCenterY,
+    rows.filter(row => !row.truth).map(row => row.chip).pop(),
+    "command wrong-text",
+    "middle",
+    "middle"
+  );
+
+  arrow(
+    layout.firstTransferStartX,
+    layout.firstTransferStartY,
+    layout.firstTransferEndX,
+    layout.firstTransferEndY,
+    "flow-wrong"
+  );
+  arrow(
+    layout.secondTransferStartX,
+    layout.secondTransferStartY,
+    layout.secondTransferEndX,
+    layout.secondTransferEndY,
+    "flow-wrong"
+  );
+
+  rectangle(
+    layout.trueChipX,
+    layout.trueChipY,
+    layout.trueChipW,
+    layout.trueChipH,
+    "small-chip-true"
+  );
+  text(
+    layout.trueChipX + layout.trueChipW / layout.boxHalfH,
+    layout.bottomCenterY,
+    rows.find(row => row.truth).chip,
+    "command true-text",
+    "middle",
+    "middle"
+  );
+
+  text(
+    layout.bottomMessageX,
+    layout.bottomCenterY,
+    "уверенность смещается к истинному классу",
+    "command true-text",
+    "start",
+    "middle",
+    layout.labelPad
+  );
+} catch (error) {
+  svg.replaceChildren();
+  svg.setAttribute("hidden", "");
+  fallback.hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

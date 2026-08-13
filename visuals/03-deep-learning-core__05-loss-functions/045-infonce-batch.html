@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Все кандидаты в знаменателе InfoNCE</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --text: #17202a;
+    --muted: #59636e;
+    --negative: #8a949e;
+    --negative-strong: #59636e;
+    --positive: #16834b;
+    --positive-fill: #dff5e8;
+    --softmax: #315fa8;
+    --softmax-fill: #e8f0fc;
+    --divider: #b7c7df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15191e;
+      --surface: #1d232a;
+      --text: #edf2f7;
+      --muted: #b1bac5;
+      --negative: #77828d;
+      --negative-strong: #b1bac5;
+      --positive: #58d68d;
+      --positive-fill: #173f2b;
+      --softmax: #8ab4f8;
+      --softmax-fill: #1d3557;
+      --divider: #496585;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .diagram {
+    width: 100%;
+    max-width: 1000px;
+    margin: auto;
+    padding: 12px 16px 10px;
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 2px 0 8px;
+    font-size: 19px;
+    line-height: 1.25;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    background: var(--bg);
+  }
+
+  #fallback {
+    margin: 0;
+    padding: 28px 20px;
+    font-size: 16px;
+    line-height: 1.45;
+    color: var(--text);
+    background: var(--surface);
+  }
+</style>
+</head>
+<body>
+<main class="diagram">
+  <h1>Позитив конкурирует со всеми негативами сразу</h1>
+  <svg id="scheme"
+       viewBox="0 0 1000 430"
+       width="1000"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="scheme-title scheme-description">
+    <title id="scheme-title">Все 256 близостей входят в один softmax</title>
+    <desc id="scheme-description">Anchor соединён зелёной линией с одним positive и серыми линиями с 255 negatives. Все линии сходятся в одном softmax.</desc>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать: anchor связан с одним positive зелёной линией и с 255 negatives серыми линиями; все 256 близостей входят в один softmax.</p>
+</main>
+
+<script>
+const data = Object.freeze({
+  canvas: { width: 1000, height: 430 },
+  zero: 0,
+  one: 1,
+  counts: { candidates: 256, negatives: 255 },
+  anchor: { x: 118, y: 218, r: 43 },
+  positive: {
+    x: 470, y: 64, r: 12, similarity: "0,80",
+    label: "positive · 0,80", dx: 17, dy: -9
+  },
+  featuredNegatives: [
+    {
+      x: 494, y: 132, r: 10, similarity: "0,75",
+      label: "negative · 0,75", dx: 17, dy: -10,
+      anchor: "start"
+    },
+    {
+      x: 578, y: 250, r: 9, similarity: "0,30",
+      label: "negative · 0,30", dx: 17, dy: -11,
+      anchor: "start"
+    },
+    {
+      x: 510, y: 338, r: 9, similarity: "0,10",
+      label: "negative · 0,10", dx: 17, dy: 22,
+      anchor: "start"
+    }
+  ],
+  cloud: {
+    x: 404, y: 126, width: 230, height: 205,
+    columns: 18, rows: 14, phase: 5, phaseCenter: 2,
+    jitterX: 2.4, jitterY: 1.8, r: 2.4
+  },
+  inlet: { x: 746, y: 218, r: 7 },
+  box: { x: 746, y: 110, width: 230, height: 226 },
+  dividers: [
+    { x1: 770, y1: 181, x2: 952, y2: 181 },
+    { x1: 770, y1: 263, x2: 952, y2: 263 }
+  ],
+  text: {
+    anchor: { x: 118, y: 218, dx: 0, dy: 6, value: "anchor" },
+    fan: {
+      x: 258, y: 94, dx: 0, dy: 0,
+      value: "близость с каждым кандидатом"
+    },
+    negativeGroup: {
+      x: 426, y: 386, dx: 0, dy: 0,
+      value: "255 negatives"
+    },
+    positiveHint: {
+      x: 264, y: 48, dx: 0, dy: 0,
+      value: "одна зелёная линия"
+    },
+    negativeHint: {
+      x: 265, y: 365, dx: 0, dy: 0,
+      value: "255 серых линий"
+    },
+    boxTitle: {
+      x: 861, y: 141, dx: 0, dy: 0,
+      value: "ОДИН SOFTMAX"
+    },
+    boxCount: {
+      x: 861, y: 165, dx: 0, dy: 0,
+      value: "все 256 близостей"
+    },
+    numeratorHead: {
+      x: 773, y: 205, dx: 0, dy: 0,
+      value: "числитель"
+    },
+    numeratorValue: {
+      x: 773, y: 236, dx: 0, dy: 0,
+      value: "positive · 0,80"
+    },
+    denominatorHead: {
+      x: 773, y: 287, dx: 0, dy: 0,
+      value: "знаменатель"
+    },
+    denominatorValue: {
+      x: 773, y: 318, dx: 0, dy: 0,
+      value: "positive + 255 negatives"
+    },
+    conclusion: {
+      x: 861, y: 382, dx: 0, dy: 0,
+      value: "Доля positive зависит от всей группы"
+    }
+  },
+  labelLines: [
+    { x1: 277, y1: 54, x2: 430, y2: 67 },
+    { x1: 278, y1: 357, x2: 416, y2: 320 }
+  ],
+  stroke: {
+    cloud: 1.15, featured: 1.8, positive: 3.5,
+    outline: 2, divider: 1.2, leader: 1.2, halo: 5
+  },
+  opacity: {
+    cloud: 0.20, cloudNode: 0.44, featured: 0.78,
+    leader: 0.8
+  },
+  font: {
+    tiny: 12, small: 14, normal: 16, medium: 17, large: 19
+  },
+  fallbackMessage: "Не удалось построить схему."
+});
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const svg = document.getElementById("scheme");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function make(tag, attributes, parent) {
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attributes || {}).forEach(([name, value]) => {
+      element.setAttribute(name, String(value));
+    });
+    (parent || svg).appendChild(element);
+    return element;
+  }
+
+  function group(name) {
+    return make("g", { "data-layer": name }, svg);
+  }
+
+  function line(parent, first, second, attributes) {
+    return make("line", Object.assign({
+      x1: sx(first.x),
+      y1: sy(first.y),
+      x2: sx(second.x),
+      y2: sy(second.y)
+    }, attributes), parent);
+  }
+
+  function circle(parent, point, radius, attributes) {
+    return make("circle", Object.assign({
+      cx: sx(point.x),
+      cy: sy(point.y),
+      r: sx(point.x + radius) - sx(point.x)
+    }, attributes), parent);
+  }
+
+  function rect(parent, box, attributes) {
+    return make("rect", Object.assign({
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.x + box.width) - sx(box.x),
+      height: sy(box.y + box.height) - sy(box.y)
+    }, attributes), parent);
+  }
+
+  function text(parent, item, attributes) {
+    const element = make("text", Object.assign({
+      x: sx(item.x),
+      y: sy(item.y),
+      dx: item.dx,
+      dy: item.dy
+    }, attributes), parent);
+    element.textContent = item.value;
+    return element;
+  }
+
+  const negativeLines = group("negative-lines");
+  const positiveLines = group("positive-line");
+  const nodes = group("candidate-nodes");
+  const annotations = group("annotations");
+  const softmax = group("softmax");
+
+  const generatedCount =
+    data.counts.negatives - data.featuredNegatives.length;
+
+  const generatedNegatives = [];
+  for (let index = data.zero; index < generatedCount; index += data.one) {
+    const column = index % data.cloud.columns;
+    const row = Math.floor(index / data.cloud.columns);
+    const horizontalStep =
+      data.cloud.width / (data.cloud.columns - data.one);
+    const verticalStep =
+      data.cloud.height / (data.cloud.rows - data.one);
+    const phaseOffset =
+      (index % data.cloud.phase) - data.cloud.phaseCenter;
+
+    generatedNegatives.push({
+      x: data.cloud.x + column * horizontalStep +
+         phaseOffset * data.cloud.jitterX,
+      y: data.cloud.y + row * verticalStep +
+         phaseOffset * data.cloud.jitterY
+    });
+  }
+
+  const allNegatives =
+    generatedNegatives.concat(data.featuredNegatives);
+
+  if (allNegatives.length !== data.counts.negatives) {
+    throw new Error(data.fallbackMessage);
+  }
+
+  generatedNegatives.forEach((negative) => {
+    line(negativeLines, data.anchor, negative, {
+      stroke: "var(--negative)",
+      "stroke-width": data.stroke.cloud,
+      "stroke-opacity": data.opacity.cloud,
+      "vector-effect": "non-scaling-stroke"
+    });
+    line(negativeLines, negative, data.inlet, {
+      stroke: "var(--negative)",
+      "stroke-width": data.stroke.cloud,
+      "stroke-opacity": data.opacity.cloud,
+      "vector-effect": "non-scaling-stroke"
+    });
+  });
+
+  data.featuredNegatives.forEach((negative) => {
+    line(negativeLines, data.anchor, negative, {
+      stroke: "var(--negative-strong)",
+      "stroke-width": data.stroke.featured,
+      "stroke-opacity": data.opacity.featured,
+      "vector-effect": "non-scaling-stroke"
+    });
+    line(negativeLines, negative, data.inlet, {
+      stroke: "var(--negative-strong)",
+      "stroke-width": data.stroke.featured,
+      "stroke-opacity": data.opacity.featured,
+      "vector-effect": "non-scaling-stroke"
+    });
+  });
+
+  line(positiveLines, data.anchor, data.positive, {
+    stroke: "var(--positive)",
+    "stroke-width": data.stroke.positive,
+    "stroke-linecap": "round",
+    "vector-effect": "non-scaling-stroke"
+  });
+  line(positiveLines, data.positive, data.inlet, {
+    stroke: "var(--positive)",
+    "stroke-width": data.stroke.positive,
+    "stroke-linecap": "round",
+    "vector-effect": "non-scaling-stroke"
+  });
+
+  generatedNegatives.forEach((negative) => {
+    circle(nodes, negative, data.cloud.r, {
+      fill: "var(--negative)",
+      "fill-opacity": data.opacity.cloudNode
+    });
+  });
+
+  data.featuredNegatives.forEach((negative) => {
+    circle(nodes, negative, negative.r, {
+      fill: "var(--surface)",
+      stroke: "var(--negative-strong)",
+      "stroke-width": data.stroke.outline,
+      "vector-effect": "non-scaling-stroke"
+    });
+  });
+
+  circle(nodes, data.positive, data.positive.r, {
+    fill: "var(--positive-fill)",
+    stroke: "var(--positive)",
+    "stroke-width": data.stroke.outline,
+    "vector-effect": "non-scaling-stroke"
+  });
+
+  circle(nodes, data.anchor, data.anchor.r, {
+    fill: "var(--surface)",
+    stroke: "var(--text)",
+    "stroke-width": data.stroke.outline,
+    "vector-effect": "non-scaling-stroke"
+  });
+
+  text(nodes, data.text.anchor, {
+    fill: "var(--text)",
+    "font-size": data.font.medium,
+    "font-weight": "700",
+    "text-anchor": "middle"
+  });
+
+  rect(softmax, data.box, {
+    fill: "var(--softmax-fill)",
+    stroke: "var(--softmax)",
+    "stroke-width": data.stroke.outline,
+    "vector-effect": "non-scaling-stroke"
+  });
+
+  circle(softmax, data.inlet, data.inlet.r, {
+    fill: "var(--positive)",
+    stroke: "var(--bg)",
+    "stroke-width": data.stroke.outline,
+    "vector-effect": "non-scaling-stroke"
+  });
+
+  data.dividers.forEach((divider) => {
+    line(softmax,
+      { x: divider.x1, y: divider.y1 },
+      { x: divider.x2, y: divider.y2 },
+      {
+        stroke: "var(--divider)",
+        "stroke-width": data.stroke.divider,
+        "vector-effect": "non-scaling-stroke"
+      }
+    );
+  });
+
+  text(softmax, data.text.boxTitle, {
+    fill: "var(--softmax)",
+    "font-size": data.font.large,
+    "font-weight": "800",
+    "text-anchor": "middle"
+  });
+  text(softmax, data.text.boxCount, {
+    fill: "var(--text)",
+    "font-size": data.font.small,
+    "text-anchor": "middle"
+  });
+  text(softmax, data.text.numeratorHead, {
+    fill: "var(--muted)",
+    "font-size": data.font.tiny,
+    "font-weight": "700",
+    "text-anchor": "start"
+  });
+  text(softmax, data.text.numeratorValue, {
+    fill: "var(--positive)",
+    "font-size": data.font.normal,
+    "font-weight": "700",
+    "text-anchor": "start"
+  });
+  text(softmax, data.text.denominatorHead, {
+    fill: "var(--muted)",
+    "font-size": data.font.tiny,
+    "font-weight": "700",
+    "text-anchor": "start"
+  });
+  text(softmax, data.text.denominatorValue, {
+    fill: "var(--text)",
+    "font-size": data.font.normal,
+    "font-weight": "700",
+    "text-anchor": "start"
+  });
+
+  const haloStyle =
+    "paint-order:stroke;stroke:var(--bg);stroke-width:" +
+    data.stroke.halo + ";stroke-linejoin:round";
+
+  text(annotations, data.positive, {
+    fill: "var(--positive)",
+    "font-size": data.font.normal,
+    "font-weight": "700",
+    "text-anchor": "start",
+    style: haloStyle
+  }).textContent = data.positive.label;
+
+  data.featuredNegatives.forEach((negative) => {
+    text(annotations, negative, {
+      fill: "var(--negative-strong)",
+      "font-size": data.font.small,
+      "font-weight": "700",
+      "text-anchor": negative.anchor,
+      style: haloStyle
+    }).textContent = negative.label;
+  });
+
+  data.labelLines.forEach((leader) => {
+    line(annotations,
+      { x: leader.x1, y: leader.y1 },
+      { x: leader.x2, y: leader.y2 },
+      {
+        stroke: "var(--muted)",
+        "stroke-width": data.stroke.leader,
+        "stroke-opacity": data.opacity.leader,
+        "vector-effect": "non-scaling-stroke"
+      }
+    );
+  });
+
+  text(annotations, data.text.fan, {
+    fill: "var(--muted)",
+    "font-size": data.font.small,
+    "text-anchor": "middle",
+    style: haloStyle
+  });
+  text(annotations, data.text.positiveHint, {
+    fill: "var(--positive)",
+    "font-size": data.font.small,
+    "font-weight": "700",
+    "text-anchor": "middle",
+    style: haloStyle
+  });
+  text(annotations, data.text.negativeHint, {
+    fill: "var(--negative-strong)",
+    "font-size": data.font.small,
+    "font-weight": "700",
+    "text-anchor": "middle",
+    style: haloStyle
+  });
+  text(annotations, data.text.negativeGroup, {
+    fill: "var(--negative-strong)",
+    "font-size": data.font.medium,
+    "font-weight": "800",
+    "text-anchor": "middle",
+    style: haloStyle
+  });
+  text(annotations, data.text.conclusion, {
+    fill: "var(--text)",
+    "font-size": data.font.medium,
+    "font-weight": "700",
+    "text-anchor": "middle",
+    style: haloStyle
+  });
+} catch (error) {
+  const svg = document.getElementById("scheme");
+  const fallback = document.getElementById("fallback");
+  svg.hidden = true;
+  fallback.hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

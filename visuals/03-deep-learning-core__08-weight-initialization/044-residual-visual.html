@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Накопление сигнала в residual-потоке</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5b667a;
+      --grid: #d8deea;
+      --raw-fill: #f5b6a8;
+      --raw-line: #b9432f;
+      --raw-branch: #d7634d;
+      --safe-fill: #b8d8ff;
+      --safe-line: #2769b2;
+      --safe-branch: #4c8ed4;
+      --deep-fill: #bdebd8;
+      --deep-line: #187254;
+      --deep-branch: #349878;
+      --chip: #eef2f8;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111723;
+        --panel: #171f2d;
+        --text: #edf3ff;
+        --muted: #aebbd0;
+        --grid: #344055;
+        --raw-fill: #74372f;
+        --raw-line: #ff9581;
+        --raw-branch: #e47865;
+        --safe-fill: #244c76;
+        --safe-line: #8ac1ff;
+        --safe-branch: #65a8ed;
+        --deep-fill: #205a49;
+        --deep-line: #76d9b5;
+        --deep-branch: #54ba96;
+        --chip: #222c3c;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      width: 100%;
+      margin: 0;
+      padding: 12px 14px 10px;
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 20px;
+      font-weight: 720;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 472px;
+      background: var(--panel);
+      overflow: visible;
+    }
+
+    .section {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .formula {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 560;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 520;
+    }
+
+    .result {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: 680;
+    }
+
+    .ellipsis {
+      fill: var(--muted);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
+
+    .divider {
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .stream-center {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .branch {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .block-mark {
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .legend-swatch {
+      stroke-width: 2;
+    }
+
+    #fallback {
+      display: none;
+      padding: 18px;
+      color: var(--text);
+      background: var(--chip);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Накопление сигнала в residual-потоке</h1>
+    <svg id="chart" width="1200" height="440" viewBox="0 0 1200 440"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Residual-поток без масштабирования и с масштабированием по глубине</title>
+      <desc id="svg-desc">Без масштабирования поток расширяется. При множителях 1 делить на корень из 24 и 1 делить на корень из 252 поток остаётся узким для 12 и 126 слоёв.</desc>
+    </svg>
+    <div id="fallback" role="img">
+      Схема должна была показать, что residual-поток без масштабирования расширяется с глубиной, а множители 1/√24 ≈ 0,204 для 12 слоёв и 1/√252 ≈ 0,063 для 126 слоёв удерживают типичный размах сигнала почти постоянным.
+    </div>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze({
+      zero: 0,
+      one: 1,
+      canvas: { width: 1200, height: 440 },
+      plot: { left: 288, right: 1085, mid: 686 },
+      arrow: { head: 10, wing: 5 },
+      labelGap: 8,
+      radius: 4,
+      dividers: [157, 282],
+      lanes: [
+        {
+          key: "raw",
+          y: 105,
+          titleY: 30,
+          formulaY: 52,
+          title: "Без масштабирования",
+          formula: "все residual-добавки входят без ослабления",
+          fill: "var(--raw-fill)",
+          line: "var(--raw-line)",
+          branch: "var(--raw-branch)",
+          widths: { start: 9, middle: 25, end: 50 },
+          result: "типичный размах растёт",
+          resultX: 1148,
+          resultY: 146,
+          ticks: [326, 392, 458, 524, 590, 656, 722, 788, 854, 920, 986, 1052],
+          branches: [
+            { x1: 353, y1: 69, x2: 382, y2: 102, label: "residual-добавка", lx: 345, ly: 67, anchor: "end" },
+            { x1: 507, y1: 145, x2: 534, y2: 110 },
+            { x1: 661, y1: 61, x2: 688, y2: 98 },
+            { x1: 815, y1: 154, x2: 842, y2: 114 },
+            { x1: 969, y1: 50, x2: 996, y2: 94 }
+          ]
+        },
+        {
+          key: "twelve",
+          y: 230,
+          titleY: 178,
+          formulaY: 200,
+          title: "12 слоёв",
+          formula: "каждый вклад × 1/√24 ≈ 0,204",
+          fill: "var(--safe-fill)",
+          line: "var(--safe-line)",
+          branch: "var(--safe-branch)",
+          widths: { start: 9, middle: 12, end: 15 },
+          result: "поток остаётся узким",
+          resultX: 1148,
+          resultY: 264,
+          ticks: [326, 392, 458, 524, 590, 656, 722, 788, 854, 920, 986, 1052],
+          branches: [
+            { x1: 361, y1: 208, x2: 382, y2: 228 },
+            { x1: 513, y1: 254, x2: 534, y2: 232 },
+            { x1: 667, y1: 206, x2: 688, y2: 228 },
+            { x1: 821, y1: 255, x2: 842, y2: 232 },
+            { x1: 975, y1: 205, x2: 996, y2: 227 }
+          ]
+        },
+        {
+          key: "deep",
+          y: 355,
+          titleY: 303,
+          formulaY: 325,
+          title: "126 слоёв",
+          formula: "каждый вклад × 1/√252 ≈ 0,063",
+          fill: "var(--deep-fill)",
+          line: "var(--deep-line)",
+          branch: "var(--deep-branch)",
+          widths: { start: 9, middle: 11, end: 13 },
+          result: "много тихих вкладов",
+          resultX: 1148,
+          resultY: 389,
+          ticks: [326, 392, 458, 524, 848, 914, 980, 1046],
+          branches: [
+            { x1: 361, y1: 333, x2: 382, y2: 353 },
+            { x1: 513, y1: 379, x2: 534, y2: 357 },
+            { x1: 821, y1: 380, x2: 842, y2: 357 },
+            { x1: 975, y1: 330, x2: 996, y2: 352 }
+          ],
+          ellipsis: { x: 686, y: 363 }
+        }
+      ],
+      input: { x: 275, ys: [105, 230, 355], labelX: 267, labelY: 420 },
+      legend: { y: 422, x1: 405, x2: 485, textX: 504 },
+      streamCurve: { q1: 486, q2: 886 }
+    });
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+        parent.appendChild(node);
+        return node;
+      };
+
+      const text = (value, x, y, className, anchor = "start", parent = svg) => {
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const line = (x1, y1, x2, y2, attributes, parent = svg) =>
+        make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          ...attributes
+        }, parent);
+
+      const arrow = (x1, y1, x2, y2, color, className, parent = svg) => {
+        line(x1, y1, x2, y2, {
+          stroke: color,
+          class: className
+        }, parent);
+
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.hypot(dx, dy) || DATA.one;
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = x2 - ux * DATA.arrow.head;
+        const baseY = y2 - uy * DATA.arrow.head;
+        const leftX = baseX - uy * DATA.arrow.wing;
+        const leftY = baseY + ux * DATA.arrow.wing;
+        const rightX = baseX + uy * DATA.arrow.wing;
+        const rightY = baseY - ux * DATA.arrow.wing;
+
+        make("polygon", {
+          points: [
+            `${sx(x2)},${sy(y2)}`,
+            `${sx(leftX)},${sy(leftY)}`,
+            `${sx(rightX)},${sy(rightY)}`
+          ].join(" "),
+          fill: color
+        }, parent);
+      };
+
+      const streamPath = lane => {
+        const left = DATA.plot.left;
+        const right = DATA.plot.right;
+        const middle = DATA.plot.mid;
+        const y = lane.y;
+        const start = lane.widths.start;
+        const mid = lane.widths.middle;
+        const end = lane.widths.end;
+        const q1 = DATA.streamCurve.q1;
+        const q2 = DATA.streamCurve.q2;
+
+        return [
+          `M ${sx(left)} ${sy(y - start)}`,
+          `Q ${sx(q1)} ${sy(y - mid)} ${sx(middle)} ${sy(y - mid)}`,
+          `Q ${sx(q2)} ${sy(y - end)} ${sx(right)} ${sy(y - end)}`,
+          `L ${sx(right)} ${sy(y + end)}`,
+          `Q ${sx(q2)} ${sy(y + end)} ${sx(middle)} ${sy(y + mid)}`,
+          `Q ${sx(q1)} ${sy(y + mid)} ${sx(left)} ${sy(y + start)}`,
+          "Z"
+        ].join(" ");
+      };
+
+      DATA.dividers.forEach(y => {
+        line(DATA.zero, y, DATA.canvas.width, y, { class: "divider" });
+      });
+
+      DATA.lanes.forEach(lane => {
+        const group = make("g", { "data-lane": lane.key });
+
+        text(lane.title, 34, lane.titleY, "section", "start", group);
+        text(lane.formula, 34, lane.formulaY, "formula", "start", group);
+
+        make("path", {
+          d: streamPath(lane),
+          fill: lane.fill,
+          stroke: lane.line,
+          "stroke-width": "2",
+          "stroke-linejoin": "round"
+        }, group);
+
+        arrow(
+          DATA.plot.left,
+          lane.y,
+          DATA.plot.right,
+          lane.y,
+          lane.line,
+          "stream-center",
+          group
+        );
+
+        lane.ticks.forEach(x => {
+          line(
+            x,
+            lane.y - lane.widths.start,
+            x,
+            lane.y + lane.widths.start,
+            {
+              stroke: lane.line,
+              class: "block-mark"
+            },
+            group
+          );
+        });
+
+        lane.branches.forEach(branch => {
+          arrow(
+            branch.x1,
+            branch.y1,
+            branch.x2,
+            branch.y2,
+            lane.branch,
+            "branch",
+            group
+          );
+
+          if (branch.label) {
+            text(
+              branch.label,
+              branch.lx,
+              branch.ly,
+              "small",
+              branch.anchor,
+              group
+            );
+          }
+        });
+
+        if (lane.ellipsis) {
+          text(
+            "···",
+            lane.ellipsis.x,
+            lane.ellipsis.y,
+            "ellipsis",
+            "middle",
+            group
+          );
+        }
+
+        text(
+          lane.result,
+          lane.resultX,
+          lane.resultY,
+          "result",
+          "end",
+          group
+        );
+      });
+
+      DATA.input.ys.forEach(y => {
+        make("circle", {
+          cx: sx(DATA.input.x),
+          cy: sy(y),
+          r: sx(DATA.radius) - sx(DATA.zero),
+          fill: "var(--text)"
+        });
+      });
+
+      text(
+        "один и тот же исходный сигнал",
+        DATA.input.labelX,
+        DATA.input.labelY,
+        "small",
+        "start"
+      );
+
+      line(
+        DATA.legend.x1,
+        DATA.legend.y,
+        DATA.legend.x2,
+        DATA.legend.y,
+        {
+          stroke: "var(--safe-line)",
+          class: "legend-swatch"
+        }
+      );
+
+      text(
+        "толщина ленты = типичный размах сигнала",
+        DATA.legend.textX,
+        DATA.legend.y + DATA.labelGap,
+        "small",
+        "start"
+      );
+
+      fallback.style.display = "none";
+    } catch (error) {
+      const chart = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      chart.style.display = "none";
+      fallback.style.display = "block";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

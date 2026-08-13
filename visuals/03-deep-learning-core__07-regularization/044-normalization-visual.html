@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BatchNorm, LayerNorm и RMSNorm на одной матрице</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --surface: #ffffff;
+    --surface-soft: #f1f3f8;
+    --ink: #182033;
+    --muted: #59647a;
+    --grid: #aeb7c8;
+    --frame: #d6dce7;
+    --batch: #2166d1;
+    --batch-soft: #dceaff;
+    --layer: #8a3ffc;
+    --layer-soft: #eadfff;
+    --rms: #087f5b;
+    --rms-soft: #d7f4e8;
+    --note: #fff2bf;
+    --note-ink: #624b00;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111522;
+      --surface: #191f2e;
+      --surface-soft: #20283a;
+      --ink: #f2f5fb;
+      --muted: #b6bfd1;
+      --grid: #68748a;
+      --frame: #343e52;
+      --batch: #78aafc;
+      --batch-soft: #203c68;
+      --layer: #c9a6ff;
+      --layer-soft: #443263;
+      --rms: #69d7ae;
+      --rms-soft: #214f42;
+      --note: #4b411c;
+      --note-ink: #ffe79a;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .diagram {
+    margin: unset;
+    background: var(--page);
+  }
+
+  .diagram-title {
+    margin: unset;
+    padding: 16px 24px 10px;
+    font-size: 24px;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: -0.02em;
+  }
+
+  svg {
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+    max-block-size: 470px;
+    background: var(--page);
+  }
+
+  .canvas {
+    fill: var(--page);
+  }
+
+  .panel {
+    fill: var(--surface);
+    stroke: var(--frame);
+    stroke-width: 2px;
+  }
+
+  .panel-rule {
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  .panel-subtitle {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .axis-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .cell {
+    fill: var(--surface-soft);
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .cell-symbol {
+    fill: var(--muted);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .selected-symbol {
+    fill: var(--ink);
+  }
+
+  .batch-selected {
+    fill: var(--batch-soft);
+    stroke: var(--batch);
+    stroke-width: 2px;
+  }
+
+  .layer-selected {
+    fill: var(--layer-soft);
+    stroke: var(--layer);
+    stroke-width: 2px;
+  }
+
+  .rms-selected {
+    fill: var(--rms-soft);
+    stroke: var(--rms);
+    stroke-width: 2px;
+  }
+
+  .direction {
+    fill: none;
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    stroke: none;
+  }
+
+  .summary {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .note-box {
+    stroke-width: 1px;
+  }
+
+  .note-text {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .footer-rule {
+    stroke: var(--frame);
+    stroke-width: 2px;
+  }
+
+  .footer-text {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<figure class="diagram" aria-labelledby="diagram-title">
+  <h1 class="diagram-title" id="diagram-title">BatchNorm, LayerNorm и RMSNorm на одной матрице</h1>
+  <svg
+    id="normalization-diagram"
+    viewBox="0 0 1200 420"
+    width="1200"
+    height="420"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-label="Три одинаковые матрицы батч на признаки: BatchNorm выделяет столбец, LayerNorm и RMSNorm выделяют строку, причём RMSNorm не вычитает среднее."
+  >
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const D = {
+  canvas: [1200, 420],
+  panel: { y: 8, w: 350, h: 350, rx: 16, ruleY: 17, ruleInset: 22 },
+  panels: [
+    {
+      key: "batch",
+      x: 25,
+      title: "BatchNorm",
+      subtitle: "один признак во всём батче",
+      summary: "по столбцу: центр + масштаб",
+      note: "соседи сверху и снизу важны"
+    },
+    {
+      key: "layer",
+      x: 425,
+      title: "LayerNorm",
+      subtitle: "все признаки одного примера",
+      summary: "по строке: центр + масштаб",
+      note: "другие строки не нужны"
+    },
+    {
+      key: "rms",
+      x: 825,
+      title: "RMSNorm",
+      subtitle: "все признаки того же примера",
+      summary: "по строке: только масштаб",
+      note: "без вычитания среднего"
+    }
+  ],
+  title: { y: 43, subtitleY: 67 },
+  matrix: {
+    dx: 67,
+    y: 111,
+    cellW: 36,
+    cellH: 34,
+    rows: ["x", "x", "x", "x", "x"],
+    columns: ["x", "x", "x", "x", "x", "x"],
+    selectedColumn: "selected",
+    selectedRow: "selected",
+    rowStates: ["plain", "plain", "selected", "plain", "plain"],
+    columnStates: ["plain", "plain", "selected", "plain", "plain", "plain"],
+    symbolDY: 5,
+    arrowInset: 7,
+    arrowSideInset: 6,
+    axisY: 99,
+    batchLabelDX: 57
+  },
+  summary: { y: 310 },
+  note: { xInset: 28, y: 329, w: 294, h: 22, rx: 11, textY: 345 },
+  arrow: { head: 6 },
+  footer: {
+    lineX1: 70,
+    lineX2: 1130,
+    lineY: 378,
+    textX: 600,
+    textY: 406,
+    text: "направление выбирает группу · операция меняет центр и/или масштаб"
+  },
+  fallback: { x: 600, y: 215 },
+  colors: {
+    batch: "var(--batch)",
+    layer: "var(--layer)",
+    rms: "var(--rms)"
+  }
+};
+const origin = { x: 0, y: 0 };
+const scale = { x: 1, y: 1 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("normalization-diagram");
+  const drawing = document.getElementById("drawing");
+
+  const node = (tag, attributes = {}, content = "") => {
+    const element = document.createElementNS(NS, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      element.setAttribute(name, String(value));
+    });
+    if (content) element.textContent = content;
+    return element;
+  };
+
+  const add = element => {
+    drawing.appendChild(element);
+    return element;
+  };
+
+  const rect = (x, y, width, height, className, rx) => add(node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(width) - sx(0),
+    height: sy(height) - sy(0),
+    rx: sx(rx) - sx(0),
+    ry: sy(rx) - sy(0),
+    class: className
+  }));
+
+  const line = (x1, y1, x2, y2, className, stroke) => add(node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className,
+    stroke
+  }));
+
+  const label = (x, y, content, className, anchor = "middle", fill) => {
+    const attributes = {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    };
+    if (fill) attributes.fill = fill;
+    return add(node("text", attributes, content));
+  };
+
+  const polygon = (points, className, fill) => add(node("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: className,
+    fill
+  }));
+
+  const arrow = (x1, y1, x2, y2, direction, color) => {
+    line(x1, y1, x2, y2, "direction", color);
+    const h = D.arrow.head;
+    const points = direction === "down"
+      ? [
+          { x: x2, y: y2 },
+          { x: x2 - h, y: y2 - h },
+          { x: x2 + h, y: y2 - h }
+        ]
+      : [
+          { x: x2, y: y2 },
+          { x: x2 - h, y: y2 - h },
+          { x: x2 - h, y: y2 + h }
+        ];
+    polygon(points, "arrow-head", color);
+  };
+
+  rect(0, 0, D.canvas[0], D.canvas[1], "canvas", 0);
+
+  D.panels.forEach(panel => {
+    const color = D.colors[panel.key];
+    const matrixX = panel.x + D.matrix.dx;
+    const matrixY = D.matrix.y;
+    const matrixW = D.matrix.columns.length * D.matrix.cellW;
+    const matrixH = D.matrix.rows.length * D.matrix.cellH;
+
+    rect(panel.x, D.panel.y, D.panel.w, D.panel.h, "panel", D.panel.rx);
+    line(
+      panel.x + D.panel.ruleInset,
+      D.panel.ruleY,
+      panel.x + D.panel.w - D.panel.ruleInset,
+      D.panel.ruleY,
+      "panel-rule",
+      color
+    );
+
+    label(
+      panel.x + D.panel.w / scale.x / (scale.x + scale.x),
+      D.title.y,
+      panel.title,
+      "panel-title"
+    );
+    label(
+      panel.x + D.panel.w / scale.x / (scale.x + scale.x),
+      D.title.subtitleY,
+      panel.subtitle,
+      "panel-subtitle"
+    );
+
+    label(
+      matrixX,
+      D.matrix.axisY,
+      "признаки →",
+      "axis-label",
+      "start"
+    );
+    label(
+      matrixX - D.matrix.batchLabelDX,
+      D.matrix.axisY,
+      "батч ↓",
+      "axis-label",
+      "start"
+    );
+
+    D.matrix.rows.forEach((symbol, rowIndex) => {
+      D.matrix.columns.forEach((columnSymbol, columnIndex) => {
+        const x = matrixX + columnIndex * D.matrix.cellW;
+        const y = matrixY + rowIndex * D.matrix.cellH;
+        const columnChosen = D.matrix.columnStates[columnIndex] === D.matrix.selectedColumn;
+        const rowChosen = D.matrix.rowStates[rowIndex] === D.matrix.selectedRow;
+        const selected = panel.key === "batch" ? columnChosen : rowChosen;
+        const cellClass = selected
+          ? `cell ${panel.key}-selected`
+          : "cell";
+
+        rect(x, y, D.matrix.cellW, D.matrix.cellH, cellClass, 0);
+        label(
+          x + D.matrix.cellW / scale.x / (scale.x + scale.x),
+          y + D.matrix.cellH / scale.y / (scale.y + scale.y) + D.matrix.symbolDY,
+          columnSymbol || symbol,
+          selected ? "cell-symbol selected-symbol" : "cell-symbol"
+        );
+      });
+    });
+
+    if (panel.key === "batch") {
+      const chosenColumn = D.matrix.columnStates.indexOf(D.matrix.selectedColumn);
+      const arrowX =
+        matrixX +
+        chosenColumn * D.matrix.cellW +
+        D.matrix.cellW -
+        D.matrix.arrowSideInset;
+
+      arrow(
+        arrowX,
+        matrixY + D.matrix.arrowInset,
+        arrowX,
+        matrixY + matrixH - D.matrix.arrowInset,
+        "down",
+        color
+      );
+    } else {
+      const chosenRow = D.matrix.rowStates.indexOf(D.matrix.selectedRow);
+      const arrowY =
+        matrixY +
+        chosenRow * D.matrix.cellH +
+        D.matrix.cellH -
+        D.matrix.arrowSideInset;
+
+      arrow(
+        matrixX + D.matrix.arrowInset,
+        arrowY,
+        matrixX + matrixW - D.matrix.arrowInset,
+        arrowY,
+        "right",
+        color
+      );
+    }
+
+    label(
+      panel.x + D.panel.w / scale.x / (scale.x + scale.x),
+      D.summary.y,
+      panel.summary,
+      "summary",
+      "middle",
+      color
+    );
+
+    const noteClass = panel.key === "rms"
+      ? "note-box rms-selected"
+      : "note-box cell";
+
+    rect(
+      panel.x + D.note.xInset,
+      D.note.y,
+      D.note.w,
+      D.note.h,
+      noteClass,
+      D.note.rx
+    );
+
+    label(
+      panel.x + D.panel.w / scale.x / (scale.x + scale.x),
+      D.note.textY,
+      panel.note,
+      "note-text",
+      "middle",
+      panel.key === "rms" ? "var(--rms)" : "var(--muted)"
+    );
+  });
+
+  line(
+    D.footer.lineX1,
+    D.footer.lineY,
+    D.footer.lineX2,
+    D.footer.lineY,
+    "footer-rule",
+    "var(--frame)"
+  );
+
+  label(
+    D.footer.textX,
+    D.footer.textY,
+    D.footer.text,
+    "footer-text"
+  );
+} catch (error) {
+  const svg = document.getElementById("normalization-diagram");
+  const NS = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+  const fallback = document.createElementNS(NS, "text");
+  fallback.setAttribute("x", String(sx(D.fallback.x)));
+  fallback.setAttribute("y", String(sy(D.fallback.y)));
+  fallback.setAttribute("text-anchor", "middle");
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = "BatchNorm выделяет столбец; LayerNorm и RMSNorm — строку; RMSNorm не вычитает среднее.";
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

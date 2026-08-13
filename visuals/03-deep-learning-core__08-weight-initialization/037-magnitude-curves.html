@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Траектории величины активаций через 50 слоёв</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #667085;
+    --grid: #d7deea;
+    --band: #eaf7ef;
+    --explode: #d13b2f;
+    --vanish: #8a4bb8;
+    --xavier: #2673c9;
+    --kaiming: #16845b;
+    --note: #f2f5f9;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-height: 520px;
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .title {
+    margin: 0;
+    padding: 14px 20px 8px;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 476px;
+    background: var(--panel);
+  }
+
+  .axis {
+    stroke: var(--ink);
+    stroke-width: 1.6;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .grid {
+    stroke: var(--grid);
+    stroke-width: 1;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .working-band {
+    fill: var(--band);
+  }
+
+  .series {
+    fill: none;
+    stroke-width: 3.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .explode {
+    stroke: var(--explode);
+    color: var(--explode);
+  }
+
+  .vanish {
+    stroke: var(--vanish);
+    color: var(--vanish);
+  }
+
+  .xavier {
+    stroke: var(--xavier);
+    color: var(--xavier);
+  }
+
+  .kaiming {
+    stroke: var(--kaiming);
+    color: var(--kaiming);
+  }
+
+  .endpoint {
+    fill: var(--panel);
+    stroke: currentColor;
+    stroke-width: 2.4;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .label,
+  .tick,
+  .annotation,
+  .legend-text,
+  .fallback {
+    fill: var(--ink);
+  }
+
+  .label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .tick {
+    font-size: 14px;
+  }
+
+  .annotation {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .legend-heading {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend-text {
+    font-size: 15px;
+  }
+
+  .leader {
+    fill: none;
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .diagnosis {
+    fill: var(--note);
+  }
+
+  .diagnosis-text {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    font-size: 17px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --panel: #171d28;
+      --ink: #edf2f8;
+      --muted: #aab4c4;
+      --grid: #3a4557;
+      --band: #17352d;
+      --explode: #ff766b;
+      --vanish: #ce8cf2;
+      --xavier: #70b7ff;
+      --kaiming: #55d39c;
+      --note: #222b39;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1 class="title">Траектории величины активаций через 50 слоёв</h1>
+  <svg
+    id="chart"
+    viewBox="0 0 1040 420"
+    width="1040"
+    height="420"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description">
+    <title id="diagram-title">Величина активаций на слоях с первого по пятидесятый</title>
+    <desc id="diagram-description">
+      N(0,1) с ReLU взрывается примерно к пятому слою, N(0,0.01)
+      с ReLU затухает примерно к десятому, а Xavier с tanh и Kaiming
+      с ReLU сохраняют рабочий масштаб до пятидесятого слоя.
+    </desc>
+  </svg>
+</main>
+
+<script>
+const data = Object.freeze({
+  canvas: { width: 1040, height: 420 },
+  axes: {
+    zero: 0,
+    left: 0,
+    right: 52,
+    bottom: 0,
+    top: 4.6,
+    tickBottom: -0.14,
+    tickLabel: -0.46,
+    xLabelX: 52,
+    xLabelY: -0.46,
+    endpointRadius: 0.18
+  },
+  guides: [
+    { y: 0, labelX: -0.55, labelY: 0.08, text: "затухание" },
+    { y: 1, labelX: -0.55, labelY: 1.08, text: "рабочая зона" },
+    { y: 4, labelX: -0.55, labelY: 4.08, text: "взрыв" }
+  ],
+  workingBand: { x1: 0, x2: 52, y1: 0.62, y2: 1.42 },
+  ticks: [
+    { x: 1, text: "1" },
+    { x: 5, text: "5" },
+    { x: 10, text: "10" },
+    { x: 50, text: "50" }
+  ],
+  series: [
+    {
+      className: "explode",
+      legend: {
+        x1: 0, x2: 3, textX: 4, y: -2.04,
+        text: "N(0,1) + ReLU — взрыв"
+      },
+      points: [
+        { x: 1, y: 1.02 },
+        { x: 2, y: 1.34 },
+        { x: 3, y: 1.94 },
+        { x: 4, y: 2.92 },
+        { x: 5, y: 4.34 }
+      ]
+    },
+    {
+      className: "vanish",
+      legend: {
+        x1: 0, x2: 3, textX: 4, y: -2.82,
+        text: "N(0,0.01) + ReLU — затухание"
+      },
+      points: [
+        { x: 1, y: 0.98 },
+        { x: 3, y: 0.68 },
+        { x: 5, y: 0.42 },
+        { x: 7, y: 0.23 },
+        { x: 10, y: 0.06 }
+      ]
+    },
+    {
+      className: "xavier",
+      legend: {
+        x1: 27, x2: 30, textX: 31, y: -2.04,
+        text: "Xavier + tanh — рабочий масштаб"
+      },
+      points: [
+        { x: 1, y: 1.04 },
+        { x: 5, y: 1.08 },
+        { x: 10, y: 1.03 },
+        { x: 20, y: 1.11 },
+        { x: 30, y: 1.06 },
+        { x: 40, y: 1.14 },
+        { x: 50, y: 1.09 }
+      ]
+    },
+    {
+      className: "kaiming",
+      legend: {
+        x1: 27, x2: 30, textX: 31, y: -2.82,
+        text: "Kaiming + ReLU — рабочий масштаб"
+      },
+      points: [
+        { x: 1, y: 0.93 },
+        { x: 5, y: 0.88 },
+        { x: 10, y: 0.94 },
+        { x: 20, y: 0.89 },
+        { x: 30, y: 0.96 },
+        { x: 40, y: 0.91 },
+        { x: 50, y: 0.95 }
+      ]
+    }
+  ],
+  annotations: [
+    {
+      className: "explode",
+      line: [
+        { x: 5, y: 4.34 },
+        { x: 5.72, y: 4.16 }
+      ],
+      textPoint: { x: 6.08, y: 4.1 },
+      anchor: "start",
+      text: "взрыв примерно к 5-му слою"
+    },
+    {
+      className: "vanish",
+      line: [
+        { x: 10, y: 0.06 },
+        { x: 10.72, y: -0.02 },
+        { x: 11.45, y: -0.86 }
+      ],
+      textPoint: { x: 11.78, y: -0.92 },
+      anchor: "start",
+      text: "затухание примерно к 10-му слою"
+    },
+    {
+      className: "kaiming",
+      line: [
+        { x: 49.2, y: 1.26 },
+        { x: 43.7, y: 1.72 }
+      ],
+      textPoint: { x: 41.1, y: 1.83 },
+      anchor: "middle",
+      text: "рабочий масштаб до 50-го слоя"
+    }
+  ],
+  legend: {
+    headingX: 0,
+    headingY: -1.48,
+    heading: "Четыре одинаковые сети, разные пары инициализации и активации"
+  },
+  diagnosis: {
+    x1: 0,
+    x2: 52,
+    y1: -3.2,
+    y2: -4.02,
+    textX: 26,
+    textY: -3.72,
+    text: "Ошибка масштаба накапливается слой за слоем"
+  },
+  fallback: {
+    x: 1,
+    y1: 2.8,
+    y2: 2.1,
+    line1: "Схема должна была показать четыре траектории через 50 слоёв.",
+    line2: "Две взрываются или затухают, две сохраняют рабочий масштаб."
+  }
+});
+const origin = Object.freeze({ x: 112, y: 238 });
+const scale = Object.freeze({ x: 16.6, y: -42 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("chart");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attrs, content) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => {
+      node.setAttribute(name, String(value));
+    });
+    if (content) node.textContent = content;
+    return node;
+  };
+
+  const add = node => svg.appendChild(node);
+
+  const pathFrom = points => {
+    let first = true;
+    let path = "";
+    points.forEach(point => {
+      path += `${first ? "M" : "L"} ${sx(point.x)} ${sy(point.y)} `;
+      first = false;
+    });
+    return path;
+  };
+
+  add(make("rect", {
+    class: "working-band",
+    x: sx(data.workingBand.x1),
+    y: sy(data.workingBand.y2),
+    width: sx(data.workingBand.x2) - sx(data.workingBand.x1),
+    height: sy(data.workingBand.y1) - sy(data.workingBand.y2)
+  }));
+
+  data.guides.forEach(guide => {
+    add(make("line", {
+      class: "grid",
+      x1: sx(data.axes.left),
+      y1: sy(guide.y),
+      x2: sx(data.axes.right),
+      y2: sy(guide.y)
+    }));
+    add(make("text", {
+      class: "label",
+      x: sx(guide.labelX),
+      y: sy(guide.labelY),
+      "text-anchor": "end"
+    }, guide.text));
+  });
+
+  add(make("line", {
+    class: "axis",
+    x1: sx(data.axes.left),
+    y1: sy(data.axes.zero),
+    x2: sx(data.axes.right),
+    y2: sy(data.axes.zero)
+  }));
+
+  add(make("line", {
+    class: "axis",
+    x1: sx(data.axes.zero),
+    y1: sy(data.axes.bottom),
+    x2: sx(data.axes.zero),
+    y2: sy(data.axes.top)
+  }));
+
+  data.ticks.forEach(tick => {
+    add(make("line", {
+      class: "axis",
+      x1: sx(tick.x),
+      y1: sy(data.axes.zero),
+      x2: sx(tick.x),
+      y2: sy(data.axes.tickBottom)
+    }));
+    add(make("text", {
+      class: "tick",
+      x: sx(tick.x),
+      y: sy(data.axes.tickLabel),
+      "text-anchor": "middle"
+    }, tick.text));
+  });
+
+  add(make("text", {
+    class: "label",
+    x: sx(data.axes.xLabelX),
+    y: sy(data.axes.xLabelY),
+    "text-anchor": "end"
+  }, "слой"));
+
+  data.series.forEach(series => {
+    add(make("path", {
+      class: `series ${series.className}`,
+      d: pathFrom(series.points)
+    }));
+
+    const endpoint = series.points.at(-1);
+    add(make("circle", {
+      class: `endpoint ${series.className}`,
+      cx: sx(endpoint.x),
+      cy: sy(endpoint.y),
+      r: Math.abs(sx(data.axes.endpointRadius) - sx(data.axes.zero))
+    }));
+  });
+
+  data.annotations.forEach(annotation => {
+    add(make("path", {
+      class: `leader ${annotation.className}`,
+      d: pathFrom(annotation.line)
+    }));
+    add(make("text", {
+      class: "annotation",
+      x: sx(annotation.textPoint.x),
+      y: sy(annotation.textPoint.y),
+      "text-anchor": annotation.anchor
+    }, annotation.text));
+  });
+
+  add(make("text", {
+    class: "legend-heading",
+    x: sx(data.legend.headingX),
+    y: sy(data.legend.headingY),
+    "text-anchor": "start"
+  }, data.legend.heading));
+
+  data.series.forEach(series => {
+    add(make("line", {
+      class: `series ${series.className}`,
+      x1: sx(series.legend.x1),
+      y1: sy(series.legend.y),
+      x2: sx(series.legend.x2),
+      y2: sy(series.legend.y)
+    }));
+    add(make("text", {
+      class: "legend-text",
+      x: sx(series.legend.textX),
+      y: sy(series.legend.y),
+      "text-anchor": "start",
+      "dominant-baseline": "middle"
+    }, series.legend.text));
+  });
+
+  add(make("rect", {
+    class: "diagnosis",
+    x: sx(data.diagnosis.x1),
+    y: sy(data.diagnosis.y1),
+    width: sx(data.diagnosis.x2) - sx(data.diagnosis.x1),
+    height: sy(data.diagnosis.y2) - sy(data.diagnosis.y1)
+  }));
+
+  add(make("text", {
+    class: "diagnosis-text",
+    x: sx(data.diagnosis.textX),
+    y: sy(data.diagnosis.textY),
+    "text-anchor": "middle"
+  }, data.diagnosis.text));
+} catch (error) {
+  const svg = document.getElementById("chart");
+  const ns = "http://www.w3.org/2000/svg";
+  const retainedTitle = svg.querySelector("title");
+  const retainedDescription = svg.querySelector("desc");
+  svg.replaceChildren(retainedTitle, retainedDescription);
+
+  const first = document.createElementNS(ns, "text");
+  first.setAttribute("class", "fallback");
+  first.setAttribute("x", String(sx(data.fallback.x)));
+  first.setAttribute("y", String(sy(data.fallback.y1)));
+  first.textContent = data.fallback.line1;
+  svg.appendChild(first);
+
+  const second = document.createElementNS(ns, "text");
+  second.setAttribute("class", "fallback");
+  second.setAttribute("x", String(sx(data.fallback.x)));
+  second.setAttribute("y", String(sy(data.fallback.y2)));
+  second.textContent = data.fallback.line2;
+  svg.appendChild(second);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

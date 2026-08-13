@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Накопление множителей за 50 слоёв</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f8fafc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #56637a;
+      --grid: #d9e0ea;
+      --axis: #7a879b;
+      --steady: #8b96a8;
+      --fade: #1778c8;
+      --fade-soft: #e1f1ff;
+      --grow: #d6532d;
+      --grow-soft: #ffebe4;
+      --focus: #f2f5f9;
+      --border: #cbd4e1;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #17202d;
+        --ink: #edf3fb;
+        --muted: #b3bfd0;
+        --grid: #344154;
+        --axis: #8795a9;
+        --steady: #9ba8ba;
+        --fade: #66b9f4;
+        --fade-soft: #173d58;
+        --grow: #ff8a67;
+        --grow-soft: #552a24;
+        --focus: #202b3a;
+        --border: #3c4a5d;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      max-width: 1120px;
+      margin: auto;
+      padding: 12px;
+      background: var(--page);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .stage {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .axis-label,
+    .tick-label {
+      fill: var(--muted);
+    }
+
+    .curve-label {
+      font-weight: 700;
+    }
+
+    .fade-label {
+      fill: var(--fade);
+    }
+
+    .grow-label {
+      fill: var(--grow);
+    }
+
+    .note {
+      fill: var(--muted);
+    }
+
+    .failure {
+      margin: 0;
+      padding: 24px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1>Как множители 0,95 и 1,05 накапливаются за 50 слоёв</h1>
+    <div class="stage">
+      <svg id="chart"
+           viewBox="0 0 960 462"
+           preserveAspectRatio="xMidYMid meet"
+           role="img"
+           aria-labelledby="svg-title svg-desc">
+        <title id="svg-title">Накопление множителей 0,95 и 1,05 за 50 слоёв</title>
+        <desc id="svg-desc">
+          Две кривые начинаются рядом. Сигнал с множителем 0,95 уменьшается
+          примерно до 0,077, а сигнал с множителем 1,05 растёт примерно до 11,47.
+        </desc>
+      </svg>
+      <p id="failure" class="failure" hidden>
+        Схема должна была показать две кривые от слоя 1 до слоя 50:
+        множитель 0,95 снижает сигнал примерно до 0,08, а множитель 1,05
+        увеличивает его почти до 11,5.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      curves: Object.freeze([
+        Object.freeze({
+          factor: 0.95,
+          className: "fade",
+          label: "× 0,95 за слой",
+          endLabel: "0,95⁵⁰ ≈ 0,077",
+          shortEnd: "меньше 8%"
+        }),
+        Object.freeze({
+          factor: 1.05,
+          className: "grow",
+          label: "× 1,05 за слой",
+          endLabel: "1,05⁵⁰ ≈ 11,47",
+          shortEnd: "почти в 11,5 раза"
+        })
+      ]),
+      domain: Object.freeze({
+        zero: 0,
+        firstLayer: 1,
+        tenthLayer: 10,
+        lastLayer: 50,
+        top: 12,
+        baseline: 1,
+        step: 1
+      }),
+      values: Object.freeze({
+        fadeAtTen: 0.60,
+        growAtTen: 1.63,
+        fadeAtEnd: 0.077,
+        growAtEnd: 11.47,
+        fadeRounded: 0.08,
+        growRounded: 11.5
+      }),
+      layout: Object.freeze({
+        pointRadius: 0.28,
+        haloRadius: 0.48,
+        tickHalf: 0.16,
+        guideTop: 12,
+        guideBottom: 0,
+        xTitleY: -1.70,
+        noteY: -2.55,
+        noteRuleY: -2.05,
+        topLabelY: 12,
+        baselineLabelX: 2.15,
+        firstBandLeft: 0.55,
+        firstBandRight: 5.20,
+        labelOffsets: Object.freeze({
+          axisX: 8,
+          axisY: -8,
+          tickX: 0,
+          tickY: 20,
+          baselineX: 0,
+          baselineY: -9,
+          tenGrowX: 0,
+          tenGrowY: -18,
+          tenFadeX: 0,
+          tenFadeY: 23,
+          endX: 14,
+          endGrowY: -13,
+          endFadeY: -17,
+          endDetailY: 11,
+          firstX: 12,
+          firstGrowY: -15,
+          firstFadeY: 20,
+          noteX: 0,
+          noteY: 0
+        }),
+        strokes: Object.freeze({
+          axis: 1.5,
+          grid: 1,
+          baseline: 1.5,
+          curve: 4,
+          leader: 1.5,
+          halo: 2
+        }),
+        fonts: Object.freeze({
+          axis: 14,
+          tick: 13,
+          curve: 15,
+          value: 14,
+          detail: 13,
+          note: 14
+        })
+      })
+    });
+
+    const origin = Object.freeze({ x: 98, y: 372 });
+    const scale = Object.freeze({ x: 13.2, y: -27 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const NS = "http://www.w3.org/2000/svg";
+      const D = DATA.domain;
+      const L = DATA.layout;
+      const O = L.labelOffsets;
+      const S = L.strokes;
+      const F = L.fonts;
+
+      const make = (name, attrs, parent = svg) => {
+        const node = document.createElementNS(NS, name);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+        parent.appendChild(node);
+        return node;
+      };
+
+      const line = (a, b, attrs, parent) => make("line", {
+        x1: sx(a.x),
+        y1: sy(a.y),
+        x2: sx(b.x),
+        y2: sy(b.y),
+        ...attrs
+      }, parent);
+
+      const circle = (point, radius, attrs, parent) => make("circle", {
+        cx: sx(point.x),
+        cy: sy(point.y),
+        r: Math.abs(sx(radius) - sx(D.zero)),
+        ...attrs
+      }, parent);
+
+      const text = (point, value, attrs, parent) => {
+        const node = make("text", {
+          x: sx(point.x),
+          y: sy(point.y),
+          ...attrs
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const pathFrom = points => points.map((point, index) =>
+        `${index === D.zero ? "M" : "L"} ${sx(point.x)} ${sy(point.y)}`
+      ).join(" ");
+
+      const styles = getComputedStyle(document.documentElement);
+      const color = name => styles.getPropertyValue(name).trim();
+
+      const grid = make("g", {
+        "aria-hidden": "true"
+      });
+
+      [D.firstLayer, D.tenthLayer, D.lastLayer].forEach(layer => {
+        line(
+          { x: layer, y: L.guideBottom },
+          { x: layer, y: L.guideTop },
+          {
+            stroke: color("--grid"),
+            "stroke-width": S.grid,
+            "vector-effect": "non-scaling-stroke"
+          },
+          grid
+        );
+      });
+
+      line(
+        { x: D.zero, y: D.baseline },
+        { x: D.lastLayer, y: D.baseline },
+        {
+          stroke: color("--steady"),
+          "stroke-width": S.baseline,
+          "vector-effect": "non-scaling-stroke"
+        },
+        grid
+      );
+
+      const axes = make("g", {
+        "aria-hidden": "true"
+      });
+
+      line(
+        { x: D.zero, y: D.zero },
+        { x: D.lastLayer, y: D.zero },
+        {
+          stroke: color("--axis"),
+          "stroke-width": S.axis,
+          "vector-effect": "non-scaling-stroke"
+        },
+        axes
+      );
+
+      line(
+        { x: D.zero, y: D.zero },
+        { x: D.zero, y: D.top },
+        {
+          stroke: color("--axis"),
+          "stroke-width": S.axis,
+          "vector-effect": "non-scaling-stroke"
+        },
+        axes
+      );
+
+      [D.firstLayer, D.tenthLayer, D.lastLayer].forEach(layer => {
+        line(
+          { x: layer, y: -L.tickHalf },
+          { x: layer, y: L.tickHalf },
+          {
+            stroke: color("--axis"),
+            "stroke-width": S.axis,
+            "vector-effect": "non-scaling-stroke"
+          },
+          axes
+        );
+
+        text(
+          { x: layer, y: D.zero },
+          String(layer),
+          {
+            dx: O.tickX,
+            dy: O.tickY,
+            class: "tick-label",
+            "font-size": F.tick,
+            "text-anchor": "middle"
+          },
+          axes
+        );
+      });
+
+      text(
+        { x: D.zero, y: L.topLabelY },
+        "масштаб сигнала",
+        {
+          dx: O.axisX,
+          dy: O.axisY,
+          class: "axis-label",
+          "font-size": F.axis,
+          "text-anchor": "start"
+        },
+        axes
+      );
+
+      text(
+        { x: D.lastLayer, y: L.xTitleY },
+        "слой",
+        {
+          dx: O.tickX,
+          dy: O.tickY,
+          class: "axis-label",
+          "font-size": F.axis,
+          "text-anchor": "end"
+        },
+        axes
+      );
+
+      text(
+        { x: L.baselineLabelX, y: D.baseline },
+        "начальный масштаб = 1",
+        {
+          dx: O.baselineX,
+          dy: O.baselineY,
+          class: "axis-label",
+          "font-size": F.tick,
+          "text-anchor": "start"
+        },
+        axes
+      );
+
+      const curves = make("g", {
+        "aria-label": "Кривые накопления"
+      });
+
+      DATA.curves.forEach(curve => {
+        const points = [];
+        for (
+          let layer = D.firstLayer;
+          layer <= D.lastLayer;
+          layer += D.step
+        ) {
+          points.push({
+            x: layer,
+            y: Math.pow(curve.factor, layer)
+          });
+        }
+
+        make("path", {
+          d: pathFrom(points),
+          fill: "none",
+          stroke: color(`--${curve.className}`),
+          "stroke-width": S.curve,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          "vector-effect": "non-scaling-stroke"
+        }, curves);
+      });
+
+      const firstGrow = {
+        x: D.firstLayer,
+        y: DATA.curves[D.step].factor
+      };
+      const firstFade = {
+        x: D.firstLayer,
+        y: DATA.curves[D.zero].factor
+      };
+
+      circle(
+        firstGrow,
+        L.pointRadius,
+        { fill: color("--grow") },
+        curves
+      );
+
+      circle(
+        firstFade,
+        L.pointRadius,
+        { fill: color("--fade") },
+        curves
+      );
+
+      text(
+        firstGrow,
+        "1,05",
+        {
+          dx: O.firstX,
+          dy: O.firstGrowY,
+          class: "curve-label grow-label",
+          "font-size": F.value,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      text(
+        firstFade,
+        "0,95",
+        {
+          dx: O.firstX,
+          dy: O.firstFadeY,
+          class: "curve-label fade-label",
+          "font-size": F.value,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      const tenGrow = {
+        x: D.tenthLayer,
+        y: DATA.values.growAtTen
+      };
+      const tenFade = {
+        x: D.tenthLayer,
+        y: DATA.values.fadeAtTen
+      };
+
+      circle(
+        tenGrow,
+        L.haloRadius,
+        {
+          fill: color("--panel"),
+          stroke: color("--grow"),
+          "stroke-width": S.halo,
+          "vector-effect": "non-scaling-stroke"
+        },
+        curves
+      );
+
+      circle(
+        tenFade,
+        L.haloRadius,
+        {
+          fill: color("--panel"),
+          stroke: color("--fade"),
+          "stroke-width": S.halo,
+          "vector-effect": "non-scaling-stroke"
+        },
+        curves
+      );
+
+      text(
+        tenGrow,
+        "10-й слой: 1,63",
+        {
+          dx: O.tenGrowX,
+          dy: O.tenGrowY,
+          class: "curve-label grow-label",
+          "font-size": F.value,
+          "text-anchor": "middle"
+        },
+        curves
+      );
+
+      text(
+        tenFade,
+        "10-й слой: 0,60",
+        {
+          dx: O.tenFadeX,
+          dy: O.tenFadeY,
+          class: "curve-label fade-label",
+          "font-size": F.value,
+          "text-anchor": "middle"
+        },
+        curves
+      );
+
+      const endGrow = {
+        x: D.lastLayer,
+        y: DATA.values.growAtEnd
+      };
+      const endFade = {
+        x: D.lastLayer,
+        y: DATA.values.fadeAtEnd
+      };
+
+      [endGrow, endFade].forEach((point, index) => {
+        circle(
+          point,
+          L.haloRadius,
+          {
+            fill: color("--panel"),
+            stroke: color(index === D.zero ? "--grow" : "--fade"),
+            "stroke-width": S.halo,
+            "vector-effect": "non-scaling-stroke"
+          },
+          curves
+        );
+      });
+
+      text(
+        endGrow,
+        DATA.curves[D.step].endLabel,
+        {
+          dx: O.endX,
+          dy: O.endGrowY,
+          class: "curve-label grow-label",
+          "font-size": F.curve,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      text(
+        endGrow,
+        DATA.curves[D.step].shortEnd,
+        {
+          dx: O.endX,
+          dy: O.endDetailY,
+          class: "grow-label",
+          "font-size": F.detail,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      text(
+        endFade,
+        DATA.curves[D.zero].endLabel,
+        {
+          dx: O.endX,
+          dy: O.endFadeY,
+          class: "curve-label fade-label",
+          "font-size": F.curve,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      text(
+        endFade,
+        DATA.curves[D.zero].shortEnd,
+        {
+          dx: O.endX,
+          dy: O.endDetailY,
+          class: "fade-label",
+          "font-size": F.detail,
+          "text-anchor": "start"
+        },
+        curves
+      );
+
+      line(
+        { x: D.zero, y: L.noteRuleY },
+        { x: D.lastLayer, y: L.noteRuleY },
+        {
+          stroke: color("--border"),
+          "stroke-width": S.grid,
+          "vector-effect": "non-scaling-stroke"
+        },
+        svg
+      );
+
+      text(
+        { x: D.lastLayer / (D.step + D.step), y: L.noteY },
+        "Каждый новый слой умножает уже изменившийся сигнал — поэтому разрыв ускоряется.",
+        {
+          dx: O.noteX,
+          dy: O.noteY,
+          class: "note",
+          "font-size": F.note,
+          "text-anchor": "middle"
+        },
+        svg
+      );
+    } catch (error) {
+      document.getElementById("chart").hidden = true;
+      document.getElementById("failure").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

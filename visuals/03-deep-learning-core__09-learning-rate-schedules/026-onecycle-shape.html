@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Подъём и спуск одного цикла</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: whitesmoke;
+      --panel: white;
+      --text: midnightblue;
+      --muted: slategray;
+      --axis: darkslategray;
+      --guide: lightgray;
+      --rise: darkorange;
+      --fall: royalblue;
+      --rise-band: oldlace;
+      --fall-band: aliceblue;
+      --error: firebrick;
+    }
+
+    body {
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      max-width: 920px;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    code {
+      color: var(--text);
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 390px;
+      overflow: visible;
+      background: var(--panel);
+      border: 2px solid var(--guide);
+    }
+
+    svg text {
+      fill: var(--text);
+      font-size: 15px;
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--guide);
+    }
+
+    .rise-band {
+      fill: var(--rise-band);
+    }
+
+    .fall-band {
+      fill: var(--fall-band);
+    }
+
+    .curve-halo {
+      fill: none;
+      stroke: var(--panel);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .rise {
+      fill: none;
+      stroke: var(--rise);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .fall {
+      fill: none;
+      stroke: var(--fall);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .leader {
+      fill: none;
+      stroke: var(--muted);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .point-rise {
+      fill: var(--rise);
+      stroke: var(--panel);
+    }
+
+    .point-peak {
+      fill: var(--text);
+      stroke: var(--panel);
+    }
+
+    .point-fall {
+      fill: var(--fall);
+      stroke: var(--panel);
+    }
+
+    .value-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .phase-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .support-label {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .rise-text {
+      fill: var(--rise);
+    }
+
+    .fall-text {
+      fill: var(--fall);
+    }
+
+    .fallback {
+      color: var(--error);
+      font-size: 16px;
+    }
+
+    .fallback[hidden] {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: black;
+        --panel: darkslategray;
+        --text: white;
+        --muted: lightgray;
+        --axis: gainsboro;
+        --guide: slategray;
+        --rise: orange;
+        --fall: lightskyblue;
+        --rise-band: saddlebrown;
+        --fall-band: midnightblue;
+        --error: lightsalmon;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-title diagram-subtitle">
+    <h1 id="diagram-title">Подъём и спуск одного цикла</h1>
+    <p class="subtitle" id="diagram-subtitle">
+      <code>lr_max = 0.01</code> · один цикл обучения
+    </p>
+
+    <svg
+      id="chart"
+      width="920"
+      height="390"
+      viewBox="0 0 920 390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">График learning rate для одного цикла</title>
+      <desc id="svg-description">
+        Learning rate поднимается от 0.0004 до пика 0.01 в середине
+        обучения, затем опускается до 0.000001.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать: 0.0004 → 0.01 → 0.000001.
+    </p>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      curve: [
+        { x: 0, y: 0.0004, kind: "start" },
+        { x: 0.5, y: 0.01, kind: "peak" },
+        { x: 1, y: 0.000001, kind: "finish" }
+      ],
+      axes: [
+        [
+          { x: 0, y: 0 },
+          { x: 1.08, y: 0 }
+        ],
+        [
+          { x: 0, y: 0 },
+          { x: 0, y: 0.011 }
+        ]
+      ],
+      arrowheads: [
+        [
+          { x: 1.052, y: 0.00025 },
+          { x: 1.08, y: 0 },
+          { x: 1.052, y: -0.00025 }
+        ],
+        [
+          { x: -0.014, y: 0.01045 },
+          { x: 0, y: 0.011 },
+          { x: 0.014, y: 0.01045 }
+        ]
+      ],
+      bands: [
+        {
+          className: "rise-band",
+          from: { x: 0, y: 0.0104 },
+          to: { x: 0.5, y: 0 }
+        },
+        {
+          className: "fall-band",
+          from: { x: 0.5, y: 0.0104 },
+          to: { x: 1, y: 0 }
+        }
+      ],
+      divider: [
+        { x: 0.5, y: 0 },
+        { x: 0.5, y: 0.01 }
+      ],
+      ticks: [
+        [
+          { x: 0, y: -0.00018 },
+          { x: 0, y: 0.00018 }
+        ],
+        [
+          { x: 0.5, y: -0.00018 },
+          { x: 0.5, y: 0.00018 }
+        ],
+        [
+          { x: 1, y: -0.00018 },
+          { x: 1, y: 0.00018 }
+        ]
+      ],
+      leaders: [
+        [
+          { x: 0, y: 0.0004 },
+          { x: 0.025, y: 0.00105 },
+          { x: 0.025, y: 0.00155 }
+        ],
+        [
+          { x: 0.5, y: 0.01 },
+          { x: 0.5, y: 0.01025 }
+        ],
+        [
+          { x: 1, y: 0.000001 },
+          { x: 0.97, y: 0.00065 },
+          { x: 0.97, y: 0.00145 }
+        ]
+      ],
+      labels: [
+        {
+          text: "Старт · 0.0004",
+          at: { x: 0.025, y: 0.00155 },
+          anchor: "start",
+          dx: "none",
+          dy: "up",
+          className: "value-label rise-text"
+        },
+        {
+          text: "Пик · 0.01",
+          at: { x: 0.5, y: 0.01025 },
+          anchor: "middle",
+          dx: "none",
+          dy: "up",
+          className: "value-label"
+        },
+        {
+          text: "Финиш · 0.000001",
+          at: { x: 0.97, y: 0.00145 },
+          anchor: "end",
+          dx: "none",
+          dy: "up",
+          className: "value-label fall-text"
+        },
+        {
+          text: "learning rate",
+          at: { x: 0, y: 0.01065 },
+          anchor: "start",
+          dx: "right",
+          dy: "up",
+          className: "support-label"
+        },
+        {
+          text: "старт",
+          at: { x: 0, y: 0 },
+          anchor: "start",
+          dx: "none",
+          dy: "below",
+          className: "support-label"
+        },
+        {
+          text: "середина обучения",
+          at: { x: 0.5, y: 0 },
+          anchor: "middle",
+          dx: "none",
+          dy: "below",
+          className: "support-label"
+        },
+        {
+          text: "финиш",
+          at: { x: 1, y: 0 },
+          anchor: "end",
+          dx: "none",
+          dy: "below",
+          className: "support-label"
+        },
+        {
+          text: "время обучения →",
+          at: { x: 1.08, y: -0.00245 },
+          anchor: "end",
+          dx: "none",
+          dy: "none",
+          className: "support-label"
+        },
+        {
+          text: "Фаза подъёма",
+          at: { x: 0.25, y: 0.00345 },
+          anchor: "middle",
+          dx: "none",
+          dy: "none",
+          className: "phase-label rise-text"
+        },
+        {
+          text: "обновления становятся крупнее",
+          at: { x: 0.25, y: 0.00265 },
+          anchor: "middle",
+          dx: "none",
+          dy: "none",
+          className: "support-label"
+        },
+        {
+          text: "Фаза спуска",
+          at: { x: 0.75, y: 0.00345 },
+          anchor: "middle",
+          dx: "none",
+          dy: "none",
+          className: "phase-label fall-text"
+        },
+        {
+          text: "обновления становятся мельче",
+          at: { x: 0.75, y: 0.00265 },
+          anchor: "middle",
+          dx: "none",
+          dy: "none",
+          className: "support-label"
+        }
+      ],
+      legend: [
+        {
+          className: "rise",
+          line: [
+            { x: 0, y: -0.00405 },
+            { x: 0.065, y: -0.00405 }
+          ],
+          text: "подъём: больше свободы для поиска",
+          at: { x: 0.082, y: -0.00405 }
+        },
+        {
+          className: "fall",
+          line: [
+            { x: 0.55, y: -0.00405 },
+            { x: 0.615, y: -0.00405 }
+          ],
+          text: "спуск: осторожная настройка",
+          at: { x: 0.632, y: -0.00405 }
+        }
+      ]
+    });
+
+    const origin = Object.freeze({ x: 110, y: 270 });
+    const scale = Object.freeze({ x: 680, y: 22500 });
+
+    const LABEL_OFFSET = Object.freeze({
+      none: 0,
+      up: -10,
+      below: 24,
+      right: 12
+    });
+
+    const LINE = Object.freeze({
+      axis: 2,
+      guide: 2,
+      curve: 6,
+      halo: 10,
+      leader: 2,
+      point: 6
+    });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const NS = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+
+      const element = (name, attributes, text) => {
+        const node = document.createElementNS(NS, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, value);
+        }
+        if (text) node.textContent = text;
+        return node;
+      };
+
+      const pointList = points =>
+        points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+      const addPolyline = (points, className, width) => {
+        drawing.appendChild(
+          element("polyline", {
+            points: pointList(points),
+            class: className,
+            "stroke-width": width,
+            "vector-effect": "non-scaling-stroke"
+          })
+        );
+      };
+
+      for (const band of DATA.bands) {
+        drawing.appendChild(
+          element("rect", {
+            x: sx(band.from.x),
+            y: sy(band.from.y),
+            width: sx(band.to.x) - sx(band.from.x),
+            height: sy(band.to.y) - sy(band.from.y),
+            class: band.className
+          })
+        );
+      }
+
+      addPolyline(DATA.divider, "guide", LINE.guide);
+
+      for (const axis of DATA.axes) {
+        addPolyline(axis, "axis", LINE.axis);
+      }
+
+      for (const arrowhead of DATA.arrowheads) {
+        addPolyline(arrowhead, "axis", LINE.axis);
+      }
+
+      for (const tick of DATA.ticks) {
+        addPolyline(tick, "axis", LINE.axis);
+      }
+
+      addPolyline(DATA.curve, "curve-halo", LINE.halo);
+      addPolyline(DATA.curve.slice(0, 2), "rise", LINE.curve);
+      addPolyline(DATA.curve.slice(1), "fall", LINE.curve);
+
+      for (const leader of DATA.leaders) {
+        addPolyline(leader, "leader", LINE.leader);
+      }
+
+      const pointClasses = {
+        start: "point-rise",
+        peak: "point-peak",
+        finish: "point-fall"
+      };
+
+      for (const point of DATA.curve) {
+        drawing.appendChild(
+          element("circle", {
+            cx: sx(point.x),
+            cy: sy(point.y),
+            r: LINE.point,
+            class: pointClasses[point.kind],
+            "stroke-width": LINE.guide,
+            "vector-effect": "non-scaling-stroke"
+          })
+        );
+      }
+
+      for (const label of DATA.labels) {
+        drawing.appendChild(
+          element(
+            "text",
+            {
+              x: sx(label.at.x),
+              y: sy(label.at.y),
+              dx: LABEL_OFFSET[label.dx],
+              dy: LABEL_OFFSET[label.dy],
+              "text-anchor": label.anchor,
+              class: label.className
+            },
+            label.text
+          )
+        );
+      }
+
+      for (const item of DATA.legend) {
+        addPolyline(item.line, item.className, LINE.curve);
+        drawing.appendChild(
+          element(
+            "text",
+            {
+              x: sx(item.at.x),
+              y: sy(item.at.y),
+              dx: LABEL_OFFSET.none,
+              dy: LABEL_OFFSET.right,
+              "text-anchor": "start",
+              class: "support-label"
+            },
+            item.text
+          )
+        );
+      }
+    } catch (error) {
+      document.getElementById("chart").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

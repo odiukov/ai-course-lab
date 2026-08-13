@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Жёсткая и сглаженная цели</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef3f8;
+      --surface: #ffffff;
+      --panel: #f7f9fc;
+      --text: #172033;
+      --muted: #596579;
+      --line: #c9d3e2;
+      --slot: #dfe6ef;
+      --hard: #356ae6;
+      --hard-soft: #dce7ff;
+      --smooth: #d75b37;
+      --smooth-soft: #ffe3d9;
+      --other: #efa382;
+      --badge: #edf2f8;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10151e;
+        --surface: #151c27;
+        --panel: #1b2431;
+        --text: #eef4ff;
+        --muted: #aab6c8;
+        --line: #3b485b;
+        --slot: #2a3545;
+        --hard: #79a3ff;
+        --hard-soft: #263b66;
+        --smooth: #ff8d69;
+        --smooth-soft: #573225;
+        --other: #d87557;
+        --badge: #222d3c;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--surface);
+    }
+
+    h1 {
+      color: var(--text);
+      font-size: 24px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--surface);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 15px;
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .heading {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .vector {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .slot {
+      fill: none;
+      stroke: var(--slot);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .slot-correct-hard {
+      fill: var(--hard-soft);
+      stroke: var(--hard);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .slot-correct-smooth {
+      fill: var(--smooth-soft);
+      stroke: var(--smooth);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .bar-hard {
+      fill: var(--hard);
+    }
+
+    .bar-smooth {
+      fill: var(--smooth);
+    }
+
+    .bar-other {
+      fill: var(--other);
+    }
+
+    .baseline {
+      stroke: var(--line);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .value {
+      fill: var(--muted);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .value-correct-hard {
+      fill: var(--hard);
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .value-correct-smooth {
+      fill: var(--smooth);
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .explanation {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .sum-box {
+      fill: var(--badge);
+      stroke: var(--line);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sum {
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .hard-text {
+      fill: var(--hard);
+    }
+
+    .smooth-text {
+      fill: var(--smooth);
+    }
+
+    #fallback {
+      color: var(--text);
+      font-size: 17px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Как одна единица распределяется между классами</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1000 440"
+      width="1000"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Сравнение жёсткой и сглаженной целей</title>
+      <desc id="svg-description">
+        В one-hot цели правильный класс получает единицу, а остальные ноль.
+        После сглаживания правильный класс получает 0,91, а девять остальных
+        классов получают по 0,01. Обе цели имеют сумму 1.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Жёсткая цель: [0,0,1,0,0,0,0,0,0,0]. Сглаженная цель:
+      [0.01,0.01,0.91,0.01,0.01,0.01,0.01,0.01,0.01,0.01].
+      В обоих случаях сумма равна 1.
+    </p>
+  </main>
+
+  <script>
+    "use strict";
+
+    const data = Object.freeze({
+      oneHot: Object.freeze([0, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
+      smoothed: Object.freeze([
+        0.01, 0.01, 0.91, 0.01, 0.01,
+        0.01, 0.01, 0.01, 0.01, 0.01
+      ]),
+      origin: Object.freeze([0, 0]),
+      scale: Object.freeze([1, 1]),
+      panels: Object.freeze([
+        Object.freeze([28, 18, 486, 430]),
+        Object.freeze([514, 18, 972, 430])
+      ]),
+      charts: Object.freeze([
+        Object.freeze([50, 130, 308, 42, 28]),
+        Object.freeze([536, 130, 308, 42, 28])
+      ]),
+      headings: Object.freeze([
+        Object.freeze([257, 50]),
+        Object.freeze([743, 50])
+      ]),
+      vectors: Object.freeze([
+        Object.freeze([257, 91]),
+        Object.freeze([743, 91])
+      ]),
+      explanations: Object.freeze([
+        Object.freeze([257, 370]),
+        Object.freeze([743, 358]),
+        Object.freeze([743, 382])
+      ]),
+      sumBoxes: Object.freeze([
+        Object.freeze([159, 397, 355, 424]),
+        Object.freeze([645, 397, 841, 424])
+      ]),
+      sumLabels: Object.freeze([
+        Object.freeze([257, 416]),
+        Object.freeze([743, 416])
+      ]),
+      labelLine: Object.freeze([333]),
+      zero: 0
+    });
+
+    const [originX, originY] = data.origin;
+    const [scaleX, scaleY] = data.scale;
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const labelOffsets = Object.freeze([10, -10]);
+    const [labelBelow, labelAbove] = labelOffsets;
+    const lineWidth = 2;
+    const bodyFontSize = 15;
+    const svgNamespace = "http://www.w3.org/2000/svg";
+
+    const diagram = document.getElementById("diagram");
+    const plot = document.getElementById("plot");
+    const fallback = document.getElementById("fallback");
+
+    function element(name, attributes, className) {
+      const node = document.createElementNS(svgNamespace, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (className) {
+        node.setAttribute("class", className);
+      }
+
+      return node;
+    }
+
+    function rectangle(parent, x1, y1, x2, y2, className) {
+      const node = element("rect", {
+        x: sx(x1),
+        y: sy(y1),
+        width: sx(x2) - sx(x1),
+        height: sy(y2) - sy(y1)
+      }, className);
+
+      parent.appendChild(node);
+      return node;
+    }
+
+    function segment(parent, x1, y1, x2, y2, className) {
+      const node = element("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2)
+      }, className);
+
+      parent.appendChild(node);
+      return node;
+    }
+
+    function label(
+      parent,
+      content,
+      x,
+      y,
+      className,
+      anchor = "middle",
+      dx,
+      dy
+    ) {
+      const attributes = {
+        x: sx(x),
+        y: sy(y),
+        "text-anchor": anchor,
+        "dominant-baseline": "alphabetic"
+      };
+
+      if (dx !== undefined) {
+        attributes.dx = dx;
+      }
+
+      if (dy !== undefined) {
+        attributes.dy = dy;
+      }
+
+      const node = element("text", attributes, className);
+      node.textContent = content;
+      parent.appendChild(node);
+      return node;
+    }
+
+    function drawPanelFrame(bounds) {
+      const [left, top, right, bottom] = bounds;
+      rectangle(plot, left, top, right, bottom, "panel");
+    }
+
+    function drawTarget(values, chart, mode) {
+      const [baseX, topY, bottomY, stepX, barWidth] = chart;
+      const peak = Math.max(...values);
+
+      segment(
+        plot,
+        baseX,
+        bottomY,
+        baseX + stepX * values.length - stepX + barWidth,
+        bottomY,
+        "baseline"
+      );
+
+      values.forEach((value, index) => {
+        const left = baseX + stepX * index;
+        const right = left + barWidth;
+        const barTop = bottomY - (bottomY - topY) * value;
+        const correct = value === peak;
+        const slotClass = correct
+          ? mode === "hard"
+            ? "slot-correct-hard"
+            : "slot-correct-smooth"
+          : "slot";
+
+        rectangle(plot, left, topY, right, bottomY, slotClass);
+
+        if (value > data.zero) {
+          const barClass = correct
+            ? mode === "hard"
+              ? "bar-hard"
+              : "bar-smooth"
+            : "bar-other";
+
+          rectangle(plot, left, barTop, right, bottomY, barClass);
+        }
+
+        const shownValue = mode === "hard"
+          ? String(value)
+          : value.toFixed(value === peak ? lineWidth : lineWidth);
+
+        label(
+          plot,
+          shownValue,
+          left + barWidth / lineWidth,
+          data.labelLine[data.zero],
+          correct
+            ? mode === "hard"
+              ? "value-correct-hard"
+              : "value-correct-smooth"
+            : "value"
+        );
+
+        if (correct) {
+          label(
+            plot,
+            mode === "hard" ? "1" : "0,91",
+            left + barWidth / lineWidth,
+            barTop,
+            mode === "hard"
+              ? "value-correct-hard"
+              : "value-correct-smooth",
+            "middle",
+            undefined,
+            labelAbove
+          );
+        }
+      });
+    }
+
+    function draw() {
+      plot.setAttribute("font-size", String(bodyFontSize));
+      plot.setAttribute("stroke-width", String(lineWidth));
+
+      data.panels.forEach(drawPanelFrame);
+
+      const [[hardHeadingX, hardHeadingY], [smoothHeadingX, smoothHeadingY]]
+        = data.headings;
+      const [[hardVectorX, hardVectorY], [smoothVectorX, smoothVectorY]]
+        = data.vectors;
+
+      label(
+        plot,
+        "Жёсткая цель · one-hot",
+        hardHeadingX,
+        hardHeadingY,
+        "heading hard-text"
+      );
+
+      label(
+        plot,
+        "Сглаженная цель · α = 0,1",
+        smoothHeadingX,
+        smoothHeadingY,
+        "heading smooth-text"
+      );
+
+      label(
+        plot,
+        "[0,0,1,0,0,0,0,0,0,0]",
+        hardVectorX,
+        hardVectorY,
+        "vector"
+      );
+
+      label(
+        plot,
+        "[0.01,0.01,0.91,0.01,0.01,0.01,0.01,0.01,0.01,0.01]",
+        smoothVectorX,
+        smoothVectorY,
+        "vector"
+      );
+
+      drawTarget(data.oneHot, data.charts[data.zero], "hard");
+      drawTarget(data.smoothed, data.charts[scale.x], "smooth");
+
+      const [
+        [hardExplanationX, hardExplanationY],
+        [mainExplanationX, mainExplanationY],
+        [otherExplanationX, otherExplanationY]
+      ] = data.explanations;
+
+      label(
+        plot,
+        "правильный класс: 1 · остальные: 0",
+        hardExplanationX,
+        hardExplanationY,
+        "explanation"
+      );
+
+      label(
+        plot,
+        "правильный: 0,9 + 0,01 = 0,91",
+        mainExplanationX,
+        mainExplanationY,
+        "explanation smooth-text"
+      );
+
+      label(
+        plot,
+        "остальные вместе: 9 × 0,01 = 0,09",
+        otherExplanationX,
+        otherExplanationY,
+        "explanation"
+      );
+
+      data.sumBoxes.forEach(bounds => {
+        const [left, top, right, bottom] = bounds;
+        rectangle(plot, left, top, right, bottom, "sum-box");
+      });
+
+      data.sumLabels.forEach(([x, y], index) => {
+        label(
+          plot,
+          "Сумма = 1",
+          x,
+          y,
+          index === data.zero ? "sum hard-text" : "sum smooth-text",
+          "middle",
+          undefined,
+          labelBelow - labelBelow
+        );
+      });
+
+      rectangle(
+        plot,
+        data.zero,
+        data.zero,
+        data.zero,
+        data.zero,
+        "slot"
+      );
+    }
+
+    try {
+      draw();
+    } catch (error) {
+      diagram.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

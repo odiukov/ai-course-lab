@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>По какой оси работает BatchNorm</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --text: #182230;
+      --muted: #5e6b7c;
+      --grid: #9aa7b8;
+      --soft-grid: #d8dee8;
+      --accent: #1769e0;
+      --accent-soft: #e5f0ff;
+      --accent-strong: #0a4fb6;
+      --stat-bg: #edf5ff;
+      --shadow: #c8d1de;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: 14px;
+    }
+
+    figure {
+      width: 100%;
+      max-width: 1040px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 2px solid var(--soft-grid);
+      box-shadow: 0 4px 18px var(--shadow);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 16px 20px 8px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      margin: 0;
+      padding: 0 20px 8px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    .matrix-fill {
+      fill: var(--panel);
+    }
+
+    .selected-fill {
+      fill: var(--accent-soft);
+    }
+
+    .stat-fill {
+      fill: var(--stat-bg);
+    }
+
+    .grid-line {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+      shape-rendering: geometricPrecision;
+    }
+
+    .selected-outline {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .stat-outline {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .heading-label {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .axis-label {
+      fill: var(--accent-strong);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .column-label {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .row-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .cell-label {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .selected-text {
+      fill: var(--accent-strong);
+      font-weight: 750;
+    }
+
+    .flow-label {
+      fill: var(--accent-strong);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .stat-title {
+      fill: var(--accent-strong);
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .stat-text {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .note-text {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .fallback {
+      margin: 12px 20px 20px;
+      padding: 16px;
+      color: var(--text);
+      background: var(--accent-soft);
+      border: 2px solid var(--accent);
+      font-size: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10151d;
+        --panel: #171e28;
+        --text: #eef4ff;
+        --muted: #aebbd0;
+        --grid: #718198;
+        --soft-grid: #344154;
+        --accent: #72adff;
+        --accent-soft: #1b385d;
+        --accent-strong: #a8ccff;
+        --stat-bg: #1b2f49;
+        --shadow: #090d13;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title diagram-subtitle">
+    <h1 id="diagram-title">По какой оси работает BatchNorm</h1>
+    <p class="subtitle" id="diagram-subtitle">
+      Один признак сравнивается у всех примеров батча.
+    </p>
+    <svg
+      id="diagram"
+      viewBox="0 0 920 390"
+      width="920"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Матрица из четырёх примеров и четырёх признаков. Столбец яркости выделен, а стрелка показывает вычисление среднего и дисперсии вниз по этому столбцу."
+    ></svg>
+    <noscript>
+      <div class="fallback">
+        Схема должна показать батч 4 × 4: BatchNorm собирает значения одного
+        признака вниз по столбцу и вычисляет для них среднее и дисперсию.
+      </div>
+    </noscript>
+  </figure>
+
+  <script>
+    const diagramData = {
+      mapping: {
+        origin: [58, 34],
+        scale: [52, 52]
+      },
+      constants: {
+        zero: 0,
+        one: 1,
+        half: 0.5
+      },
+      matrix: {
+        x: 2.65,
+        y: 2.15,
+        cellWidth: 1.72,
+        cellHeight: 0.82,
+        selectedColumn: 1,
+        headersY: 1.72,
+        rowLabelsX: 2.32,
+        batchTitleX: 2.65,
+        batchTitleY: 0.54,
+        axisTitleX: 5.23,
+        axisTitleY: 0.98
+      },
+      flow: {
+        columnArrowTop: 1.14,
+        columnArrowBottom: 1.59,
+        columnArrowXShift: 0.54,
+        headHalfWidth: 0.12,
+        headHeight: 0.18,
+        outputStartX: 6.16,
+        outputEndX: 10.38,
+        outputY: 3.39,
+        outputLabelX: 8.28,
+        outputLabelY: 3.05
+      },
+      statistics: {
+        x: 10.52,
+        y: 2.22,
+        width: 5.82,
+        height: 2.34,
+        titleX: 13.43,
+        titleY: 2.68,
+        valuesX: 13.43,
+        valuesY: 3.18,
+        meanX: 13.43,
+        meanY: 3.68,
+        varianceX: 13.43,
+        varianceY: 4.09
+      },
+      footer: {
+        x: 8.48,
+        y: 6.72
+      },
+      columns: [
+        { name: "контур", values: ["к₁", "к₂", "к₃", "к₄"] },
+        { name: "яркость", values: ["я₁", "я₂", "я₃", "я₄"] },
+        { name: "текстура", values: ["т₁", "т₂", "т₃", "т₄"] },
+        { name: "признак 4", values: ["п₁", "п₂", "п₃", "п₄"] }
+      ],
+      rows: ["Пример 1", "Пример 2", "Пример 3", "Пример 4"]
+    };
+
+    const origin = {
+      x: diagramData.mapping.origin[diagramData.constants.zero],
+      y: diagramData.mapping.origin[diagramData.constants.one]
+    };
+
+    const scale = {
+      x: diagramData.mapping.scale[diagramData.constants.zero],
+      y: diagramData.mapping.scale[diagramData.constants.one]
+    };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+      const { zero, one, half } = diagramData.constants;
+      const matrix = diagramData.matrix;
+      const flow = diagramData.flow;
+      const statistics = diagramData.statistics;
+      const columns = diagramData.columns;
+      const rows = diagramData.rows;
+
+      function element(name, attributes, parent = svg) {
+        const item = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          item.setAttribute(key, String(value));
+        });
+        parent.appendChild(item);
+        return item;
+      }
+
+      function textLabel(content, x, y, className, anchor = "middle") {
+        const item = element("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        });
+        item.textContent = content;
+        return item;
+      }
+
+      function verticalArrow(x, top, bottom) {
+        element("line", {
+          x1: sx(x),
+          y1: sy(top),
+          x2: sx(x),
+          y2: sy(bottom),
+          class: "flow-line"
+        });
+
+        const points = [
+          [x - flow.headHalfWidth, bottom - flow.headHeight],
+          [x, bottom],
+          [x + flow.headHalfWidth, bottom - flow.headHeight]
+        ];
+
+        element("polygon", {
+          points: points.map(([px, py]) => `${sx(px)},${sy(py)}`).join(" "),
+          class: "flow-line"
+        });
+      }
+
+      function horizontalArrow(left, right, y) {
+        element("line", {
+          x1: sx(left),
+          y1: sy(y),
+          x2: sx(right),
+          y2: sy(y),
+          class: "flow-line"
+        });
+
+        const points = [
+          [right - flow.headHeight, y - flow.headHalfWidth],
+          [right, y],
+          [right - flow.headHeight, y + flow.headHalfWidth]
+        ];
+
+        element("polygon", {
+          points: points.map(([px, py]) => `${sx(px)},${sy(py)}`).join(" "),
+          class: "flow-line"
+        });
+      }
+
+      const tableWidth = columns.length * matrix.cellWidth;
+      const tableHeight = rows.length * matrix.cellHeight;
+      const selectedX =
+        matrix.x + matrix.selectedColumn * matrix.cellWidth;
+      const selectedCenterX = selectedX + half * matrix.cellWidth;
+      const selectedArrowX =
+        selectedCenterX + flow.columnArrowXShift;
+
+      textLabel(
+        "Батч B × F: 4 примера × 4 признака",
+        matrix.batchTitleX,
+        matrix.batchTitleY,
+        "heading-label",
+        "start"
+      );
+
+      textLabel(
+        "вниз по оси B",
+        matrix.axisTitleX,
+        matrix.axisTitleY,
+        "axis-label"
+      );
+
+      verticalArrow(
+        selectedArrowX,
+        flow.columnArrowTop,
+        flow.columnArrowBottom
+      );
+
+      element("rect", {
+        x: sx(matrix.x),
+        y: sy(matrix.y),
+        width: sx(matrix.x + tableWidth) - sx(matrix.x),
+        height: sy(matrix.y + tableHeight) - sy(matrix.y),
+        class: "matrix-fill"
+      });
+
+      element("rect", {
+        x: sx(selectedX),
+        y: sy(matrix.y),
+        width: sx(selectedX + matrix.cellWidth) - sx(selectedX),
+        height: sy(matrix.y + tableHeight) - sy(matrix.y),
+        class: "selected-fill"
+      });
+
+      Array.from(
+        { length: columns.length + one },
+        (_, columnBoundary) => {
+          const x = matrix.x + columnBoundary * matrix.cellWidth;
+          element("line", {
+            x1: sx(x),
+            y1: sy(matrix.y),
+            x2: sx(x),
+            y2: sy(matrix.y + tableHeight),
+            class: "grid-line"
+          });
+        }
+      );
+
+      Array.from(
+        { length: rows.length + one },
+        (_, rowBoundary) => {
+          const y = matrix.y + rowBoundary * matrix.cellHeight;
+          element("line", {
+            x1: sx(matrix.x),
+            y1: sy(y),
+            x2: sx(matrix.x + tableWidth),
+            y2: sy(y),
+            class: "grid-line"
+          });
+        }
+      );
+
+      element("rect", {
+        x: sx(selectedX),
+        y: sy(matrix.y),
+        width: sx(selectedX + matrix.cellWidth) - sx(selectedX),
+        height: sy(matrix.y + tableHeight) - sy(matrix.y),
+        class: "selected-outline"
+      });
+
+      columns.forEach((column, columnIndex) => {
+        const centerX =
+          matrix.x + (columnIndex + half) * matrix.cellWidth;
+        const headingClass =
+          columnIndex === matrix.selectedColumn
+            ? "column-label selected-text"
+            : "column-label";
+
+        textLabel(
+          column.name,
+          centerX,
+          matrix.headersY,
+          headingClass
+        );
+
+        column.values.forEach((value, rowIndex) => {
+          const centerY =
+            matrix.y + (rowIndex + half) * matrix.cellHeight;
+          const cellClass =
+            columnIndex === matrix.selectedColumn
+              ? "cell-label selected-text"
+              : "cell-label";
+
+          textLabel(value, centerX, centerY, cellClass);
+        });
+      });
+
+      rows.forEach((row, rowIndex) => {
+        const centerY =
+          matrix.y + (rowIndex + half) * matrix.cellHeight;
+        textLabel(
+          row,
+          matrix.rowLabelsX,
+          centerY,
+          "row-label",
+          "end"
+        );
+      });
+
+      horizontalArrow(
+        flow.outputStartX,
+        flow.outputEndX,
+        flow.outputY
+      );
+
+      textLabel(
+        "собрать 4 значения одного признака",
+        flow.outputLabelX,
+        flow.outputLabelY,
+        "flow-label"
+      );
+
+      element("rect", {
+        x: sx(statistics.x),
+        y: sy(statistics.y),
+        width: sx(statistics.x + statistics.width) - sx(statistics.x),
+        height: sy(statistics.y + statistics.height) - sy(statistics.y),
+        class: "stat-fill"
+      });
+
+      element("rect", {
+        x: sx(statistics.x),
+        y: sy(statistics.y),
+        width: sx(statistics.x + statistics.width) - sx(statistics.x),
+        height: sy(statistics.y + statistics.height) - sy(statistics.y),
+        class: "stat-outline"
+      });
+
+      textLabel(
+        "Статистики для «яркости»",
+        statistics.titleX,
+        statistics.titleY,
+        "stat-title"
+      );
+
+      textLabel(
+        "[ я₁, я₂, я₃, я₄ ]",
+        statistics.valuesX,
+        statistics.valuesY,
+        "stat-text"
+      );
+
+      textLabel(
+        "μ — среднее по примерам",
+        statistics.meanX,
+        statistics.meanY,
+        "stat-text"
+      );
+
+      textLabel(
+        "σ² — дисперсия по примерам",
+        statistics.varianceX,
+        statistics.varianceY,
+        "stat-text"
+      );
+
+      textLabel(
+        "Затем BatchNorm отдельно проходит вниз по каждому следующему столбцу.",
+        diagramData.footer.x,
+        diagramData.footer.y,
+        "note-text"
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      svg.replaceChildren();
+      const fallback = document.createElement("div");
+      fallback.className = "fallback";
+      fallback.setAttribute("role", "status");
+      fallback.textContent =
+        "Схема должна показать матрицу батча 4 × 4: один столбец выделен как значения одного признака, по которым BatchNorm вычисляет среднее и дисперсию.";
+      svg.insertAdjacentElement("afterend", fallback);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
