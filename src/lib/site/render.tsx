@@ -13,8 +13,15 @@ import {
 import type { LessonBlock, LessonModel } from "./lesson-page";
 import { encodeQuizPayload } from "./quiz";
 
+export interface NextLesson {
+  slug: string;
+  title: string;
+}
+
 export interface RenderOptions {
   basePath: string;
+  /** Следующий урок курса — куда идти, когда этот дочитан. */
+  nextLesson?: NextLesson | null;
 }
 
 function escapeHtml(text: string): string {
@@ -93,7 +100,7 @@ function renderToc(model: LessonModel, currentId: string | null, options: Render
   const items = model.blocks
     .map((block) => {
       const current = block.step.id === currentId ? " is-current" : "";
-      return `<li><a class="toc-link${current}" data-step="${block.step.id}" href="${stepPageUrl(options.basePath, model.slug, block.step.id)}"><span class="toc-number">${block.number}</span><span class="toc-title">${escapeHtml(block.step.title)}</span></a></li>`;
+      return `<li><a class="toc-link${current}" data-step="${block.step.id}" href="${stepPageUrl(options.basePath, model.slug, block.step.id)}"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">${block.number}</span><span class="toc-title">${escapeHtml(block.step.title)}</span></a></li>`;
     })
     .join("\n");
 
@@ -147,6 +154,17 @@ export function renderStepPage(
     ? `<a class="nav-button is-primary" data-mark-read href="${stepPageUrl(options.basePath, model.slug, next.step.id)}">Дальше</a>`
     : `<a class="nav-button is-done" data-mark-read href="${lessonUrl(options.basePath, model.slug)}">Закончить урок</a>`;
 
+  // На последнем шаге курс не заканчивается — дальше следующий урок.
+  const onward =
+    !next && options.nextLesson
+      ? `<a class="nav-button" data-mark-read href="${lessonUrl(options.basePath, options.nextLesson.slug)}">Следующий урок: ${escapeHtml(options.nextLesson.title)} →</a>`
+      : "";
+
+  // Кнопку показывает скрипт, и только когда сюда пришли по ссылке из текста
+  // другого шага. Возврат — history.back(), чтобы вернуться ровно к тому
+  // абзацу, из которого ушли.
+  const returnButton = `<button type="button" class="return-button" data-return hidden></button>`;
+
   const lessonData = encodeJson({
     slug: model.slug,
     stepId: block.step.id,
@@ -164,6 +182,7 @@ ${renderToc(model, block.step.id, options)}
 <main class="lesson">
 <article class="step">
 <h1 class="step-title">${escapeHtml(block.step.title)}</h1>
+${returnButton}
 ${body}
 ${visual}
 ${renderQuiz(block)}
@@ -172,6 +191,7 @@ ${practice}
 <nav class="step-nav">
 ${back}
 ${forward}
+${onward}
 </nav>
 </main>
 </div>
@@ -205,11 +225,18 @@ export function renderLessonIndexPage(model: LessonModel, options: RenderOptions
 
   const lessonData = encodeJson({ slug: model.slug, plannedCount: model.plannedCount });
 
+  const onward = options.nextLesson
+    ? `<a class="nav-button" href="${lessonUrl(options.basePath, options.nextLesson.slug)}">Следующий урок: ${escapeHtml(options.nextLesson.title)} →</a>`
+    : "";
+
   const page = `<header class="lesson-header">
 <a class="back" href="${options.basePath}/">← к списку уроков</a>
 <h1>${escapeHtml(model.title)}</h1>
 <p class="lesson-meta"><span data-read-count>${model.plannedCount} шагов</span></p>
+<p class="lesson-actions">
 <a class="nav-button is-primary" data-resume href="#" hidden>Начать урок</a>
+${onward}
+</p>
 ${gap}
 </header>
 <main class="lesson-index">

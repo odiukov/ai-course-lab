@@ -81,6 +81,9 @@ function main(): void {
   fs.mkdirSync(outDir, { recursive: true });
 
   const catalog: CatalogLesson[] = [];
+  // Модели копятся первым проходом, страницы пишутся вторым: ссылка «следующий
+  // урок» существует только после того, как известен порядок всех уроков.
+  const models = new Map<string, ReturnType<typeof buildLessonModel>>();
   let renderedSteps = 0;
   let missingSteps = 0;
   let copiedVisuals = 0;
@@ -123,15 +126,7 @@ function main(): void {
       visualHrefByStepId: hrefByStepId,
     });
 
-    // Страница урока — оглавление; каждый шаг живёт своей страницей, чтобы
-    // урок читался порциями, а не одним полотном.
-    write(path.join("lesson", slug, "index.html"), renderLessonIndexPage(model, { basePath }));
-    model.blocks.forEach((block, index) => {
-      write(
-        path.join("lesson", slug, block.step.id, "index.html"),
-        renderStepPage(model, index, { basePath }),
-      );
-    });
+    models.set(slug, model);
 
     renderedSteps += model.writtenCount;
     missingSteps += model.plannedCount - model.writtenCount;
@@ -144,7 +139,33 @@ function main(): void {
     });
   }
 
-  write("index.html", renderIndexPage(groupLessons(catalog), { basePath }));
+  const phases = groupLessons(catalog);
+  // Порядок курса — как в каталоге: фаза за фазой, урок за уроком. Он же
+  // отвечает на вопрос «что читать дальше» в конце урока.
+  const ordered = phases.flatMap((phase) => phase.lessons);
+
+  ordered.forEach((lesson, position) => {
+    const model = models.get(lesson.slug);
+    if (!model) return;
+
+    const after = ordered[position + 1];
+    const nextLesson = after ? { slug: after.slug, title: after.title } : null;
+
+    // Страница урока — оглавление; каждый шаг живёт своей страницей, чтобы
+    // урок читался порциями, а не одним полотном.
+    write(
+      path.join("lesson", lesson.slug, "index.html"),
+      renderLessonIndexPage(model, { basePath, nextLesson }),
+    );
+    model.blocks.forEach((block, index) => {
+      write(
+        path.join("lesson", lesson.slug, block.step.id, "index.html"),
+        renderStepPage(model, index, { basePath, nextLesson }),
+      );
+    });
+  });
+
+  write("index.html", renderIndexPage(phases, { basePath }));
   write("assets/site.css", buildSiteCss());
   // Без .nojekyll Pages прогоняет вывод через Jekyll и выбрасывает всё, что
   // начинается с подчёркивания.

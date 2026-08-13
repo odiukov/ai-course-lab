@@ -45,6 +45,33 @@ describe("renderStepPage", () => {
     expect(html).toMatch(/data-mark-read[^>]*href="\/base\/lesson\/lesson-a\/"/);
   });
 
+  it("points the last step at the next lesson", () => {
+    const html = renderStepPage(model(allWritten), 2, {
+      basePath: "/base",
+      nextLesson: { slug: "lesson-b", title: "Следующий" },
+    });
+
+    expect(html).toContain('href="/base/lesson/lesson-b/"');
+    expect(html).toContain("Следующий урок: Следующий");
+  });
+
+  it("does not offer a next lesson in the middle of one", () => {
+    const html = renderStepPage(model(allWritten), 1, {
+      basePath: "/base",
+      nextLesson: { slug: "lesson-b", title: "Следующий" },
+    });
+
+    expect(html).not.toContain("Следующий урок");
+  });
+
+  it("keeps a hidden slot for the return button", () => {
+    // Показывает её скрипт: знает ли он, откуда пришли, решает referrer.
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
+
+    expect(html).toContain("data-return");
+    expect(html).toContain("hidden");
+  });
+
   it("carries the lesson position for the progress script", () => {
     const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
 
@@ -120,6 +147,15 @@ describe("renderLessonIndexPage", () => {
     expect(html).toContain('href="/base/lesson/lesson-a/001-a/"');
     expect(html).toContain("ещё не написан");
     expect(html).toContain("готово 1 шагов из 3");
+  });
+
+  it("links on to the next lesson", () => {
+    const html = renderLessonIndexPage(model(allWritten), {
+      basePath: "/base",
+      nextLesson: { slug: "lesson-b", title: "Следующий" },
+    });
+
+    expect(html).toContain('href="/base/lesson/lesson-b/"');
   });
 
   it("offers a resume button the script can point at the first unread step", () => {
