@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Данные вперёд, градиенты назад</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --container: #f1f4f9;
+      --node: #ffffff;
+      --node-edge: #60708a;
+      --text: #182235;
+      --muted: #5e6b7f;
+      --forward: #1769d2;
+      --forward-soft: #dcecff;
+      --backward: #c34c16;
+      --backward-soft: #ffeadf;
+      --outline: #a9b4c5;
+      --tag: #e6ebf3;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --panel: #161c26;
+        --container: #1c2431;
+        --node: #242e3e;
+        --node-edge: #91a0b8;
+        --text: #eef3fb;
+        --muted: #b2bfd1;
+        --forward: #6cadff;
+        --forward-soft: #17365d;
+        --backward: #ff9866;
+        --backward-soft: #552918;
+        --outline: #536177;
+        --tag: #2a3547;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      margin: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      overflow-x: hidden;
+    }
+
+    main,
+    figure,
+    svg {
+      background: var(--panel);
+    }
+
+    main {
+      width: 100%;
+    }
+
+    h1 {
+      margin-inline: unset;
+      text-align: center;
+      font-size: 22px;
+      color: var(--text);
+    }
+
+    figure {
+      margin: unset;
+      width: 100%;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+    }
+
+    .container {
+      fill: var(--container);
+      stroke: var(--outline);
+      stroke-width: 2px;
+    }
+
+    .container-tag {
+      fill: var(--tag);
+      stroke: var(--outline);
+      stroke-width: 1.5px;
+    }
+
+    .node {
+      fill: var(--node);
+      stroke: var(--node-edge);
+      stroke-width: 2px;
+    }
+
+    .node-accent-forward {
+      fill: var(--forward-soft);
+    }
+
+    .node-accent-backward {
+      fill: var(--backward-soft);
+    }
+
+    .forward-line {
+      fill: none;
+      stroke: var(--forward);
+      stroke-width: 2.2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .forward-head {
+      fill: var(--forward);
+    }
+
+    .backward-line {
+      fill: none;
+      stroke: var(--backward);
+      stroke-width: 2.2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .backward-head,
+    .backward-dot {
+      fill: var(--backward);
+    }
+
+    .tap {
+      stroke: var(--backward);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 15px;
+    }
+
+    .tag-label {
+      font-size: 14px;
+      font-weight: bold;
+      fill: var(--muted);
+    }
+
+    .node-label {
+      font-size: 17px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .flow-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .forward-text {
+      fill: var(--forward);
+    }
+
+    .backward-text {
+      fill: var(--backward);
+    }
+
+    .endpoint-label {
+      font-size: 14px;
+      fill: var(--muted);
+    }
+
+    .endpoint-value {
+      font-size: 15px;
+      font-weight: bold;
+      fill: var(--text);
+    }
+
+    .fallback {
+      font-size: 15px;
+      fill: var(--text);
+    }
+
+    .error-note {
+      color: var(--text);
+      text-align: center;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Данные вперёд, градиенты назад</h1>
+    <figure aria-labelledby="diagram-title">
+      <svg
+        id="diagram"
+        viewBox="0 0 1200 370"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-labelledby="diagram-title diagram-description"
+      >
+        <desc id="diagram-description">
+          Цепочка Linear(2,16), ReLU, Linear(16,1), Sigmoid. Данные идут
+          слева направо, а градиенты возвращаются справа налево.
+        </desc>
+        <g id="scene"></g>
+        <g id="fallback"></g>
+      </svg>
+      <noscript>
+        <p class="error-note">
+          Схема должна показать данные, идущие по цепочке вперёд, и градиенты,
+          возвращающиеся по ней назад.
+        </p>
+      </noscript>
+    </figure>
+  </main>
+
+  <script>
+    const data = [{
+      origin: { x: 0, y: 0 },
+      scale: { x: 10, y: 10 },
+      zero: 0,
+      unit: 1,
+      canvas: { width: 120, height: 37 },
+      corner: 1.1,
+      tagCorner: 0.8,
+      dotRadius: 0.32,
+      arrowHead: { length: 1.15, wing: 0.68 },
+      container: {
+        left: 10.5,
+        top: 7,
+        right: 106.5,
+        bottom: 34.2
+      },
+      tag: {
+        left: 12.5,
+        top: 8.2,
+        right: 45.5,
+        bottom: 12.3,
+        x: 14,
+        y: 10.25,
+        text: "Последовательная цепочка · снаружи один модуль"
+      },
+      nodeTop: 17,
+      nodeBottom: 24.8,
+      nodes: [
+        {
+          left: 14,
+          right: 34,
+          labelX: 24,
+          labelY: 20.9,
+          label: "Linear(2,16)"
+        },
+        {
+          left: 39,
+          right: 55,
+          labelX: 47,
+          labelY: 20.9,
+          label: "ReLU"
+        },
+        {
+          left: 60,
+          right: 81,
+          labelX: 70.5,
+          labelY: 20.9,
+          label: "Linear(16,1)"
+        },
+        {
+          left: 86,
+          right: 103,
+          labelX: 94.5,
+          labelY: 20.9,
+          label: "Sigmoid"
+        }
+      ],
+      forwardArrows: [
+        { from: { x: 5.5, y: 20.9 }, to: { x: 13.3, y: 20.9 } },
+        { from: { x: 34.5, y: 20.9 }, to: { x: 38.3, y: 20.9 } },
+        { from: { x: 55.5, y: 20.9 }, to: { x: 59.3, y: 20.9 } },
+        { from: { x: 81.5, y: 20.9 }, to: { x: 85.3, y: 20.9 } },
+        { from: { x: 103.5, y: 20.9 }, to: { x: 114.5, y: 20.9 } }
+      ],
+      backwardArrows: [
+        { from: { x: 114.5, y: 29.2 }, to: { x: 94.5, y: 29.2 } },
+        { from: { x: 94.5, y: 29.2 }, to: { x: 70.5, y: 29.2 } },
+        { from: { x: 70.5, y: 29.2 }, to: { x: 47, y: 29.2 } },
+        { from: { x: 47, y: 29.2 }, to: { x: 24, y: 29.2 } },
+        { from: { x: 24, y: 29.2 }, to: { x: 5.5, y: 29.2 } }
+      ],
+      taps: [
+        { x: 24, fromY: 25.6, toY: 28.35 },
+        { x: 47, fromY: 25.6, toY: 28.35 },
+        { x: 70.5, fromY: 25.6, toY: 28.35 },
+        { x: 94.5, fromY: 25.6, toY: 28.35 }
+      ],
+      outputConnector: [
+        { x: 114.5, y: 21.65 },
+        { x: 114.5, y: 29.2 }
+      ],
+      labels: [
+        {
+          x: 5.5,
+          y: 20.9,
+          dx: -8,
+          dy: -55,
+          anchor: "start",
+          className: "flow-label forward-text",
+          text: "данные · прямой проход"
+        },
+        {
+          x: 114.5,
+          y: 29.2,
+          dx: -8,
+          dy: 35,
+          anchor: "end",
+          className: "flow-label backward-text",
+          text: "градиенты · обратный проход"
+        },
+        {
+          x: 2,
+          y: 15.2,
+          dx: 0,
+          dy: 0,
+          anchor: "start",
+          className: "endpoint-label",
+          text: "входные"
+        },
+        {
+          x: 2,
+          y: 16.9,
+          dx: 0,
+          dy: 0,
+          anchor: "start",
+          className: "endpoint-value",
+          text: "данные"
+        },
+        {
+          x: 118,
+          y: 14.5,
+          dx: 0,
+          dy: 0,
+          anchor: "end",
+          className: "endpoint-label",
+          text: "предсказание модели"
+        },
+        {
+          x: 118,
+          y: 16.3,
+          dx: 0,
+          dy: 0,
+          anchor: "end",
+          className: "endpoint-value",
+          text: "0,7 вместо желаемого 1"
+        }
+      ],
+      fallback: { x: 60, y: 20 }
+    }];
+
+    const [diagramData] = data;
+    const origin = diagramData.origin;
+    const scale = diagramData.scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const namespace = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+
+      const create = (name, attributes, content) => {
+        const element = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        if (content) element.textContent = content;
+        return element;
+      };
+
+      const addRect = (box, className, radius) => {
+        scene.append(create("rect", {
+          x: sx(box.left),
+          y: sy(box.top),
+          width: sx(box.right) - sx(box.left),
+          height: sy(box.bottom) - sy(box.top),
+          rx: sx(radius) - sx(diagramData.zero),
+          class: className
+        }));
+      };
+
+      const addLine = (from, to, className) => {
+        scene.append(create("line", {
+          x1: sx(from.x),
+          y1: sy(from.y),
+          x2: sx(to.x),
+          y2: sy(to.y),
+          class: className
+        }));
+      };
+
+      const addArrow = (arrow, lineClass, headClass) => {
+        const deltaX = arrow.to.x - arrow.from.x;
+        const deltaY = arrow.to.y - arrow.from.y;
+        const length = Math.hypot(deltaX, deltaY) || diagramData.unit;
+        const unitX = deltaX / length;
+        const unitY = deltaY / length;
+        const baseX =
+          arrow.to.x - unitX * diagramData.arrowHead.length;
+        const baseY =
+          arrow.to.y - unitY * diagramData.arrowHead.length;
+        const perpendicularX = -unitY;
+        const perpendicularY = unitX;
+        const head = [
+          arrow.to,
+          {
+            x: baseX + perpendicularX * diagramData.arrowHead.wing,
+            y: baseY + perpendicularY * diagramData.arrowHead.wing
+          },
+          {
+            x: baseX - perpendicularX * diagramData.arrowHead.wing,
+            y: baseY - perpendicularY * diagramData.arrowHead.wing
+          }
+        ];
+
+        addLine(arrow.from, arrow.to, lineClass);
+        scene.append(create("polygon", {
+          points: head
+            .map(point => `${sx(point.x)},${sy(point.y)}`)
+            .join(" "),
+          class: headClass
+        }));
+      };
+
+      addRect(
+        diagramData.container,
+        "container",
+        diagramData.corner
+      );
+      addRect(
+        diagramData.tag,
+        "container-tag",
+        diagramData.tagCorner
+      );
+
+      scene.append(create("text", {
+        x: sx(diagramData.tag.x),
+        y: sy(diagramData.tag.y),
+        "text-anchor": "start",
+        "dominant-baseline": "middle",
+        class: "tag-label"
+      }, diagramData.tag.text));
+
+      diagramData.forwardArrows.forEach(arrow => {
+        addArrow(arrow, "forward-line", "forward-head");
+      });
+
+      diagramData.outputConnector
+        .map((point, position, points) => ({
+          point,
+          previous: points[position - diagramData.unit]
+        }))
+        .filter(segment => segment.previous)
+        .forEach(segment => {
+          addLine(
+            segment.previous,
+            segment.point,
+            "backward-line"
+          );
+        });
+
+      diagramData.backwardArrows.forEach(arrow => {
+        addArrow(arrow, "backward-line", "backward-head");
+      });
+
+      diagramData.taps.forEach(tap => {
+        addLine(
+          { x: tap.x, y: tap.fromY },
+          { x: tap.x, y: tap.toY },
+          "tap"
+        );
+        scene.append(create("circle", {
+          cx: sx(tap.x),
+          cy: sy(tap.toY),
+          r: sx(diagramData.dotRadius) - sx(diagramData.zero),
+          class: "backward-dot"
+        }));
+      });
+
+      diagramData.nodes.forEach(node => {
+        addRect({
+          left: node.left,
+          top: diagramData.nodeTop,
+          right: node.right,
+          bottom: diagramData.nodeBottom
+        }, "node", diagramData.corner);
+
+        scene.append(create("text", {
+          x: sx(node.labelX),
+          y: sy(node.labelY),
+          "text-anchor": "middle",
+          class: "node-label"
+        }, node.label));
+      });
+
+      diagramData.labels.forEach(label => {
+        scene.append(create("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.anchor,
+          class: label.className
+        }, label.text));
+      });
+    } catch (error) {
+      const scene = document.getElementById("scene");
+      const fallback = document.getElementById("fallback");
+      if (scene) scene.replaceChildren();
+
+      if (fallback) {
+        const message = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text"
+        );
+        message.setAttribute("x", sx(diagramData.fallback.x));
+        message.setAttribute("y", sy(diagramData.fallback.y));
+        message.setAttribute("text-anchor", "middle");
+        message.setAttribute("class", "fallback");
+        message.textContent =
+          "Схема: данные идут по цепочке вперёд, а градиенты возвращаются назад.";
+        fallback.append(message);
+      }
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
