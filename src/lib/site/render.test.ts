@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Step, StepMeta } from "../content/step-file";
 import { buildLessonModel } from "./lesson-page";
-import { renderIndexPage, renderLessonPage } from "./render";
+import { renderIndexPage, renderLessonIndexPage, renderStepPage } from "./render";
 
 const plan: StepMeta[] = [
   { id: "001-a", type: "theory", title: "Первый" },
   { id: "002-b", type: "check", title: "Проверка" },
+  { id: "003-c", type: "theory", title: "Третий" },
 ];
+
+function step(meta: StepMeta, overrides: Partial<Step> = {}): Step {
+  return { ...meta, body: "", ...overrides } as Step;
+}
 
 function model(written: Record<string, Step>, visuals: Record<string, string> = {}) {
   return buildLessonModel({
@@ -18,42 +23,77 @@ function model(written: Record<string, Step>, visuals: Record<string, string> = 
   });
 }
 
-describe("renderLessonPage", () => {
-  it("renders a step body with an anchor and turns step references into anchors", () => {
-    const html = renderLessonPage(
-      model({
-        "001-a": { ...plan[0], body: "" } as Step,
-        "002-b": { ...plan[1], body: "Как в шаге 1.", check: [] } as Step,
-      }),
+const allWritten = {
+  "001-a": step(plan[0]),
+  "002-b": step(plan[1], { check: [] }),
+  "003-c": step(plan[2]),
+};
+
+describe("renderStepPage", () => {
+  it("links Back and Next to the neighbouring step pages", () => {
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
+
+    expect(html).toContain('href="/base/lesson/lesson-a/001-a/">Назад');
+    expect(html).toContain('href="/base/lesson/lesson-a/003-c/">Дальше');
+  });
+
+  it("marks the last step read through the finish button", () => {
+    const html = renderStepPage(model(allWritten), 2, { basePath: "/base" });
+
+    // У последнего шага «Дальше» некуда, но прочитанным его отметить надо.
+    expect(html).toContain("Закончить урок");
+    expect(html).toMatch(/data-mark-read[^>]*href="\/base\/lesson\/lesson-a\/"/);
+  });
+
+  it("carries the lesson position for the progress script", () => {
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
+
+    expect(html).toContain('data-lesson>{"slug":"lesson-a","stepId":"002-b","number":2');
+    expect(html).toContain('"plannedCount":3');
+    expect(html).toContain("2 / 3");
+  });
+
+  it("turns a step reference in the text into a link to that step's page", () => {
+    const html = renderStepPage(
+      model({ ...allWritten, "003-c": step(plan[2], { body: "Как в шаге 1." }) }),
+      2,
       { basePath: "/base" },
     );
 
-    expect(html).toContain('id="step-002-b"');
-    expect(html).toContain('href="#step-001-a"');
+    expect(html).toContain('href="/base/lesson/lesson-a/001-a/"');
+  });
+
+  it("sends a reference to an unwritten step back to the lesson", () => {
+    // Страницы у него нет: ссылка вела бы в 404 посреди чтения.
+    const html = renderStepPage(
+      model({ "001-a": step(plan[0]), "003-c": step(plan[2], { body: "Как в шаге 2." }) }),
+      1,
+      { basePath: "/base" },
+    );
+
+    expect(html).toContain('<a href="/base/lesson/lesson-a/">2</a>');
   });
 
   it("embeds the answers of a check step as JSON", () => {
-    const html = renderLessonPage(
+    const html = renderStepPage(
       model({
-        "002-b": {
-          ...plan[1],
-          body: "",
+        ...allWritten,
+        "002-b": step(plan[1], {
           check: [{ question: "Сколько?", options: ["1", "2"], correct: 1, explanation: "Два." }],
-        } as Step,
+        }),
       }),
+      1,
       { basePath: "/base" },
     );
 
-    expect(html).toContain('type="application/json"');
+    expect(html).toContain('type="application/json" data-quiz-answers');
     expect(html).toContain('"correct":1');
   });
 
   it("mounts a lazy sandboxed frame for a visual", () => {
-    const html = renderLessonPage(
-      model(
-        { "001-a": { ...plan[0], body: "" } as Step },
-        { "001-a": "/base/visuals/lesson-a/001-a.html" },
-      ),
+    const html = renderStepPage(
+      model(allWritten, { "001-a": "/base/visuals/lesson-a/001-a.html" }),
+      0,
       { basePath: "/base" },
     );
 
@@ -62,15 +102,10 @@ describe("renderLessonPage", () => {
     expect(html).toContain('loading="lazy"');
   });
 
-  it("escapes the lesson title", () => {
-    const html = renderLessonPage(
-      buildLessonModel({
-        slug: "lesson-a",
-        title: "Урок <script>alert(1)</script>",
-        steps: plan,
-        written: {},
-        visualHrefByStepId: {},
-      }),
+  it("escapes the step title", () => {
+    const html = renderStepPage(
+      model({ "001-a": step({ ...plan[0], title: "<script>alert(1)</script>" }) }),
+      0,
       { basePath: "/base" },
     );
 
@@ -78,8 +113,25 @@ describe("renderLessonPage", () => {
   });
 });
 
+describe("renderLessonIndexPage", () => {
+  it("lists every planned step and marks the unwritten ones", () => {
+    const html = renderLessonIndexPage(model({ "001-a": step(plan[0]) }), { basePath: "/base" });
+
+    expect(html).toContain('href="/base/lesson/lesson-a/001-a/"');
+    expect(html).toContain("ещё не написан");
+    expect(html).toContain("готово 1 шагов из 3");
+  });
+
+  it("offers a resume button the script can point at the first unread step", () => {
+    const html = renderLessonIndexPage(model(allWritten), { basePath: "/base" });
+
+    expect(html).toContain("data-resume");
+    expect(html).toContain('data-lesson>{"slug":"lesson-a","plannedCount":3}');
+  });
+});
+
 describe("renderIndexPage", () => {
-  it("lists phases, lessons and how much of each is written", () => {
+  it("lists phases and lessons, with a slot the script fills with read counts", () => {
     const html = renderIndexPage(
       [
         {
@@ -100,7 +152,8 @@ describe("renderIndexPage", () => {
     );
 
     expect(html).toContain('href="/base/lesson/01-math__01-a/"');
-    expect(html).toContain("Первый урок");
-    expect(html).toContain("8 из 56");
+    expect(html).toContain('data-lesson-slug="01-math__01-a"');
+    expect(html).toContain("data-read");
+    expect(html).toContain("8 из 56 шагов");
   });
 });

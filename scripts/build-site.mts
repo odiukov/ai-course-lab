@@ -13,7 +13,11 @@ import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { readStepsById } from "../src/lib/content/step-file.js";
 import { groupLessons, type CatalogLesson } from "../src/lib/site/catalog.js";
 import { buildLessonModel } from "../src/lib/site/lesson-page.js";
-import { renderIndexPage, renderLessonPage } from "../src/lib/site/render.js";
+import {
+  renderIndexPage,
+  renderLessonIndexPage,
+  renderStepPage,
+} from "../src/lib/site/render.js";
 import { collectVisualRefs } from "../src/lib/site/visual-refs.js";
 
 const root = process.cwd();
@@ -119,7 +123,15 @@ function main(): void {
       visualHrefByStepId: hrefByStepId,
     });
 
-    write(path.join("lesson", slug, "index.html"), renderLessonPage(model, { basePath }));
+    // Страница урока — оглавление; каждый шаг живёт своей страницей, чтобы
+    // урок читался порциями, а не одним полотном.
+    write(path.join("lesson", slug, "index.html"), renderLessonIndexPage(model, { basePath }));
+    model.blocks.forEach((block, index) => {
+      write(
+        path.join("lesson", slug, block.step.id, "index.html"),
+        renderStepPage(model, index, { basePath }),
+      );
+    });
 
     renderedSteps += model.writtenCount;
     missingSteps += model.plannedCount - model.writtenCount;

@@ -1,12 +1,10 @@
 import type { Step, StepMeta } from "../content/step-file";
-import { stepAnchor } from "./anchors";
 import { quizQuestions, type QuizQuestion } from "./quiz";
 
 export interface LessonBlock {
   step: Step;
   /** Человеческий номер шага в плане, с единицы. */
   number: number;
-  anchor: string;
   visualHref: string | null;
   questions: QuizQuestion[];
   practiceFn: string | null;
@@ -52,7 +50,6 @@ export function buildLessonModel(options: BuildLessonModelOptions): LessonModel 
     blocks.push({
       step,
       number: position + 1,
-      anchor: stepAnchor(meta.id),
       visualHref: visualHrefByStepId[meta.id] ?? null,
       questions: quizQuestions(step),
       practiceFn: step.exercise_fn ?? null,

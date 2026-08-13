@@ -41,10 +41,9 @@ describe("buildLessonModel", () => {
     expect(model.plannedCount).toBe(4);
   });
 
-  it("exposes anchors and the full plan order for step links", () => {
+  it("exposes the full plan order for step links", () => {
     const model = build(["001-a"]);
 
-    expect(model.blocks[0].anchor).toBe("step-001-a");
     expect(model.stepIds).toEqual(["001-a", "002-b", "003-c", "004-d"]);
   });
 

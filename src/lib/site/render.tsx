@@ -1,9 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StepBody } from "../../components/StepBody";
-import { anchorHrefForStep } from "./anchors";
+import { lessonUrl, stepPageHref, stepPageUrl } from "./anchors";
 import type { CatalogPhase } from "./catalog";
-import { FRAME_SCRIPT, QUIZ_SCRIPT } from "./client";
+import {
+  CATALOG_SCRIPT,
+  FRAME_SCRIPT,
+  LESSON_INDEX_SCRIPT,
+  PROGRESS_SCRIPT,
+  QUIZ_SCRIPT,
+} from "./client";
 import type { LessonBlock, LessonModel } from "./lesson-page";
 import { encodeQuizPayload } from "./quiz";
 
@@ -17,6 +23,11 @@ function escapeHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** JSON внутри тега script: `<` и `&` экранируются, чтобы текст не закрыл тег. */
+function encodeJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/&/g, "\\u0026");
 }
 
 function htmlDocument(options: {
@@ -72,12 +83,48 @@ ${questions}
 </div>`;
 }
 
-function renderBlock(block: LessonBlock, stepIds: string[]): string {
+/**
+ * Оглавление урока сбоку: все написанные шаги.
+ *
+ * `data-step` — якорь для скрипта прогресса: по нему он расставляет галочки
+ * прочитанного, не зная ничего про разметку вокруг.
+ */
+function renderToc(model: LessonModel, currentId: string | null, options: RenderOptions): string {
+  const items = model.blocks
+    .map((block) => {
+      const current = block.step.id === currentId ? " is-current" : "";
+      return `<li><a class="toc-link${current}" data-step="${block.step.id}" href="${stepPageUrl(options.basePath, model.slug, block.step.id)}"><span class="toc-number">${block.number}</span><span class="toc-title">${escapeHtml(block.step.title)}</span></a></li>`;
+    })
+    .join("\n");
+
+  return `<nav class="toc" aria-label="Шаги урока"><ol>
+${items}
+</ol></nav>`;
+}
+
+function renderProgressBar(): string {
+  return `<div class="progress"><div class="progress-fill" data-progress-fill></div></div>`;
+}
+
+export function renderStepPage(
+  model: LessonModel,
+  index: number,
+  options: RenderOptions,
+): string {
+  const block = model.blocks[index];
+  const previous = model.blocks[index - 1] ?? null;
+  const next = model.blocks[index + 1] ?? null;
+
   const body = renderToStaticMarkup(
     createElement(StepBody, {
       body: block.step.body,
       currentStepNumber: block.number,
-      hrefForStep: anchorHrefForStep(stepIds),
+      hrefForStep: stepPageHref({
+        basePath: options.basePath,
+        slug: model.slug,
+        stepIds: model.stepIds,
+        writtenIds: model.blocks.map((item) => item.step.id),
+      }),
     }),
   );
 
@@ -90,21 +137,65 @@ function renderBlock(block: LessonBlock, stepIds: string[]): string {
       ? `<p class="practice">Практика: функция <code>${escapeHtml(block.practiceFn)}</code>. Писать код — в локальном приложении курса.</p>`
       : "";
 
-  return `<section class="step" id="${block.anchor}">
-<h2 class="step-title"><span class="step-number">${block.number}</span>${escapeHtml(block.step.title)}</h2>
+  const back = previous
+    ? `<a class="nav-button" href="${stepPageUrl(options.basePath, model.slug, previous.step.id)}">Назад</a>`
+    : `<span class="nav-button is-disabled">Назад</span>`;
+
+  // «Дальше» и «Закончить урок» — обе отмечают текущий шаг прочитанным:
+  // последний шаг иначе навсегда оставался бы недочитанным.
+  const forward = next
+    ? `<a class="nav-button is-primary" data-mark-read href="${stepPageUrl(options.basePath, model.slug, next.step.id)}">Дальше</a>`
+    : `<a class="nav-button is-done" data-mark-read href="${lessonUrl(options.basePath, model.slug)}">Закончить урок</a>`;
+
+  const lessonData = encodeJson({
+    slug: model.slug,
+    stepId: block.step.id,
+    number: block.number,
+    plannedCount: model.plannedCount,
+  });
+
+  const page = `<header class="step-header">
+<a class="back" href="${lessonUrl(options.basePath, model.slug)}">← ${escapeHtml(model.title)}</a>
+<span class="counter" data-counter>${block.number} / ${model.plannedCount}</span>
+</header>
+${renderProgressBar()}
+<div class="lesson-layout">
+${renderToc(model, block.step.id, options)}
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">${escapeHtml(block.step.title)}</h1>
 ${body}
 ${visual}
 ${renderQuiz(block)}
 ${practice}
-</section>`;
+</article>
+<nav class="step-nav">
+${back}
+${forward}
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>${lessonData}</script>`;
+
+  return htmlDocument({
+    title: `${block.step.title} — ${model.title}`,
+    basePath: options.basePath,
+    body: page,
+    scripts: [PROGRESS_SCRIPT, QUIZ_SCRIPT, FRAME_SCRIPT],
+  });
 }
 
-export function renderLessonPage(model: LessonModel, options: RenderOptions): string {
-  const toc = model.blocks
-    .map(
-      (block) =>
-        `<li><a href="#${block.anchor}"><span class="toc-number">${block.number}</span>${escapeHtml(block.step.title)}</a></li>`,
-    )
+export function renderLessonIndexPage(model: LessonModel, options: RenderOptions): string {
+  const written = new Map(model.blocks.map((block) => [block.step.id, block]));
+
+  const items = model.stepIds
+    .map((id, position) => {
+      const block = written.get(id);
+      if (!block) {
+        return `<li class="step-item is-missing"><span class="toc-number">${position + 1}</span><span class="toc-title">ещё не написан</span></li>`;
+      }
+      return `<li class="step-item"><a class="toc-link" data-step="${id}" href="${stepPageUrl(options.basePath, model.slug, id)}"><span class="toc-number">${block.number}</span><span class="toc-title">${escapeHtml(block.step.title)}</span></a></li>`;
+    })
     .join("\n");
 
   const gap =
@@ -112,25 +203,27 @@ export function renderLessonPage(model: LessonModel, options: RenderOptions): st
       ? `<p class="note">Урок ещё пишется: готово ${model.writtenCount} шагов из ${model.plannedCount}.</p>`
       : "";
 
-  const body = `<header class="lesson-header">
+  const lessonData = encodeJson({ slug: model.slug, plannedCount: model.plannedCount });
+
+  const page = `<header class="lesson-header">
 <a class="back" href="${options.basePath}/">← к списку уроков</a>
 <h1>${escapeHtml(model.title)}</h1>
+<p class="lesson-meta"><span data-read-count>${model.plannedCount} шагов</span></p>
+<a class="nav-button is-primary" data-resume href="#" hidden>Начать урок</a>
 ${gap}
 </header>
-<div class="lesson-layout">
-<nav class="toc" aria-label="Шаги урока"><ol>
-${toc}
-</ol></nav>
-<main class="lesson">
-${model.blocks.map((block) => renderBlock(block, model.stepIds)).join("\n")}
+<main class="lesson-index">
+<ol class="step-list">
+${items}
+</ol>
 </main>
-</div>`;
+<script type="application/json" data-lesson>${lessonData}</script>`;
 
   return htmlDocument({
     title: model.title,
     basePath: options.basePath,
-    body,
-    scripts: [QUIZ_SCRIPT, FRAME_SCRIPT],
+    body: page,
+    scripts: [LESSON_INDEX_SCRIPT],
   });
 }
 
@@ -139,16 +232,17 @@ export function renderIndexPage(phases: CatalogPhase[], options: RenderOptions):
     .map((phase) => {
       const lessons = phase.lessons
         .map((lesson) => {
-          const progress =
+          const total =
             lesson.writtenCount < lesson.plannedCount
               ? `<span class="partial">${lesson.writtenCount} из ${lesson.plannedCount} шагов</span>`
               : `<span class="full">${lesson.plannedCount} шагов</span>`;
 
-          return `<li>
-<a href="${options.basePath}/lesson/${escapeHtml(lesson.slug)}/">
+          return `<li data-lesson-slug="${escapeHtml(lesson.slug)}">
+<a href="${lessonUrl(options.basePath, lesson.slug)}">
 <span class="lesson-number">${lesson.number}</span>
 <span class="lesson-title">${escapeHtml(lesson.title)}</span>
-${progress}
+<span class="read" data-read hidden></span>
+${total}
 </a>
 </li>`;
         })
@@ -167,5 +261,6 @@ ${lessons}
     title: "Курс",
     basePath: options.basePath,
     body: `<header class="index-header"><h1>Курс</h1></header>\n${sections}`,
+    scripts: [CATALOG_SCRIPT],
   });
 }
