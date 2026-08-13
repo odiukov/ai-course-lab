@@ -78,10 +78,15 @@ export function StepBody({
   body,
   currentStepNumber,
   onStepLink,
+  hrefForStep,
 }: {
   body: string;
   currentStepNumber?: number;
   onStepLink?: (stepNumber: number) => void;
+  // Куда ведёт ссылка на шаг. В ридере это адрес с ?step=, в статической
+  // сборке — якорь той же страницы. Адрес строится здесь, а не переписывается
+  // потом в готовом HTML: он свойство самой ссылки, а не текста вокруг неё.
+  hrefForStep?: (stepNumber: number) => string;
 }) {
   const linked = currentStepNumber ? linkStepReferences(body, currentStepNumber) : body;
   const rendered = normalizeMath(linked);
@@ -96,7 +101,10 @@ export function StepBody({
             const stepNumber = stepNumberFromHref(href);
             // Даже без JS это остаётся настоящей ссылкой на нужный экран.
             // В markdown номера человеческие (с 1), а query reader-а — с 0.
-            const renderedHref = stepNumber === null ? href : `?step=${stepNumber - 1}`;
+            const renderedHref =
+              stepNumber === null
+                ? href
+                : (hrefForStep ?? ((number: number) => `?step=${number - 1}`))(stepNumber);
             const navigate = (event: MouseEvent<HTMLAnchorElement>) => {
               if (stepNumber === null || !onStepLink) return;
               event.preventDefault();
