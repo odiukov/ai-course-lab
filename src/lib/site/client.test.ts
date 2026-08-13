@@ -183,7 +183,20 @@ describe("практика", () => {
       solution: "/base/exercise/p01-l01-linear-algebra/solution.py",
     },
   };
-  const template = "def magnitude(v):\n    raise NotImplementedError\n";
+  const template = [
+    '"""Заголовок упражнения."""',
+    "",
+    "import math",
+    "",
+    "",
+    "def magnitude(v):",
+    "    raise NotImplementedError",
+    "",
+    "",
+    "def dot(a, b):",
+    "    raise NotImplementedError",
+    "",
+  ].join("\n");
 
   /** Открывает шаг практики, подменив загрузку файлов упражнения. */
   async function openPractice(saved?: string): Promise<Window> {
@@ -206,27 +219,38 @@ describe("практика", () => {
     return window;
   }
 
-  it("кладёт в редактор заготовку упражнения", async () => {
+  it("показывает только функцию шага, а не весь файл", async () => {
+    // Заголовок упражнения и чужие функции в редакторе только мешают: писать
+    // на этом шаге нужно одну.
     const window = await openPractice();
 
-    expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toBe(template);
+    const value = (pick(window, "[data-code]") as HTMLTextAreaElement).value;
+    expect(value).toBe("def magnitude(v):\n    raise NotImplementedError");
+    expect(value).not.toContain("Заголовок упражнения");
+    expect(value).not.toContain("def dot");
   });
 
   it("возвращает написанный раньше код", async () => {
     // Код живёт в браузере: вернулся через неделю — он на месте.
-    const window = await openPractice("def magnitude(v):\n    return 1\n");
+    const window = await openPractice(template.replace("raise NotImplementedError", "return 1"));
 
     expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toContain("return 1");
   });
 
-  it("сохраняет код при вводе", async () => {
+  it("сохраняет весь файл, подставив в него написанную функцию", async () => {
+    // Тесты импортируют из файла все имена сразу, поэтому на диск обязан
+    // уехать файл целиком, а не одна функция.
     const window = await openPractice();
     const area = pick(window, "[data-code]") as HTMLTextAreaElement;
 
-    area.value = "def magnitude(v):\n    return 2\n";
+    area.value = "def magnitude(v):\n    return 2";
     area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
 
-    expect(window.localStorage.getItem(`course-exercise:${panel.slug}`)).toContain("return 2");
+    const saved = window.localStorage.getItem(`course-exercise:${panel.slug}`)!;
+    expect(saved).toContain("return 2");
+    expect(saved).toContain("def dot(a, b):");
+    expect(saved).toContain("import math");
+    expect(saved).not.toContain("def magnitude(v):\n    raise NotImplementedError");
   });
 });
 

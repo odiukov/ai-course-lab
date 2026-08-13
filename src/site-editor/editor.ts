@@ -8,6 +8,7 @@
 // изменение. Если этот файл почему-то не загрузился, писать код всё равно
 // можно — просто без подсветки.
 import { python } from "@codemirror/lang-python";
+import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView, basicSetup } from "codemirror";
 
 declare global {
@@ -22,12 +23,17 @@ function mount(textarea: HTMLTextAreaElement): void {
   textarea.parentNode?.insertBefore(host, textarea);
   textarea.hidden = true;
 
+  // Тема выбирается под тему страницы: подсветка, рассчитанная на белый фон,
+  // на чёрном превращается в красное по чёрному.
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
   const view = new EditorView({
     parent: host,
     doc: textarea.value,
     extensions: [
       basicSetup,
       python(),
+      ...(dark ? [oneDark] : []),
       EditorView.updateListener.of((update) => {
         if (!update.docChanged) return;
         textarea.value = update.state.doc.toString();

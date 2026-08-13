@@ -159,7 +159,7 @@ function renderPractice(block: LessonBlock, options: RenderOptions): string {
 
   return `<section class="practice-panel">
 <h2 class="practice-title">Практика: <code>${escapeHtml(fn)}</code></h2>
-<p class="practice-hint">Код выполняется прямо здесь, в твоём браузере. Первый запуск качает Python — примерно десять мегабайт, дальше из кэша.</p>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
 <textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
 <div class="practice-actions">
 <button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
