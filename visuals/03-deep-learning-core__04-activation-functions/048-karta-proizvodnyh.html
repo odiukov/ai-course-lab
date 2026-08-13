@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта градиентов шести скрытых активаций</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #657087;
+    --grid: #d9dfeb;
+    --outline: #9da9bc;
+    --positive: #087fa3;
+    --negative: #d05a24;
+    --zero: #cbd2de;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-height: 520px;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--grid);
+  }
+
+  .title {
+    padding: 12px 18px 8px;
+    font-size: 20px;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 15px;
+  }
+
+  .heading {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .01em;
+  }
+
+  .name {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .metric {
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tick, .legend, .note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .row-rule, .column-rule, .axis, .tick-line {
+    stroke: var(--grid);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .axis {
+    stroke: var(--outline);
+  }
+
+  .stripe-outline {
+    fill: none;
+    stroke: var(--outline);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .heat {
+    shape-rendering: crispEdges;
+  }
+
+  .legend-swatch {
+    stroke: var(--outline);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #171e2a;
+      --text: #edf2fb;
+      --muted: #aeb8ca;
+      --grid: #333d4d;
+      --outline: #68758a;
+      --positive: #36c6ec;
+      --negative: #ff8a54;
+      --zero: #536071;
+    }
+  }
+</style>
+</head>
+<body>
+<figure class="figure" aria-labelledby="figure-title">
+  <figcaption class="title" id="figure-title">Карта градиентов шести скрытых активаций</figcaption>
+  <svg id="diagram" viewBox="0 0 1200 410" role="img"
+       aria-label="Шесть полос производных и таблица диапазонов, максимальных производных и долей почти нулевого градиента"
+       preserveAspectRatio="xMidYMid meet">
+    <desc>Цвет показывает знак производной, а насыщенность — силу обратного сигнала на входах от минус пяти до пяти.</desc>
+  </svg>
+</figure>
+
+<script>
+const DATA = [
+  {
+    zero: 0, one: 1, two: 2, half: 0.5, hundred: 100,
+    domainMin: -5, domainMax: 5, threshold: 0.01, leak: 0.01,
+    stripeParts: 180, metricSamples: 24000, shareDigits: 1,
+    xName: -6.1, xRange: 5.62, xMaxGrad: 7.62, xLow: 9.2,
+    xRight: 9.85, xRuleOne: 5.34, xRuleTwo: 7.08, xRuleThree: 8.38,
+    headerTop: 0.28, headerBottom: 0.66,
+    rowStart: 1.32, rowStep: 0.88, stripeHalf: 0.28, ruleGap: 0.46,
+    axisY: 6.62, tickHalf: 0.11, tickLabelY: 7.08,
+    legendY: 7.72, legendHalf: 0.17, noteY: 8.62,
+    legendNegA: -5, legendNegB: -4.45, legendNegText: -4.24,
+    legendZeroA: -0.92, legendZeroB: -0.37, legendZeroText: -0.16,
+    legendPosA: 2.15, legendPosB: 2.7, legendPosText: 2.91,
+    legendStrength: 5.55,
+    opacityFloor: 0.13, opacitySpan: 0.87,
+    geluDigits: 3, swishDigits: 3, commonDigits: 2,
+    erfP: 0.3275911, erfA1: 0.254829592, erfA2: -0.284496736,
+    erfA3: 1.421413741, erfA4: -1.453152027, erfA5: 1.061405429
+  },
+  { id: "sigmoid", name: "Sigmoid", range: "(0; 1)", digits: 2 },
+  { id: "tanh", name: "Tanh", range: "(−1; 1)", digits: 2 },
+  { id: "relu", name: "ReLU", range: "[0; +∞)", digits: 2 },
+  { id: "leaky", name: "Leaky ReLU", range: "(−∞; +∞)", digits: 2 },
+  { id: "gelu", name: "GELU", range: "≈ [−0,17; +∞)", digits: 3 },
+  { id: "swish", name: "Swish", range: "≈ [−0,28; +∞)", digits: 3 }
+];
+
+const origin = { x: 490, y: 18 };
+const scale = { x: 70, y: 42 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const [cfg, ...activations] = DATA;
+const svg = document.getElementById("diagram");
+const ns = "http://www.w3.org/2000/svg";
+
+try {
+  const make = (tag, attrs, content) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (content !== undefined) node.textContent = content;
+    return node;
+  };
+
+  const addText = (x, y, content, className, anchor) => {
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content);
+    svg.appendChild(node);
+    return node;
+  };
+
+  const erf = value => {
+    const sign = value < cfg.zero ? -cfg.one : cfg.one;
+    const x = Math.abs(value);
+    const t = cfg.one / (cfg.one + cfg.erfP * x);
+    const polynomial =
+      (((((cfg.erfA5 * t + cfg.erfA4) * t + cfg.erfA3) * t +
+      cfg.erfA2) * t + cfg.erfA1) * t);
+    return sign * (cfg.one - polynomial * Math.exp(-x * x));
+  };
+
+  const normalPdf = x =>
+    Math.exp(-(x * x) / cfg.two) / Math.sqrt(cfg.two * Math.PI);
+
+  const normalCdf = x =>
+    (cfg.one + erf(x / Math.sqrt(cfg.two))) / cfg.two;
+
+  const sigmoid = x => cfg.one / (cfg.one + Math.exp(-x));
+
+  const derivative = (activation, x) => {
+    if (activation.id === "sigmoid") {
+      const s = sigmoid(x);
+      return s * (cfg.one - s);
+    }
+    if (activation.id === "tanh") {
+      const t = Math.tanh(x);
+      return cfg.one - t * t;
+    }
+    if (activation.id === "relu") {
+      return x > cfg.zero ? cfg.one : cfg.zero;
+    }
+    if (activation.id === "leaky") {
+      return x >= cfg.zero ? cfg.one : cfg.leak;
+    }
+    if (activation.id === "gelu") {
+      return normalCdf(x) + x * normalPdf(x);
+    }
+    const s = sigmoid(x);
+    return s + x * s * (cfg.one - s);
+  };
+
+  const scan = activation => {
+    let maximum = cfg.zero;
+    let lowCount = cfg.zero;
+    const span = cfg.domainMax - cfg.domainMin;
+
+    for (let i = cfg.zero; i < cfg.metricSamples; i += cfg.one) {
+      const x = cfg.domainMin +
+        span * (i + cfg.half) / cfg.metricSamples;
+      const magnitude = Math.abs(derivative(activation, x));
+      maximum = Math.max(maximum, magnitude);
+      if (magnitude < cfg.threshold) lowCount += cfg.one;
+    }
+
+    return {
+      maximum,
+      lowShare: cfg.hundred * lowCount / cfg.metricSamples
+    };
+  };
+
+  const decimal = (value, digits) => {
+    const fixed = value.toFixed(digits);
+    const trimmed = fixed
+      .replace(/(\.[0-9]*?)0+$/, "$1")
+      .replace(/\.$/, "");
+    return trimmed.replace(".", ",");
+  };
+
+  addText(cfg.xName, cfg.headerTop, "АКТИВАЦИЯ", "heading", "start");
+  addText(cfg.zero, cfg.headerTop, "КАРТА ПРОИЗВОДНОЙ", "heading", "middle");
+  addText(cfg.zero, cfg.headerBottom, "вход x: −5 → 5", "heading", "middle");
+  addText(cfg.xRange, cfg.headerTop, "ДИАПАЗОН", "heading", "start");
+  addText(cfg.xRange, cfg.headerBottom, "ВЫХОДА", "heading", "start");
+  addText(cfg.xMaxGrad, cfg.headerTop, "МАКСИМУМ", "heading", "middle");
+  addText(cfg.xMaxGrad, cfg.headerBottom, "|f′(x)|", "heading", "middle");
+  addText(cfg.xLow, cfg.headerTop, "ДОЛЯ ТОЧЕК", "heading", "middle");
+  addText(cfg.xLow, cfg.headerBottom, "|f′(x)| < 0,01", "heading", "middle");
+
+  [cfg.xRuleOne, cfg.xRuleTwo, cfg.xRuleThree].forEach(x => {
+    svg.appendChild(make("line", {
+      x1: sx(x),
+      y1: sy(cfg.headerTop),
+      x2: sx(x),
+      y2: sy(cfg.rowStart + cfg.rowStep * activations.length - cfg.ruleGap),
+      class: "column-rule"
+    }));
+  });
+
+  activations.forEach((activation, index) => {
+    const y = cfg.rowStart + index * cfg.rowStep;
+    const stats = scan(activation);
+    const span = cfg.domainMax - cfg.domainMin;
+
+    addText(cfg.xName, y, activation.name, "name", "start");
+
+    for (let part = cfg.zero; part < cfg.stripeParts; part += cfg.one) {
+      const x0 = cfg.domainMin + span * part / cfg.stripeParts;
+      const x1 = cfg.domainMin + span * (part + cfg.one) / cfg.stripeParts;
+      const sampleX = (x0 + x1) / cfg.two;
+      const grad = derivative(activation, sampleX);
+      const magnitude = Math.abs(grad);
+      const strength = Math.min(magnitude / stats.maximum, cfg.one);
+      const opacity = cfg.opacityFloor + cfg.opacitySpan * strength;
+      const fill = grad === cfg.zero
+        ? "var(--zero)"
+        : grad < cfg.zero
+          ? "var(--negative)"
+          : "var(--positive)";
+
+      svg.appendChild(make("rect", {
+        x: sx(x0),
+        y: sy(y - cfg.stripeHalf),
+        width: sx(x1) - sx(x0),
+        height: sy(y + cfg.stripeHalf) - sy(y - cfg.stripeHalf),
+        fill,
+        opacity,
+        class: "heat"
+      }));
+    }
+
+    svg.appendChild(make("rect", {
+      x: sx(cfg.domainMin),
+      y: sy(y - cfg.stripeHalf),
+      width: sx(cfg.domainMax) - sx(cfg.domainMin),
+      height: sy(y + cfg.stripeHalf) - sy(y - cfg.stripeHalf),
+      class: "stripe-outline"
+    }));
+
+    addText(cfg.xRange, y, activation.range, "metric", "start");
+    addText(
+      cfg.xMaxGrad,
+      y,
+      decimal(stats.maximum, activation.digits),
+      "metric",
+      "middle"
+    );
+    addText(
+      cfg.xLow,
+      y,
+      decimal(stats.lowShare, cfg.shareDigits) + " %",
+      "metric",
+      "middle"
+    );
+
+    svg.appendChild(make("line", {
+      x1: sx(cfg.xName),
+      y1: sy(y + cfg.ruleGap),
+      x2: sx(cfg.xRight),
+      y2: sy(y + cfg.ruleGap),
+      class: "row-rule"
+    }));
+  });
+
+  svg.appendChild(make("line", {
+    x1: sx(cfg.domainMin),
+    y1: sy(cfg.axisY),
+    x2: sx(cfg.domainMax),
+    y2: sy(cfg.axisY),
+    class: "axis"
+  }));
+
+  [cfg.domainMin, cfg.zero, cfg.domainMax].forEach(value => {
+    svg.appendChild(make("line", {
+      x1: sx(value),
+      y1: sy(cfg.axisY - cfg.tickHalf),
+      x2: sx(value),
+      y2: sy(cfg.axisY + cfg.tickHalf),
+      class: "tick-line"
+    }));
+    addText(
+      value,
+      cfg.tickLabelY,
+      value < cfg.zero ? "−5" : String(value),
+      "tick",
+      "middle"
+    );
+  });
+
+  const swatches = [
+    {
+      a: cfg.legendNegA, b: cfg.legendNegB,
+      textX: cfg.legendNegText, fill: "var(--negative)",
+      label: "отрицательный градиент"
+    },
+    {
+      a: cfg.legendZeroA, b: cfg.legendZeroB,
+      textX: cfg.legendZeroText, fill: "var(--zero)",
+      label: "почти нулевой"
+    },
+    {
+      a: cfg.legendPosA, b: cfg.legendPosB,
+      textX: cfg.legendPosText, fill: "var(--positive)",
+      label: "положительный градиент"
+    }
+  ];
+
+  swatches.forEach(item => {
+    svg.appendChild(make("rect", {
+      x: sx(item.a),
+      y: sy(cfg.legendY - cfg.legendHalf),
+      width: sx(item.b) - sx(item.a),
+      height: sy(cfg.legendY + cfg.legendHalf) -
+        sy(cfg.legendY - cfg.legendHalf),
+      fill: item.fill,
+      class: "legend-swatch"
+    }));
+    addText(item.textX, cfg.legendY, item.label, "legend", "start");
+  });
+
+  addText(
+    cfg.legendStrength,
+    cfg.legendY,
+    "насыщенность = сила сигнала",
+    "legend",
+    "start"
+  );
+
+  addText(
+    cfg.xName,
+    cfg.noteY,
+    "Доля рассчитана равномерно на отрезке [−5; 5]; Leaky ReLU: α = 0,01.",
+    "note",
+    "start"
+  );
+} catch (error) {
+  while (svg.lastChild && svg.lastChild.tagName !== "desc") {
+    svg.removeChild(svg.lastChild);
+  }
+  const fallback = document.createElementNS(ns, "text");
+  fallback.setAttribute("x", sx(cfg.xName));
+  fallback.setAttribute("y", sy(cfg.rowStart));
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent =
+    "Здесь должна быть таблица градиентов sigmoid, tanh, ReLU, Leaky ReLU, GELU и Swish на отрезке [−5; 5].";
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

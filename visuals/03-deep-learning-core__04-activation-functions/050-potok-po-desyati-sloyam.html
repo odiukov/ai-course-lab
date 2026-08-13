@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь градиента от выхода к первому слою</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --surface: #ffffff;
+    --panel: #f1f5f9;
+    --ink: #172033;
+    --muted: #596579;
+    --line: #8b98aa;
+    --accent: #7457d9;
+    --accent-soft: #eee9ff;
+    --focus: #dff5ed;
+    --focus-line: #16866c;
+    --sigmoid: #d44b5e;
+    --tanh: #b56a10;
+    --relu: #16866c;
+    --gelu: #2774c8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111622;
+      --surface: #171e2d;
+      --panel: #20293a;
+      --ink: #edf2f8;
+      --muted: #b8c2d1;
+      --line: #748197;
+      --accent: #b8a3ff;
+      --accent-soft: #30294e;
+      --focus: #183b35;
+      --focus-line: #58d0ad;
+      --sigmoid: #ff8290;
+      --tanh: #f4b45d;
+      --relu: #58d0ad;
+      --gelu: #79b9ff;
+    }
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    color: var(--ink);
+    font-size: 22px;
+    text-align: center;
+  }
+
+  #stage {
+    background: var(--surface);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--surface);
+  }
+
+  .frame {
+    fill: var(--surface);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .layer {
+    fill: var(--surface);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .layer-focus {
+    fill: var(--focus);
+    stroke: var(--focus-line);
+    stroke-width: 2px;
+  }
+
+  .output {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .network-line,
+  .guide {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+  }
+
+  .forward {
+    fill: none;
+    stroke: var(--focus-line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .backward {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .forward-head {
+    fill: var(--focus-line);
+  }
+
+  .backward-head,
+  .backward-tail {
+    fill: var(--accent);
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .node-label {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .arrow-label {
+    fill: var(--accent);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .forward-label {
+    fill: var(--focus-line);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .series-name {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .series-value {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .sigmoid {
+    fill: var(--sigmoid);
+    stroke: var(--sigmoid);
+  }
+
+  .tanh {
+    fill: var(--tanh);
+    stroke: var(--tanh);
+  }
+
+  .relu {
+    fill: var(--relu);
+    stroke: var(--relu);
+  }
+
+  .gelu {
+    fill: var(--gelu);
+    stroke: var(--gelu);
+  }
+
+  .fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<h1 id="step-title">Путь градиента через 10 слоёв</h1>
+
+<div id="stage">
+  <svg id="diagram"
+       viewBox="0 0 1080 430"
+       width="1080"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="step-title svg-description">
+  </svg>
+</div>
+
+<script>
+const [diagram] = [{
+  origin: { x: 20, y: 18 },
+  scale: { x: 20, y: 18 },
+
+  frame: { x: -1, y: -1, w: 54, h: 25 },
+
+  layerShape: { y: 7, w: 3.4, h: 2.6 },
+  layers: [
+    { x: 2, label: "Слой 1", focus: true },
+    { x: 6.4, label: "", focus: false },
+    { x: 10.8, label: "", focus: false },
+    { x: 15.2, label: "", focus: false },
+    { x: 19.6, label: "Слой 5", focus: true },
+    { x: 24, label: "", focus: false },
+    { x: 28.4, label: "", focus: false },
+    { x: 32.8, label: "", focus: false },
+    { x: 37.2, label: "", focus: false },
+    { x: 41.6, label: "Слой 10", focus: true }
+  ],
+  output: {
+    x: 47.2, y: 7, w: 4.4, h: 2.6,
+    label: "Выход"
+  },
+
+  backward: {
+    line: { a: { x: 49.4, y: 3.6 }, b: { x: 4.4, y: 3.6 } },
+    head: [
+      { x: 3.7, y: 3.6 },
+      { x: 4.5, y: 3.05 },
+      { x: 4.5, y: 4.15 }
+    ],
+    tail: { x: 49.4, y: 3.6, r: 0.22 },
+    outputGuide: { a: { x: 49.4, y: 3.95 }, b: { x: 49.4, y: 7 } },
+    checkpoints: [
+      { a: { x: 3.7, y: 4.05 }, b: { x: 3.7, y: 7 } },
+      { a: { x: 21.3, y: 4.05 }, b: { x: 21.3, y: 7 } },
+      { a: { x: 43.3, y: 4.05 }, b: { x: 43.3, y: 7 } }
+    ]
+  },
+
+  forward: {
+    line: { a: { x: 2, y: 11.8 }, b: { x: 50.8, y: 11.8 } },
+    head: [
+      { x: 51.6, y: 11.8 },
+      { x: 50.8, y: 11.25 },
+      { x: 50.8, y: 12.35 }
+    ]
+  },
+
+  firstLayerGuide: {
+    a: { x: 3.7, y: 9.6 },
+    b: { x: 3.7, y: 13.2 }
+  },
+
+  panels: [
+    { x: 1.2, y: 13.2, w: 25.4, h: 8.7 },
+    { x: 28.2, y: 13.2, w: 23.8, h: 8.7 }
+  ],
+
+  outcomes: {
+    lineStart: 2.2,
+    lineEnd: 3.6,
+    nameX: 4.2,
+    valueX: 12.3,
+    rows: [
+      { y: 16, name: "sigmoid", value: "≈ 0,000001", className: "sigmoid" },
+      { y: 17.6, name: "tanh", value: "≈ 0,001", className: "tanh" },
+      { y: 19.2, name: "ReLU", value: "≈ 1,0", className: "relu" },
+      { y: 20.8, name: "GELU", value: "≈ 0,8", className: "gelu" }
+    ]
+  },
+
+  labels: [
+    {
+      at: { x: 49.4, y: 2.3 }, dx: -8, dy: -2,
+      anchor: "end", className: "arrow-label",
+      text: "Обратный градиент: от выхода к первому слою"
+    },
+    {
+      at: { x: 48.6, y: 5.15 }, dx: -8, dy: 3,
+      anchor: "end", className: "label",
+      text: "Коррекция на выходе: 1"
+    },
+    {
+      at: { x: 2, y: 10.8 }, dx: 0, dy: -2,
+      anchor: "start", className: "forward-label",
+      text: "Прямой путь сигнала"
+    },
+    {
+      at: { x: 2.2, y: 14.45 }, dx: 0, dy: 0,
+      anchor: "start", className: "heading",
+      text: "Что дошло до первого слоя"
+    },
+    {
+      at: { x: 29.2, y: 14.45 }, dx: 0, dy: 0,
+      anchor: "start", className: "heading",
+      text: "Почему сигнал меняется"
+    },
+    {
+      at: { x: 29.2, y: 16.2 }, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "На каждом слое градиент умножается"
+    },
+    {
+      at: { x: 29.2, y: 17.75 }, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "на производную активации."
+    },
+    {
+      at: { x: 29.2, y: 19.45 }, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "Повторяющееся ослабление превращает"
+    },
+    {
+      at: { x: 29.2, y: 20.95 }, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "громкую команду в едва слышимый след."
+    }
+  ]
+}];
+
+const origin = diagram.origin;
+const scale = diagram.scale;
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attributes, parent = svg) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      node.setAttribute(name, String(value));
+    }
+    parent.appendChild(node);
+    return node;
+  };
+
+  const drawLine = (segment, className) => make("line", {
+    x1: sx(segment.a.x),
+    y1: sy(segment.a.y),
+    x2: sx(segment.b.x),
+    y2: sy(segment.b.y),
+    class: className
+  });
+
+  const drawRect = (shape, className) => make("rect", {
+    x: sx(shape.x),
+    y: sy(shape.y),
+    width: sx(shape.x + shape.w) - sx(shape.x),
+    height: sy(shape.y + shape.h) - sy(shape.y),
+    class: className
+  });
+
+  const drawPolygon = (points, className) => make("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: className
+  });
+
+  const drawText = item => {
+    const node = make("text", {
+      x: sx(item.at.x),
+      y: sy(item.at.y),
+      dx: item.dx,
+      dy: item.dy,
+      "text-anchor": item.anchor,
+      class: item.className
+    });
+    node.textContent = item.text;
+    return node;
+  };
+
+  const description = make("desc", { id: "svg-description" });
+  description.textContent =
+    "Сеть из десяти слоёв. Сигнал идёт к выходу, а градиент величиной один возвращается назад. У первого слоя показаны ориентиры для sigmoid, tanh, ReLU и GELU.";
+
+  drawRect(diagram.frame, "frame");
+
+  let previousLayer;
+  for (const layer of diagram.layers) {
+    if (previousLayer) {
+      drawLine({
+        a: {
+          x: previousLayer.x + diagram.layerShape.w,
+          y: diagram.layerShape.y + diagram.layerShape.h / diagram.scale.x
+        },
+        b: {
+          x: layer.x,
+          y: diagram.layerShape.y + diagram.layerShape.h / diagram.scale.x
+        }
+      }, "network-line");
+    }
+    previousLayer = layer;
+  }
+
+  drawLine({
+    a: {
+      x: previousLayer.x + diagram.layerShape.w,
+      y: diagram.layerShape.y + diagram.layerShape.h / diagram.scale.x
+    },
+    b: {
+      x: diagram.output.x,
+      y: diagram.output.y + diagram.output.h / diagram.scale.x
+    }
+  }, "network-line");
+
+  for (const checkpoint of diagram.backward.checkpoints) {
+    drawLine(checkpoint, "guide");
+  }
+  drawLine(diagram.backward.outputGuide, "guide");
+  drawLine(diagram.backward.line, "backward");
+  drawPolygon(diagram.backward.head, "backward-head");
+  make("circle", {
+    cx: sx(diagram.backward.tail.x),
+    cy: sy(diagram.backward.tail.y),
+    r: sx(diagram.backward.tail.x + diagram.backward.tail.r) -
+       sx(diagram.backward.tail.x),
+    class: "backward-tail"
+  });
+
+  drawLine(diagram.forward.line, "forward");
+  drawPolygon(diagram.forward.head, "forward-head");
+  drawLine(diagram.firstLayerGuide, "guide");
+
+  for (const layer of diagram.layers) {
+    drawRect({
+      x: layer.x,
+      y: diagram.layerShape.y,
+      w: diagram.layerShape.w,
+      h: diagram.layerShape.h
+    }, layer.focus ? "layer-focus" : "layer");
+
+    if (layer.label) {
+      drawText({
+        at: {
+          x: layer.x + diagram.layerShape.w / diagram.scale.x,
+          y: diagram.layerShape.y + diagram.layerShape.h / diagram.scale.x
+        },
+        dx: 0,
+        dy: 5,
+        anchor: "middle",
+        className: "node-label",
+        text: layer.label
+      });
+    }
+  }
+
+  drawRect(diagram.output, "output");
+  drawText({
+    at: {
+      x: diagram.output.x + diagram.output.w / diagram.scale.x,
+      y: diagram.output.y + diagram.output.h / diagram.scale.x
+    },
+    dx: 0,
+    dy: 5,
+    anchor: "middle",
+    className: "node-label",
+    text: diagram.output.label
+  });
+
+  for (const panel of diagram.panels) {
+    drawRect(panel, "panel");
+  }
+
+  for (const label of diagram.labels) {
+    drawText(label);
+  }
+
+  for (const row of diagram.outcomes.rows) {
+    drawLine({
+      a: { x: diagram.outcomes.lineStart, y: row.y },
+      b: { x: diagram.outcomes.lineEnd, y: row.y }
+    }, row.className);
+
+    drawText({
+      at: { x: diagram.outcomes.nameX, y: row.y },
+      dx: 4,
+      dy: 5,
+      anchor: "start",
+      className: "series-name",
+      text: row.name
+    });
+
+    drawText({
+      at: { x: diagram.outcomes.valueX, y: row.y },
+      dx: 8,
+      dy: 5,
+      anchor: "start",
+      className: `series-value ${row.className}`,
+      text: row.value
+    });
+  }
+} catch (error) {
+  const stage = document.getElementById("stage");
+  stage.replaceChildren();
+  const note = document.createElement("p");
+  note.className = "fallback";
+  note.textContent =
+    "Схема должна была показать обратный путь градиента через 10 слоёв и ориентиры первого слоя: sigmoid ≈ 0,000001; tanh ≈ 0,001; ReLU ≈ 1,0; GELU ≈ 0,8.";
+  stage.appendChild(note);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
