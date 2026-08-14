@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Коллаж из чужих кадров</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --ink:#22252b; --mut:#5d6673;
+    --src:#1f6feb; --tgt:#c2410c; --dot:#9aa2ad; --arr:#7a8391; --box:#c9ccd2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --ink:#e8eaee; --mut:#a3adba;
+      --src:#6aa9ff; --tgt:#f0954a; --dot:#727c8a; --arr:#8f99a7; --box:#3a4149;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  figure{margin:0;padding:10px 12px}
+  figcaption{font-size:14px;font-weight:600;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  text{font-size:13px;fill:var(--ink)}
+  text.mut{font-size:12px;fill:var(--mut)}
+  text.halo{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+  #fb{font-size:13px;line-height:1.5;color:var(--ink);padding:0 2px}
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>Коллаж из чужих кадров: каждой своей полоске — ближайшие полоски из ящика</figcaption>
+  <svg id="d" viewBox="0 0 900 430" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Лента кадров источника, ящик кадров цели и стрелки к ближайшим соседям"></svg>
+  <p id="fb" hidden></p>
+</figure>
+<script>
+(function(){
+var svg=document.getElementById("d"), fb=document.getElementById("fb");
+try{
+  /* ---- данные схемы ---- */
+  var D={
+    src:{x0:4,x1:12,y0:6,y1:46,n:10},
+    pool:{x0:40,x1:86,y0:6,y1:46},
+    out:{x0:92,x1:100},
+    head:1.2, dotR:0.42, kRow:2,
+    dots:[[41,9],[46,7],[52,10],[57,8],[63,12],[68,7],[74,10],[79,8],[84,12],
+          [42,15],[47,18],[53,14],[58,17],[64,20],[69,15],[75,18],[80,14],[85,17],
+          [41,23],[46,26],[52,22],[57,25],[63,28],[68,23],[74,26],[79,22],[84,25],
+          [43,31],[48,29],[54,32],[59,30],[65,34],[70,31],[76,29],[81,33],[85,30],
+          [42,38],[47,41],[53,37],[58,40],[64,43],[69,38],[75,41],[80,37],[85,42],
+          [44,44],[50,45]],
+    /* для каждого кадра источника — его ближайший сосед в ящике */
+    link:[20,5,null,43,8,28,25,38,33,2],
+    /* для одного кадра показаны все k = 4 ближайших */
+    kDots:[10,11,12,13],
+    labels:[
+      {x:4,   y:2.6,  a:"start", t:"Твоя запись: 3 с = 150 кадров по 20 мс"},
+      {x:40,  y:2.6,  a:"start", t:"Кадры Бориса: ≈ 15 000 из 5 минут"},
+      {x:100, y:2.6,  a:"end",   t:"Выход: те же 150 клеток"},
+      {x:2.6, y:8.7,  a:"end",   t:"20 мс", c:"mut"},
+      {x:4,   y:49,   a:"start", c:"mut",
+       t:"Сплошная стрелка — ближайший кадр Бориса в пространстве WavLM, не по времени"},
+      {x:4,   y:52.4, a:"start", c:"mut",
+       t:"Оранжевым — k = 4 ближайших для одного кадра, их усредняют; пунктир — кадр встаёт в твою клетку"}
+    ]
+  };
+  var origin={x:52,y:0}, scale=8;
+
+  /* ---- единственный перевод координат ---- */
+  function sx(x){return origin.x+x*scale;}
+  function sy(y){return origin.y+y*scale;}
+
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,at,p){var e=document.createElementNS(NS,n);
+    for(var k in at) e.setAttribute(k,at[k]); (p||svg).appendChild(e); return e;}
+  function txt(x,y,anchor,s,cls){
+    var t=el("text",{x:sx(x),y:sy(y),"text-anchor":anchor});
+    if(cls) t.setAttribute("class",cls);
+    t.textContent=s; return t;
+  }
+  function seg(a,b,at){
+    at=at||{}; at.x1=sx(a.x); at.y1=sy(a.y); at.x2=sx(b.x); at.y2=sy(b.y);
+    return el("line",at);
+  }
+  function arrow(a,b,color,dashed){
+    var dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
+    var ux=dx/L, uy=dy/L;
+    var base={x:b.x-ux*D.head, y:b.y-uy*D.head};
+    var w=D.head*0.42;
+    var o={stroke:color,"stroke-width":1.4,fill:"none"};
+    if(dashed) o["stroke-dasharray"]="5 4";
+    seg(a,base,o);
+    el("polygon",{fill:color,points:
+      sx(b.x)+","+sy(b.y)+" "+
+      sx(base.x-uy*w)+","+sy(base.y+ux*w)+" "+
+      sx(base.x+uy*w)+","+sy(base.y-ux*w)});
+  }
+
+  var rowH=(D.src.y1-D.src.y0)/D.src.n;
+  function rowY(i){return D.src.y0+(i+0.5)*rowH;}
+  var dotR=sx(D.dotR)-sx(0);
+
+  /* ящик кадров цели */
+  el("rect",{x:sx(D.pool.x0),y:sy(D.pool.y0),
+    width:sx(D.pool.x1)-sx(D.pool.x0), height:sy(D.pool.y1)-sy(D.pool.y0),
+    fill:"none",stroke:"var(--box)","stroke-width":1.2,rx:dotR});
+  D.dots.forEach(function(p,i){
+    var acc=D.kDots.indexOf(i)>=0;
+    el("circle",{cx:sx(p[0]),cy:sy(p[1]),r:acc?dotR*1.4:dotR,
+      fill:acc?"var(--tgt)":"var(--dot)"});
+  });
+
+  /* лента источника и лента выхода */
+  for(var i=0;i<D.src.n;i++){
+    var y0=D.src.y0+i*rowH, hh=sy(y0+rowH)-sy(y0);
+    var hot=(i===D.kRow);
+    el("rect",{x:sx(D.src.x0),y:sy(y0),width:sx(D.src.x1)-sx(D.src.x0),height:hh,
+      fill:hot?"var(--src)":"none",stroke:"var(--src)","stroke-width":1.2,
+      "fill-opacity":hot?0.35:1});
+    el("rect",{x:sx(D.out.x0),y:sy(y0),width:sx(D.out.x1)-sx(D.out.x0),height:hh,
+      fill:"var(--tgt)","fill-opacity":hot?0.5:0.22,
+      stroke:"var(--tgt)","stroke-width":1.2});
+  }
+
+  /* засечка «один кадр = 20 мс» */
+  seg({x:3.2,y:D.src.y0},{x:4,y:D.src.y0},{stroke:"var(--mut)","stroke-width":1.2});
+  seg({x:3.2,y:D.src.y0+rowH},{x:4,y:D.src.y0+rowH},{stroke:"var(--mut)","stroke-width":1.2});
+  seg({x:3.2,y:D.src.y0},{x:3.2,y:D.src.y0+rowH},{stroke:"var(--mut)","stroke-width":1.2});
+
+  /* стрелки: каждый кадр источника — к своему ближайшему соседу */
+  function shoot(row,di,color){
+    var d=D.dots[di], a={x:D.src.x1,y:rowY(row)}, b={x:d[0],y:d[1]};
+    var dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy), gap=D.dotR*1.8;
+    arrow(a,{x:b.x-dx/L*gap, y:b.y-dy/L*gap},color,false);
+  }
+  D.link.forEach(function(di,row){ if(di!==null) shoot(row,di,"var(--arr)"); });
+  D.kDots.forEach(function(di){ shoot(D.kRow,di,"var(--tgt)"); });
+
+  /* усреднённый кадр встаёт в свою клетку */
+  arrow({x:D.pool.x1+0.6,y:rowY(D.kRow)},{x:D.out.x0-0.6,y:rowY(D.kRow)},"var(--tgt)",true);
+
+  D.labels.forEach(function(l){ txt(l.x,l.y,l.a,l.t,l.c); });
+  txt(32,11,"middle","k = 4","halo").setAttribute("fill","var(--tgt)");
+  txt(89,13.4,"middle","усреднить","halo mut");
+}catch(e){
+  svg.setAttribute("hidden","");
+  fb.removeAttribute("hidden");
+  fb.textContent="Схема должна показывать: слева лента твоей записи — 3 с речи, "+
+   "150 кадров по 20 мс, идущих по порядку; справа ящик кадров Бориса — около "+
+   "15 000 штук из 5 минут речи, лежащих без порядка. От каждого твоего кадра "+
+   "идёт стрелка к ближайшему кадру Бориса в пространстве WavLM (для одного кадра "+
+   "показаны все k = 4 ближайших, их усредняют), и найденный кадр встаёт в твою "+
+   "клетку: порядок клеток твой, содержимое — Борисово.";
+}
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

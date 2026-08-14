@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Путь звука через Whisper</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6673;
+    --line:#33404d; --accent:#0b6fb0; --box:#eef3f8; --boxb:#9fb6c9;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e6ebf0; --muted:#9aa7b4;
+      --line:#c3ccd6; --accent:#5fb4ea; --box:#1c242d; --boxb:#425263;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 8px 12px;
+        font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  h3{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:460px;background:var(--bg)}
+  .legend{margin:6px 0 0;color:var(--muted);font-size:12px}
+  .fail{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h3>Путь звука через Whisper: четыре пересадки</h3>
+  <div id="slot"></div>
+  <p class="legend" id="lg">
+    Единицы измерения меняются на каждой пересадке: секунды → кадры спектрограммы → позиции энкодера → векторы → токены.
+  </p>
+</div>
+<script>
+(function(){
+  var slot=document.getElementById('slot');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var STAGES=[
+      {x:0,  t:"Аудио",        s:["30 s волна"]},
+      {x:1,  t:"log-mel",      s:["3000 кадров","× 80 mel"]},
+      {x:2,  t:"Свёртка",      s:["stride 2"]},
+      {x:3,  t:"Энкодер",      s:["1500 позиций","32 слоя, dim 1280"]},
+      {x:4,  t:"Декодер",      s:["cross-attention"]},
+      {x:5,  t:"BPE-токены",   s:["словарь 51 865"]}
+    ];
+    var BOXW=0.86, BOXH=0.62, ROW=0.0;      // единицы схемы
+    var CROSS_Y=-0.95;                       // высота дуги cross-attention
+
+    // ---- одна система координат ----
+    var ORIGIN={x:70,y:200}, SCALE={x:148,y:118};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y - y*SCALE.y; }
+
+    var W=960,H=430;
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+
+    var svg=el("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet",
+                      role:"img","aria-label":"Цепочка преобразований звука в Whisper"});
+
+    var defs=el("defs",{});
+    var mk=el("marker",{id:"ar",viewBox:"0 0 10 10",refX:"9",refY:"5",
+        markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+    mk.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:"var(--line)"}));
+    defs.appendChild(mk);
+    svg.appendChild(defs);
+
+    // базовая линия маршрута — тоже через sx/sy
+    svg.appendChild(el("line",{x1:sx(-BOXW/2),y1:sy(ROW),
+                               x2:sx(STAGES.length-1+BOXW/2),y2:sy(ROW),
+                               stroke:"var(--boxb)","stroke-width":1,"stroke-dasharray":"3 5"}));
+
+    function label(x,y,txt,anchor,dx,dy,cls){
+      var t=el("text",{x:sx(x)+dx,y:sy(y)+dy,"text-anchor":anchor,
+                       fill:cls==="m"?"var(--muted)":"var(--fg)",
+                       "font-size":cls==="m"?11:13,
+                       "font-weight":cls==="b"?600:400,
+                       "font-family":"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"});
+      t.textContent=txt; svg.appendChild(t); return t;
+    }
+
+    // коробки этапов
+    STAGES.forEach(function(st,i){
+      var x=st.x;
+      svg.appendChild(el("rect",{x:sx(x-BOXW/2),y:sy(ROW+BOXH/2),
+        width:sx(x+BOXW/2)-sx(x-BOXW/2), height:sy(ROW-BOXH/2)-sy(ROW+BOXH/2),
+        rx:6, fill:"var(--box)", stroke:"var(--boxb)","stroke-width":1.5}));
+      label(x,ROW+BOXH/2,st.t,"middle",0,-8,"b");
+      st.s.forEach(function(line,k){
+        label(x,ROW-BOXH/2,line,"middle",0,16+k*14,"m");
+      });
+      // номер пересадки — внутри коробки
+      label(x,ROW,"u"+(i+1),"middle",0,5,"m");
+    });
+
+    // стрелки между этапами
+    for(var i=0;i<STAGES.length-1;i++){
+      svg.appendChild(el("line",{x1:sx(STAGES[i].x+BOXW/2),y1:sy(ROW),
+        x2:sx(STAGES[i+1].x-BOXW/2),y2:sy(ROW),
+        stroke:"var(--line)","stroke-width":1.8,"marker-end":"url(#ar)"}));
+    }
+
+    // дуга cross-attention: энкодер -> декодер, поверх
+    var ex=STAGES[3].x, dx0=STAGES[4].x;
+    var arc=el("path",{d:"M "+sx(ex)+" "+sy(ROW+BOXH/2)+
+                          " C "+sx(ex)+" "+sy(CROSS_Y*-1)+
+                          " "+sx(dx0)+" "+sy(CROSS_Y*-1)+
+                          " "+sx(dx0)+" "+sy(ROW+BOXH/2),
+      fill:"none",stroke:"var(--accent)","stroke-width":1.8,"marker-end":"url(#ar)"});
+    svg.appendChild(arc);
+    var mid=(ex+dx0)/2;
+    label(mid,-CROSS_Y,"cross-attention: весь слепок энкодера","middle",0,-8,"m")
+      .setAttribute("fill","var(--accent)");
+
+    // подпись про 30 s и паддинг — у хвоста первой стрелки, снизу
+    label(STAGES[0].x+BOXW/2,ROW,"шаг 10 ms","start",6,22,"m");
+    // подпись про прореживание — у хвоста стрелки свёртки, снизу
+    label(STAGES[2].x+BOXW/2,ROW,"3000 → 1500","start",6,22,"m");
+    // авторегрессия декодера — под декодером
+    label(STAGES[4].x,ROW-BOXH/2,"по одному токену","middle",0,44,"m");
+
+    // шкала единиц под схемой
+    var UY=-1.15;
+    svg.appendChild(el("line",{x1:sx(STAGES[0].x-BOXW/2),y1:sy(UY),
+      x2:sx(STAGES[STAGES.length-1].x+BOXW/2),y2:sy(UY),
+      stroke:"var(--boxb)","stroke-width":1}));
+    [[0,"секунды"],[1,"кадры"],[3,"векторы"],[5,"токены"]].forEach(function(p){
+      svg.appendChild(el("line",{x1:sx(p[0]),y1:sy(UY),x2:sx(p[0]),y2:sy(UY)+7,
+        stroke:"var(--boxb)","stroke-width":1}));
+      label(p[0],UY,p[1],"middle",0,22,"m");
+    });
+    label(STAGES[0].x-BOXW/2,UY,"чем меряем:","end",-8,4,"m");
+
+    slot.appendChild(svg);
+  }catch(e){
+    slot.innerHTML='<p class="fail">Схема не построилась. Она показывает цепочку: '+
+      '30 s аудио → log-mel 3000 кадров × 80 mel → свёртка stride 2 → '+
+      'энкодер 1500 позиций (32 слоя, dim 1280) → декодер с cross-attention → '+
+      'BPE-токены из словаря 51 865. Единицы меняются на каждой пересадке.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

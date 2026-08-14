@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RNN в развёрнутом виде</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --ink: #172033;
+      --muted: #556176;
+      --cell-fill: #e8f2ff;
+      --cell-stroke: #2463a6;
+      --state: #27558f;
+      --input: #087f8c;
+      --shared: #7545b8;
+      --shared-fill: #f0e9ff;
+      --time: #7a8496;
+      --fallback: #a83244;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111722;
+        --ink: #edf3ff;
+        --muted: #aab6ca;
+        --cell-fill: #172b43;
+        --cell-stroke: #78b7ff;
+        --state: #8ac1ff;
+        --input: #5dd5df;
+        --shared: #c5a2ff;
+        --shared-fill: #2b2140;
+        --time: #9da9bc;
+        --fallback: #ff94a4;
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+    }
+
+    body {
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: 0;
+      background: var(--bg);
+    }
+
+    figcaption {
+      box-sizing: border-box;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      overflow: visible;
+      background: var(--bg);
+    }
+
+    line,
+    rect,
+    polygon {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cell {
+      fill: var(--cell-fill);
+      stroke: var(--cell-stroke);
+      stroke-width: 2.5px;
+    }
+
+    .shared-box {
+      fill: var(--shared-fill);
+      stroke: var(--shared);
+      stroke-width: 2px;
+    }
+
+    .shared-line {
+      fill: none;
+      stroke: var(--shared);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .state {
+      fill: none;
+      stroke: var(--state);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .input {
+      fill: none;
+      stroke: var(--input);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .time {
+      fill: none;
+      stroke: var(--time);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      stroke: none;
+    }
+
+    .arrow-head.state {
+      fill: var(--state);
+    }
+
+    .arrow-head.input {
+      fill: var(--input);
+    }
+
+    .arrow-head.time {
+      fill: var(--time);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 17px;
+      user-select: none;
+    }
+
+    .shared-label {
+      fill: var(--shared);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .moment {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .cell-name {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .cell-note {
+      fill: var(--cell-stroke);
+      font-size: 14px;
+    }
+
+    .state-label {
+      fill: var(--state);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .token-label {
+      fill: var(--input);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .word-label {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    .time-label {
+      fill: var(--time);
+      font-size: 16px;
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="visible-title">
+    <figcaption id="visible-title">RNN в развёрнутом виде</figcaption>
+
+    <svg id="diagram"
+         viewBox="0 0 1200 420"
+         width="1200"
+         height="420"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Одна RNN, развёрнутая на четыре момента времени</title>
+      <desc id="svg-desc">
+        Токены x₁–x₄ входят в четыре изображения одной RNN-ячейки.
+        Между изображениями слева направо передаются состояния h₀–h₄.
+        Все изображения используют общие параметры W, U и b.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze([
+      {
+        kind: "config",
+        origin: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 },
+        zero: 0,
+        arrowLength: 15,
+        arrowSpread: 0.48,
+        labelPad: 9,
+        fallback: [
+          {
+            point: { x: 70, y: 185 },
+            text: "Не удалось построить схему."
+          },
+          {
+            point: { x: 70, y: 220 },
+            text: "Она должна показать x₁–x₄, одну RNN и цепочку h₀–h₄."
+          }
+        ]
+      },
+
+      {
+        kind: "rect",
+        className: "shared-box",
+        x: 350, y: 20, w: 500, h: 50, r: 16
+      },
+      {
+        kind: "label",
+        className: "shared-label",
+        point: { x: 600, y: 45 },
+        side: "center",
+        text: "Одна RNN • общие W, U и b"
+      },
+
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 600, y: 70 },
+        to: { x: 600, y: 105 }
+      },
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 230, y: 105 },
+        to: { x: 980, y: 105 }
+      },
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 230, y: 105 },
+        to: { x: 230, y: 135 }
+      },
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 480, y: 105 },
+        to: { x: 480, y: 135 }
+      },
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 730, y: 105 },
+        to: { x: 730, y: 135 }
+      },
+      {
+        kind: "segment",
+        className: "shared-line",
+        from: { x: 980, y: 105 },
+        to: { x: 980, y: 135 }
+      },
+
+      {
+        kind: "arrow",
+        className: "state",
+        from: { x: 50, y: 190 },
+        to: { x: 150, y: 190 }
+      },
+      {
+        kind: "arrow",
+        className: "state",
+        from: { x: 310, y: 190 },
+        to: { x: 400, y: 190 }
+      },
+      {
+        kind: "arrow",
+        className: "state",
+        from: { x: 560, y: 190 },
+        to: { x: 650, y: 190 }
+      },
+      {
+        kind: "arrow",
+        className: "state",
+        from: { x: 810, y: 190 },
+        to: { x: 900, y: 190 }
+      },
+      {
+        kind: "arrow",
+        className: "state",
+        from: { x: 1060, y: 190 },
+        to: { x: 1150, y: 190 }
+      },
+
+      {
+        kind: "arrow",
+        className: "input",
+        from: { x: 230, y: 315 },
+        to: { x: 230, y: 245 }
+      },
+      {
+        kind: "arrow",
+        className: "input",
+        from: { x: 480, y: 315 },
+        to: { x: 480, y: 245 }
+      },
+      {
+        kind: "arrow",
+        className: "input",
+        from: { x: 730, y: 315 },
+        to: { x: 730, y: 245 }
+      },
+      {
+        kind: "arrow",
+        className: "input",
+        from: { x: 980, y: 315 },
+        to: { x: 980, y: 245 }
+      },
+
+      {
+        kind: "arrow",
+        className: "time",
+        from: { x: 150, y: 400 },
+        to: { x: 1130, y: 400 }
+      },
+
+      {
+        kind: "rect",
+        className: "cell",
+        x: 150, y: 135, w: 160, h: 110, r: 18
+      },
+      {
+        kind: "rect",
+        className: "cell",
+        x: 400, y: 135, w: 160, h: 110, r: 18
+      },
+      {
+        kind: "rect",
+        className: "cell",
+        x: 650, y: 135, w: 160, h: 110, r: 18
+      },
+      {
+        kind: "rect",
+        className: "cell",
+        x: 900, y: 135, w: 160, h: 110, r: 18
+      },
+
+      {
+        kind: "label", className: "moment",
+        point: { x: 230, y: 156 }, side: "center", text: "момент t₁"
+      },
+      {
+        kind: "label", className: "cell-name",
+        point: { x: 230, y: 190 }, side: "center", text: "RNN"
+      },
+      {
+        kind: "label", className: "cell-note",
+        point: { x: 230, y: 222 }, side: "center", text: "та же ячейка"
+      },
+
+      {
+        kind: "label", className: "moment",
+        point: { x: 480, y: 156 }, side: "center", text: "момент t₂"
+      },
+      {
+        kind: "label", className: "cell-name",
+        point: { x: 480, y: 190 }, side: "center", text: "RNN"
+      },
+      {
+        kind: "label", className: "cell-note",
+        point: { x: 480, y: 222 }, side: "center", text: "та же ячейка"
+      },
+
+      {
+        kind: "label", className: "moment",
+        point: { x: 730, y: 156 }, side: "center", text: "момент t₃"
+      },
+      {
+        kind: "label", className: "cell-name",
+        point: { x: 730, y: 190 }, side: "center", text: "RNN"
+      },
+      {
+        kind: "label", className: "cell-note",
+        point: { x: 730, y: 222 }, side: "center", text: "та же ячейка"
+      },
+
+      {
+        kind: "label", className: "moment",
+        point: { x: 980, y: 156 }, side: "center", text: "момент t₄"
+      },
+      {
+        kind: "label", className: "cell-name",
+        point: { x: 980, y: 190 }, side: "center", text: "RNN"
+      },
+      {
+        kind: "label", className: "cell-note",
+        point: { x: 980, y: 222 }, side: "center", text: "та же ячейка"
+      },
+
+      {
+        kind: "label", className: "state-label",
+        point: { x: 50, y: 190 }, side: "up", text: "h₀"
+      },
+      {
+        kind: "label", className: "state-label",
+        point: { x: 310, y: 190 }, side: "up", text: "h₁"
+      },
+      {
+        kind: "label", className: "state-label",
+        point: { x: 560, y: 190 }, side: "up", text: "h₂"
+      },
+      {
+        kind: "label", className: "state-label",
+        point: { x: 810, y: 190 }, side: "up", text: "h₃"
+      },
+      {
+        kind: "label", className: "state-label",
+        point: { x: 1060, y: 190 }, side: "up", text: "h₄"
+      },
+
+      {
+        kind: "label", className: "token-label",
+        point: { x: 230, y: 315 }, side: "down", text: "x₁"
+      },
+      {
+        kind: "label", className: "word-label",
+        point: { x: 230, y: 344 }, side: "down", text: "«фильм»"
+      },
+      {
+        kind: "label", className: "token-label",
+        point: { x: 480, y: 315 }, side: "down", text: "x₂"
+      },
+      {
+        kind: "label", className: "word-label",
+        point: { x: 480, y: 344 }, side: "down", text: "«совсем»"
+      },
+      {
+        kind: "label", className: "token-label",
+        point: { x: 730, y: 315 }, side: "down", text: "x₃"
+      },
+      {
+        kind: "label", className: "word-label",
+        point: { x: 730, y: 344 }, side: "down", text: "«не»"
+      },
+      {
+        kind: "label", className: "token-label",
+        point: { x: 980, y: 315 }, side: "down", text: "x₄"
+      },
+      {
+        kind: "label", className: "word-label",
+        point: { x: 980, y: 344 }, side: "down", text: "«понравился»"
+      },
+
+      {
+        kind: "label", className: "time-label",
+        point: { x: 150, y: 400 }, side: "left", text: "время"
+      }
+    ]);
+
+    const [config, ...diagram] = DATA;
+    const { x: originX, y: originY } = config.origin;
+    const { x: scaleX, y: scaleY } = config.scale;
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const namespace = "http://www.w3.org/2000/svg";
+    const layer = document.getElementById("drawing");
+
+    function makeNode(tag, attributes, content) {
+      const element = document.createElementNS(namespace, tag);
+
+      Object.entries(attributes).forEach(([name, value]) => {
+        element.setAttribute(name, String(value));
+      });
+
+      if (content !== undefined) {
+        element.textContent = content;
+      }
+
+      return element;
+    }
+
+    function drawSegment(item) {
+      return makeNode("line", {
+        class: item.className,
+        x1: sx(item.from.x),
+        y1: sy(item.from.y),
+        x2: sx(item.to.x),
+        y2: sy(item.to.y)
+      });
+    }
+
+    function drawArrow(item) {
+      const angle = Math.atan2(
+        item.to.y - item.from.y,
+        item.to.x - item.from.x
+      );
+
+      const left = {
+        x: item.to.x - config.arrowLength *
+          Math.cos(angle - config.arrowSpread),
+        y: item.to.y - config.arrowLength *
+          Math.sin(angle - config.arrowSpread)
+      };
+
+      const right = {
+        x: item.to.x - config.arrowLength *
+          Math.cos(angle + config.arrowSpread),
+        y: item.to.y - config.arrowLength *
+          Math.sin(angle + config.arrowSpread)
+      };
+
+      const group = makeNode("g", { class: "arrow" });
+      group.append(drawSegment(item));
+      group.append(makeNode("polygon", {
+        class: `arrow-head ${item.className}`,
+        points: [
+          `${sx(item.to.x)},${sy(item.to.y)}`,
+          `${sx(left.x)},${sy(left.y)}`,
+          `${sx(right.x)},${sy(right.y)}`
+        ].join(" ")
+      }));
+
+      return group;
+    }
+
+    function drawRect(item) {
+      return makeNode("rect", {
+        class: item.className,
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y),
+        rx: sx(item.x + item.r) - sx(item.x),
+        ry: sy(item.y + item.r) - sy(item.y)
+      });
+    }
+
+    function drawLabel(item) {
+      const zeroX = sx(config.zero) - sx(config.zero);
+      const zeroY = sy(config.zero) - sy(config.zero);
+      const padX = sx(config.labelPad) - sx(config.zero);
+      const padY = sy(config.labelPad) - sy(config.zero);
+
+      let anchor = "middle";
+      let baseline = "central";
+      let dx = zeroX;
+      let dy = zeroY;
+
+      if (item.side === "left") {
+        anchor = "end";
+        dx = -padX;
+      } else if (item.side === "right") {
+        anchor = "start";
+        dx = padX;
+      } else if (item.side === "up") {
+        baseline = "auto";
+        dy = -padY;
+      } else if (item.side === "down") {
+        baseline = "hanging";
+        dy = padY;
+      }
+
+      return makeNode("text", {
+        class: item.className,
+        x: sx(item.point.x),
+        y: sy(item.point.y),
+        dx,
+        dy,
+        "text-anchor": anchor,
+        "dominant-baseline": baseline
+      }, item.text);
+    }
+
+    function renderItem(item) {
+      if (item.kind === "segment") {
+        return drawSegment(item);
+      }
+
+      if (item.kind === "arrow") {
+        return drawArrow(item);
+      }
+
+      if (item.kind === "rect") {
+        return drawRect(item);
+      }
+
+      if (item.kind === "label") {
+        return drawLabel(item);
+      }
+
+      throw new Error(`Неизвестный элемент схемы: ${item.kind}`);
+    }
+
+    function renderFallback() {
+      layer.replaceChildren();
+
+      config.fallback.forEach(message => {
+        layer.append(makeNode("text", {
+          class: "fallback",
+          x: sx(message.point.x),
+          y: sy(message.point.y),
+          "text-anchor": "start",
+          "dominant-baseline": "central"
+        }, message.text));
+      });
+    }
+
+    try {
+      const fragment = document.createDocumentFragment();
+
+      diagram.forEach(item => {
+        fragment.append(renderItem(item));
+      });
+
+      layer.append(fragment);
+    } catch (error) {
+      renderFallback();
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

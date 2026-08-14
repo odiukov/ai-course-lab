@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Почему луч сохраняет перспективное продолжение</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: white;
+      --panel: ghostwhite;
+      --ink: midnightblue;
+      --muted: slategray;
+      --guide: lightsteelblue;
+      --beam-fill: aliceblue;
+      --beam-stroke: steelblue;
+      --greedy: firebrick;
+      --greedy-fill: mistyrose;
+      --alternative: seagreen;
+      --alternative-fill: honeydew;
+      --node: white;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      background: var(--panel);
+      border: 2px solid var(--guide);
+      overflow: hidden;
+    }
+
+    .heading {
+      font-size: 22px;
+      font-weight: bold;
+      line-height: 1.25;
+      padding: 14px 20px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--panel);
+    }
+
+    .beam-area {
+      fill: var(--beam-fill);
+      stroke: var(--beam-stroke);
+      stroke-width: 2px;
+    }
+
+    .divider,
+    .leader {
+      stroke: var(--guide);
+      stroke-width: 2px;
+    }
+
+    .edge {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 5px;
+    }
+
+    .edge.greedy {
+      stroke: var(--greedy);
+    }
+
+    .edge.alternative {
+      stroke: var(--alternative);
+    }
+
+    .node {
+      fill: var(--node);
+      stroke-width: 4px;
+    }
+
+    .node.root {
+      stroke: var(--ink);
+    }
+
+    .node.greedy {
+      stroke: var(--greedy);
+    }
+
+    .node.alternative {
+      stroke: var(--alternative);
+    }
+
+    .result {
+      stroke-width: 3px;
+    }
+
+    .result.greedy {
+      fill: var(--greedy-fill);
+      stroke: var(--greedy);
+    }
+
+    .result.alternative {
+      fill: var(--alternative-fill);
+      stroke: var(--alternative);
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 17px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .probability {
+      fill: var(--ink);
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .greedy-text {
+      fill: var(--greedy);
+    }
+
+    .alternative-text {
+      fill: var(--alternative);
+    }
+
+    .result-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .formula {
+      font-size: 18px;
+    }
+
+    .total {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .beam-caption {
+      fill: var(--beam-stroke);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 17px;
+      line-height: 1.5;
+      padding: 18px 22px;
+    }
+
+    noscript {
+      display: block;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 17px;
+      line-height: 1.5;
+      padding: 18px 22px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: black;
+        --panel: darkslategray;
+        --ink: ghostwhite;
+        --muted: lightgray;
+        --guide: slategray;
+        --beam-fill: midnightblue;
+        --beam-stroke: lightskyblue;
+        --greedy: lightsalmon;
+        --greedy-fill: maroon;
+        --alternative: lightgreen;
+        --alternative-fill: darkgreen;
+        --node: darkslategray;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="diagram-heading">
+    <figcaption id="diagram-heading" class="heading">
+      Почему луч сохраняет перспективное продолжение
+    </figcaption>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 960 390"
+      width="960"
+      height="390"
+      role="img"
+      aria-labelledby="diagram-heading diagram-description"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <desc id="diagram-description">
+        Дерево вероятностей: ветвь 0,6 затем 0,3 получает итог 0,18,
+        а ветвь 0,4 затем 0,9 получает итог 0,36. Луч шириной 3 хранит обе.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать две сохранённые ветви: 0,6 × 0,3 = 0,18
+      и 0,4 × 0,9 = 0,36. Beam width = 3 хранит обе, поэтому более слабое
+      начало успевает получить сильное продолжение и победить.
+    </div>
+
+    <noscript>
+      Схема: жадная ветвь получает 0,6 × 0,3 = 0,18, альтернативная —
+      0,4 × 0,9 = 0,36. Beam width = 3 хранит обе ветви.
+    </noscript>
+  </figure>
+
+  <script>
+    const DATA = {
+      beam: {
+        left: 42,
+        top: 5,
+        right: 118,
+        bottom: 62,
+        radius: 2
+      },
+      divider: {
+        from: { x: 121, y: 4 },
+        to: { x: 121, y: 62 }
+      },
+      edges: [
+        {
+          from: { x: 10, y: 34 },
+          to: { x: 52, y: 15 },
+          kind: "greedy"
+        },
+        {
+          from: { x: 10, y: 34 },
+          to: { x: 52, y: 53 },
+          kind: "alternative"
+        },
+        {
+          from: { x: 52, y: 15 },
+          to: { x: 102, y: 15 },
+          kind: "greedy"
+        },
+        {
+          from: { x: 52, y: 53 },
+          to: { x: 102, y: 53 },
+          kind: "alternative"
+        }
+      ],
+      nodes: [
+        { at: { x: 10, y: 34 }, radius: 2.3, kind: "root" },
+        { at: { x: 52, y: 15 }, radius: 2.3, kind: "greedy" },
+        { at: { x: 52, y: 53 }, radius: 2.3, kind: "alternative" },
+        { at: { x: 102, y: 15 }, radius: 2.3, kind: "greedy" },
+        { at: { x: 102, y: 53 }, radius: 2.3, kind: "alternative" }
+      ],
+      results: [
+        {
+          left: 126,
+          top: 7,
+          right: 178,
+          bottom: 25,
+          radius: 2,
+          kind: "greedy",
+          texts: [
+            {
+              text: "жадная ветвь",
+              at: { x: 152, y: 11 },
+              className: "result-title greedy-text"
+            },
+            {
+              text: "0,6 × 0,3",
+              at: { x: 152, y: 16 },
+              className: "formula greedy-text"
+            },
+            {
+              text: "итог 0,18",
+              at: { x: 152, y: 22 },
+              className: "total greedy-text"
+            }
+          ]
+        },
+        {
+          left: 126,
+          top: 43,
+          right: 178,
+          bottom: 61,
+          radius: 2,
+          kind: "alternative",
+          texts: [
+            {
+              text: "альтернативная ветвь",
+              at: { x: 152, y: 47 },
+              className: "result-title alternative-text"
+            },
+            {
+              text: "0,4 × 0,9",
+              at: { x: 152, y: 52 },
+              className: "formula alternative-text"
+            },
+            {
+              text: "итог 0,36",
+              at: { x: 152, y: 58 },
+              className: "total alternative-text"
+            }
+          ]
+        }
+      ],
+      leaders: [
+        {
+          from: { x: 104.5, y: 15 },
+          to: { x: 126, y: 15 },
+          kind: "greedy"
+        },
+        {
+          from: { x: 104.5, y: 53 },
+          to: { x: 126, y: 53 },
+          kind: "alternative"
+        }
+      ],
+      labels: [
+        {
+          text: "начало",
+          at: { x: 10, y: 34 },
+          side: "bottom",
+          className: "small"
+        },
+        {
+          text: "после первого выбора",
+          at: { x: 52, y: 5 },
+          side: "bottom",
+          className: "small"
+        },
+        {
+          text: "после продолжения",
+          at: { x: 102, y: 5 },
+          side: "bottom",
+          className: "small"
+        },
+        {
+          text: "0,6",
+          at: { x: 29, y: 25 },
+          side: "top",
+          className: "probability greedy-text"
+        },
+        {
+          text: "0,4",
+          at: { x: 29, y: 43 },
+          side: "bottom",
+          className: "probability alternative-text"
+        },
+        {
+          text: "0,3",
+          at: { x: 77, y: 15 },
+          side: "top",
+          className: "probability greedy-text"
+        },
+        {
+          text: "0,9",
+          at: { x: 77, y: 53 },
+          side: "top",
+          className: "probability alternative-text"
+        },
+        {
+          text: "ранний лидер",
+          at: { x: 52, y: 15 },
+          side: "bottom",
+          className: "small greedy-text"
+        },
+        {
+          text: "слабее в начале",
+          at: { x: 52, y: 53 },
+          side: "bottom",
+          className: "small alternative-text"
+        },
+        {
+          text: "beam width = 3 · обе ветви сохранены",
+          at: { x: 80, y: 62 },
+          side: "bottom",
+          className: "beam-caption"
+        }
+      ]
+    };
+
+    const origin = { x: 35, y: 20 };
+    const scale = 5;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    const LABEL_PAD = 9;
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    function makeElement(name, attributes, className) {
+      const node = document.createElementNS(SVG_NS, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (className) {
+        node.setAttribute("class", className);
+      }
+
+      return node;
+    }
+
+    function appendLine(parent, item, className) {
+      const line = makeElement(
+        "line",
+        {
+          x1: sx(item.from.x),
+          y1: sy(item.from.y),
+          x2: sx(item.to.x),
+          y2: sy(item.to.y)
+        },
+        className
+      );
+      parent.appendChild(line);
+    }
+
+    function appendRect(parent, item, className) {
+      const rect = makeElement(
+        "rect",
+        {
+          x: sx(item.left),
+          y: sy(item.top),
+          width: sx(item.right) - sx(item.left),
+          height: sy(item.bottom) - sy(item.top),
+          rx: sx(item.radius) - sx(0),
+          ry: sy(item.radius) - sy(0)
+        },
+        className
+      );
+      parent.appendChild(rect);
+    }
+
+    function appendCircle(parent, item) {
+      const circle = makeElement(
+        "circle",
+        {
+          cx: sx(item.at.x),
+          cy: sy(item.at.y),
+          r: sx(item.radius) - sx(0)
+        },
+        `node ${item.kind}`
+      );
+      parent.appendChild(circle);
+    }
+
+    function appendCenteredText(parent, item) {
+      const text = makeElement(
+        "text",
+        {
+          x: sx(item.at.x),
+          y: sy(item.at.y),
+          "text-anchor": "middle",
+          "dominant-baseline": "middle"
+        },
+        item.className
+      );
+      text.textContent = item.text;
+      parent.appendChild(text);
+    }
+
+    function appendOffsetText(parent, item) {
+      const attributes = {
+        x: sx(item.at.x),
+        y: sy(item.at.y),
+        "dominant-baseline": "middle"
+      };
+
+      if (item.side === "left") {
+        attributes.dx = -LABEL_PAD;
+        attributes["text-anchor"] = "end";
+      } else if (item.side === "right") {
+        attributes.dx = LABEL_PAD;
+        attributes["text-anchor"] = "start";
+      } else if (item.side === "top") {
+        attributes.dy = -LABEL_PAD;
+        attributes["text-anchor"] = "middle";
+      } else {
+        attributes.dy = LABEL_PAD;
+        attributes["text-anchor"] = "middle";
+      }
+
+      const text = makeElement(
+        "text",
+        attributes,
+        `label ${item.className}`
+      );
+      text.textContent = item.text;
+      parent.appendChild(text);
+    }
+
+    function renderDiagram() {
+      const drawing = document.getElementById("drawing");
+
+      appendRect(drawing, DATA.beam, "beam-area");
+      appendLine(drawing, DATA.divider, "divider");
+
+      DATA.edges.forEach(edge => {
+        appendLine(drawing, edge, `edge ${edge.kind}`);
+      });
+
+      DATA.leaders.forEach(leader => {
+        appendLine(drawing, leader, `leader ${leader.kind}`);
+      });
+
+      DATA.results.forEach(result => {
+        appendRect(drawing, result, `result ${result.kind}`);
+      });
+
+      DATA.nodes.forEach(node => {
+        appendCircle(drawing, node);
+      });
+
+      DATA.results.forEach(result => {
+        result.texts.forEach(item => {
+          appendCenteredText(drawing, item);
+        });
+      });
+
+      DATA.labels.forEach(label => {
+        appendOffsetText(drawing, label);
+      });
+    }
+
+    try {
+      renderDiagram();
+    } catch (error) {
+      const diagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      diagram.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

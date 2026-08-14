@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Цикл агента от намерения до результата</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5c667a;
+      --line: #64748b;
+      --plan-fill: #eef2ff;
+      --plan-stroke: #6366f1;
+      --tool-fill: #ecfeff;
+      --tool-stroke: #0891b2;
+      --observe-fill: #ecfdf5;
+      --observe-stroke: #059669;
+      --decide-fill: #fff7ed;
+      --decide-stroke: #ea580c;
+      --budget-fill: #f8fafc;
+      --budget-stroke: #94a3b8;
+      --budget-text: #334155;
+      --fallback-fill: #f1f5f9;
+      --shadow: #d8deea;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0b1020;
+        --panel: #111827;
+        --text: #f1f5f9;
+        --muted: #aeb8ca;
+        --line: #94a3b8;
+        --plan-fill: #20234c;
+        --plan-stroke: #a5b4fc;
+        --tool-fill: #103642;
+        --tool-stroke: #67e8f9;
+        --observe-fill: #12382e;
+        --observe-stroke: #6ee7b7;
+        --decide-fill: #472516;
+        --decide-stroke: #fdba74;
+        --budget-fill: #1e293b;
+        --budget-stroke: #64748b;
+        --budget-text: #e2e8f0;
+        --fallback-fill: #1e293b;
+        --shadow: #050816;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 960px;
+      margin: auto;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 14px 22px 8px;
+      color: var(--text);
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .figure {
+      margin: 0;
+      padding: 0 8px 8px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--panel);
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+    }
+
+    .node {
+      stroke-width: 3px;
+    }
+
+    .node-plan {
+      fill: var(--plan-fill);
+      stroke: var(--plan-stroke);
+    }
+
+    .node-tool {
+      fill: var(--tool-fill);
+      stroke: var(--tool-stroke);
+    }
+
+    .node-observe {
+      fill: var(--observe-fill);
+      stroke: var(--observe-stroke);
+    }
+
+    .node-decide {
+      fill: var(--decide-fill);
+      stroke: var(--decide-stroke);
+    }
+
+    .node-title {
+      fill: var(--text);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .flow-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .budget {
+      fill: var(--budget-fill);
+      stroke: var(--budget-stroke);
+      stroke-width: 2px;
+    }
+
+    .budget-code {
+      fill: var(--budget-text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .budget-caption {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .fallback {
+      margin: 12px 22px 20px;
+      padding: 14px;
+      background: var(--fallback-fill);
+      color: var(--text);
+      border: 1px solid var(--budget-stroke);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Цикл агента: от намерения до результата</h1>
+
+    <figure class="figure">
+      <p id="fallback" class="fallback">
+        Схема показывает замкнутый цикл: план → вызов инструмента →
+        наблюдение → следующий шаг или финальный ответ. Цикл ограничен
+        бюджетом max_steps=5.
+      </p>
+
+      <svg
+        id="diagram"
+        hidden
+        width="960"
+        height="390"
+        viewBox="0 0 960 390"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-labelledby="svg-title svg-description"
+      >
+        <title id="svg-title">Цикл работы LLM-агента</title>
+        <desc id="svg-description">
+          Четыре узла образуют цикл: план, вызов инструмента, наблюдение,
+          следующий шаг или финальный ответ. В центре указан лимит
+          max_steps=5.
+        </desc>
+      </svg>
+    </figure>
+  </main>
+
+  <script>
+    const diagramData = [
+      {
+        origin: { x: 0, y: 0 },
+        scale: 1,
+        divisor: 2,
+        arrowLength: 14,
+        arrowHalfWidth: 8,
+        badge: {
+          x: 480,
+          y: 203,
+          width: 190,
+          height: 54,
+          radius: 16,
+          codeY: 197,
+          captionY: 217,
+          code: "max_steps=5",
+          caption: "бюджет цикла"
+        }
+      },
+      [
+        {
+          x: 215,
+          y: 120,
+          width: 272,
+          height: 86,
+          radius: 18,
+          titleY: 111,
+          detailY: 137,
+          title: "План",
+          detail: "запрос + история",
+          className: "node-plan"
+        },
+        {
+          x: 745,
+          y: 120,
+          width: 272,
+          height: 86,
+          radius: 18,
+          titleY: 111,
+          detailY: 137,
+          title: "Вызов инструмента",
+          detail: "одно действие",
+          className: "node-tool"
+        },
+        {
+          x: 745,
+          y: 286,
+          width: 272,
+          height: 86,
+          radius: 18,
+          titleY: 277,
+          detailY: 303,
+          title: "Наблюдение",
+          detail: "результат или ошибка",
+          className: "node-observe"
+        },
+        {
+          x: 215,
+          y: 286,
+          width: 272,
+          height: 86,
+          radius: 18,
+          titleY: 277,
+          detailY: 303,
+          title: "Следующий шаг",
+          detail: "или финальный ответ",
+          className: "node-decide"
+        }
+      ],
+      [
+        {
+          start: { x: 351, y: 120 },
+          end: { x: 609, y: 120 }
+        },
+        {
+          start: { x: 745, y: 163 },
+          end: { x: 745, y: 243 }
+        },
+        {
+          start: { x: 609, y: 286 },
+          end: { x: 351, y: 286 }
+        },
+        {
+          start: { x: 215, y: 243 },
+          end: { x: 215, y: 163 }
+        }
+      ],
+      [
+        {
+          x: 480,
+          y: 91,
+          anchor: "middle",
+          text: "модель выбирает действие"
+        },
+        {
+          x: 716,
+          y: 203,
+          anchor: "end",
+          text: "инструмент возвращает результат"
+        },
+        {
+          x: 480,
+          y: 324,
+          anchor: "middle",
+          text: "наблюдение пополняет историю"
+        },
+        {
+          x: 244,
+          y: 203,
+          anchor: "start",
+          text: "если нужен ещё шаг"
+        }
+      ]
+    ];
+
+    const [
+      { origin, scale, divisor, arrowLength, arrowHalfWidth, badge },
+      nodes,
+      arrows,
+      labels
+    ] = diagramData;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+      const fragment = document.createDocumentFragment();
+
+      const make = (name, attributes, text) => {
+        const element = document.createElementNS(namespace, name);
+
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+
+        if (text !== undefined) {
+          element.textContent = text;
+        }
+
+        return element;
+      };
+
+      const arrowPoints = arrow => {
+        const deltaX = arrow.end.x - arrow.start.x;
+        const deltaY = arrow.end.y - arrow.start.y;
+        const distance = Math.hypot(deltaX, deltaY);
+        const unitX = deltaX / distance;
+        const unitY = deltaY / distance;
+        const baseX = arrow.end.x - unitX * arrowLength;
+        const baseY = arrow.end.y - unitY * arrowLength;
+        const sideX = -unitY * arrowHalfWidth;
+        const sideY = unitX * arrowHalfWidth;
+
+        return [
+          `${sx(arrow.end.x)},${sy(arrow.end.y)}`,
+          `${sx(baseX + sideX)},${sy(baseY + sideY)}`,
+          `${sx(baseX - sideX)},${sy(baseY - sideY)}`
+        ].join(" ");
+      };
+
+      const flowGroup = make("g", {
+        "aria-label": "Замкнутый цикл действий агента"
+      });
+
+      arrows.forEach(arrow => {
+        flowGroup.appendChild(
+          make("line", {
+            x1: sx(arrow.start.x),
+            y1: sy(arrow.start.y),
+            x2: sx(arrow.end.x),
+            y2: sy(arrow.end.y),
+            class: "flow-line"
+          })
+        );
+
+        flowGroup.appendChild(
+          make("polygon", {
+            points: arrowPoints(arrow),
+            class: "arrow-head"
+          })
+        );
+      });
+
+      fragment.appendChild(flowGroup);
+
+      const badgeGroup = make("g", {
+        "aria-label": "Ограничение max_steps=5"
+      });
+
+      badgeGroup.appendChild(
+        make("rect", {
+          x: sx(badge.x - badge.width / divisor),
+          y: sy(badge.y - badge.height / divisor),
+          width: sx(badge.width) - sx(0),
+          height: sy(badge.height) - sy(0),
+          rx: sx(badge.radius) - sx(0),
+          ry: sy(badge.radius) - sy(0),
+          class: "budget"
+        })
+      );
+
+      badgeGroup.appendChild(
+        make(
+          "text",
+          {
+            x: sx(badge.x),
+            y: sy(badge.codeY),
+            "text-anchor": "middle",
+            "dominant-baseline": "middle",
+            class: "budget-code"
+          },
+          badge.code
+        )
+      );
+
+      badgeGroup.appendChild(
+        make(
+          "text",
+          {
+            x: sx(badge.x),
+            y: sy(badge.captionY),
+            "text-anchor": "middle",
+            "dominant-baseline": "middle",
+            class: "budget-caption"
+          },
+          badge.caption
+        )
+      );
+
+      fragment.appendChild(badgeGroup);
+
+      const nodeGroup = make("g", {
+        "aria-label": "Четыре узла цикла"
+      });
+
+      nodes.forEach(node => {
+        const group = make("g", {
+          "aria-label": `${node.title}: ${node.detail}`
+        });
+
+        group.appendChild(
+          make("rect", {
+            x: sx(node.x - node.width / divisor),
+            y: sy(node.y - node.height / divisor),
+            width: sx(node.width) - sx(0),
+            height: sy(node.height) - sy(0),
+            rx: sx(node.radius) - sx(0),
+            ry: sy(node.radius) - sy(0),
+            class: `node ${node.className}`
+          })
+        );
+
+        group.appendChild(
+          make(
+            "text",
+            {
+              x: sx(node.x),
+              y: sy(node.titleY),
+              "text-anchor": "middle",
+              "dominant-baseline": "middle",
+              class: "node-title"
+            },
+            node.title
+          )
+        );
+
+        group.appendChild(
+          make(
+            "text",
+            {
+              x: sx(node.x),
+              y: sy(node.detailY),
+              "text-anchor": "middle",
+              "dominant-baseline": "middle",
+              class: "node-detail"
+            },
+            node.detail
+          )
+        );
+
+        nodeGroup.appendChild(group);
+      });
+
+      fragment.appendChild(nodeGroup);
+
+      const labelGroup = make("g", {
+        "aria-label": "Пояснения к переходам"
+      });
+
+      labels.forEach(label => {
+        labelGroup.appendChild(
+          make(
+            "text",
+            {
+              x: sx(label.x),
+              y: sy(label.y),
+              "text-anchor": label.anchor,
+              "dominant-baseline": "middle",
+              class: "flow-label"
+            },
+            label.text
+          )
+        );
+      });
+
+      fragment.appendChild(labelGroup);
+      svg.appendChild(fragment);
+      svg.hidden = false;
+      fallback.hidden = true;
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      fallback.hidden = false;
+      fallback.textContent =
+        "Схема должна была показать замкнутый цикл: план → вызов инструмента → наблюдение → следующий шаг или финальный ответ, с ограничением max_steps=5.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

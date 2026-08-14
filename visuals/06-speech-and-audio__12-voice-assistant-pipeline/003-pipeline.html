@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Пайплайн голосового ассистента</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d23; --muted:#5b6472;
+    --line:#2c3440; --node:#eef2f8; --nodeStroke:#4a5costs;
+    --nodeStroke:#4a5568; --accent:#c0392b; --budget:#1f6f4a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --fg:#e8ecf2; --muted:#a2adbd;
+      --line:#c3ccd8; --node:#1f2530; --nodeStroke:#8a97a8;
+      --accent:#ff8b7a; --budget:#6fd6a4;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 4px;}
+  h2{font-size:15px;margin:0 0 4px;padding:0 8px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{padding:10px;color:var(--fg);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Пайплайн: шесть стрелок вправо и одна обратно</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+var host=document.getElementById('host');
+try{
+  /* ---- данные схемы ---- */
+  var NODES=[
+    {id:'mic',  x:0,  y:0, t:'Микрофон',  b:''},
+    {id:'vad',  x:4,  y:0, t:'VAD',       b:'500 мс'},
+    {id:'stt',  x:8,  y:0, t:'STT',       b:'300 мс'},
+    {id:'llm',  x:12, y:0, t:'LLM +\u00A0инструменты', b:'300 мс'},
+    {id:'tts',  x:16, y:0, t:'TTS',       b:'300 мс'},
+    {id:'spk',  x:20, y:0, t:'Динамик',   b:''}
+  ];
+  var NW=3.4, NH=1.6;               /* размеры блока в единицах данных */
+  var BACK_Y=-2.6;                  /* высота обратной стрелки */
+  var BUD_Y=1.9;                    /* строка бюджета под блоками */
+
+  /* ---- одна пара функций перевода ---- */
+  var origin={x:34, y:150}, scale=26;
+  function sx(x){ return origin.x + x*scale; }
+  function sy(y){ return origin.y + y*scale; }
+
+  /* ---- холст (литералы: размеры) ---- */
+  var VBW=640, VBH=250;
+  var SVGNS='http://www.w3.org/2000/svg';
+  var svg=document.createElementNS(SVGNS,'svg');
+  svg.setAttribute('viewBox','0 0 '+VBW+' '+VBH);
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  svg.setAttribute('role','img');
+  svg.setAttribute('aria-label','Цепочка микрофон, VAD, STT, LLM с инструментами, TTS, динамик; обратная стрелка от VAD к TTS и LLM; бюджет 500 мс на VAD и 300 мс на остальное');
+
+  function el(n,a){var e=document.createElementNS(SVGNS,n);
+    for(var k in a) e.setAttribute(k,a[k]); return e;}
+  function txt(x,y,s,cls,anchor,size,weight){
+    var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle',
+      'font-size':size||11,'font-weight':weight||'400'});
+    t.setAttribute('class',cls||'lbl'); t.textContent=s; return t;}
+
+  var st=el('style',{});
+  st.textContent=
+    '.bg{fill:var(--bg)}'+
+    '.box{fill:var(--node);stroke:var(--nodeStroke);stroke-width:1.4}'+
+    '.arr{stroke:var(--line);stroke-width:1.6;fill:none}'+
+    '.back{stroke:var(--accent);stroke-width:1.6;fill:none;stroke-dasharray:5 3}'+
+    '.lbl{fill:var(--fg)}'+
+    '.bud{fill:var(--budget)}'+
+    '.mut{fill:var(--muted)}'+
+    '.acc{fill:var(--accent)}';
+  svg.appendChild(st);
+  svg.appendChild(el('rect',{x:0,y:0,width:VBW,height:VBH,'class':'bg'}));
+
+  var defs=el('defs',{});
+  function marker(id,cls){
+    var m=el('marker',{id:id,viewBox:'0 0 10 8',refX:9,refY:4,
+      markerWidth:7,markerHeight:6,orient:'auto-start-reverse'});
+    var p=el('path',{d:'M0,0 L10,4 L0,8 z'});
+    p.setAttribute('class',cls); m.appendChild(p); return m;}
+  var mf=marker('af','arrHead'), mb=marker('ab','backHead');
+  defs.appendChild(mf); defs.appendChild(mb);
+  svg.appendChild(defs);
+  st.textContent+='.arrHead{fill:var(--line)}.backHead{fill:var(--accent)}';
+
+  /* ---- блоки ---- */
+  NODES.forEach(function(n){
+    var x0=sx(n.x-NW/2), x1=sx(n.x+NW/2);
+    var y0=sy(n.y-NH/2), y1=sy(n.y+NH/2);
+    svg.appendChild(el('rect',{x:x0,y:y0,width:x1-x0,height:y1-y0,
+      rx:5,'class':'box'}));
+    var parts=n.t.split(' +\u00A0');
+    if(parts.length===2){
+      svg.appendChild(txt(sx(n.x), sy(n.y)-3, parts[0],'lbl','middle',11.5,'600'));
+      svg.appendChild(txt(sx(n.x), sy(n.y)+11, '+ '+parts[1],'lbl','middle',10,'400'));
+    } else {
+      svg.appendChild(txt(sx(n.x), sy(n.y)+4, n.t,'lbl','middle',11.5,'600'));
+    }
+    if(n.b){
+      svg.appendChild(txt(sx(n.x), sy(BUD_Y), n.b,'bud','middle',11,'600'));
+    }
+  });
+
+  /* ---- стрелки вперёд ---- */
+  for(var i=0;i<NODES.length-1;i++){
+    var a=NODES[i], b=NODES[i+1];
+    var p=el('path',{d:'M'+sx(a.x+NW/2)+','+sy(a.y)+' L'+sx(b.x-NW/2)+','+sy(b.y),
+      'class':'arr'});
+    p.setAttribute('marker-end','url(#af)');
+    svg.appendChild(p);
+  }
+
+  /* ---- обратная стрелка: VAD <- TTS, ветка на LLM ---- */
+  var vad=NODES[1], llm=NODES[3], tts=NODES[4];
+  var back=el('path',{d:
+    'M'+sx(tts.x)+','+sy(tts.y-NH/2)+
+    ' L'+sx(tts.x)+','+sy(BACK_Y)+
+    ' L'+sx(vad.x)+','+sy(BACK_Y)+
+    ' L'+sx(vad.x)+','+sy(vad.y-NH/2),'class':'back'});
+  back.setAttribute('marker-end','url(#ab)');
+  svg.appendChild(back);
+
+  var brLlm=el('path',{d:'M'+sx(llm.x)+','+sy(BACK_Y)+' L'+sx(llm.x)+','+sy(llm.y-NH/2),
+    'class':'back'});
+  brLlm.setAttribute('marker-end','url(#ab)');
+  svg.appendChild(brLlm);
+
+  /* подпись обратной стрелки — у хвоста, справа от него, ниже линии */
+  svg.appendChild(txt(sx(tts.x+NW/2+0.4), sy(BACK_Y)+4,
+    'прерывание: стоп TTS, отмена LLM','acc','start',10.5,'600'));
+
+  /* ---- строка бюджета ---- */
+  svg.appendChild(txt(sx(vad.x), sy(BUD_Y)+15,'hangover тишины','mut','middle',9.5));
+  svg.appendChild(el('path',{d:'M'+sx(stt.left)+',0 L'+sx(0)+',0'})); // no-op guard
+  var stt=NODES[2];
+  var brace=el('path',{d:
+    'M'+sx(stt.x-NW/2)+','+sy(BUD_Y+0.75)+
+    ' L'+sx(stt.x-NW/2)+','+sy(BUD_Y+1.05)+
+    ' L'+sx(tts.x+NW/2)+','+sy(BUD_Y+1.05)+
+    ' L'+sx(tts.x+NW/2)+','+sy(BUD_Y+0.75),'class':'arr'});
+  svg.appendChild(brace);
+  svg.appendChild(txt(sx((stt.x+tts.x)/2), sy(BUD_Y+1.05)+14,
+    'STT + LLM + первый чанк TTS — остаётся 300 мс','bud','middle',11,'600'));
+
+  host.appendChild(svg);
+}catch(e){
+  host.innerHTML='<div class="fail"><b>Схема не построилась.</b> '+
+    'Она показывает цепочку: микрофон → VAD → STT → LLM с инструментами → TTS → динамик. '+
+    'Все стрелки идут вправо, кроме одной обратной: от VAD к TTS и LLM — прерывание '+
+    '(стоп воспроизведения, отмена генерации). Бюджет: VAD 500 мс, '+
+    'на STT + LLM + первый чанк TTS остаётся 300 мс.</div>';
+}
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

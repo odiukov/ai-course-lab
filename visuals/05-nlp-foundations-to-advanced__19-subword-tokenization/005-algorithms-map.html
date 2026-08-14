@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Три пути построения subword-словаря</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: ivory;
+  --panel: white;
+  --ink: midnightblue;
+  --muted: slategray;
+  --line: lightslategray;
+  --soft: aliceblue;
+  --bpe: royalblue;
+  --wordpiece: darkorange;
+  --unigram: seagreen;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: midnightblue;
+    --panel: darkslategray;
+    --ink: whitesmoke;
+    --muted: lightgray;
+    --line: slategray;
+    --soft: steelblue;
+    --bpe: lightskyblue;
+    --wordpiece: gold;
+    --unigram: lightgreen;
+  }
+}
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, sans-serif;
+}
+.figure {
+  max-width: 1200px;
+  margin: auto;
+}
+.title {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 470px;
+  background: var(--bg);
+}
+.card {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 2px;
+}
+.corpus {
+  fill: var(--soft);
+  stroke: var(--ink);
+  stroke-width: 2px;
+}
+.stage {
+  fill: var(--soft);
+  stroke-width: 2px;
+}
+.target {
+  fill: var(--panel);
+  stroke-width: 2px;
+}
+.connector {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.flow {
+  fill: none;
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.arrowhead {
+  stroke: none;
+}
+.bpe-stroke { stroke: var(--bpe); }
+.wordpiece-stroke { stroke: var(--wordpiece); }
+.unigram-stroke { stroke: var(--unigram); }
+.bpe-fill { fill: var(--bpe); }
+.wordpiece-fill { fill: var(--wordpiece); }
+.unigram-fill { fill: var(--unigram); }
+.ink-fill { fill: var(--ink); }
+.label {
+  fill: var(--ink);
+  font-size: 16px;
+}
+.small {
+  fill: var(--muted);
+  font-size: 13px;
+}
+.algorithm {
+  font-size: 19px;
+  font-weight: bold;
+}
+.stage-main {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: bold;
+}
+.stage-note {
+  fill: var(--muted);
+  font-size: 12px;
+}
+.limit {
+  fill: var(--ink);
+  font-size: 18px;
+  font-weight: bold;
+}
+.branch-label {
+  font-size: 13px;
+  font-weight: bold;
+}
+.fallback {
+  color: var(--ink);
+  font-size: 16px;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+<main class="figure">
+  <div class="title">Три пути построения subword-словаря</div>
+  <svg id="diagram" viewBox="0 0 1200 420" width="1200" height="420"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Один корпус и три способа построить словарь</title>
+    <desc id="svgDesc">BPE растёт от символов частыми слияниями, WordPiece выбирает полезные связи, а Unigram сокращает большой набор кандидатов. Каждый путь приводит к словарю из 30 000 элементов.</desc>
+  </svg>
+  <p id="fallback" class="fallback" hidden>Один корпус расходится в три ветки: BPE растёт от символов частыми слияниями, WordPiece выбирает слияния по приросту правдоподобия, а Unigram сокращает большой словарь. У всех один лимит — 30 000 элементов.</p>
+</main>
+<script>
+const data = {
+  zero: 0,
+  origin: { x: 0, y: 0 },
+  scale: 1,
+  corpus: {
+    box: { x: 18, y: 165, w: 178, h: 90 },
+    title: { x: 107, y: 194, text: "ОДИН КОРПУС" },
+    line: { x: 107, y: 220, text: "те же тексты" },
+    limit: { x: 107, y: 240, text: "лимит: 30 000" },
+    exit: [{ x: 196, y: 210 }, { x: 246, y: 210 }],
+    junction: { x: 246, y: 210, r: 6 }
+  },
+  branches: [
+    {
+      kind: "bpe",
+      route: [
+        { x: 246, y: 210 }, { x: 278, y: 210 },
+        { x: 278, y: 72 }, { x: 318, y: 72 }
+      ],
+      head: [{ x: 318, y: 72 }, { x: 306, y: 65 }, { x: 306, y: 79 }],
+      label: { x: 267, y: 124, text: "добавляет", anchor: "end" }
+    },
+    {
+      kind: "wordpiece",
+      route: [{ x: 246, y: 210 }, { x: 318, y: 210 }],
+      head: [{ x: 318, y: 210 }, { x: 306, y: 203 }, { x: 306, y: 217 }],
+      label: { x: 267, y: 198, text: "добавляет", anchor: "middle" }
+    },
+    {
+      kind: "unigram",
+      route: [
+        { x: 246, y: 210 }, { x: 278, y: 210 },
+        { x: 278, y: 348 }, { x: 318, y: 348 }
+      ],
+      head: [{ x: 318, y: 348 }, { x: 306, y: 341 }, { x: 306, y: 355 }],
+      label: { x: 267, y: 296, text: "удаляет", anchor: "end" }
+    }
+  ],
+  lanes: [
+    {
+      kind: "bpe",
+      card: { x: 318, y: 10, w: 864, h: 124 },
+      accent: [{ x: 318, y: 10 }, { x: 318, y: 134 }],
+      title: { x: 342, y: 34, text: "BPE" },
+      criterion: {
+        x: 430, y: 34,
+        text: "снизу вверх · побеждает самая частая соседняя пара"
+      },
+      stages: [
+        {
+          box: { x: 342, y: 53, w: 218, h: 60 },
+          main: { x: 451, y: 74, text: "с · л · о · в · о" },
+          note: { x: 451, y: 96, text: "старт: символы" },
+          style: "bpe"
+        },
+        {
+          box: { x: 647, y: 53, w: 226, h: 60 },
+          main: { x: 760, y: 74, text: "частое слияние" },
+          note: { x: 760, y: 96, text: "пара становится токеном" },
+          style: "bpe"
+        },
+        {
+          box: { x: 960, y: 53, w: 198, h: 60 },
+          main: { x: 1059, y: 74, text: "30 000" },
+          note: { x: 1059, y: 96, text: "растущий словарь" },
+          style: "bpe",
+          target: true
+        }
+      ],
+      arrows: [
+        {
+          line: [{ x: 572, y: 83 }, { x: 635, y: 83 }],
+          head: [{ x: 635, y: 83 }, { x: 623, y: 76 }, { x: 623, y: 90 }]
+        },
+        {
+          line: [{ x: 885, y: 83 }, { x: 948, y: 83 }],
+          head: [{ x: 948, y: 83 }, { x: 936, y: 76 }, { x: 936, y: 90 }]
+        }
+      ]
+    },
+    {
+      kind: "wordpiece",
+      card: { x: 318, y: 148, w: 864, h: 124 },
+      accent: [{ x: 318, y: 148 }, { x: 318, y: 272 }],
+      title: { x: 342, y: 172, text: "WordPiece" },
+      criterion: {
+        x: 482, y: 172,
+        text: "снизу вверх · побеждает полезная именно вместе пара"
+      },
+      stages: [
+        {
+          box: { x: 342, y: 191, w: 218, h: 60 },
+          main: { x: 451, y: 212, text: "часть + часть" },
+          note: { x: 451, y: 234, text: "кандидат на слияние" },
+          style: "wordpiece"
+        },
+        {
+          box: { x: 647, y: 191, w: 226, h: 60 },
+          main: { x: 760, y: 212, text: "прирост правдоподобия" },
+          note: { x: 760, y: 234, text: "учтена частота частей" },
+          style: "wordpiece"
+        },
+        {
+          box: { x: 960, y: 191, w: 198, h: 60 },
+          main: { x: 1059, y: 212, text: "30 000" },
+          note: { x: 1059, y: 234, text: "растущий словарь" },
+          style: "wordpiece",
+          target: true
+        }
+      ],
+      arrows: [
+        {
+          line: [{ x: 572, y: 221 }, { x: 635, y: 221 }],
+          head: [{ x: 635, y: 221 }, { x: 623, y: 214 }, { x: 623, y: 228 }]
+        },
+        {
+          line: [{ x: 885, y: 221 }, { x: 948, y: 221 }],
+          head: [{ x: 948, y: 221 }, { x: 936, y: 214 }, { x: 936, y: 228 }]
+        }
+      ]
+    },
+    {
+      kind: "unigram",
+      card: { x: 318, y: 286, w: 864, h: 124 },
+      accent: [{ x: 318, y: 286 }, { x: 318, y: 410 }],
+      title: { x: 342, y: 310, text: "Unigram" },
+      criterion: {
+        x: 450, y: 310,
+        text: "сверху вниз · удаляется наименее нужный фрагмент"
+      },
+      stages: [
+        {
+          box: { x: 342, y: 329, w: 218, h: 60 },
+          main: { x: 451, y: 350, text: "дом · до · ом · д · м" },
+          note: { x: 451, y: 372, text: "большой словарь кандидатов" },
+          style: "unigram"
+        },
+        {
+          box: { x: 647, y: 329, w: 226, h: 60 },
+          main: { x: 760, y: 350, text: "удаление без ущерба" },
+          note: { x: 760, y: 372, text: "вероятности пересчитаны" },
+          style: "unigram"
+        },
+        {
+          box: { x: 960, y: 329, w: 198, h: 60 },
+          main: { x: 1059, y: 350, text: "30 000" },
+          note: { x: 1059, y: 372, text: "сокращённый словарь" },
+          style: "unigram",
+          target: true
+        }
+      ],
+      arrows: [
+        {
+          line: [{ x: 572, y: 359 }, { x: 635, y: 359 }],
+          head: [{ x: 635, y: 359 }, { x: 623, y: 352 }, { x: 623, y: 366 }]
+        },
+        {
+          line: [{ x: 885, y: 359 }, { x: 948, y: 359 }],
+          head: [{ x: 948, y: 359 }, { x: 936, y: 352 }, { x: 936, y: 366 }]
+        }
+      ]
+    }
+  ]
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attrs, text) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const add = node => {
+    svg.appendChild(node);
+    return node;
+  };
+
+  const rect = (box, classes) => add(make("rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: sx(box.x + box.w) - sx(box.x),
+    height: sy(box.y + box.h) - sy(box.y),
+    class: classes
+  }));
+
+  const text = (item, classes, anchor = "start") => add(make("text", {
+    x: sx(item.x),
+    y: sy(item.y),
+    class: classes,
+    "text-anchor": item.anchor || anchor,
+    "dominant-baseline": "middle"
+  }, item.text));
+
+  const polyline = (points, classes) => add(make("polyline", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: classes
+  }));
+
+  const polygon = (points, classes) => add(make("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: classes
+  }));
+
+  rect(data.corpus.box, "corpus");
+  text(data.corpus.title, "label algorithm", "middle");
+  text(data.corpus.line, "small", "middle");
+  text(data.corpus.limit, "small", "middle");
+  polyline(data.corpus.exit, "connector");
+  add(make("circle", {
+    cx: sx(data.corpus.junction.x),
+    cy: sy(data.corpus.junction.y),
+    r: sx(data.corpus.junction.r) - sx(data.zero),
+    class: "ink-fill"
+  }));
+
+  data.branches.forEach(branch => {
+    polyline(branch.route, `flow ${branch.kind}-stroke`);
+    polygon(branch.head, `arrowhead ${branch.kind}-fill`);
+    text(branch.label, `branch-label ${branch.kind}-fill`, branch.label.anchor);
+  });
+
+  data.lanes.forEach(lane => {
+    rect(lane.card, "card");
+    polyline(lane.accent, `flow ${lane.kind}-stroke`);
+    text(lane.title, `algorithm ${lane.kind}-fill`);
+    text(lane.criterion, "small");
+
+    lane.stages.forEach(stage => {
+      rect(stage.box, `${stage.target ? "target" : "stage"} ${stage.style}-stroke`);
+      text(stage.main, stage.target ? "limit" : "stage-main", "middle");
+      text(stage.note, "stage-note", "middle");
+    });
+
+    lane.arrows.forEach(arrow => {
+      polyline(arrow.line, `flow ${lane.kind}-stroke`);
+      polygon(arrow.head, `arrowhead ${lane.kind}-fill`);
+    });
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

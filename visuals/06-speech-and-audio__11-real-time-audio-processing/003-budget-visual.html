@@ -1,0 +1,181 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Полоса бюджета latency</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1f24; --muted:#5d6672;
+    --seg:#ccd6e0; --seg-line:#fbfbfd; --hi:#e08a2e; --hi-fg:#2a1c06;
+    --axis:#8b95a1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8ecf1; --muted:#9aa4b0;
+      --seg:#39424e; --seg-line:#14161a; --hi:#e6a44a; --hi-fg:#241703;
+      --axis:#6f7986;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{padding:10px 12px 14px}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;max-height:520px;height:auto;background:var(--bg)}
+  .seg{fill:var(--seg);stroke:var(--seg-line);stroke-width:2}
+  .seg-hi{fill:var(--hi)}
+  .lbl{font-size:13px;fill:var(--fg)}
+  .lbl-in{font-size:13px;fill:var(--fg)}
+  .lbl-hi{fill:var(--hi-fg)}
+  .num{font-size:12px;fill:var(--muted)}
+  .lead{stroke:var(--axis);stroke-width:1;fill:none}
+  .axis{stroke:var(--axis);stroke-width:1}
+  .cap{font-size:12px;fill:var(--muted)}
+  .fallback{display:none;color:var(--fg);font-size:13px}
+</style>
+<div class="wrap">
+  <h2>Бюджет 400 мс, вытянутый в одну полосу</h2>
+  <svg id="s" viewBox="30 6 862 266" role="img"
+       aria-label="Полоса 400 миллисекунд, поделённая на шесть этапов; ASR — самый широкий кусок"></svg>
+  <p class="fallback" id="fb">Схема: горизонтальная полоса длиной 400 мс, поделённая на шесть кусков —
+    микрофон 20 мс (5%), VAD 10 мс (2,5%), ASR 150 мс (37,5%), LLM 100 мс (25%),
+    TTS 100 мс (25%), колонка 20 мс (5%). Самый широкий кусок — ASR.</p>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById('s');
+  try{
+    /* --- данные схемы --- */
+    var DATA = [
+      {tag:'mic', name:'Микрофон',            ms:20},
+      {tag:'vad', name:'VAD',                 ms:10},
+      {tag:'asr', name:'ASR (стриминг)',      ms:150},
+      {tag:'llm', name:'LLM (первый токен)',  ms:100},
+      {tag:'tts', name:'TTS (первый чанк)',   ms:100},
+      {tag:'spk', name:'Колонка',             ms:20}
+    ];
+
+    /* --- один origin, один scale, одна пара sx/sy --- */
+    var origin = {x:60, y:90}, scale = 2;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    /* пиксельные отступы подписей от точек привязки */
+    var PAD = 16, PAD_S = 6, FS = 13;
+
+    var total = DATA.reduce(function(a,d){ return a + d.ms; }, 0);
+    function pct(ms){ return String(+(ms/total*100).toFixed(1)).replace('.', ','); }
+
+    function el(tag, attrs, text){
+      var n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (text != null) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    }
+    function line(x1,y1,x2,y2,cls){
+      return el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),'class':cls});
+    }
+
+    /* y-уровни в единицах домена: полоса, выноски, ось, подпись */
+    var BAR_T = 0, BAR_B = 40, IN_1 = 15, IN_2 = 31;
+    var UP_A = -30, UP_A_STOP = -26, UP_B = -8, UP_B_BEND = -16;
+    var AX = 50, TK_T = 46, TK_B = 54, TK_LBL = 68, CAP = 86;
+
+    /* --- куски полосы --- */
+    var at = 0, seg = {};
+    DATA.forEach(function(d){
+      seg[d.tag] = {x0:at, x1:at + d.ms, c:at + d.ms/2, d:d};
+      el('rect',{
+        x:sx(at), y:sy(BAR_T),
+        width:sx(at + d.ms) - sx(at), height:sy(BAR_B) - sy(BAR_T),
+        'class':'seg' + (d.tag === 'asr' ? ' seg-hi' : '')
+      });
+      at += d.ms;
+    });
+
+    /* --- подписи внутри широких кусков --- */
+    ['asr','llm','tts'].forEach(function(t){
+      var s = seg[t], hi = (t === 'asr' ? ' lbl-hi' : '');
+      el('text',{x:sx(s.c), y:sy(IN_1), 'text-anchor':'middle',
+        'class':'lbl-in' + hi}, s.d.name);
+      el('text',{x:sx(s.c), y:sy(IN_2), 'text-anchor':'middle',
+        'class':'lbl-in' + hi}, s.d.ms + ' мс · ' + pct(s.d.ms) + '%');
+    });
+
+    /* --- выноски тонких кусков: разные стороны и разные уровни --- */
+    function txt(s, x, y, anchor){
+      el('text',{x:x, y:sy(y), 'text-anchor':anchor, 'class':'lbl'},
+        s.d.name + ' · ' + s.d.ms + ' мс · ' + pct(s.d.ms) + '%');
+    }
+
+    var m = seg.mic;                                  /* слева, верхний уровень */
+    line(m.c, BAR_T, m.c, UP_A_STOP, 'lead');
+    txt(m, sx(m.c) - PAD, UP_A, 'start');
+
+    var v = seg.vad;                                  /* рядом, но уровнем ниже */
+    line(v.c, BAR_T, v.c, UP_B_BEND, 'lead');
+    line(v.c, UP_B_BEND, v.x1 + m.d.ms, UP_B_BEND, 'lead');
+    txt(v, sx(v.x1 + m.d.ms) + PAD_S, UP_B, 'start');
+
+    var k = seg.spk;                                  /* справа, верхний уровень */
+    line(k.c, BAR_T, k.c, UP_A_STOP, 'lead');
+    txt(k, sx(k.c) + PAD, UP_A, 'end');
+
+    /* --- ось миллисекунд: засечки на границах кусков --- */
+    line(0, AX, total, AX, 'axis');
+    el('line',{x1:sx(0),y1:sy(TK_T),x2:sx(0),y2:sy(TK_B),'class':'axis'});
+    DATA.reduce(function(a,d){
+      var x = a + d.ms;
+      el('line',{x1:sx(x),y1:sy(TK_T),x2:sx(x),y2:sy(TK_B),'class':'axis'});
+      return x;
+    }, 0);
+    el('text',{x:sx(0), y:sy(TK_LBL), 'text-anchor':'start', 'class':'num'}, '0');
+    el('text',{x:sx(total), y:sy(TK_LBL), 'text-anchor':'end', 'class':'num'},
+      total + ' мс');
+
+    /* --- подпись под схемой --- */
+    el('text',{x:sx(0), y:sy(CAP), 'text-anchor':'start', 'class':'cap'},
+      'Засечки — границы этапов. Итого ' + total +
+      ' мс. Самый широкий кусок — ASR: ' + seg.asr.d.ms + ' мс из ' + total +
+      ', то есть ' + pct(seg.asr.d.ms) + '% всей полосы.');
+
+    if (!svg.childNodes.length) throw new Error('пусто');
+  } catch (e){
+    svg.style.display = 'none';
+    document.getElementById('fb').style.display = 'block';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>
