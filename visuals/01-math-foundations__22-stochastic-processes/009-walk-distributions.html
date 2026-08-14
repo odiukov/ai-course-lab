@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как расширяется распределение позиций</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #182230;
+    --muted: #586678;
+    --axis: #77869a;
+    --border: #cbd5e1;
+    --bar: #3b82f6;
+    --bar-stroke: #1d4ed8;
+    --impossible: #d9467d;
+    --halo: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --panel: #182231;
+      --ink: #edf3fb;
+      --muted: #aebdd0;
+      --axis: #91a2b8;
+      --border: #3b4b60;
+      --bar: #60a5fa;
+      --bar-stroke: #bfdbfe;
+      --impossible: #fb7185;
+      --halo: #182231;
+    }
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  main {
+    background: var(--page);
+  }
+
+  h1 {
+    margin: unset;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--page);
+    shape-rendering: geometricPrecision;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .axis {
+    fill: none;
+    stroke: var(--axis);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .bar {
+    fill: var(--bar);
+    stroke: var(--bar-stroke);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .impossible {
+    fill: none;
+    stroke: var(--impossible);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+    dominant-baseline: middle;
+  }
+
+  .axis-label {
+    fill: var(--muted);
+    font-size: 12px;
+    dominant-baseline: hanging;
+  }
+
+  .probability {
+    fill: var(--ink);
+    stroke: var(--halo);
+    stroke-width: 3px;
+    paint-order: stroke fill;
+    font-size: 12px;
+    font-weight: bold;
+    dominant-baseline: auto;
+  }
+
+  .legend {
+    fill: var(--muted);
+    font-size: 12px;
+    dominant-baseline: middle;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 14px;
+    dominant-baseline: hanging;
+  }
+</style>
+</head>
+<body>
+<main aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Как расширяется распределение позиций</h1>
+  <svg
+    id="chart"
+    viewBox="0 0 1200 455"
+    width="1200"
+    height="455"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description"
+  >
+    <desc id="diagram-description">
+      Столбчатые распределения позиции честного случайного блуждания после
+      одного, двух, четырёх и двадцати шагов. Крестиками отмечены позиции,
+      невозможные из-за чётности числа шагов.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+</main>
+
+<script>
+/*
+  В начале собраны все числа: исходные значения распределений, размеры
+  логического поля, компоновка панелей и отступы подписей. Далее каждая
+  экранная координата получается только через sx или sy.
+*/
+const DATA = [
+  [0, 0],
+  [10, 10],
+  [0, 0, 120, 45.5],
+  [0, 1, 2, 4, 20],
+  [24, 0.32, 0.16, 0.35, 0.72, 0.6],
+  [
+    [
+      1,
+      "1 шаг · доступны нечётные",
+      3, 31, 1.5, 21.7,
+      7, 27, 18.3, 3.5, 20.05,
+      [[-1, "−1"], [1, "+1"]],
+      []
+    ],
+    [
+      2,
+      "2 шага · доступны чётные",
+      33, 69, 1.5, 21.7,
+      37, 65, 18.3, 3.5, 20.05,
+      [[-2, "−2"], [0, "0"], [2, "+2"]],
+      [[-2, "0,25"], [0, "0,5"], [2, "0,25"]]
+    ],
+    [
+      4,
+      "4 шага · доступны чётные",
+      71, 117, 1.5, 21.7,
+      75, 113, 18.3, 3.5, 20.05,
+      [[-4, "−4"], [-2, "−2"], [0, "0"], [2, "+2"], [4, "+4"]],
+      [[-4, "1/16"], [-2, "4/16"], [0, "6/16"], [2, "4/16"], [4, "1/16"]]
+    ],
+    [
+      20,
+      "20 шагов · симметричный холм",
+      3, 117, 22.5, 45.1,
+      6, 114, 39.6, 24.5, 41.35,
+      [[-20, "−20"], [0, "0"], [20, "+20"]],
+      []
+    ]
+  ],
+  [
+    60,
+    44.15,
+    "Одна шкала высоты · сумма высот = 1 · × — невозможная позиция из-за чётности"
+  ],
+  [
+    [6, 9, "Схема должна была показать распределения после 1, 2, 4 и 20 шагов."],
+    [6, 13, "Крестиками отмечаются позиции, невозможные из-за чётности."]
+  ],
+  [0, 0]
+];
+
+const [
+  ORIGIN_DEF,
+  SCALE_DEF,
+  CANVAS_DEF,
+  NUMBER_DEF,
+  GEOMETRY_DEF,
+  PANELS,
+  LEGEND_DEF,
+  FALLBACK_DEF,
+  LABEL_OFFSET_DEF
+] = DATA;
+
+const origin = Object.freeze({
+  x: ORIGIN_DEF.at(0),
+  y: ORIGIN_DEF.at(1)
+});
+
+const scale = Object.freeze({
+  x: SCALE_DEF.at(0),
+  y: SCALE_DEF.at(1)
+});
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const [ZERO, ONE, TWO, FOUR, TWENTY] = NUMBER_DEF;
+const [
+  HEIGHT_FACTOR,
+  BAR_RATIO,
+  CROSS_RATIO,
+  CROSS_MAX,
+  CROSS_LIFT,
+  PROBABILITY_GAP
+] = GEOMETRY_DEF;
+const [LABEL_DX, LABEL_DY] = LABEL_OFFSET_DEF;
+const HALF = ONE / TWO;
+const SVG_NS = "http://www.w3.org/2000/svg";
+const drawing = document.getElementById("drawing");
+
+function svgElement(name, className) {
+  const node = document.createElementNS(SVG_NS, name);
+  if (className) node.setAttribute("class", className);
+  return node;
+}
+
+function appendPath(parent, points, className, closed) {
+  const node = svgElement("path", className);
+  const [first, ...rest] = points;
+  let pathData = `M ${sx(first.x)} ${sy(first.y)}`;
+
+  for (const point of rest) {
+    pathData += ` L ${sx(point.x)} ${sy(point.y)}`;
+  }
+
+  if (closed) pathData += " Z";
+  node.setAttribute("d", pathData);
+  parent.appendChild(node);
+  return node;
+}
+
+function appendLine(parent, xStart, yStart, xEnd, yEnd, className) {
+  return appendPath(
+    parent,
+    [
+      { x: xStart, y: yStart },
+      { x: xEnd, y: yEnd }
+    ],
+    className,
+    false
+  );
+}
+
+function appendText(parent, x, y, value, className, anchor) {
+  const node = svgElement("text", className);
+  node.setAttribute("x", sx(x));
+  node.setAttribute("y", sy(y));
+  node.setAttribute("dx", LABEL_DX);
+  node.setAttribute("dy", LABEL_DY);
+  node.setAttribute("text-anchor", anchor);
+  node.textContent = value;
+  parent.appendChild(node);
+  return node;
+}
+
+function probabilityRow(stepCount) {
+  let row = [ONE];
+
+  for (let step = ZERO; step < stepCount; step += ONE) {
+    const next = Array(row.length + ONE).fill(ZERO);
+
+    row.forEach((probability, index) => {
+      next[index] += probability / TWO;
+      next[index + ONE] += probability / TWO;
+    });
+
+    row = next;
+  }
+
+  return row;
+}
+
+function positionToX(position, stepCount, firstX, lastX) {
+  const binIndex = position + stepCount;
+  const binRange = TWO * stepCount;
+  return firstX + (binIndex / binRange) * (lastX - firstX);
+}
+
+function labelForPosition(labels, position) {
+  const match = labels.find(item => item.at(ZERO) === position);
+  return match ? match.at(ONE) : "";
+}
+
+function drawCross(parent, x, y, radius) {
+  appendLine(
+    parent,
+    x - radius,
+    y - radius,
+    x + radius,
+    y + radius,
+    "impossible"
+  );
+  appendLine(
+    parent,
+    x - radius,
+    y + radius,
+    x + radius,
+    y - radius,
+    "impossible"
+  );
+}
+
+function drawPanel(panel) {
+  const [
+    stepCount,
+    title,
+    boxLeft,
+    boxRight,
+    boxTop,
+    boxBottom,
+    firstX,
+    lastX,
+    baseline,
+    titleY,
+    positionLabelY,
+    positionLabels,
+    probabilityLabels
+  ] = panel;
+
+  const group = svgElement("g");
+  const probabilities = probabilityRow(stepCount);
+  const binCount = TWO * stepCount + ONE;
+  const spacing = (lastX - firstX) / (binCount - ONE);
+  const barHalfWidth = spacing * BAR_RATIO;
+  const crossRadius = Math.min(spacing * CROSS_RATIO, CROSS_MAX);
+  const axisStart = firstX - spacing * HALF;
+  const axisEnd = lastX + spacing * HALF;
+
+  appendPath(
+    group,
+    [
+      { x: boxLeft, y: boxTop },
+      { x: boxRight, y: boxTop },
+      { x: boxRight, y: boxBottom },
+      { x: boxLeft, y: boxBottom }
+    ],
+    "panel",
+    true
+  );
+
+  appendText(
+    group,
+    (boxLeft + boxRight) * HALF,
+    titleY,
+    title,
+    "panel-title",
+    "middle"
+  );
+
+  appendLine(group, axisStart, baseline, axisEnd, baseline, "axis");
+
+  for (
+    let position = -stepCount;
+    position <= stepCount;
+    position += ONE
+  ) {
+    const x = positionToX(position, stepCount, firstX, lastX);
+    const parityIndex = position + stepCount;
+    const possible = parityIndex % TWO === ZERO;
+
+    if (possible) {
+      const probabilityIndex = parityIndex / TWO;
+      const probability = probabilities.at(probabilityIndex);
+      const top = baseline - probability * HEIGHT_FACTOR;
+
+      appendPath(
+        group,
+        [
+          { x: x - barHalfWidth, y: baseline },
+          { x: x - barHalfWidth, y: top },
+          { x: x + barHalfWidth, y: top },
+          { x: x + barHalfWidth, y: baseline }
+        ],
+        "bar",
+        true
+      );
+
+      const probabilityText = labelForPosition(
+        probabilityLabels,
+        position
+      );
+
+      if (probabilityText) {
+        appendText(
+          group,
+          x,
+          top - PROBABILITY_GAP,
+          probabilityText,
+          "probability",
+          "middle"
+        );
+      }
+    } else {
+      drawCross(
+        group,
+        x,
+        baseline - CROSS_LIFT,
+        crossRadius
+      );
+    }
+
+    const positionText = labelForPosition(positionLabels, position);
+
+    if (positionText) {
+      appendText(
+        group,
+        x,
+        positionLabelY,
+        positionText,
+        "axis-label",
+        "middle"
+      );
+    }
+  }
+
+  drawing.appendChild(group);
+}
+
+try {
+  const [, , canvasWidth, canvasHeight] = CANVAS_DEF;
+
+  if (
+    sx(canvasWidth) <= sx(ZERO) ||
+    sy(canvasHeight) <= sy(ZERO)
+  ) {
+    throw new Error("Некорректный размер поля схемы");
+  }
+
+  PANELS.forEach(drawPanel);
+
+  const [legendX, legendY, legendText] = LEGEND_DEF;
+  appendText(
+    drawing,
+    legendX,
+    legendY,
+    legendText,
+    "legend",
+    "middle"
+  );
+} catch (error) {
+  drawing.replaceChildren();
+
+  FALLBACK_DEF.forEach(item => {
+    const [x, y, message] = item;
+    appendText(
+      drawing,
+      x,
+      y,
+      message,
+      "fallback",
+      "start"
+    );
+  });
+
+  console.error(error);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

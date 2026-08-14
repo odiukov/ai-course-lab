@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Два направления диффузионного процесса</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f3f9;
+    --ink: #172033;
+    --muted: #657089;
+    --line: #cbd2df;
+    --forward: #d95f43;
+    --forward-soft: #fbe5df;
+    --reverse: #257e9d;
+    --reverse-soft: #dff3f8;
+    --frame: #e7eaf1;
+    --noise-dark: #30384a;
+    --noise-mid: #8791a6;
+    --noise-light: #e4e8ef;
+    --cat: #e16b4c;
+    --cat-dark: #8d3d31;
+    --boat: #287ca3;
+    --boat-light: #73bfd1;
+    --sun: #f0bc4b;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  body { padding: 12px; }
+
+  main {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 14px 18px 4px;
+    font-size: 22px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  .panel-bg { fill: var(--panel-soft); }
+  .panel-title {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: 750;
+    letter-spacing: .04em;
+  }
+  .panel-subtitle {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+  .state-label {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .state-hint {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+  .frame-bg {
+    fill: var(--frame);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+  .forward-line {
+    stroke: var(--forward);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    fill: none;
+  }
+  .reverse-line {
+    stroke: var(--reverse);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    fill: none;
+  }
+  .forward-head { fill: var(--forward); }
+  .reverse-head { fill: var(--reverse); }
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1px;
+    stroke-dasharray: 5 7;
+  }
+  .note-title {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .note {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+  .chip-forward { fill: var(--forward-soft); }
+  .chip-reverse { fill: var(--reverse-soft); }
+  .chip-forward-text {
+    fill: var(--forward);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .chip-reverse-text {
+    fill: var(--reverse);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .fallback {
+    margin: 12px 18px 18px;
+    color: var(--muted);
+    font-size: 15px;
+    text-align: center;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111522;
+      --panel: #191f2d;
+      --panel-soft: #222a3a;
+      --ink: #eef2fa;
+      --muted: #aab4c8;
+      --line: #3c465b;
+      --forward: #ff8b6f;
+      --forward-soft: #432b2a;
+      --reverse: #69cbe8;
+      --reverse-soft: #203b47;
+      --frame: #293244;
+      --noise-dark: #151a25;
+      --noise-mid: #6f7b91;
+      --noise-light: #c9d1df;
+      --cat: #f08062;
+      --cat-dark: #642e2a;
+      --boat: #55acd0;
+      --boat-light: #91d6e5;
+      --sun: #ffd36a;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Два направления диффузионного процесса</h1>
+  <svg id="diagram" viewBox="0 0 1200 400" width="1200" height="400"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Прямое и обратное направления диффузии</title>
+    <desc id="svgDesc">Слева изображение кота за четыре перехода превращается в шум. Справа шум за четыре выученных перехода превращается в новое изображение лодки.</desc>
+  </svg>
+  <p id="fallback" class="fallback" hidden>
+    Слева изображение x₀ за четыре шага превращается в гауссов шум x_T.
+    Справа модель за четыре выученных шага создаёт из x_T новое изображение x₀.
+  </p>
+</main>
+
+<script>
+const data = Object.freeze({
+  origin: Object.freeze({ x: 0, y: 0 }),
+  scale: 1,
+  n: Object.freeze({
+    zero: 0, one: 1, two: 2, half: 0.5,
+    panelY: 28, panelW: 548, panelH: 244,
+    leftPanelX: 26, rightPanelX: 626,
+    dividerX: 600, dividerTop: 48, dividerBottom: 258,
+    titleY: 59, subtitleY: 83,
+    frameY: 122, frameW: 78, frameH: 78,
+    leftStart: 54, rightStart: 654, frameGap: 106,
+    frameRadius: 9, inner: 5,
+    arrowY: 161, arrowInset: 8, headLength: 9, headWidth: 6,
+    labelY: 225, hintY: 247,
+    noteTitleY: 304, noteY: 329,
+    chipY: 352, chipH: 30, chipRadius: 15,
+    leftChipX: 300, rightChipX: 660, chipW: 240,
+    centerX: 600,
+    labelPad: 6,
+    grid: 7, noiseGap: 0.45,
+    opacityFloor: 0.04, noiseBase: 0.18,
+    magicA: 12.9898, magicB: 78.233, magicC: 43758.5453,
+    catHeadX: 0.5, catHeadY: 0.43, catHeadR: 0.19,
+    catBodyX: 0.5, catBodyY: 0.72, catBodyW: 0.36, catBodyH: 0.35,
+    catEarTop: 0.14, catEarSide: 0.29, catEarInner: 0.4,
+    eyeY: 0.41, eyeDX: 0.07, eyeR: 0.018,
+    noseY: 0.48, noseR: 0.022,
+    boatWaterY: 0.76, boatHullY: 0.66,
+    boatLeft: 0.18, boatRight: 0.82, boatBottom: 0.79,
+    mastX: 0.51, mastTop: 0.2,
+    sailTop: 0.25, sailBottom: 0.61, sailLeft: 0.25, sailRight: 0.76,
+    sunX: 0.78, sunY: 0.24, sunR: 0.09
+  }),
+  stages: Object.freeze([0, 0.24, 0.5, 0.76, 1]),
+  reverseStages: Object.freeze([1, 0.76, 0.5, 0.24, 0]),
+  seeds: Object.freeze([3, 11, 19, 29, 41]),
+  noiseColors: Object.freeze([
+    "var(--noise-dark)", "var(--noise-mid)", "var(--noise-light)",
+    "#aeb7c8", "#606b80", "#d4d9e3"
+  ])
+});
+
+const origin = Object.freeze(data.origin);
+const scale = data.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+(() => {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const n = data.n;
+  const ns = "http://www.w3.org/2000/svg";
+
+  try {
+    const make = (name, attrs, parent = svg) => {
+      const node = document.createElementNS(ns, name);
+      Object.entries(attrs || {}).forEach(([key, value]) => node.setAttribute(key, String(value)));
+      parent.appendChild(node);
+      return node;
+    };
+
+    const text = (parent, value, x, y, className, anchor = "middle", dx = n.zero, dy = n.zero) => {
+      const node = make("text", {
+        x: sx(x), y: sy(y), dx, dy,
+        class: className, "text-anchor": anchor
+      }, parent);
+      node.textContent = value;
+      return node;
+    };
+
+    const rect = (parent, x, y, w, h, attrs = {}) => make("rect", {
+      x: sx(x), y: sy(y),
+      width: sx(x + w) - sx(x),
+      height: sy(y + h) - sy(y),
+      ...attrs
+    }, parent);
+
+    const circle = (parent, x, y, r, attrs = {}) => make("circle", {
+      cx: sx(x), cy: sy(y),
+      r: sx(r) - sx(n.zero),
+      ...attrs
+    }, parent);
+
+    const polygon = (parent, points, attrs = {}) => make("polygon", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      ...attrs
+    }, parent);
+
+    const line = (parent, x1, y1, x2, y2, attrs = {}) => make("line", {
+      x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), ...attrs
+    }, parent);
+
+    const arrow = (parent, x1, y1, x2, y2, kind) => {
+      const lineClass = kind === "forward" ? "forward-line" : "reverse-line";
+      const headClass = kind === "forward" ? "forward-head" : "reverse-head";
+      line(parent, x1, y1, x2, y2, { class: lineClass });
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const backX = x2 - Math.cos(angle) * n.headLength;
+      const backY = y2 - Math.sin(angle) * n.headLength;
+      const sideX = Math.sin(angle) * n.headWidth;
+      const sideY = Math.cos(angle) * n.headWidth;
+      polygon(parent, [
+        { x: x2, y: y2 },
+        { x: backX + sideX, y: backY - sideY },
+        { x: backX - sideX, y: backY + sideY }
+      ], { class: headClass });
+    };
+
+    const local = (x, y, w, h, px, py) => ({
+      x: x + px * w,
+      y: y + py * h
+    });
+
+    const drawCat = (parent, x, y, w, h, opacity) => {
+      const g = make("g", { opacity }, parent);
+      const body = local(x, y, w, h, n.catBodyX, n.catBodyY);
+      rect(g,
+        body.x - n.catBodyW * w * n.half,
+        body.y - n.catBodyH * h * n.half,
+        n.catBodyW * w, n.catBodyH * h,
+        { rx: sx(n.frameRadius) - sx(n.zero), fill: "var(--cat)" }
+      );
+      const head = local(x, y, w, h, n.catHeadX, n.catHeadY);
+      const radius = n.catHeadR * w;
+      polygon(g, [
+        local(x, y, w, h, n.catEarSide, n.catEarTop),
+        local(x, y, w, h, n.catEarInner, n.catHeadY),
+        local(x, y, w, h, n.catHeadX - n.eyeDX, n.catEarSide)
+      ], { fill: "var(--cat)" });
+      polygon(g, [
+        local(x, y, w, h, n.one - n.catEarSide, n.catEarTop),
+        local(x, y, w, h, n.one - n.catEarInner, n.catHeadY),
+        local(x, y, w, h, n.catHeadX + n.eyeDX, n.catEarSide)
+      ], { fill: "var(--cat)" });
+      circle(g, head.x, head.y, radius, { fill: "var(--cat)" });
+      circle(g, x + (n.catHeadX - n.eyeDX) * w, y + n.eyeY * h,
+        n.eyeR * w, { fill: "var(--cat-dark)" });
+      circle(g, x + (n.catHeadX + n.eyeDX) * w, y + n.eyeY * h,
+        n.eyeR * w, { fill: "var(--cat-dark)" });
+      circle(g, x + n.catHeadX * w, y + n.noseY * h,
+        n.noseR * w, { fill: "var(--cat-dark)" });
+    };
+
+    const drawBoat = (parent, x, y, w, h, opacity) => {
+      const g = make("g", { opacity }, parent);
+      circle(g, x + n.sunX * w, y + n.sunY * h,
+        n.sunR * w, { fill: "var(--sun)" });
+      line(g, x + n.mastX * w, y + n.mastTop * h,
+        x + n.mastX * w, y + n.boatHullY * h,
+        { stroke: "var(--boat)", "stroke-width": "3", "stroke-linecap": "round" });
+      polygon(g, [
+        local(x, y, w, h, n.mastX, n.sailTop),
+        local(x, y, w, h, n.mastX, n.sailBottom),
+        local(x, y, w, h, n.sailLeft, n.sailBottom)
+      ], { fill: "var(--boat-light)" });
+      polygon(g, [
+        local(x, y, w, h, n.mastX + n.eyeR, n.sailTop),
+        local(x, y, w, h, n.mastX + n.eyeR, n.sailBottom),
+        local(x, y, w, h, n.sailRight, n.sailBottom)
+      ], { fill: "var(--boat)" });
+      polygon(g, [
+        local(x, y, w, h, n.boatLeft, n.boatHullY),
+        local(x, y, w, h, n.boatRight, n.boatHullY),
+        local(x, y, w, h, n.sailRight, n.boatBottom),
+        local(x, y, w, h, n.boatLeft + n.sunR, n.boatBottom)
+      ], { fill: "var(--boat)" });
+      line(g, x + n.boatLeft * w, y + n.boatWaterY * h,
+        x + n.boatRight * w, y + n.boatWaterY * h,
+        { stroke: "var(--boat-light)", "stroke-width": "3", "stroke-linecap": "round" });
+    };
+
+    const drawNoise = (parent, x, y, w, h, level, seed) => {
+      const cellW = w / n.grid;
+      const cellH = h / n.grid;
+      for (let row = n.zero; row < n.grid; row++) {
+        for (let col = n.zero; col < n.grid; col++) {
+          const value = Math.abs(Math.sin(
+            (col + seed) * n.magicA + (row + seed) * n.magicB
+          ) * n.magicC);
+          const fraction = value - Math.floor(value);
+          const colorIndex = Math.floor(fraction * data.noiseColors.length);
+          rect(parent,
+            x + col * cellW + n.noiseGap,
+            y + row * cellH + n.noiseGap,
+            cellW - n.noiseGap * n.two,
+            cellH - n.noiseGap * n.two,
+            {
+              fill: data.noiseColors[colorIndex],
+              opacity: n.noiseBase + level * (n.one - n.noiseBase)
+            }
+          );
+        }
+      }
+    };
+
+    const drawFrame = (parent, x, noise, seed, subject, id) => {
+      const y = n.frameY;
+      rect(parent, x, y, n.frameW, n.frameH, {
+        rx: sx(n.frameRadius) - sx(n.zero),
+        class: "frame-bg"
+      });
+      const clip = make("clipPath", { id }, parent);
+      rect(clip, x + n.inner, y + n.inner,
+        n.frameW - n.inner * n.two,
+        n.frameH - n.inner * n.two,
+        { rx: sx(n.frameRadius - n.inner) - sx(n.zero) });
+      const content = make("g", { "clip-path": `url(#${id})` }, parent);
+      const ix = x + n.inner;
+      const iy = y + n.inner;
+      const iw = n.frameW - n.inner * n.two;
+      const ih = n.frameH - n.inner * n.two;
+      rect(content, ix, iy, iw, ih, { fill: "var(--panel)" });
+      const imageOpacity = Math.max(n.opacityFloor, n.one - noise);
+      if (subject === "cat") drawCat(content, ix, iy, iw, ih, imageOpacity);
+      else drawBoat(content, ix, iy, iw, ih, imageOpacity);
+      if (noise > n.zero) drawNoise(content, ix, iy, iw, ih, noise, seed);
+    };
+
+    const root = make("g", {});
+    rect(root, n.leftPanelX, n.panelY, n.panelW, n.panelH, {
+      rx: sx(n.frameRadius) - sx(n.zero), class: "panel-bg"
+    });
+    rect(root, n.rightPanelX, n.panelY, n.panelW, n.panelH, {
+      rx: sx(n.frameRadius) - sx(n.zero), class: "panel-bg"
+    });
+    line(root, n.dividerX, n.dividerTop, n.dividerX, n.dividerBottom, {
+      class: "divider"
+    });
+
+    text(root, "ПРЯМОЕ НАПРАВЛЕНИЕ", n.leftPanelX + n.panelW * n.half,
+      n.titleY, "panel-title");
+    text(root, "добавляем шум · 4 шага", n.leftPanelX + n.panelW * n.half,
+      n.subtitleY, "panel-subtitle");
+    text(root, "ОБРАТНОЕ НАПРАВЛЕНИЕ", n.rightPanelX + n.panelW * n.half,
+      n.titleY, "panel-title");
+    text(root, "4 выученных шага модели", n.rightPanelX + n.panelW * n.half,
+      n.subtitleY, "panel-subtitle");
+
+    data.stages.forEach((noise, index) => {
+      const x = n.leftStart + index * n.frameGap;
+      drawFrame(root, x, noise, data.seeds[index], "cat", `forward-${index}`);
+      if (index < data.stages.length - n.one) {
+        const nextX = n.leftStart + (index + n.one) * n.frameGap;
+        arrow(root,
+          x + n.frameW + n.arrowInset,
+          n.arrowY,
+          nextX - n.arrowInset,
+          n.arrowY,
+          "forward"
+        );
+      }
+    });
+
+    data.reverseStages.forEach((noise, index) => {
+      const x = n.rightStart + index * n.frameGap;
+      drawFrame(root, x, noise, data.seeds[data.seeds.length - n.one - index],
+        "boat", `reverse-${index}`);
+      if (index < data.reverseStages.length - n.one) {
+        const nextX = n.rightStart + (index + n.one) * n.frameGap;
+        arrow(root,
+          x + n.frameW + n.arrowInset,
+          n.arrowY,
+          nextX - n.arrowInset,
+          n.arrowY,
+          "reverse"
+        );
+      }
+    });
+
+    text(root, "x₀", n.leftStart + n.frameW * n.half,
+      n.labelY, "state-label");
+    text(root, "изображение", n.leftStart + n.frameW * n.half,
+      n.hintY, "state-hint");
+    text(root, "x_T", n.leftStart + n.frameGap * (data.stages.length - n.one) +
+      n.frameW * n.half, n.labelY, "state-label");
+    text(root, "гауссов шум", n.leftStart + n.frameGap *
+      (data.stages.length - n.one) + n.frameW * n.half,
+      n.hintY, "state-hint");
+
+    text(root, "x_T", n.rightStart + n.frameW * n.half,
+      n.labelY, "state-label");
+    text(root, "гауссов шум", n.rightStart + n.frameW * n.half,
+      n.hintY, "state-hint");
+    text(root, "x₀", n.rightStart + n.frameGap *
+      (data.reverseStages.length - n.one) + n.frameW * n.half,
+      n.labelY, "state-label");
+    text(root, "новое изображение", n.rightStart + n.frameGap *
+      (data.reverseStages.length - n.one) + n.frameW * n.half,
+      n.hintY, "state-hint");
+
+    text(root, "Обратный путь — не перемотка исходника",
+      n.centerX, n.noteTitleY, "note-title");
+    text(root, "Модель начинает с шума и создаёт один из правдоподобных новых образов.",
+      n.centerX, n.noteY, "note");
+
+    rect(root, n.leftChipX, n.chipY, n.chipW, n.chipH, {
+      rx: sx(n.chipRadius) - sx(n.zero), class: "chip-forward"
+    });
+    rect(root, n.rightChipX, n.chipY, n.chipW, n.chipH, {
+      rx: sx(n.chipRadius) - sx(n.zero), class: "chip-reverse"
+    });
+    text(root, "прямой путь стирает структуру",
+      n.leftChipX + n.chipW * n.half,
+      n.chipY + n.chipH * n.half,
+      "chip-forward-text", "middle", n.zero, n.labelPad);
+    text(root, "обратный путь создаёт структуру",
+      n.rightChipX + n.chipW * n.half,
+      n.chipY + n.chipH * n.half,
+      "chip-reverse-text", "middle", n.zero, n.labelPad);
+
+    const originPoint = Object.freeze({
+      x: sx(n.zero),
+      y: sy(n.zero)
+    });
+    svg.dataset.origin = `${originPoint.x},${originPoint.y}`;
+  } catch (error) {
+    svg.setAttribute("hidden", "");
+    fallback.hidden = false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

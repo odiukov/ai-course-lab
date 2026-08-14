@@ -1,0 +1,191 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как 7 кГц превращается в 3 кГц</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1a2230; --mute:#67717f; --axis:#3b4657;
+    --real:#1f6feb; --ghost:#8a94a6; --nyq:#c8384f; --band:rgba(200,56,79,.07);
+    --frame:#dde3ea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161d; --ink:#e6ebf2; --mute:#97a2b2; --axis:#8fa0b8;
+      --real:#5aa2ff; --ghost:#79839a; --nyq:#ff7a8a; --band:rgba(255,122,138,.12);
+      --frame:#2a3240;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .scheme{margin:0;padding:14px 16px 12px;background:var(--bg);
+    border:1px solid var(--frame);border-radius:10px;}
+  .scheme h2{margin:0 0 6px;font-size:16px;font-weight:600;letter-spacing:.01em;}
+  .plot{width:100%;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  figcaption{margin-top:8px;font-size:13px;color:var(--mute);}
+  .fallback{margin:0;padding:10px 0;font-size:14px;color:var(--ink);}
+  .band{fill:var(--band);}
+  .axis{stroke:var(--axis);fill:none;}
+  .axis-fill{fill:var(--axis);}
+  .tick{stroke:var(--axis);}
+  .tick-label{fill:var(--mute);font-size:13px;}
+  .nyq-line{stroke:var(--nyq);stroke-dasharray:6 5;fill:none;}
+  .nyq-label{fill:var(--nyq);font-size:15px;font-weight:600;}
+  .bar-real{stroke:var(--real);}
+  .bar-ghost{stroke:var(--ghost);stroke-dasharray:7 6;}
+  .lbl-real{fill:var(--real);font-size:15px;font-weight:600;}
+  .lbl-real-sub{fill:var(--real);font-size:14px;}
+  .lbl-ghost{fill:var(--ghost);font-size:15px;}
+  .arc{stroke:var(--nyq);fill:none;}
+  .arc-fill{fill:var(--nyq);}
+  .lbl-arc{fill:var(--nyq);font-size:15px;}
+  .lbl-mute{fill:var(--mute);font-size:14px;}
+</style>
+
+<figure class="scheme">
+  <h2>Как 7 кГц превращается в 3 кГц</h2>
+  <div class="plot" id="plot"><noscript><p class="fallback">Ось частот 0–10 кГц. Граница Nyquist на 5 кГц. Тон 7 кГц лежит выше границы, заворачивается через неё и садится пиком на 3 кГц (10 − 7).</p></noscript></div>
+  <figcaption>Сплошной пик — то, что показывает анализатор. Пунктир — тон, которого в массиве нет.</figcaption>
+</figure>
+
+<script>
+(function () {
+  var host = document.getElementById('plot');
+  try {
+    /* ---- данные схемы (кГц по X, условные единицы высоты по Y) ---- */
+    var D = {
+      ticks:    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      alias:    3,      /* пик, который видит FFT */
+      nyquist:  5,      /* потолок sr / 2 */
+      tone:     7,      /* исходный тон */
+      rate:     10,     /* частота дискретизации */
+      peakH:    3.0,
+      ghostH:   2.2,
+      bandTop:  4.3,
+      axisEnd:  10.5,
+      tickLen:  0.13,
+      tickText: -0.42
+    };
+
+    /* ---- единственная система координат ---- */
+    var origin = { x: 80, y: 350 }, scale = 74;
+    function sx(x) { return origin.x + x * scale; }
+    function sy(y) { return origin.y - y * scale; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 20 910 370');
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label',
+      'Тон 7 кГц заворачивается через границу Nyquist 5 кГц и даёт пик на 3 кГц');
+
+    function add(tag, attrs, text) {
+      var n = document.createElementNS(NS, tag), k;
+      for (k in attrs) n.setAttribute(k, attrs[k]);
+      if (text != null) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    }
+    function line(cls, x1, y1, x2, y2, w) {
+      add('line', { 'class': cls, x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+                    'stroke-width': w, 'stroke-linecap': 'round' });
+    }
+    function label(cls, x, y, anchor, dx, dy, text) {
+      add('text', { 'class': cls, x: sx(x), y: sy(y), 'text-anchor': anchor,
+                    dx: dx, dy: dy }, text);
+    }
+    /* наконечник: вершины считаются в данных и переводятся тем же sx/sy */
+    function head(cls, tipX, tipY, dirX, dirY, len, half) {
+      var m = Math.sqrt(dirX * dirX + dirY * dirY),
+          ux = dirX / m, uy = dirY / m,
+          bx = tipX - ux * len, by = tipY - uy * len,
+          px = -uy * half, py = ux * half,
+          pts = [[tipX, tipY], [bx + px, by + py], [bx - px, by - py]]
+            .map(function (p) { return sx(p[0]) + ',' + sy(p[1]); }).join(' ');
+      add('polygon', { 'class': cls, points: pts });
+    }
+
+    /* ---- зона выше Nyquist ---- */
+    add('rect', { 'class': 'band',
+      x: sx(D.nyquist), y: sy(D.bandTop),
+      width: sx(D.axisEnd) - sx(D.nyquist),
+      height: sy(0) - sy(D.bandTop) });
+
+    /* ---- ось частот ---- */
+    line('axis', 0, 0, D.axisEnd, 0, 2);
+    head('axis-fill', D.axisEnd, 0, 1, 0, 0.22, 0.09);
+    label('tick-label', D.axisEnd, 0, 'start', 10, 5, 'кГц');
+
+    D.ticks.forEach(function (t) {
+      line('tick', t, 0, t, -D.tickLen, 1.5);
+      label('tick-label', t, D.tickText, 'middle', 0, 0, String(t));
+    });
+    label('lbl-mute', D.rate, 0.3, 'end', -4, 0, 'sr = ' + D.rate + ' кГц');
+
+    /* ---- граница Nyquist ---- */
+    line('nyq-line', D.nyquist, 0, D.nyquist, 3.3, 2);
+    label('nyq-label', D.nyquist, 3.42, 'middle', 0, 0, 'Nyquist ' + D.nyquist + ' кГц');
+
+    /* ---- тон 7 кГц: в массиве его нет ---- */
+    line('bar-ghost', D.tone, 0, D.tone, D.ghostH, 7);
+    label('lbl-ghost', D.tone, 1.5, 'start', 8, 0, D.tone + ' кГц: в массиве нет');
+
+    /* ---- заворот через границу ---- */
+    add('path', { 'class': 'arc', 'stroke-width': 2,
+      d: 'M ' + sx(D.tone) + ' ' + sy(2.5) +
+         ' C ' + sx(6) + ' ' + sy(D.bandTop) +
+         ' '   + sx(4) + ' ' + sy(4.15) +
+         ' '   + sx(D.alias) + ' ' + sy(3.15) });
+    head('arc-fill', D.alias, 3.15, -1, -1, 0.3, 0.13);
+    label('lbl-arc', D.tone, 2.75, 'start', 12, 0, 'заворачивается вниз');
+    label('lbl-mute', 8.7, 3.6, 'middle', 0, 0, 'выше Nyquist');
+
+    /* ---- пик, который видит анализатор ---- */
+    line('bar-real', D.alias, 0, D.alias, D.peakH, 8);
+    label('lbl-real', D.alias, 2.4, 'end', -10, 0, 'пик ' + D.alias + ' кГц');
+    label('lbl-real-sub', D.alias, 2.0, 'end', -10, 0,
+      D.rate + ' \u2212 ' + D.tone + ' = ' + D.alias);
+
+    host.textContent = '';
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<p class="fallback">Схема не построилась. Она должна показывать: ось частот 0–10 кГц, пунктирную границу Nyquist на 5 кГц, тон 7 кГц выше границы (пунктирный столбик, в массиве его нет) и стрелку, которая заворачивает его через границу в сплошной пик на 3 кГц, потому что 10 &minus; 7 = 3.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

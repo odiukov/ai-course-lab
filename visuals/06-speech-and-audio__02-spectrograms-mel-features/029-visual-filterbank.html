@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>80 треугольников, равномерных по mel-оси</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --axis: #374151;
+    --tri-low: #2563eb;
+    --tri-high: #db2777;
+    --grid: #d1d5db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8eaed;
+      --muted: #9aa2ad;
+      --axis: #c3c9d2;
+      --tri-low: #7aa7ff;
+      --tri-high: #ff87c2;
+      --grid: #3a4048;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { background: var(--bg); padding: 8px 4px 12px; }
+  h2 { font-size: 15px; margin: 0 0 6px; text-align: center; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  .fail { color: var(--muted); font-size: 13px; padding: 10px 16px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>80 треугольников, равномерных по mel-оси</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById("host");
+  try {
+    // ---------- данные схемы ----------
+    var N_FILTERS = 80;
+    var F_MIN = 0, F_MAX = 8000;
+    var MEL_MAX = 2840;          // mel(8000) из текста шага
+    var SPEECH_HZ = 1800;        // граница формант, 1.8 kHz
+    var HZ_TICKS = [0, 1800, 4000, 6000, 8000];
+    var FIRST_EDGE_HZ = 22;      // первые 35 mel: 0..22 Hz
+    var LAST_EDGE_HZ = 7736;     // последние 35 mel: 7736..8000
+    var TRI_TOP = 1;             // высота треугольника в единицах данных
+
+    function melToHz(m) { return 700 * (Math.pow(10, m / 2595) - 1); }
+
+    // границы фильтров: N+2 точки, равномерно по mel
+    var edges = [];
+    for (var i = 0; i < N_FILTERS + 2; i++) {
+      edges.push(melToHz(MEL_MAX * i / (N_FILTERS + 1)));
+    }
+
+    // ---------- ЕДИНСТВЕННЫЙ перевод координат ----------
+    var VB_W = 900, VB_H = 400;
+    var origin = { x: 70, y: 300 };                       // sx(0), sy(0)
+    var scale  = { x: (VB_W - 110) / F_MAX, y: -170 };    // px на Hz / px на единицу высоты
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y + y * scale.y; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(name, attrs) {
+      var n = document.createElementNS(NS, name);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      return n;
+    }
+    function text(str, x, y, anchor, cls, size) {
+      var t = el("text", { x: x, y: y, "text-anchor": anchor, "font-size": size, fill: cls });
+      t.textContent = str;
+      return t;
+    }
+
+    var svg = el("svg", {
+      viewBox: "0 0 " + VB_W + " " + VB_H,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img"
+    });
+    svg.appendChild(el("rect", { x: 0, y: 0, width: VB_W, height: VB_H, fill: "var(--bg)" }));
+
+    // ---------- зона речи: 0 .. 1.8 kHz ----------
+    svg.appendChild(el("rect", {
+      x: sx(F_MIN), y: sy(TRI_TOP + 0.28),
+      width: sx(SPEECH_HZ) - sx(F_MIN),
+      height: sy(0) - sy(TRI_TOP + 0.28),
+      fill: "var(--tri-low)", opacity: 0.09
+    }));
+    svg.appendChild(el("line", {
+      x1: sx(SPEECH_HZ), y1: sy(0), x2: sx(SPEECH_HZ), y2: sy(TRI_TOP + 0.28),
+      stroke: "var(--tri-low)", "stroke-width": 1.5, "stroke-dasharray": "5 4", opacity: 0.75
+    }));
+
+    // ---------- треугольники ----------
+    for (var k = 0; k < N_FILTERS; k++) {
+      var a = edges[k], c = edges[k + 1], b = edges[k + 2];
+      var color = c < SPEECH_HZ ? "var(--tri-low)" : "var(--tri-high)";
+      svg.appendChild(el("polygon", {
+        points: sx(a) + "," + sy(0) + " " + sx(c) + "," + sy(TRI_TOP) + " " + sx(b) + "," + sy(0),
+        fill: "none", stroke: color, "stroke-width": 1, opacity: 0.85
+      }));
+    }
+
+    // ---------- ось Hz ----------
+    svg.appendChild(el("line", {
+      x1: sx(F_MIN), y1: sy(0), x2: sx(F_MAX), y2: sy(0),
+      stroke: "var(--axis)", "stroke-width": 2
+    }));
+    for (var t = 0; t < HZ_TICKS.length; t++) {
+      var hz = HZ_TICKS[t];
+      svg.appendChild(el("line", {
+        x1: sx(hz), y1: sy(0), x2: sx(hz), y2: sy(-0.06),
+        stroke: "var(--axis)", "stroke-width": 1.5
+      }));
+      var anchor = hz === F_MIN ? "start" : (hz === F_MAX ? "end" : "middle");
+      svg.appendChild(text(hz + " Hz", sx(hz), sy(-0.06) + 16, anchor, "var(--muted)", 13));
+    }
+    svg.appendChild(text("частота, Hz", sx(F_MAX), sy(-0.06) + 34, "end", "var(--muted)", 13));
+
+    // ---------- подпись зоны речи (внутри, сверху) ----------
+    svg.appendChild(text("ниже 1.8 kHz — гласные и форманты",
+      sx(SPEECH_HZ) - 10, sy(TRI_TOP + 0.20), "end", "var(--tri-low)", 13));
+
+    // ---------- левая выноска: первый треугольник, 0–22 Hz ----------
+    svg.appendChild(el("line", {
+      x1: sx(FIRST_EDGE_HZ), y1: sy(TRI_TOP + 0.05),
+      x2: sx(1150), y2: sy(TRI_TOP + 0.62),
+      stroke: "var(--tri-low)", "stroke-width": 1.2
+    }));
+    svg.appendChild(el("polygon", {
+      points: sx(FIRST_EDGE_HZ) + "," + sy(TRI_TOP + 0.02) + " " +
+              sx(FIRST_EDGE_HZ + 150) + "," + sy(TRI_TOP + 0.16) + " " +
+              sx(FIRST_EDGE_HZ - 60) + "," + sy(TRI_TOP + 0.19),
+      fill: "var(--tri-low)"
+    }));
+    svg.appendChild(text("первые 35 mel = 0–22 Hz",
+      sx(1200), sy(TRI_TOP + 0.62), "start", "var(--tri-low)", 13));
+    svg.appendChild(text("меньше одного FFT-бина",
+      sx(1200), sy(TRI_TOP + 0.62) + 17, "start", "var(--muted)", 12));
+
+    // ---------- правая выноска: последний треугольник, 7736–8000 Hz ----------
+    svg.appendChild(el("line", {
+      x1: sx(LAST_EDGE_HZ), y1: sy(TRI_TOP + 0.05),
+      x2: sx(6600), y2: sy(TRI_TOP + 0.62),
+      stroke: "var(--tri-high)", "stroke-width": 1.2
+    }));
+    svg.appendChild(el("polygon", {
+      points: sx(LAST_EDGE_HZ) + "," + sy(TRI_TOP + 0.02) + " " +
+              sx(LAST_EDGE_HZ - 150) + "," + sy(TRI_TOP + 0.16) + " " +
+              sx(LAST_EDGE_HZ + 60) + "," + sy(TRI_TOP + 0.19),
+      fill: "var(--tri-high)"
+    }));
+    svg.appendChild(text("последние 35 mel = 7736–8000 Hz",
+      sx(6550), sy(TRI_TOP + 0.62), "end", "var(--tri-high)", 13));
+    svg.appendChild(text("264 Hz, шесть-семь бинов",
+      sx(6550), sy(TRI_TOP + 0.62) + 17, "end", "var(--muted)", 12));
+
+    // ---------- нижняя строка-легенда ----------
+    svg.appendChild(text("равный шаг 35 mel по всей оси; в герцах ширина растёт в двенадцать раз",
+      sx(F_MAX / 2), sy(-0.55), "middle", "var(--fg)", 14));
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML =
+      '<p class="fail">Схема не построилась. Она должна была показать ось Hz от 0 до 8000 ' +
+      'с 80 перекрывающимися треугольниками: слева, ниже 1.8 kHz, они узкие и стоят вплотную ' +
+      '(первый — всего 0–22 Hz, меньше одного FFT-бина), справа — редкие и широкие ' +
+      '(последний — 7736–8000 Hz, около 264 Hz и шесть-семь бинов). Шаг всюду одинаков — 35 mel ' +
+      'из 2840; разница в ширине по оси герц — в двенадцать раз.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
