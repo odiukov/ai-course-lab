@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Прямой проход от камеры до нового пикселя</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: white;
+      --panel: ghostwhite;
+      --ink: midnightblue;
+      --muted: slategray;
+      --line: steelblue;
+      --ray: darkorange;
+      --sample: royalblue;
+      --network: lavender;
+      --render: papayawhip;
+      --sigma: mediumvioletred;
+      --red: crimson;
+      --green: seagreen;
+      --blue: dodgerblue;
+      --result: tomato;
+      --soft: gainsboro;
+      --shadow: lightsteelblue;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #172033;
+        --ink: #f1f5f9;
+        --muted: #b6c2d2;
+        --line: #7dd3fc;
+        --ray: #fbbf24;
+        --sample: #93c5fd;
+        --network: #312e81;
+        --render: #4a321d;
+        --sigma: #f9a8d4;
+        --red: #fb7185;
+        --green: #6ee7b7;
+        --blue: #60a5fa;
+        --result: #fb923c;
+        --soft: #334155;
+        --shadow: #1e3a5f;
+      }
+    }
+
+    html,
+    body {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--bg);
+    }
+
+    h1 {
+      font-size: 20px;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--soft);
+      stroke-width: 1.5;
+    }
+
+    .camera,
+    .screen {
+      fill: var(--panel);
+      stroke: var(--ink);
+      stroke-width: 2;
+    }
+
+    .lens {
+      fill: var(--line);
+      stroke: var(--ink);
+      stroke-width: 1.5;
+    }
+
+    .ray {
+      fill: none;
+      stroke: var(--ray);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--muted);
+    }
+
+    .sample {
+      fill: var(--sample);
+      stroke: var(--bg);
+      stroke-width: 1;
+    }
+
+    .chosen-pixel {
+      fill: var(--result);
+      stroke: var(--ink);
+      stroke-width: 2;
+    }
+
+    .nerf {
+      fill: var(--network);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .render {
+      fill: var(--render);
+      stroke: var(--ray);
+      stroke-width: 2;
+    }
+
+    .node {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 1.5;
+    }
+
+    .node-link {
+      stroke: var(--line);
+      stroke-width: 1.5;
+    }
+
+    .sigma {
+      fill: var(--sigma);
+    }
+
+    .rgb-r {
+      fill: var(--red);
+    }
+
+    .rgb-g {
+      fill: var(--green);
+    }
+
+    .rgb-b {
+      fill: var(--blue);
+    }
+
+    .result {
+      fill: var(--result);
+      stroke: var(--ink);
+      stroke-width: 2;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .major {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .formula {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Прямой проход от камеры до нового пикселя</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 960 430"
+      width="960"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Камера выпускает луч через выбранный пиксель. Вдоль луча расположены
+        64 точки. NeRF возвращает для каждой точки плотность сигма и цвет RGB,
+        а объёмный рендеринг объединяет ответы в один цвет нового пикселя.
+      </desc>
+    </svg>
+
+    <div id="fallback" hidden>
+      Камера выпускает луч через выбранный пиксель, NeRF обрабатывает 64 точки
+      вдоль луча, а объёмный рендеринг собирает из плотностей и цветов один
+      новый пиксель.
+    </div>
+  </main>
+
+  <script>
+    const data = {
+      zero: 0,
+      one: 1,
+      two: 2,
+      half: 0.5,
+      samples: 64,
+      camera: { x: 5, y: 8, w: 12, h: 13 },
+      cameraTop: { x: 8, y: 5, w: 6, h: 3 },
+      lens: { x: 17, y: 12, w: 4, h: 5 },
+      screen: { x: 25, y: 5, w: 1, h: 22 },
+      pixel: { x: 25.5, y: 13.3, rx: 0.9, ry: 1.1 },
+      ray: {
+        x1: 21,
+        y1: 14.5,
+        x2: 68,
+        y2: 4.5,
+        sampleX1: 29,
+        sampleY1: 12.8,
+        sampleX2: 66,
+        sampleY2: 4.9
+      },
+      rayLabel: { x: 49, y: 5.2, dx: 0, dy: -13 },
+      cameraLabel: { x: 11, y: 22, dx: 0, dy: 20 },
+      pixelLabel: { x: 25.5, y: 13.3, dx: 12, dy: 27 },
+      sampleLabel: { x: 49, y: 10, dx: 0, dy: 29 },
+      sampleEnds: [
+        { x: 29, y: 12.8, text: "ближе" },
+        { x: 66, y: 4.9, text: "дальше" }
+      ],
+      panel: { x: 3, y: 29, w: 98, h: 29 },
+      input: { x: 8, y: 36, w: 17, h: 14 },
+      nerf: { x: 31, y: 34, w: 18, h: 18 },
+      outputs: { x: 55, y: 34, w: 14, h: 18 },
+      rendering: { x: 75, y: 34, w: 16, h: 18 },
+      finalPixel: { x: 98, y: 43, rx: 3, ry: 3.8 },
+      arrows: [
+        { x1: 25, y1: 43, x2: 31, y2: 43 },
+        { x1: 49, y1: 43, x2: 55, y2: 43 },
+        { x1: 69, y1: 43, x2: 75, y2: 43 },
+        { x1: 91, y1: 43, x2: 95, y2: 43 }
+      ],
+      downArrow: { x1: 48, y1: 17, x2: 18, y2: 36 },
+      arrowHead: { length: 1.3, side: 0.75 },
+      labels: [
+        { x: 16.5, y: 32.5, text: "64 позиции", anchor: "middle", cls: "major" },
+        { x: 16.5, y: 35.2, text: "+ направление луча", anchor: "middle", cls: "small" },
+        { x: 40, y: 39.5, text: "NeRF", anchor: "middle", cls: "major" },
+        { x: 40, y: 43, text: "одна сеть", anchor: "middle", cls: "small" },
+        { x: 40, y: 46, text: "для всех точек", anchor: "middle", cls: "small" },
+        { x: 62, y: 32, text: "ответ для каждой точки", anchor: "middle", cls: "small" },
+        { x: 62, y: 38.2, text: "σ", anchor: "middle", cls: "major" },
+        { x: 62, y: 46.5, text: "RGB", anchor: "middle", cls: "formula" },
+        { x: 83, y: 39, text: "volume", anchor: "middle", cls: "major" },
+        { x: 83, y: 42.5, text: "rendering", anchor: "middle", cls: "major" },
+        { x: 83, y: 47, text: "ближнее закрывает дальнее", anchor: "middle", cls: "small" },
+        { x: 98, y: 34, text: "новый", anchor: "middle", cls: "major" },
+        { x: 98, y: 37, text: "пиксель", anchor: "middle", cls: "major" },
+        { x: 98, y: 50.5, text: "один цвет", anchor: "middle", cls: "small" },
+        { x: 52, y: 56, text: "64 оценки сцены → взвешивание плотностью → один видимый цвет", anchor: "middle", cls: "formula" }
+      ],
+      inputDots: [
+        { x: 11, y: 39 },
+        { x: 16.5, y: 42.5 },
+        { x: 21.5, y: 47 }
+      ],
+      networkNodes: [
+        { x: 35, y: 38 },
+        { x: 35, y: 43 },
+        { x: 35, y: 48 },
+        { x: 40, y: 39.5 },
+        { x: 40, y: 46.5 },
+        { x: 45, y: 38 },
+        { x: 45, y: 43 },
+        { x: 45, y: 48 }
+      ],
+      networkLinks: [
+        { a: 0, b: 3 }, { a: 0, b: 4 },
+        { a: 1, b: 3 }, { a: 1, b: 4 },
+        { a: 2, b: 3 }, { a: 2, b: 4 },
+        { a: 3, b: 5 }, { a: 3, b: 6 }, { a: 3, b: 7 },
+        { a: 4, b: 5 }, { a: 4, b: 6 }, { a: 4, b: 7 }
+      ],
+      sigmaBars: [
+        { x: 57, y: 40.5, w: 2, h: 2.8 },
+        { x: 60, y: 39.5, w: 2, h: 3.8 },
+        { x: 63, y: 37.5, w: 2, h: 5.8 },
+        { x: 66, y: 41.5, w: 1, h: 1.8 }
+      ],
+      rgb: [
+        { x: 58, y: 47.5, rx: 1.4, ry: 1.4, cls: "rgb-r" },
+        { x: 62, y: 47.5, rx: 1.4, ry: 1.4, cls: "rgb-g" },
+        { x: 66, y: 47.5, rx: 1.4, ry: 1.4, cls: "rgb-b" }
+      ],
+      renderLayers: [
+        { x: 78, y: 44.8, w: 1.7, h: 4.5, cls: "rgb-r" },
+        { x: 81, y: 43.8, w: 1.7, h: 5.5, cls: "rgb-g" },
+        { x: 84, y: 42.6, w: 1.7, h: 6.7, cls: "rgb-b" },
+        { x: 87, y: 40.8, w: 1.7, h: 8.5, cls: "sigma" }
+      ]
+    };
+
+    const origin = { x: 20, y: 10 };
+    const scale = { x: 9, y: 7 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const add = (name, attrs, text) => {
+        const element = document.createElementNS(ns, name);
+        Object.entries(attrs).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        if (text !== undefined) element.textContent = text;
+        svg.appendChild(element);
+        return element;
+      };
+
+      const rect = (box, cls) => add("rect", {
+        x: sx(box.x),
+        y: sy(box.y),
+        width: sx(box.x + box.w) - sx(box.x),
+        height: sy(box.y + box.h) - sy(box.y),
+        rx: sx(box.x + data.half) - sx(box.x),
+        ry: sy(box.y + data.half) - sy(box.y),
+        class: cls
+      });
+
+      const ellipse = (point, cls) => add("ellipse", {
+        cx: sx(point.x),
+        cy: sy(point.y),
+        rx: sx(point.x + point.rx) - sx(point.x),
+        ry: sy(point.y + point.ry) - sy(point.y),
+        class: cls
+      });
+
+      const line = (segment, cls) => add("line", {
+        x1: sx(segment.x1),
+        y1: sy(segment.y1),
+        x2: sx(segment.x2),
+        y2: sy(segment.y2),
+        class: cls
+      });
+
+      const label = (item, dx, dy) => add("text", {
+        x: sx(item.x),
+        y: sy(item.y),
+        dx: dx === undefined ? item.dx || data.zero : dx,
+        dy: dy === undefined ? item.dy || data.zero : dy,
+        "text-anchor": item.anchor || "middle",
+        class: item.cls || ""
+      }, item.text);
+
+      const arrow = segment => {
+        line(segment, "connector");
+        const vx = segment.x2 - segment.x1;
+        const vy = segment.y2 - segment.y1;
+        const magnitude = Math.hypot(vx, vy);
+        const ux = vx / magnitude;
+        const uy = vy / magnitude;
+        const bx = segment.x2 - ux * data.arrowHead.length;
+        const by = segment.y2 - uy * data.arrowHead.length;
+        const px = -uy * data.arrowHead.side;
+        const py = ux * data.arrowHead.side;
+        add("polygon", {
+          points: [
+            `${sx(segment.x2)},${sy(segment.y2)}`,
+            `${sx(bx + px)},${sy(by + py)}`,
+            `${sx(bx - px)},${sy(by - py)}`
+          ].join(" "),
+          class: "arrow-head"
+        });
+      };
+
+      rect(data.panel, "panel");
+      rect(data.camera, "camera");
+      rect(data.cameraTop, "camera");
+      rect(data.lens, "lens");
+      rect(data.screen, "screen");
+      ellipse(data.pixel, "chosen-pixel");
+
+      line(data.ray, "ray");
+
+      for (let index = data.zero; index < data.samples; index += data.one) {
+        const portion = index / (data.samples - data.one);
+        const x = data.ray.sampleX1 +
+          (data.ray.sampleX2 - data.ray.sampleX1) * portion;
+        const y = data.ray.sampleY1 +
+          (data.ray.sampleY2 - data.ray.sampleY1) * portion;
+        ellipse({
+          x,
+          y,
+          rx: data.half,
+          ry: data.half
+        }, "sample");
+      }
+
+      label({
+        ...data.rayLabel,
+        text: "луч через выбранный пиксель",
+        anchor: "middle",
+        cls: "major"
+      });
+      label({
+        ...data.cameraLabel,
+        text: "виртуальная камера",
+        anchor: "middle",
+        cls: "major"
+      });
+      label({
+        ...data.pixelLabel,
+        text: "пустой пиксель нового кадра",
+        anchor: "start",
+        cls: "small"
+      });
+      label({
+        ...data.sampleLabel,
+        text: "64 точки вдоль луча",
+        anchor: "middle",
+        cls: "major"
+      });
+
+      label({
+        x: data.sampleEnds[data.zero].x,
+        y: data.sampleEnds[data.zero].y,
+        text: data.sampleEnds[data.zero].text,
+        anchor: "end",
+        dx: -8,
+        dy: -10,
+        cls: "small"
+      });
+      label({
+        x: data.sampleEnds[data.one].x,
+        y: data.sampleEnds[data.one].y,
+        text: data.sampleEnds[data.one].text,
+        anchor: "start",
+        dx: 8,
+        dy: 16,
+        cls: "small"
+      });
+
+      arrow(data.downArrow);
+      data.arrows.forEach(arrow);
+
+      rect(data.input, "panel");
+      rect(data.nerf, "nerf");
+      rect(data.outputs, "panel");
+      rect(data.rendering, "render");
+      ellipse(data.finalPixel, "result");
+
+      data.inputDots.forEach((point, index) => {
+        ellipse({
+          x: point.x,
+          y: point.y,
+          rx: data.half + index * data.zero,
+          ry: data.half + index * data.zero
+        }, "sample");
+      });
+
+      data.networkLinks.forEach(link => {
+        const from = data.networkNodes[link.a];
+        const to = data.networkNodes[link.b];
+        line({
+          x1: from.x,
+          y1: from.y,
+          x2: to.x,
+          y2: to.y
+        }, "node-link");
+      });
+
+      data.networkNodes.forEach(point => {
+        ellipse({
+          x: point.x,
+          y: point.y,
+          rx: data.half,
+          ry: data.half
+        }, "node");
+      });
+
+      data.sigmaBars.forEach(bar => rect(bar, "sigma"));
+      data.rgb.forEach(dot => ellipse(dot, dot.cls));
+      data.renderLayers.forEach(layer => rect(layer, layer.cls));
+      data.labels.forEach(item => label(item));
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

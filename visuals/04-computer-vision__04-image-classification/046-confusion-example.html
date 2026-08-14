@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как читать строку и столбец confusion matrix</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #526078;
+      --grid: #8793a8;
+      --neutral: #edf1f7;
+      --diagonal: #d9f4e4;
+      --diagonal-strong: #9ee0b9;
+      --diagonal-stroke: #228653;
+      --error: #ffe0c2;
+      --error-stroke: #d66b13;
+      --row: #2675d8;
+      --column: #8a4dc4;
+      --card-green: #effaf3;
+      --card-orange: #fff5eb;
+      --shadow: #d9dfeb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2c;
+        --text: #eef3fb;
+        --muted: #b9c4d6;
+        --grid: #8190a8;
+        --neutral: #222d3d;
+        --diagonal: #173a2a;
+        --diagonal-strong: #205d3d;
+        --diagonal-stroke: #66d59a;
+        --error: #4a2c18;
+        --error-stroke: #ffad61;
+        --row: #69a9ff;
+        --column: #c28cf0;
+        --card-green: #183126;
+        --card-orange: #38271b;
+        --shadow: #0c111a;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      padding: 12px 14px 10px;
+      background: var(--page);
+    }
+
+    .diagram__title {
+      margin: 0 0 6px;
+      font-size: 22px;
+      line-height: normal;
+      font-weight: bold;
+      text-align: center;
+      color: var(--text);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+    }
+
+    svg text {
+      font-family: inherit;
+      fill: var(--text);
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-weight: bold;
+    }
+
+    .class-label {
+      fill: var(--text);
+      font-weight: bold;
+    }
+
+    .cell-value {
+      font-weight: bold;
+    }
+
+    .cell-value--correct {
+      fill: var(--diagonal-stroke);
+    }
+
+    .cell-value--error {
+      fill: var(--error-stroke);
+    }
+
+    .callout-title {
+      font-weight: bold;
+    }
+
+    .callout-note,
+    .legend-label {
+      fill: var(--muted);
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 24px;
+      min-height: 180px;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+      color: var(--text);
+      font-size: 18px;
+    }
+
+    .fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1 class="diagram__title">Как читать строку и столбец confusion matrix</h1>
+
+    <svg
+      id="matrix"
+      viewBox="0 0 960 440"
+      width="960"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Строки — истинные классы, столбцы — предсказанные</title>
+      <desc id="svg-desc">
+        В строке класса 3 число 40 находится на диагонали, а число 10 —
+        в столбце класса 5. Диагональ выделена зелёным.
+      </desc>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать confusion matrix: строки обозначают истинные
+      классы, столбцы — предсказания. Для истинного класса 3 на диагонали стоит
+      40, а в столбце класса 5 — 10.
+    </p>
+  </main>
+
+  <script>
+    const diagram = {
+      axes: {
+        predicted: {
+          label: "Предсказанный класс",
+          labelPoint: { x: 6.25, y: 0.18 },
+          line: { x1: 4.25, y1: 0.64, x2: 8.22, y2: 0.64 },
+          head: [
+            { x1: 8.22, y1: 0.64, x2: 7.98, y2: 0.49 },
+            { x1: 8.22, y1: 0.64, x2: 7.98, y2: 0.79 }
+          ]
+        },
+        trueClass: {
+          label: "Истинный класс",
+          labelPoint: { x: 2.08, y: 3.45 },
+          rotation: -90,
+          line: { x1: 3.18, y1: 1.42, x2: 3.18, y2: 5.48 },
+          head: [
+            { x1: 3.18, y1: 5.48, x2: 3.03, y2: 5.24 },
+            { x1: 3.18, y1: 5.48, x2: 3.33, y2: 5.24 }
+          ]
+        }
+      },
+      matrix: {
+        left: 4,
+        right: 8.5,
+        top: 1.2,
+        bottom: 5.7
+      },
+      columns: [
+        { label: "3", x: 4.75, y: 0.98 },
+        { label: "…", x: 6.25, y: 0.98 },
+        { label: "5", x: 7.75, y: 0.98 }
+      ],
+      rows: [
+        { label: "3", x: 3.72, y: 1.95 },
+        { label: "…", x: 3.72, y: 3.45 },
+        { label: "5", x: 3.72, y: 4.95 }
+      ],
+      cells: [
+        {
+          x1: 4, y1: 1.2, x2: 5.5, y2: 2.7,
+          value: "40", role: "correct"
+        },
+        {
+          x1: 5.5, y1: 1.2, x2: 7, y2: 2.7,
+          value: "", role: "neutral"
+        },
+        {
+          x1: 7, y1: 1.2, x2: 8.5, y2: 2.7,
+          value: "10", role: "error"
+        },
+        {
+          x1: 4, y1: 2.7, x2: 5.5, y2: 4.2,
+          value: "", role: "neutral"
+        },
+        {
+          x1: 5.5, y1: 2.7, x2: 7, y2: 4.2,
+          value: "", role: "diagonal"
+        },
+        {
+          x1: 7, y1: 2.7, x2: 8.5, y2: 4.2,
+          value: "", role: "neutral"
+        },
+        {
+          x1: 4, y1: 4.2, x2: 5.5, y2: 5.7,
+          value: "", role: "neutral"
+        },
+        {
+          x1: 5.5, y1: 4.2, x2: 7, y2: 5.7,
+          value: "", role: "neutral"
+        },
+        {
+          x1: 7, y1: 4.2, x2: 8.5, y2: 5.7,
+          value: "", role: "diagonal"
+        }
+      ],
+      focus: {
+        row: { x1: 4, y1: 1.2, x2: 8.5, y2: 2.7 },
+        column: { x1: 7, y1: 1.2, x2: 8.5, y2: 5.7 }
+      },
+      callouts: [
+        {
+          x1: 9.15, y1: 1.2, x2: 14.9, y2: 2.65,
+          role: "correct",
+          title: "40 — верное предсказание",
+          titlePoint: { x: 9.48, y: 1.72 },
+          note: "истинный 3 → предсказан 3",
+          notePoint: { x: 9.48, y: 2.2 }
+        },
+        {
+          x1: 9.15, y1: 3.02, x2: 14.9, y2: 4.72,
+          role: "error",
+          title: "10 — ошибка",
+          titlePoint: { x: 9.48, y: 3.58 },
+          note: "истинный 3 → предсказан 5",
+          notePoint: { x: 9.48, y: 4.1 }
+        }
+      ],
+      legend: [
+        {
+          x1: 3.05, y1: 6.2, x2: 3.38, y2: 6.53,
+          role: "row",
+          label: "строка: судьба истинного класса 3",
+          labelPoint: { x: 3.58, y: 6.43 }
+        },
+        {
+          x1: 9.05, y1: 6.2, x2: 9.38, y2: 6.53,
+          role: "column",
+          label: "столбец: все предсказания класса 5",
+          labelPoint: { x: 9.58, y: 6.43 }
+        }
+      ]
+    };
+
+    const canvasWidth = 960;
+    const canvasHeight = 440;
+    const origin = { x: 92, y: 54 };
+    const scale = 55;
+
+    const labelPad = 10;
+    const noPad = 0;
+    const thinLine = 2;
+    const thickLine = 3;
+    const axisFont = 17;
+    const classFont = 19;
+    const valueFont = 25;
+    const calloutTitleFont = 18;
+    const calloutNoteFont = 16;
+    const legendFont = 15;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("matrix");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const node = document.createElementNS(NS, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+        parent.appendChild(node);
+        return node;
+      };
+
+      const group = className =>
+        make("g", { class: className });
+
+      const line = (segment, className, width, parent = svg) =>
+        make("line", {
+          x1: sx(segment.x1),
+          y1: sy(segment.y1),
+          x2: sx(segment.x2),
+          y2: sy(segment.y2),
+          class: className,
+          "stroke-width": width,
+          "stroke-linecap": "round",
+          "vector-effect": "non-scaling-stroke"
+        }, parent);
+
+      const rect = (box, className, width, parent = svg) =>
+        make("rect", {
+          x: sx(box.x1),
+          y: sy(box.y1),
+          width: sx(box.x2) - sx(box.x1),
+          height: sy(box.y2) - sy(box.y1),
+          class: className,
+          "stroke-width": width,
+          "vector-effect": "non-scaling-stroke"
+        }, parent);
+
+      const text = (
+        value,
+        point,
+        className,
+        fontSize,
+        anchor,
+        dx = noPad,
+        dy = noPad,
+        parent = svg
+      ) => {
+        const node = make("text", {
+          x: sx(point.x) + dx,
+          y: sy(point.y) + dy,
+          class: className,
+          "font-size": fontSize,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const style = make("style", {}, svg);
+      style.textContent = `
+        .axis-line { stroke: var(--muted); fill: none; }
+        .cell-neutral { fill: var(--neutral); stroke: var(--grid); }
+        .cell-diagonal { fill: var(--diagonal); stroke: var(--diagonal-stroke); }
+        .cell-correct { fill: var(--diagonal-strong); stroke: var(--diagonal-stroke); }
+        .cell-error { fill: var(--error); stroke: var(--error-stroke); }
+        .row-focus { fill: none; stroke: var(--row); }
+        .column-focus { fill: none; stroke: var(--column); }
+        .card-correct { fill: var(--card-green); stroke: var(--diagonal-stroke); }
+        .card-error { fill: var(--card-orange); stroke: var(--error-stroke); }
+        .legend-row { fill: var(--row); stroke: var(--row); }
+        .legend-column { fill: var(--column); stroke: var(--column); }
+      `;
+
+      const axesLayer = group("axes");
+      const cellsLayer = group("cells");
+      const labelsLayer = group("labels");
+      const focusLayer = group("focus");
+      const notesLayer = group("notes");
+      const legendLayer = group("legend");
+
+      line(
+        diagram.axes.predicted.line,
+        "axis-line",
+        thickLine,
+        axesLayer
+      );
+      diagram.axes.predicted.head.forEach(segment =>
+        line(segment, "axis-line", thickLine, axesLayer)
+      );
+
+      text(
+        diagram.axes.predicted.label,
+        diagram.axes.predicted.labelPoint,
+        "axis-label",
+        axisFont,
+        "middle",
+        noPad,
+        noPad,
+        axesLayer
+      );
+
+      line(
+        diagram.axes.trueClass.line,
+        "axis-line",
+        thickLine,
+        axesLayer
+      );
+      diagram.axes.trueClass.head.forEach(segment =>
+        line(segment, "axis-line", thickLine, axesLayer)
+      );
+
+      const trueLabel = text(
+        diagram.axes.trueClass.label,
+        diagram.axes.trueClass.labelPoint,
+        "axis-label",
+        axisFont,
+        "middle",
+        noPad,
+        noPad,
+        axesLayer
+      );
+      trueLabel.setAttribute(
+        "transform",
+        `rotate(${diagram.axes.trueClass.rotation} ${sx(diagram.axes.trueClass.labelPoint.x)} ${sy(diagram.axes.trueClass.labelPoint.y)})`
+      );
+
+      diagram.cells.forEach(cell => {
+        rect(
+          cell,
+          `cell-${cell.role}`,
+          thinLine,
+          cellsLayer
+        );
+
+        if (cell.value) {
+          const center = {
+            x: (cell.x1 + cell.x2) / (cell.x2 - cell.x1),
+            y: (cell.y1 + cell.y2) / (cell.y2 - cell.y1)
+          };
+
+          text(
+            cell.value,
+            center,
+            `cell-value cell-value--${cell.role}`,
+            valueFont,
+            "middle",
+            noPad,
+            noPad,
+            labelsLayer
+          );
+        }
+      });
+
+      diagram.columns.forEach(column =>
+        text(
+          column.label,
+          column,
+          "class-label",
+          classFont,
+          "middle",
+          noPad,
+          noPad,
+          labelsLayer
+        )
+      );
+
+      diagram.rows.forEach(row =>
+        text(
+          row.label,
+          row,
+          "class-label",
+          classFont,
+          "end",
+          -labelPad,
+          noPad,
+          labelsLayer
+        )
+      );
+
+      rect(
+        diagram.focus.row,
+        "row-focus",
+        thickLine,
+        focusLayer
+      );
+      rect(
+        diagram.focus.column,
+        "column-focus",
+        thickLine,
+        focusLayer
+      );
+
+      diagram.callouts.forEach(callout => {
+        rect(
+          callout,
+          `card-${callout.role}`,
+          thinLine,
+          notesLayer
+        );
+
+        text(
+          callout.title,
+          callout.titlePoint,
+          `callout-title cell-value--${callout.role}`,
+          calloutTitleFont,
+          "start",
+          noPad,
+          noPad,
+          notesLayer
+        );
+
+        text(
+          callout.note,
+          callout.notePoint,
+          "callout-note",
+          calloutNoteFont,
+          "start",
+          noPad,
+          noPad,
+          notesLayer
+        );
+      });
+
+      diagram.legend.forEach(item => {
+        rect(
+          item,
+          `legend-${item.role}`,
+          thinLine,
+          legendLayer
+        );
+
+        text(
+          item.label,
+          item.labelPoint,
+          "legend-label",
+          legendFont,
+          "start",
+          noPad,
+          noPad,
+          legendLayer
+        );
+      });
+
+      svg.setAttribute("width", canvasWidth);
+      svg.setAttribute("height", canvasHeight);
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("matrix");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

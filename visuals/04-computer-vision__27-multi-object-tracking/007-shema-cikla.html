@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Полный цикл tracking-by-detection</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#f8fafc;
+  --ink:#172033;
+  --muted:#526078;
+  --line:#64748b;
+  --panel:#ffffff;
+  --blue:#dbeafe;
+  --blue-stroke:#2563eb;
+  --amber:#fef3c7;
+  --amber-stroke:#d97706;
+  --green:#dcfce7;
+  --green-stroke:#16a34a;
+  --violet:#ede9fe;
+  --violet-stroke:#7c3aed;
+  --red:#fee2e2;
+  --red-stroke:#dc2626;
+  --shadow:#cbd5e1;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#0f172a;
+    --ink:#f1f5f9;
+    --muted:#b8c3d4;
+    --line:#94a3b8;
+    --panel:#182235;
+    --blue:#172f52;
+    --blue-stroke:#60a5fa;
+    --amber:#493416;
+    --amber-stroke:#fbbf24;
+    --green:#173b2b;
+    --green-stroke:#4ade80;
+    --violet:#30265a;
+    --violet-stroke:#a78bfa;
+    --red:#4b2228;
+    --red-stroke:#fb7185;
+    --shadow:#020617;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page);color:var(--ink)}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:100%;max-width:1200px;margin:0 auto;padding:10px}
+h1{margin:0 0 8px;font-size:22px;line-height:1.2}
+#stage{
+  width:100%;
+  background:var(--page);
+  border:2px solid var(--shadow);
+  overflow:hidden;
+}
+svg{display:block;width:100%;height:auto;max-height:470px}
+.node{fill:var(--panel);stroke:var(--line)}
+.detector{fill:var(--blue);stroke:var(--blue-stroke)}
+.associate{fill:var(--amber);stroke:var(--amber-stroke)}
+.update{fill:var(--green);stroke:var(--green-stroke)}
+.birth{fill:var(--violet);stroke:var(--violet-stroke)}
+.age{fill:var(--red);stroke:var(--red-stroke)}
+.output{fill:var(--green);stroke:var(--green-stroke)}
+.edge{fill:none;stroke:var(--line);stroke-linecap:round;stroke-linejoin:round}
+.edge-blue{stroke:var(--blue-stroke)}
+.edge-green{stroke:var(--green-stroke)}
+.edge-violet{stroke:var(--violet-stroke)}
+.edge-red{stroke:var(--red-stroke)}
+.feedback{stroke:var(--green-stroke);opacity:.82}
+.arrow{stroke:none;fill:var(--line)}
+.arrow-blue{fill:var(--blue-stroke)}
+.arrow-green{fill:var(--green-stroke)}
+.arrow-violet{fill:var(--violet-stroke)}
+.arrow-red{fill:var(--red-stroke)}
+text{fill:var(--ink);font-weight:650}
+.label{fill:var(--muted);font-weight:600}
+.badge{fill:var(--panel);stroke:var(--line)}
+.badge-text{font-weight:800}
+#error{padding:14px;font-size:16px;line-height:1.4}
+</style>
+</head>
+<body>
+<main>
+  <h1>Полный цикл tracking-by-detection</h1>
+  <div id="stage" aria-live="polite"></div>
+</main>
+<script>
+const diagramData=[
+  {
+    canvas:[1200,430],
+    origin:[10,10],
+    scale:[10,10],
+    labelPad:7,
+    stroke:2,
+    font:[14,12,11],
+    math:[0,1,2],
+    shape:[0.8,1.15,0.72,0.34],
+    arrow:[0.75,0.34]
+  },
+  {type:"node",id:"frame",box:[2,5,13,7],lines:["Кадр t"],class:"node"},
+  {type:"node",id:"detector",box:[19,5,13,7],lines:["Детектор"],class:"detector"},
+  {type:"node",id:"detections",box:[36,4,15,9],lines:["Детекции в t","3 машины"],class:"node",badge:"3"},
+  {type:"node",id:"previous",box:[2,23,13,8],lines:["Треки до t−1","4 истории"],class:"node",badge:"4"},
+  {type:"node",id:"predict",box:[19,23,13,8],lines:["Прогноз движения","Kalman"],class:"detector"},
+  {type:"node",id:"predicted",box:[36,22,15,10],lines:["Позиции треков","в момент t"],class:"node"},
+  {type:"node",id:"associate",box:[56,13,15,10],lines:["Сопоставление","Hungarian assignment","IoU · вид · движение"],class:"associate",small:true},
+  {type:"node",id:"update",box:[76,3,17,8],lines:["Совпавшая пара","Обновить трек","ID сохранён"],class:"update",small:true},
+  {type:"node",id:"birth",box:[76,14,17,8],lines:["Детекция без пары","Рождение","нового трека"],class:"birth",small:true},
+  {type:"node",id:"age",box:[76,25,17,10],lines:["Трек без детекции","Возраст пропуска +1","Удалить после N"],class:"age",small:true},
+  {type:"node",id:"next",box:[98,13,16,10],lines:["Треки в t","Память для t+1"],class:"output"},
+  {type:"edge",points:[[15,8.5],[19,8.5]],class:"edge-blue"},
+  {type:"edge",points:[[32,8.5],[36,8.5]],class:"edge-blue"},
+  {type:"edge",points:[[15,27],[19,27]],class:"edge-blue"},
+  {type:"edge",points:[[32,27],[36,27]],class:"edge-blue"},
+  {type:"edge",points:[[51,8.5],[53.5,8.5],[53.5,16.5],[56,16.5]],class:"edge-blue"},
+  {type:"edge",points:[[51,27],[53.5,27],[53.5,19.5],[56,19.5]],class:"edge-blue"},
+  {type:"edge",points:[[71,16],[73,16],[73,7],[76,7]],class:"edge-green"},
+  {type:"edge",points:[[71,18],[76,18]],class:"edge-violet"},
+  {type:"edge",points:[[71,20],[73,20],[73,30],[76,30]],class:"edge-red"},
+  {type:"edge",points:[[93,7],[95.5,7],[95.5,16],[98,16]],class:"edge-green"},
+  {type:"edge",points:[[93,18],[98,18]],class:"edge-violet"},
+  {type:"edge",points:[[93,30],[95.5,30],[95.5,20],[98,20]],class:"edge-red"},
+  {type:"edge",points:[[106,23],[106,39],[8.5,39],[8.5,31]],class:"feedback"},
+  {type:"label",at:[45,2.9],text:"свежие рамки",side:"middle"},
+  {type:"label",at:[45,33.6],text:"предсказанные позиции",side:"middle"},
+  {type:"label",at:[66,11.4],text:"совместное распределение пар",side:"middle"},
+  {type:"label",at:[55,38.2],text:"обновлённый список переходит в следующий кадр",side:"middle"}
+];
+
+const origin=Object.freeze(diagramData[0].origin);
+const scale=Object.freeze(diagramData[0].scale);
+const [originX,originY]=origin;
+const [scaleX,scaleY]=scale;
+function sx(x){return originX+x*scaleX}
+function sy(y){return originY+y*scaleY}
+
+try{
+  const config=diagramData[0];
+  const [canvasWidth,canvasHeight]=config.canvas;
+  const [zero,one,two]=config.math;
+  const [round,lineStep,badgeRadius,badgeInset]=config.shape;
+  const [arrowLength,arrowHalf]=config.arrow;
+  const [mainFont,smallFont,labelFont]=config.font;
+  const svgNS="http://www.w3.org/2000/svg";
+  const stage=document.getElementById("stage");
+
+  const svg=document.createElementNS(svgNS,"svg");
+  svg.setAttribute("viewBox",`${zero} ${zero} ${canvasWidth} ${canvasHeight}`);
+  svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+  svg.setAttribute("role","img");
+  svg.setAttribute("aria-labelledby","diagram-title diagram-desc");
+
+  const title=document.createElementNS(svgNS,"title");
+  title.id="diagram-title";
+  title.textContent="Полный цикл tracking-by-detection";
+  svg.appendChild(title);
+
+  const desc=document.createElementNS(svgNS,"desc");
+  desc.id="diagram-desc";
+  desc.textContent="Два потока, детекции и предсказанные треки, встречаются в Hungarian assignment. Затем совпадения обновляются, новые детекции рождают треки, а пропуски стареют до удаления. Результат становится памятью следующего кадра.";
+  svg.appendChild(desc);
+
+  function element(name,attrs){
+    const item=document.createElementNS(svgNS,name);
+    for(const [key,value] of Object.entries(attrs)) item.setAttribute(key,value);
+    return item;
+  }
+
+  function appendArrow(points,styleClass){
+    const [tail,tip]=points.slice(-two);
+    const [tailX,tailY]=tail;
+    const [tipX,tipY]=tip;
+    const vectorX=tipX-tailX;
+    const vectorY=tipY-tailY;
+    const vectorLength=Math.hypot(vectorX,vectorY);
+    const unitX=vectorX/vectorLength;
+    const unitY=vectorY/vectorLength;
+    const baseX=tipX-unitX*arrowLength;
+    const baseY=tipY-unitY*arrowLength;
+    const sideX=-unitY*arrowHalf;
+    const sideY=unitX*arrowHalf;
+    const vertices=[
+      [tipX,tipY],
+      [baseX+sideX,baseY+sideY],
+      [baseX-sideX,baseY-sideY]
+    ];
+    svg.appendChild(element("polygon",{
+      points:vertices.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+      class:`arrow ${styleClass.replace("edge","arrow")}`
+    }));
+  }
+
+  const feedbackEdges=diagramData.filter(item=>item.type==="edge"&&item.class==="feedback");
+  const regularEdges=diagramData.filter(item=>item.type==="edge"&&item.class!=="feedback");
+
+  for(const item of [...feedbackEdges,...regularEdges]){
+    svg.appendChild(element("polyline",{
+      points:item.points.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+      class:`edge ${item.class}`,
+      "stroke-width":config.stroke
+    }));
+    appendArrow(item.points,item.class);
+  }
+
+  for(const item of diagramData.filter(entry=>entry.type==="node")){
+    const [x,y,width,height]=item.box;
+    const group=element("g",{"data-node":item.id});
+    group.appendChild(element("rect",{
+      x:sx(x),
+      y:sy(y),
+      width:sx(x+width)-sx(x),
+      height:sy(y+height)-sy(y),
+      rx:sx(round)-sx(zero),
+      class:item.class,
+      "stroke-width":config.stroke
+    }));
+
+    const centerX=x+width/two;
+    const centerY=y+height/two;
+    const lines=item.lines;
+    const firstY=centerY-(lines.length-one)*lineStep/two;
+
+    lines.forEach((line,index)=>{
+      const text=element("text",{
+        x:sx(centerX),
+        y:sy(firstY+index*lineStep),
+        "text-anchor":"middle",
+        "dominant-baseline":"middle",
+        "font-size":item.small?smallFont:mainFont
+      });
+      text.textContent=line;
+      group.appendChild(text);
+    });
+
+    if(item.badge){
+      const badgeX=x+width-badgeInset;
+      const badgeY=y+badgeInset;
+      group.appendChild(element("circle",{
+        cx:sx(badgeX),
+        cy:sy(badgeY),
+        r:sx(badgeRadius)-sx(zero),
+        class:"badge",
+        "stroke-width":config.stroke
+      }));
+      const badgeText=element("text",{
+        x:sx(badgeX),
+        y:sy(badgeY),
+        "text-anchor":"middle",
+        "dominant-baseline":"middle",
+        "font-size":smallFont,
+        class:"badge-text"
+      });
+      badgeText.textContent=item.badge;
+      group.appendChild(badgeText);
+    }
+    svg.appendChild(group);
+  }
+
+  for(const item of diagramData.filter(entry=>entry.type==="label")){
+    const [x,y]=item.at;
+    const text=element("text",{
+      x:sx(x),
+      y:sy(y),
+      "text-anchor":item.side,
+      "dominant-baseline":"middle",
+      "font-size":labelFont,
+      class:"label"
+    });
+    text.setAttribute("data-label-pad",config.labelPad);
+    text.textContent=item.text;
+    svg.appendChild(text);
+  }
+
+  stage.replaceChildren(svg);
+}catch(error){
+  const fallback=document.createElement("div");
+  fallback.id="error";
+  fallback.textContent="Схема должна была показать два потока: Frame t → Detector → 3 детекции и 4 трека до t−1 → прогноз движения. Они встречаются в Hungarian assignment и расходятся на update, birth и age/delete, после чего треки в t становятся памятью для t+1.";
+  document.getElementById("stage").replaceChildren(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

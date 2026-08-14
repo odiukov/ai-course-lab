@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Куда временной эмбеддинг входит в TinyUNet</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5f6b7d;
+    --line: #53657d;
+    --blue: #3d78d8;
+    --blue-top: #8db8f2;
+    --blue-side: #295da9;
+    --violet: #8254c7;
+    --violet-soft: #eee6fb;
+    --orange: #d87927;
+    --orange-soft: #fff0dc;
+    --green: #328665;
+    --green-top: #84cbb0;
+    --green-side: #226049;
+    --skip: #24826c;
+    --grid: #dfe6ef;
+    --shadow: #d9e1ec;
+    --error: #a23434;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1160px;
+    margin: auto;
+    background: var(--panel);
+    border: 1px solid var(--grid);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  h2 {
+    margin: 0;
+    padding: 15px 22px 8px;
+    font-size: 20px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .operation {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .shape {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .small {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .branch-label {
+    font-size: 14px;
+    font-weight: 700;
+    fill: var(--violet);
+  }
+
+  .skip-label {
+    font-size: 14px;
+    font-weight: 700;
+    fill: var(--skip);
+  }
+
+  .tensor-front {
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .tensor-top, .tensor-side {
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linejoin: round;
+  }
+
+  .flow {
+    stroke: var(--line);
+    stroke-width: 3px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .time-flow {
+    stroke: var(--violet);
+    stroke-width: 3px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .skip-flow {
+    stroke: var(--skip);
+    stroke-width: 3px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .pill {
+    fill: var(--violet-soft);
+    stroke: var(--violet);
+    stroke-width: 2px;
+  }
+
+  .plus {
+    fill: var(--orange-soft);
+    stroke: var(--orange);
+    stroke-width: 3px;
+  }
+
+  .plus-mark {
+    fill: var(--orange);
+    font-size: 24px;
+    font-weight: 800;
+  }
+
+  .guide {
+    stroke: var(--grid);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .error {
+    fill: var(--error);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #18202c;
+      --ink: #eef3fb;
+      --muted: #b2bdcc;
+      --line: #9eacbe;
+      --blue: #4d89e8;
+      --blue-top: #7aa8e5;
+      --blue-side: #315f9f;
+      --violet: #b18aee;
+      --violet-soft: #302642;
+      --orange: #f0a054;
+      --orange-soft: #3c2b1e;
+      --green: #4fa987;
+      --green-top: #71bea1;
+      --green-side: #34745d;
+      --skip: #68c8aa;
+      --grid: #313c4c;
+      --shadow: #0f151f;
+      --error: #ff9a9a;
+    }
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <h2>Куда временной эмбеддинг входит в TinyUNet</h2>
+  <svg id="diagram"
+       viewBox="0 0 1160 430"
+       width="1160"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Схема тензоров TinyUNet и добавления временной проекции</title>
+    <desc id="svg-desc">Изображение проходит enc1 и enc2. Проекция времени размером 64 на 1 на 1 прибавляется после enc2. Затем декодер восстанавливает размер, а skip-связь объединяет 32 и 32 канала.</desc>
+  </svg>
+</figure>
+
+<script>
+const diagramData = [{
+  origin: [0, 0],
+  scale: 1,
+  canvas: [1160, 430],
+  labelPad: 8,
+  arrow: { head: 12, wing: 6 },
+  tensorRadius: 7,
+  tensors: [
+    {
+      id: "input", x: 28, y: 202, w: 72, h: 96, d: 9,
+      operation: "изображение x", shape: "3 × 32 × 32",
+      fill: "var(--blue)", top: "var(--blue-top)", side: "var(--blue-side)"
+    },
+    {
+      id: "h1", x: 158, y: 174, w: 92, h: 152, d: 11,
+      operation: "enc1 → h1", shape: "32 × 32 × 32",
+      fill: "var(--blue)", top: "var(--blue-top)", side: "var(--blue-side)"
+    },
+    {
+      id: "h2", x: 354, y: 210, w: 98, h: 80, d: 11,
+      operation: "enc2 → h2", shape: "64 × 16 × 16",
+      fill: "var(--blue)", top: "var(--blue-top)", side: "var(--blue-side)"
+    },
+    {
+      id: "mid", x: 598, y: 210, w: 98, h: 80, d: 11,
+      operation: "mid", shape: "64 × 16 × 16",
+      fill: "var(--green)", top: "var(--green-top)", side: "var(--green-side)"
+    },
+    {
+      id: "d1", x: 762, y: 174, w: 92, h: 152, d: 11,
+      operation: "dec1 → d1", shape: "32 × 32 × 32",
+      fill: "var(--green)", top: "var(--green-top)", side: "var(--green-side)"
+    },
+    {
+      id: "concat", x: 984, y: 174, w: 116, h: 152, d: 11,
+      operation: "skip-конкатенация", shape: "64 × 32 × 32",
+      fill: "var(--green)", top: "var(--green-top)", side: "var(--green-side)"
+    }
+  ],
+  mainArrows: [
+    { from: [109, 250], to: [149, 250], label: "enc1", labelAt: [129, 228] },
+    { from: [261, 250], to: [345, 250], label: "enc2, ↓2", labelAt: [303, 228] },
+    { from: [463, 250], to: [513, 250], label: "", labelAt: [488, 228] },
+    { from: [547, 250], to: [589, 250], label: "после сложения", labelAt: [568, 304] },
+    { from: [707, 250], to: [753, 250], label: "dec1, ↑2", labelAt: [730, 228] },
+    { from: [865, 250], to: [975, 250], label: "d1", labelAt: [920, 228] }
+  ],
+  plus: { x: 530, y: 250, r: 17, labelAt: [530, 339] },
+  time: {
+    t: { x: 177, y: 70, r: 19 },
+    pills: [
+      { x: 222, y: 45, w: 132, h: 50, title: "эмбеддинг t", value: "64" },
+      { x: 376, y: 45, w: 102, h: 50, title: "t_mlp", value: "128" },
+      { x: 500, y: 45, w: 116, h: 50, title: "time_proj", value: "64" },
+      { x: 638, y: 45, w: 132, h: 50, title: "[:, :, None, None]", value: "64 × 1 × 1" }
+    ],
+    arrows: [
+      { from: [196, 70], to: [213, 70] },
+      { from: [354, 70], to: [367, 70] },
+      { from: [478, 70], to: [491, 70] },
+      { from: [616, 70], to: [629, 70] }
+    ],
+    route: [[704, 95], [704, 132], [566, 132], [530, 233]],
+    captionAt: [530, 151],
+    caption: "broadcasting: одно значение на весь канал"
+  },
+  skip: {
+    route: [[204, 337], [204, 377], [942, 377], [942, 304], [975, 304]],
+    labelAt: [573, 402],
+    label: "skip: h1 (32 канала) + d1 (32 канала)"
+  },
+  divider: { from: [24, 118], to: [1136, 118] },
+  fallback: {
+    at: [580, 220],
+    text: "Схема должна показать: h2 + проекция t 64 × 1 × 1, затем dec1 и skip-конкатенацию."
+  }
+}];
+
+const [cfg] = diagramData;
+const [originX, originY] = cfg.origin;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = cfg.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const svg = document.getElementById("diagram");
+const ns = "http://www.w3.org/2000/svg";
+
+function node(name, attrs, className) {
+  const element = document.createElementNS(ns, name);
+  Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+  if (className) element.setAttribute("class", className);
+  return element;
+}
+
+function pointList(points) {
+  return points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+}
+
+function addText(parent, x, y, value, className, anchor = "middle") {
+  const text = node("text", {
+    x: sx(x),
+    y: sy(y),
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, className);
+  text.textContent = value;
+  parent.appendChild(text);
+  return text;
+}
+
+function arrowHead(parent, from, to, className) {
+  const [x1, y1] = from;
+  const [x2, y2] = to;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const ux = dx / length;
+  const uy = dy / length;
+  const bx = x2 - ux * cfg.arrow.head;
+  const by = y2 - uy * cfg.arrow.head;
+  const px = -uy * cfg.arrow.wing;
+  const py = ux * cfg.arrow.wing;
+  const head = node("polygon", {
+    points: pointList([
+      [x2, y2],
+      [bx + px, by + py],
+      [bx - px, by - py]
+    ])
+  }, className);
+  parent.appendChild(head);
+}
+
+function straightArrow(parent, item, lineClass, headClass) {
+  const [x1, y1] = item.from;
+  const [x2, y2] = item.to;
+  parent.appendChild(node("line", {
+    x1: sx(x1), y1: sy(y1),
+    x2: sx(x2), y2: sy(y2)
+  }, lineClass));
+  arrowHead(parent, item.from, item.to, headClass);
+  if (item.label) {
+    const [lx, ly] = item.labelAt;
+    addText(parent, lx, ly, item.label, "small");
+  }
+}
+
+function routedArrow(parent, points, lineClass, headClass) {
+  parent.appendChild(node("polyline", {
+    points: pointList(points)
+  }, lineClass));
+  const reversed = [...points].reverse();
+  const [to, from] = reversed;
+  arrowHead(parent, from, to, headClass);
+}
+
+function tensor(parent, item) {
+  const group = node("g", {}, "");
+  const x = item.x;
+  const y = item.y;
+  const w = item.w;
+  const h = item.h;
+  const d = item.d;
+
+  group.appendChild(node("polygon", {
+    points: pointList([
+      [x, y],
+      [x + d, y - d],
+      [x + w + d, y - d],
+      [x + w, y]
+    ]),
+    fill: item.top
+  }, "tensor-top"));
+
+  group.appendChild(node("polygon", {
+    points: pointList([
+      [x + w, y],
+      [x + w + d, y - d],
+      [x + w + d, y + h - d],
+      [x + w, y + h]
+    ]),
+    fill: item.side
+  }, "tensor-side"));
+
+  group.appendChild(node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(w) - sx(0),
+    height: sy(h) - sy(0),
+    rx: sx(cfg.tensorRadius) - sx(0),
+    fill: item.fill
+  }, "tensor-front"));
+
+  addText(group, x + w / (cfg.scale + cfg.scale), y - d - cfg.labelPad,
+    item.operation, "operation");
+  addText(group, x + w / (cfg.scale + cfg.scale), y + h + cfg.labelPad + cfg.labelPad,
+    item.shape, "shape");
+  parent.appendChild(group);
+}
+
+function pill(parent, item) {
+  parent.appendChild(node("rect", {
+    x: sx(item.x),
+    y: sy(item.y),
+    width: sx(item.w) - sx(0),
+    height: sy(item.h) - sy(0),
+    rx: sx(cfg.tensorRadius) - sx(0)
+  }, "pill"));
+
+  addText(parent,
+    item.x + item.w / (cfg.scale + cfg.scale),
+    item.y + item.h / (cfg.scale + cfg.scale) - cfg.labelPad,
+    item.title, "small");
+
+  addText(parent,
+    item.x + item.w / (cfg.scale + cfg.scale),
+    item.y + item.h / (cfg.scale + cfg.scale) + cfg.labelPad,
+    item.value, "branch-label");
+}
+
+try {
+  const layer = node("g", {}, "");
+  svg.appendChild(layer);
+
+  const [dividerFromX, dividerFromY] = cfg.divider.from;
+  const [dividerToX, dividerToY] = cfg.divider.to;
+  layer.appendChild(node("line", {
+    x1: sx(dividerFromX), y1: sy(dividerFromY),
+    x2: sx(dividerToX), y2: sy(dividerToY)
+  }, "guide"));
+
+  cfg.mainArrows.forEach(item =>
+    straightArrow(layer, item, "flow", "flow")
+  );
+
+  routedArrow(layer, cfg.skip.route, "skip-flow", "skip-flow");
+  const [skipLabelX, skipLabelY] = cfg.skip.labelAt;
+  addText(layer, skipLabelX, skipLabelY, cfg.skip.label, "skip-label");
+
+  cfg.tensors.forEach(item => tensor(layer, item));
+
+  layer.appendChild(node("circle", {
+    cx: sx(cfg.plus.x),
+    cy: sy(cfg.plus.y),
+    r: sx(cfg.plus.r) - sx(0)
+  }, "plus"));
+  addText(layer, cfg.plus.x, cfg.plus.y, "+", "plus-mark");
+  const [plusLabelX, plusLabelY] = cfg.plus.labelAt;
+  addText(layer, plusLabelX, plusLabelY, "прибавление t_proj", "operation");
+
+  layer.appendChild(node("circle", {
+    cx: sx(cfg.time.t.x),
+    cy: sy(cfg.time.t.y),
+    r: sx(cfg.time.t.r) - sx(0)
+  }, "pill"));
+  addText(layer, cfg.time.t.x, cfg.time.t.y, "t", "branch-label");
+
+  cfg.time.pills.forEach(item => pill(layer, item));
+  cfg.time.arrows.forEach(item =>
+    straightArrow(layer, item, "time-flow", "time-flow")
+  );
+  routedArrow(layer, cfg.time.route, "time-flow", "time-flow");
+
+  const [captionX, captionY] = cfg.time.captionAt;
+  addText(layer, captionX, captionY, cfg.time.caption, "branch-label");
+
+} catch (error) {
+  while (svg.lastChild && svg.lastChild.nodeName !== "desc") {
+    svg.removeChild(svg.lastChild);
+  }
+  const [fallbackX, fallbackY] = cfg.fallback.at;
+  addText(svg, fallbackX, fallbackY, cfg.fallback.text, "error");
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

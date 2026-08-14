@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как объёмная гауссиана становится экранным эллипсом</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #657086;
+    --grid: #d9dfeb;
+    --line: #64748b;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
+    --orange: #ea580c;
+    --orange-soft: #ffedd5;
+    --green: #15803d;
+    --shadow: #cbd5e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --panel: #171d29;
+      --ink: #edf2ff;
+      --muted: #aab4c8;
+      --grid: #30394a;
+      --line: #94a3b8;
+      --blue: #60a5fa;
+      --blue-soft: #19365d;
+      --violet: #c4b5fd;
+      --violet-soft: #34265c;
+      --orange: #fb923c;
+      --orange-soft: #542b18;
+      --green: #4ade80;
+      --shadow: #293244;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: auto; background: var(--page); color: var(--ink); }
+  body {
+    max-width: 1200px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 {
+    margin: 14px 18px 8px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: .01em;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--page);
+  }
+  text { fill: var(--ink); font-size: 15px; }
+  .small { fill: var(--muted); font-size: 13px; }
+  .label { font-size: 14px; font-weight: 650; }
+  .formula { font-size: 17px; font-weight: 700; }
+  .panel-title { font-size: 17px; font-weight: 750; }
+  .fallback {
+    display: none;
+    margin: 18px;
+    padding: 18px;
+    color: var(--ink);
+    background: var(--panel);
+    border: 2px solid var(--orange);
+    border-radius: 10px;
+  }
+</style>
+</head>
+<body>
+<h1>Как объёмная гауссиана становится экранным эллипсом</h1>
+<svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">Проекция трёхмерной гауссианы в экранный эллипс</title>
+  <desc id="svgDesc">Камера наблюдает объёмную гауссиану с ковариацией три на три. Перспективная проекция переводит её в двумерную ковариацию два на два и ограниченный примерно тремя сигмами экранный эллипс.</desc>
+</svg>
+<p id="fallback" class="fallback">
+  Здесь должна быть схема: 3D-гауссиана с ковариацией 3×3 перед камерой,
+  её перспективная проекция и экранный эллипс с ковариацией 2×2,
+  обрезанный примерно по трём сигмам.
+</p>
+
+<script>
+const data = [{
+  originX: 28, originY: 422, scale: 29,
+  bounds: { left: 0, right: 39.4, bottom: 0, top: 14.15 },
+  pad: 8, stroke: 2, thin: 1, dot: 0.11, fullAngle: 180,
+  camera: {
+    body: [[0.7,5.4],[2.5,5.4],[3.2,6.15],[3.2,7.85],[2.5,8.6],[0.7,8.6]],
+    back: [[0.7,6.15],[0.05,6.65],[0.05,7.35],[0.7,7.85]],
+    lens: [[3.2,6.15],[4.0,6.55],[4.0,7.45],[3.2,7.85]],
+    eye: [4.0,7.0], label: [2.0,4.8]
+  },
+  gaussian: {
+    center: [12.2,7.0], rx: 3.15, ry: 1.55, angle: -22,
+    rings: [
+      { k: 1, opacity: 0.13 },
+      { k: 0.78, opacity: 0.16 },
+      { k: 0.56, opacity: 0.2 },
+      { k: 0.34, opacity: 0.28 }
+    ],
+    longAxis: [[9.25,8.18],[15.15,5.82]],
+    shortAxis: [[11.62,5.55],[12.78,8.45]],
+    crossA: [[10.0,8.65],[10.9,7.35],[13.5,6.0],[14.65,6.15]],
+    crossB: [[10.25,6.05],[11.45,6.2],[13.55,7.55],[14.35,8.15]],
+    title: [12.2,10.35], note: [12.2,3.95]
+  },
+  rays: [
+    [[4.0,7.0],[9.45,8.55],[22.0,10.2]],
+    [[4.0,7.0],[14.9,5.95],[22.0,5.25]],
+    [[4.0,7.0],[12.2,7.0],[22.0,7.55]]
+  ],
+  plane: {
+    polygon: [[21.55,4.35],[23.0,4.85],[23.0,10.75],[21.55,10.25]],
+    axis: [[22.28,4.6],[22.28,10.5]],
+    center: [22.28,7.55],
+    ellipseRx: 0.68, ellipseRy: 1.55, angle: -14,
+    label: [22.28,3.75]
+  },
+  formula: {
+    box: [7.05,11.25,17.55,13.55],
+    first: [12.3,12.75],
+    second: [12.3,11.85]
+  },
+  transfer: {
+    from: [23.35,7.55], to: [25.05,7.55], label: [24.2,8.25],
+    head: 0.34, wing: 0.18
+  },
+  screen: {
+    box: [25.15,1.15,39.25,13.55],
+    title: [32.2,12.85],
+    gridX: [26.0,27.0,28.0,29.0,30.0,31.0,32.0,33.0,34.0,35.0,36.0,37.0,38.0],
+    gridY: [2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0],
+    center: [32.25,7.15], rx: 4.45, ry: 2.05, angle: -25,
+    rings: [
+      { k: 1, opacity: 0.13 },
+      { k: 0.76, opacity: 0.17 },
+      { k: 0.52, opacity: 0.23 },
+      { k: 0.28, opacity: 0.34 }
+    ],
+    longAxis: [[28.22,9.03],[36.28,5.27]],
+    shortAxis: [[31.38,5.29],[33.12,9.01]],
+    centerLabel: [32.25,7.15],
+    longLabel: [36.15,5.1],
+    shortLabel: [31.25,5.15],
+    clipLabel: [28.2,9.6],
+    densityLabel: [35.85,9.7]
+  },
+  styles: {
+    background: "var(--page)", panel: "var(--panel)", ink: "var(--ink)",
+    muted: "var(--muted)", grid: "var(--grid)", line: "var(--line)",
+    blue: "var(--blue)", blueSoft: "var(--blue-soft)",
+    violet: "var(--violet)", violetSoft: "var(--violet-soft)",
+    orange: "var(--orange)", orangeSoft: "var(--orange-soft)",
+    green: "var(--green)", shadow: "var(--shadow)",
+    dash: "7 7", fineDash: "4 5"
+  }
+}];
+
+const origin = Object.freeze({ x: data[0].originX, y: data[0].originY });
+const scale = data[0].scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y - y * scale;
+
+try {
+  const d = data[0];
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const node = (name, attrs = {}, parent = svg) => {
+    const el = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    parent.appendChild(el);
+    return el;
+  };
+
+  const rect = (box, attrs = {}, parent = svg) =>
+    node("rect", {
+      x: sx(box[0]), y: sy(box[3]),
+      width: sx(box[2]) - sx(box[0]),
+      height: sy(box[1]) - sy(box[3]),
+      ...attrs
+    }, parent);
+
+  const line = (a, b, attrs = {}, parent = svg) =>
+    node("line", {
+      x1: sx(a[0]), y1: sy(a[1]),
+      x2: sx(b[0]), y2: sy(b[1]),
+      ...attrs
+    }, parent);
+
+  const polygon = (points, attrs = {}, parent = svg) =>
+    node("polygon", {
+      points: points.map(p => `${sx(p[0])},${sy(p[1])}`).join(" "),
+      ...attrs
+    }, parent);
+
+  const path = (parts, attrs = {}, parent = svg) =>
+    node("path", { d: parts.join(" "), ...attrs }, parent);
+
+  const ellipse = (center, rx, ry, angle, attrs = {}, parent = svg) =>
+    node("ellipse", {
+      cx: sx(center[0]), cy: sy(center[1]),
+      rx: Math.abs(sx(rx) - sx(0)),
+      ry: Math.abs(sy(ry) - sy(0)),
+      transform: `rotate(${-angle} ${sx(center[0])} ${sy(center[1])})`,
+      ...attrs
+    }, parent);
+
+  const text = (point, value, options = {}, parent = svg) => {
+    const el = node("text", {
+      x: sx(point[0]) + (options.dx || d.pad - d.pad),
+      y: sy(point[1]) + (options.dy || d.pad - d.pad),
+      "text-anchor": options.anchor || "middle",
+      class: options.className || "",
+      ...options.attrs
+    }, parent);
+    el.textContent = value;
+    return el;
+  };
+
+  const arrow = (a, b, attrs = {}, parent = svg) => {
+    line(a, b, attrs, parent);
+    const vx = b[0] - a[0];
+    const vy = b[1] - a[1];
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const hx = b[0] - ux * d.transfer.head;
+    const hy = b[1] - uy * d.transfer.head;
+    const px = -uy * d.transfer.wing;
+    const py = ux * d.transfer.wing;
+    polygon([
+      [b[0],b[1]],
+      [hx + px,hy + py],
+      [hx - px,hy - py]
+    ], { fill: attrs.stroke || d.styles.ink }, parent);
+  };
+
+  rect(
+    [d.bounds.left,d.bounds.bottom,d.bounds.right,d.bounds.top],
+    { fill: d.styles.background }
+  );
+
+  const world = node("g", { "aria-label": "Объёмная гауссиана перед камерой" });
+
+  polygon(d.camera.back, {
+    fill: d.styles.shadow, stroke: d.styles.line, "stroke-width": d.stroke
+  }, world);
+  polygon(d.camera.body, {
+    fill: d.styles.panel, stroke: d.styles.line, "stroke-width": d.stroke
+  }, world);
+  polygon(d.camera.lens, {
+    fill: d.styles.blueSoft, stroke: d.styles.blue, "stroke-width": d.stroke
+  }, world);
+  line([d.camera.body[0][0],d.camera.body[0][1]],
+       [d.camera.body[1][0],d.camera.body[1][1]],
+       { stroke: d.styles.line, "stroke-width": d.stroke }, world);
+  text(d.camera.label, "камера", {
+    className: "label", dy: d.pad, anchor: "middle"
+  }, world);
+
+  d.rays.forEach(ray => path([
+    `M ${sx(ray[0][0])} ${sy(ray[0][1])}`,
+    `L ${sx(ray[1][0])} ${sy(ray[1][1])}`,
+    `L ${sx(ray[2][0])} ${sy(ray[2][1])}`
+  ], {
+    fill: "none", stroke: d.styles.orange,
+    "stroke-width": d.thin, "stroke-dasharray": d.styles.fineDash
+  }, world));
+
+  d.gaussian.rings.forEach(ring =>
+    ellipse(
+      d.gaussian.center,
+      d.gaussian.rx * ring.k,
+      d.gaussian.ry * ring.k,
+      d.gaussian.angle,
+      { fill: d.styles.violet, opacity: ring.opacity, stroke: "none" },
+      world
+    )
+  );
+
+  ellipse(
+    d.gaussian.center, d.gaussian.rx, d.gaussian.ry, d.gaussian.angle,
+    { fill: "none", stroke: d.styles.violet, "stroke-width": d.stroke }, world
+  );
+  line(d.gaussian.longAxis[0], d.gaussian.longAxis[1], {
+    stroke: d.styles.violet, "stroke-width": d.stroke
+  }, world);
+  line(d.gaussian.shortAxis[0], d.gaussian.shortAxis[1], {
+    stroke: d.styles.violet, "stroke-width": d.stroke
+  }, world);
+  path([
+    `M ${sx(d.gaussian.crossA[0][0])} ${sy(d.gaussian.crossA[0][1])}`,
+    `C ${sx(d.gaussian.crossA[1][0])} ${sy(d.gaussian.crossA[1][1])}`,
+    `${sx(d.gaussian.crossA[2][0])} ${sy(d.gaussian.crossA[2][1])}`,
+    `${sx(d.gaussian.crossA[3][0])} ${sy(d.gaussian.crossA[3][1])}`
+  ], {
+    fill: "none", stroke: d.styles.violet,
+    "stroke-width": d.thin, opacity: d.gaussian.rings[1].opacity
+  }, world);
+  path([
+    `M ${sx(d.gaussian.crossB[0][0])} ${sy(d.gaussian.crossB[0][1])}`,
+    `C ${sx(d.gaussian.crossB[1][0])} ${sy(d.gaussian.crossB[1][1])}`,
+    `${sx(d.gaussian.crossB[2][0])} ${sy(d.gaussian.crossB[2][1])}`,
+    `${sx(d.gaussian.crossB[3][0])} ${sy(d.gaussian.crossB[3][1])}`
+  ], {
+    fill: "none", stroke: d.styles.violet,
+    "stroke-width": d.thin, opacity: d.gaussian.rings[1].opacity
+  }, world);
+  node("circle", {
+    cx: sx(d.gaussian.center[0]), cy: sy(d.gaussian.center[1]),
+    r: Math.abs(sx(d.dot) - sx(0)), fill: d.styles.violet
+  }, world);
+
+  text(d.gaussian.title, "Объём: Σ (3×3)", {
+    className: "panel-title", dy: -d.pad
+  }, world);
+  text(d.gaussian.note, "форма в пространстве сохраняется", {
+    className: "small", dy: d.pad
+  }, world);
+
+  rect(d.formula.box, {
+    rx: Math.abs(sx(d.dot) - sx(0)),
+    fill: d.styles.panel, stroke: d.styles.shadow, "stroke-width": d.thin
+  }, world);
+  text(d.formula.first, "Σ′ = J W Σ Wᵀ Jᵀ", {
+    className: "formula"
+  }, world);
+  text(d.formula.second, "перспективная проекция", {
+    className: "small"
+  }, world);
+
+  polygon(d.plane.polygon, {
+    fill: d.styles.blueSoft, stroke: d.styles.blue,
+    "stroke-width": d.stroke, opacity: d.screen.rings[1].opacity
+  }, world);
+  line(d.plane.axis[0], d.plane.axis[1], {
+    stroke: d.styles.blue, "stroke-width": d.thin
+  }, world);
+  ellipse(
+    d.plane.center, d.plane.ellipseRx, d.plane.ellipseRy, d.plane.angle,
+    { fill: d.styles.blue, opacity: d.screen.rings[2].opacity,
+      stroke: d.styles.blue, "stroke-width": d.stroke },
+    world
+  );
+  text(d.plane.label, "плоскость изображения", {
+    className: "small", dy: d.pad
+  }, world);
+
+  arrow(d.transfer.from, d.transfer.to, {
+    stroke: d.styles.green, "stroke-width": d.stroke
+  });
+  text(d.transfer.label, "след", {
+    className: "small", dy: -d.pad
+  });
+
+  const screen = node("g", { "aria-label": "Экранный эллипс" });
+  rect(d.screen.box, {
+    rx: Math.abs(sx(d.dot) - sx(0)),
+    fill: d.styles.panel, stroke: d.styles.shadow, "stroke-width": d.stroke
+  }, screen);
+
+  d.screen.gridX.forEach(x =>
+    line([x,d.screen.box[1]],[x,d.screen.box[3]], {
+      stroke: d.styles.grid, "stroke-width": d.thin
+    }, screen)
+  );
+  d.screen.gridY.forEach(y =>
+    line([d.screen.box[0],y],[d.screen.box[2],y], {
+      stroke: d.styles.grid, "stroke-width": d.thin
+    }, screen)
+  );
+
+  d.screen.rings.forEach(ring =>
+    ellipse(
+      d.screen.center,
+      d.screen.rx * ring.k,
+      d.screen.ry * ring.k,
+      d.screen.angle,
+      { fill: d.styles.blue, opacity: ring.opacity, stroke: "none" },
+      screen
+    )
+  );
+
+  ellipse(
+    d.screen.center, d.screen.rx, d.screen.ry, d.screen.angle,
+    {
+      fill: "none", stroke: d.styles.orange,
+      "stroke-width": d.stroke, "stroke-dasharray": d.styles.dash
+    }, screen
+  );
+  line(d.screen.longAxis[0], d.screen.longAxis[1], {
+    stroke: d.styles.blue, "stroke-width": d.stroke
+  }, screen);
+  line(d.screen.shortAxis[0], d.screen.shortAxis[1], {
+    stroke: d.styles.green, "stroke-width": d.stroke
+  }, screen);
+  node("circle", {
+    cx: sx(d.screen.center[0]), cy: sy(d.screen.center[1]),
+    r: Math.abs(sx(d.dot) - sx(0)), fill: d.styles.ink
+  }, screen);
+
+  text(d.screen.title, "Экран: Σ′ (2×2)", {
+    className: "panel-title"
+  }, screen);
+  text(d.screen.centerLabel, "μ′, вес max", {
+    className: "label", dx: d.pad, dy: -d.pad, anchor: "start"
+  }, screen);
+  text(d.screen.longLabel, "длинная ось", {
+    className: "small", dx: d.pad, dy: -d.pad, anchor: "start"
+  }, screen);
+  text(d.screen.shortLabel, "короткая ось", {
+    className: "small", dx: -d.pad, dy: -d.pad, anchor: "end"
+  }, screen);
+  text(d.screen.clipLabel, "≈ 3σ: обрезка", {
+    className: "label", dx: -d.pad, dy: -d.pad, anchor: "end",
+    attrs: { fill: d.styles.orange }
+  }, screen);
+  text(d.screen.densityLabel, "к краю вклад убывает", {
+    className: "small", dy: d.pad
+  }, screen);
+
+} catch (error) {
+  document.getElementById("diagram").style.display = "none";
+  document.getElementById("fallback").style.display = "block";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

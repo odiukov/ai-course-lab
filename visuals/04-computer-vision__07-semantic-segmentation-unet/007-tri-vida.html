@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Одна сцена в трёх видах сегментации</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#f7f8fc;--card:#ffffff;--ink:#172033;--muted:#59657a;
+  --line:#cbd3e1;--sky:#b9ddf5;--road:#667085;--rawroad:#687181;
+  --unmarked:#e8ebf1;--car:#ef5da8;--window:#dcecf7;--wheel:#202735;
+  --white:#fff;--shadow:#dce2ec;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+figure{margin:0;background:var(--page)}
+figcaption{padding:14px 18px 8px;font-size:22px;font-weight:750;letter-spacing:-.02em}
+svg{display:block;width:100%;max-height:480px;background:var(--page)}
+.panel{font-size:16px;font-weight:750;fill:var(--ink)}
+.kicker{font-size:11px;font-weight:750;letter-spacing:.08em;fill:var(--muted)}
+.label{font-size:12px;font-weight:650;fill:var(--ink)}
+.light{fill:var(--white)}
+.id{font-size:14px;font-weight:800;fill:var(--white);paint-order:stroke;stroke:#172033;stroke-width:1.5px}
+.note{font-size:12px;fill:var(--muted)}
+.card{fill:var(--card);stroke:var(--line);stroke-width:1.5px}
+.scene{stroke:var(--line);stroke-width:1.5px}
+.boundary{stroke:var(--card);stroke-width:2px;stroke-linejoin:round}
+.rule{stroke:var(--line);stroke-width:1.5px}
+@media(prefers-color-scheme:dark){
+  :root{
+    --page:#11151e;--card:#1a202c;--ink:#eef2f8;--muted:#aab5c7;
+    --line:#3a4558;--sky:#315f7a;--road:#4c5668;--rawroad:#464e5d;
+    --unmarked:#262d39;--window:#9bc5dd;--wheel:#090c12;--shadow:#080b10;
+  }
+}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Одна сцена в трёх видах сегментации</figcaption>
+  <svg id="chart" width="1160" height="452" viewBox="0 0 1160 452"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Парковка с пятью машинами: исходное изображение, semantic-, instance- и panoptic-маски">
+    <g id="drawing"></g>
+  </svg>
+</figure>
+<script>
+const data={
+  origin:{x:15,y:15},scale:10,zero:0,
+  card:{y:4,w:27.5,h:29.2},scene:{ox:1.2,y:7,w:25.1,h:23.5,split:16},
+  panels:[
+    {x:0,title:"Исходное изображение",kind:"input",tag:"ВХОД",
+     a:"Одна парковка",b:"5 машин"},
+    {x:28.5,title:"Semantic",kind:"semantic",tag:"ПИКСЕЛЬ → КЛАСС",
+     a:"Единый класс «машина»",b:"граница между машинами исчезает"},
+    {x:57,title:"Instance",kind:"instance",tag:"ПИКСЕЛЬ → ID",
+     a:"Машины получают id 1–5",b:"фон может быть не размечен"},
+    {x:85.5,title:"Panoptic",kind:"panoptic",tag:"КЛАСС + ID",
+     a:"Классы есть у всех пикселей",b:"у машин также есть id 1–5"}
+  ],
+  carY:18.2,
+  carShape:[[0,7],[0,3],[.7,3],[1.25,1],[3.35,1],[3.9,3],[4.6,3],[4.6,7]],
+  window:[[1.25,2.9],[1.65,1.45],[2.9,1.45],[3.35,2.9]],
+  cars:[
+    {x:2.2,id:"1",raw:"#e35d6a",mask:"#e0529c"},
+    {x:6.8,id:"2",raw:"#e6a43c",mask:"#9b62d5"},
+    {x:11.4,id:"3",raw:"#3c91d6",mask:"#347ed4"},
+    {x:16,id:"4",raw:"#55a56a",mask:"#25a58a"},
+    {x:20.6,id:"5",raw:"#9b6bd1",mask:"#de7048"}
+  ],
+  footer:{y:34.5,h:6.4,tagY:36.1,aY:38.2,bY:39.8},
+  labels:{titleY:2.4,skyY:10.1,roadY:28.8,carY:27.5,instanceY:10.1},
+  wheel:{y:25.35,r:.55,left:1,right:3.6},
+  lamp:{y:23.3,r:.18,left:.65,right:3.95},
+  lane:{y:28.1,w:3.1,gap:2.1},
+  line:{y:16},
+  error:{x:56.5,y:20,a:"Схема должна показать одну парковку",b:"в исходном виде и трёх видах сегментации."}
+};
+const origin=data.origin;
+const scale=data.scale;
+const sx=x=>origin.x+x*scale;
+const sy=y=>origin.y+y*scale;
+
+const NS="http://www.w3.org/2000/svg";
+const root=document.getElementById("drawing");
+function el(name,attrs={},text){
+  const n=document.createElementNS(NS,name);
+  Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));
+  if(text!==undefined)n.textContent=text;
+  return n;
+}
+function rect(x,y,w,h,attrs={}){
+  return el("rect",{x:sx(x),y:sy(y),width:sx(x+w)-sx(x),
+    height:sy(y+h)-sy(y),...attrs});
+}
+function text(x,y,value,cls,anchor="middle"){
+  return el("text",{x:sx(x),y:sy(y),class:cls,"text-anchor":anchor,
+    "dominant-baseline":"middle"},value);
+}
+function path(points,attrs={}){
+  const d=points.map((p,i)=>(i?"L":"M")+sx(p[0])+" "+sy(p[1])).join(" ")+" Z";
+  return el("path",{d,...attrs});
+}
+function shifted(points,x,y){
+  return points.map(p=>[x+p[0],y+p[1]]);
+}
+function circle(x,y,r,attrs={}){
+  return el("circle",{cx:sx(x),cy:sy(y),r:sx(r)-sx(data.zero),...attrs});
+}
+function addRawCar(g,x,y,color){
+  g.append(path(shifted(data.carShape,x,y),{fill:color,stroke:"var(--shadow)",
+    "stroke-width":sy(.16)-sy(data.zero),"stroke-linejoin":"round"}));
+  g.append(path(shifted(data.window,x,y),{fill:"var(--window)",opacity:".92"}));
+  g.append(circle(x+data.wheel.left,data.wheel.y,data.wheel.r,{fill:"var(--wheel)"}));
+  g.append(circle(x+data.wheel.right,data.wheel.y,data.wheel.r,{fill:"var(--wheel)"}));
+  g.append(circle(x+data.lamp.left,data.lamp.y,data.lamp.r,{fill:"#fff4b8"}));
+  g.append(circle(x+data.lamp.right,data.lamp.y,data.lamp.r,{fill:"#fff4b8"}));
+}
+function addMaskCar(g,x,id,color,boundary){
+  const attrs={fill:color};
+  if(boundary)attrs.class="boundary";
+  g.append(path(shifted(data.carShape,x,data.carY),attrs));
+  if(boundary)g.append(text(x+2.3,data.carY+5.15,id,"id"));
+}
+function addRoadMarks(g,x){
+  data.cars.slice(0,4).forEach((car,i)=>{
+    const lx=x+car.x+data.lane.gap;
+    g.append(rect(lx,data.lane.y,data.lane.w,.22,{fill:"#f3f4f6",opacity:".72"}));
+  });
+}
+function addScene(panel,g){
+  const x=panel.x+data.scene.ox;
+  const y=data.scene.y;
+  const w=data.scene.w;
+  const skyH=data.scene.split-y;
+  const roadH=y+data.scene.h-data.scene.split;
+  const clipId="clip-"+panel.kind;
+  const defs=el("defs");
+  const cp=el("clipPath",{id:clipId});
+  cp.append(rect(x,y,w,data.scene.h));
+  defs.append(cp);
+  g.append(defs);
+  const scene=el("g",{"clip-path":"url(#"+clipId+")"});
+  g.append(scene);
+
+  if(panel.kind==="instance"){
+    scene.append(rect(x,y,w,data.scene.h,{fill:"var(--unmarked)"}));
+    scene.append(text(x+w/2,data.labels.instanceY,"фон не размечен","label"));
+  }else{
+    scene.append(rect(x,y,w,skyH,{fill:"var(--sky)"}));
+    scene.append(rect(x,data.scene.split,w,roadH,
+      {fill:panel.kind==="input"?"var(--rawroad)":"var(--road)"}));
+    if(panel.kind==="input")addRoadMarks(scene,panel.x);
+    if(panel.kind!=="input"){
+      scene.append(text(x+1,data.labels.skyY,"небо","label","start"));
+      scene.append(text(x+w-1,data.labels.roadY,"асфальт","label light","end"));
+    }
+  }
+
+  if(panel.kind==="input"){
+    data.cars.forEach(car=>addRawCar(scene,panel.x+car.x,data.carY,car.raw));
+  }
+  if(panel.kind==="semantic"){
+    data.cars.forEach(car=>addMaskCar(scene,panel.x+car.x,car.id,"var(--car)",false));
+    scene.append(text(x+w/2,data.labels.carY,"единый класс: машина","label light"));
+  }
+  if(panel.kind==="instance"){
+    data.cars.forEach(car=>addMaskCar(scene,panel.x+car.x,car.id,car.mask,true));
+  }
+  if(panel.kind==="panoptic"){
+    data.cars.forEach(car=>addMaskCar(scene,panel.x+car.x,car.id,car.mask,true));
+  }
+  g.append(rect(x,y,w,data.scene.h,{fill:"none",class:"scene"}));
+}
+function addPanel(panel){
+  const g=el("g");
+  root.append(g);
+  g.append(text(panel.x+data.card.w/2,data.labels.titleY,panel.title,"panel"));
+  g.append(rect(panel.x,data.card.y,data.card.w,data.card.h,{class:"card",
+    rx:sx(.8)-sx(data.zero)}));
+  addScene(panel,g);
+  g.append(rect(panel.x,data.footer.y,data.card.w,data.footer.h,{class:"card",
+    rx:sx(.8)-sx(data.zero)}));
+  g.append(text(panel.x+data.card.w/2,data.footer.tagY,panel.tag,"kicker"));
+  g.append(text(panel.x+data.card.w/2,data.footer.aY,panel.a,"label"));
+  g.append(text(panel.x+data.card.w/2,data.footer.bY,panel.b,"note"));
+}
+try{
+  data.panels.forEach(addPanel);
+  const semantic=data.panels.find(p=>p.kind==="semantic");
+  const instance=data.panels.find(p=>p.kind==="instance");
+  const panoptic=data.panels.find(p=>p.kind==="panoptic");
+  root.append(el("line",{x1:sx(semantic.x+data.card.w),y1:sy(41.8),
+    x2:sx(instance.x),y2:sy(41.8),class:"rule"}));
+  root.append(el("line",{x1:sx(instance.x+data.card.w),y1:sy(41.8),
+    x2:sx(panoptic.x),y2:sy(41.8),class:"rule"}));
+  root.append(text(56.5,42.6,"одна сцена → разные ответы модели","kicker"));
+}catch(error){
+  root.replaceChildren();
+  root.append(text(data.error.x,data.error.y,data.error.a,"panel"));
+  root.append(text(data.error.x,data.error.y+2.4,data.error.b,"note"));
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

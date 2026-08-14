@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Маршрут патчей через MAE</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --ink: #172033;
+    --muted: #526078;
+    --panel: #ffffff;
+    --line: #77849a;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --blue-faint: #eff6ff;
+    --purple: #7c3aed;
+    --purple-soft: #ede9fe;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --orange: #c2410c;
+    --orange-soft: #ffedd5;
+    --hidden: #d7dce5;
+    --hidden-line: #98a2b3;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101522;
+      --ink: #f1f5f9;
+      --muted: #b8c1d1;
+      --panel: #171e2d;
+      --line: #8995aa;
+      --blue: #60a5fa;
+      --blue-soft: #193764;
+      --blue-faint: #18263c;
+      --purple: #c4b5fd;
+      --purple-soft: #352661;
+      --green: #4ade80;
+      --green-soft: #173e2a;
+      --orange: #fb923c;
+      --orange-soft: #4b291c;
+      --hidden: #343d4d;
+      --hidden-line: #778399;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    font-size: 20px;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .encoder {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .decoder {
+    fill: var(--purple-soft);
+    stroke: var(--purple);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .loss-box {
+    fill: var(--orange-soft);
+    stroke: var(--orange);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .visible-patch {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .hidden-patch {
+    fill: var(--hidden);
+    stroke: var(--hidden-line);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .mask-patch {
+    fill: var(--purple-soft);
+    stroke: var(--purple);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .predicted-patch {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .context-patch {
+    fill: var(--blue-faint);
+    stroke: var(--blue);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .grid-frame {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .mask-flow {
+    fill: none;
+    stroke: var(--purple);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .loss-flow {
+    fill: none;
+    stroke: var(--orange);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .blocked {
+    fill: none;
+    stroke: var(--hidden-line);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow-blue {
+    fill: var(--blue);
+  }
+
+  .arrow-purple {
+    fill: var(--purple);
+  }
+
+  .arrow-orange {
+    fill: var(--orange);
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .box-title {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .blue-text {
+    fill: var(--blue);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .purple-text {
+    fill: var(--purple);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .orange-text {
+    fill: var(--orange);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  #fallback {
+    color: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Маршрут патчей через MAE</h1>
+  <svg id="diagram"
+       viewBox="0 0 1280 455"
+       width="1280"
+       height="455"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Из 196 патчей 49 видимых проходят через большой ViT-энкодер.
+      На 147 скрытых позиций перед маленьким декодером вставляются
+      mask-токены. Ошибка считается только на скрытых позициях.
+    </desc>
+  </svg>
+  <p id="fallback" hidden></p>
+</main>
+
+<script>
+const DATA = [
+  ["zero", 0], ["one", 1], ["grid", 14], ["total", 196],
+  ["visible", 49], ["hidden", 147], ["stride", 4],
+  ["originX", 0], ["originY", 0], ["scaleX", 1], ["scaleY", 1],
+  ["patchStep", 10], ["patchSize", 8], ["lineGap", 19],
+  ["headLength", 10], ["headHalf", 6], ["stopHalf", 13],
+  ["inputX", 42], ["inputY", 112],
+  ["encoderX", 350], ["encoderY", 70], ["encoderW", 220], ["encoderH", 120],
+  ["sequenceX", 650], ["sequenceY", 110],
+  ["maskBoxX", 430], ["maskBoxY", 310], ["maskBoxW", 180], ["maskBoxH", 62],
+  ["decoderX", 850], ["decoderY", 135], ["decoderW", 160], ["decoderH", 90],
+  ["outputX", 1080], ["outputY", 110],
+  ["lossX", 1035], ["lossY", 320], ["lossW", 225], ["lossH", 70],
+  ["inputTitleX", 42], ["inputTitleY", 80],
+  ["sequenceTitleX", 720], ["sequenceTitleY", 80],
+  ["outputTitleX", 1150], ["outputTitleY", 80],
+  ["visibleRouteX", 280], ["visibleRouteY", 130],
+  ["hiddenRouteEndX", 310], ["hiddenRouteY", 225],
+  ["noteY", 430], ["noteX", 42],
+  ["labelVisibleX", 210], ["labelVisibleY", 101],
+  ["labelHiddenX", 210], ["labelHiddenY", 272],
+  ["encodedLabelX", 638], ["encodedLabelY", 214],
+  ["maskTurnX", 630], ["maskEntryY", 220],
+  ["arrowMidY", 180]
+];
+
+const C = Object.fromEntries(DATA);
+const origin = Object.freeze({ x: C.originX, y: C.originY });
+const scale = Object.freeze({ x: C.scaleX, y: C.scaleY });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs = {}) => {
+    const node = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    svg.appendChild(node);
+    return node;
+  };
+
+  const rect = (x, y, w, h, cls) => make("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(C.zero),
+    height: sy(y + h) - sy(C.zero),
+    class: cls
+  });
+
+  const line = (xA, yA, xB, yB, cls) => make("line", {
+    x1: sx(xA),
+    y1: sy(yA),
+    x2: sx(xB),
+    y2: sy(yB),
+    class: cls
+  });
+
+  const text = (x, y, lines, cls, anchor = "middle") => {
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: cls,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    });
+
+    lines.forEach((content, index) => {
+      const span = document.createElementNS(NS, "tspan");
+      span.setAttribute("x", sx(x));
+      if (index !== C.zero) {
+        span.setAttribute("dy", sy(C.lineGap) - sy(C.zero));
+      }
+      span.textContent = content;
+      node.appendChild(span);
+    });
+    return node;
+  };
+
+  const polygon = (points, cls) => make("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: cls
+  });
+
+  const route = (points, flowClass, headClass, direction) => {
+    make("polyline", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: flowClass
+    });
+
+    const end = points[points.length - C.one];
+    let head;
+
+    if (direction === "down") {
+      head = [
+        { x: end.x, y: end.y },
+        { x: end.x - C.headHalf, y: end.y - C.headLength },
+        { x: end.x + C.headHalf, y: end.y - C.headLength }
+      ];
+    } else {
+      head = [
+        { x: end.x, y: end.y },
+        { x: end.x - C.headLength, y: end.y - C.headHalf },
+        { x: end.x - C.headLength, y: end.y + C.headHalf }
+      ];
+    }
+    polygon(head, headClass);
+  };
+
+  const patchIsVisible = (row, column) =>
+    (row * C.grid + column) % C.stride === C.zero;
+
+  const grid = (x, y, mode) => {
+    for (let row = C.zero; row < C.grid; row += C.one) {
+      for (let column = C.zero; column < C.grid; column += C.one) {
+        const visible = patchIsVisible(row, column);
+        let cls;
+
+        if (mode === "input") {
+          cls = visible ? "visible-patch" : "hidden-patch";
+        } else if (mode === "sequence") {
+          cls = visible ? "visible-patch" : "mask-patch";
+        } else {
+          cls = visible ? "context-patch" : "predicted-patch";
+        }
+
+        rect(
+          x + column * C.patchStep,
+          y + row * C.patchStep,
+          C.patchSize,
+          C.patchSize,
+          cls
+        );
+      }
+    }
+
+    rect(
+      x - C.one,
+      y - C.one,
+      C.grid * C.patchStep,
+      C.grid * C.patchStep,
+      "grid-frame"
+    );
+  };
+
+  text(
+    C.inputTitleX,
+    C.inputTitleY,
+    ["Изображение → 14×14 = 196 патчей"],
+    "heading",
+    "start"
+  );
+  grid(C.inputX, C.inputY, "input");
+
+  route(
+    [
+      { x: C.inputX + C.grid * C.patchStep, y: C.visibleRouteY },
+      { x: C.visibleRouteX, y: C.visibleRouteY },
+      { x: C.encoderX, y: C.visibleRouteY }
+    ],
+    "flow",
+    "arrow-blue",
+    "right"
+  );
+
+  text(
+    C.labelVisibleX,
+    C.labelVisibleY,
+    ["49 видимых патчей"],
+    "blue-text",
+    "start"
+  );
+
+  line(
+    C.inputX + C.grid * C.patchStep,
+    C.hiddenRouteY,
+    C.hiddenRouteEndX,
+    C.hiddenRouteY,
+    "blocked"
+  );
+  line(
+    C.hiddenRouteEndX,
+    C.hiddenRouteY - C.stopHalf,
+    C.hiddenRouteEndX,
+    C.hiddenRouteY + C.stopHalf,
+    "blocked"
+  );
+
+  text(
+    C.labelHiddenX,
+    C.labelHiddenY,
+    ["147 скрытых патчей:", "энкодер их не видит"],
+    "small",
+    "start"
+  );
+
+  rect(
+    C.encoderX,
+    C.encoderY,
+    C.encoderW,
+    C.encoderH,
+    "encoder"
+  );
+  text(
+    C.encoderX + C.encoderW / C.stride,
+    C.encoderY + C.encoderH / C.stride,
+    ["БОЛЬШОЙ"],
+    "box-title",
+    "middle"
+  );
+  text(
+    C.encoderX + C.encoderW / C.stride,
+    C.encoderY + C.encoderH / C.stride + C.lineGap,
+    ["ViT-ЭНКОДЕР"],
+    "box-title",
+    "middle"
+  );
+  text(
+    C.encoderX + C.encoderW / C.stride,
+    C.encoderY + C.encoderH - C.lineGap,
+    ["только видимые патчи"],
+    "small",
+    "middle"
+  );
+
+  route(
+    [
+      {
+        x: C.encoderX + C.encoderW,
+        y: C.visibleRouteY
+      },
+      {
+        x: C.sequenceX,
+        y: C.visibleRouteY
+      }
+    ],
+    "flow",
+    "arrow-blue",
+    "right"
+  );
+
+  text(
+    C.encodedLabelX,
+    C.encodedLabelY,
+    ["выход: 49 представлений"],
+    "blue-text",
+    "end"
+  );
+
+  text(
+    C.sequenceTitleX,
+    C.sequenceTitleY,
+    ["Полная последовательность"],
+    "heading",
+    "middle"
+  );
+  grid(C.sequenceX, C.sequenceY, "sequence");
+
+  rect(
+    C.maskBoxX,
+    C.maskBoxY,
+    C.maskBoxW,
+    C.maskBoxH,
+    "panel"
+  );
+  text(
+    C.maskBoxX + C.maskBoxW / C.stride,
+    C.maskBoxY + C.lineGap,
+    ["147 mask-токенов"],
+    "purple-text",
+    "middle"
+  );
+  text(
+    C.maskBoxX + C.maskBoxW / C.stride,
+    C.maskBoxY + C.lineGap + C.lineGap,
+    ["вставляются в пропуски"],
+    "small",
+    "middle"
+  );
+
+  route(
+    [
+      {
+        x: C.maskBoxX + C.maskBoxW,
+        y: C.maskBoxY + C.maskBoxH / C.stride
+      },
+      {
+        x: C.maskTurnX,
+        y: C.maskBoxY + C.maskBoxH / C.stride
+      },
+      {
+        x: C.maskTurnX,
+        y: C.maskEntryY
+      },
+      {
+        x: C.sequenceX,
+        y: C.maskEntryY
+      }
+    ],
+    "mask-flow",
+    "arrow-purple",
+    "right"
+  );
+
+  route(
+    [
+      {
+        x: C.sequenceX + C.grid * C.patchStep,
+        y: C.arrowMidY
+      },
+      {
+        x: C.decoderX,
+        y: C.arrowMidY
+      }
+    ],
+    "mask-flow",
+    "arrow-purple",
+    "right"
+  );
+
+  rect(
+    C.decoderX,
+    C.decoderY,
+    C.decoderW,
+    C.decoderH,
+    "decoder"
+  );
+  text(
+    C.decoderX + C.decoderW / C.stride,
+    C.decoderY + C.decoderH / C.stride,
+    ["МАЛЕНЬКИЙ"],
+    "box-title",
+    "middle"
+  );
+  text(
+    C.decoderX + C.decoderW / C.stride,
+    C.decoderY + C.decoderH / C.stride + C.lineGap,
+    ["ДЕКОДЕР"],
+    "box-title",
+    "middle"
+  );
+  text(
+    C.decoderX + C.decoderW / C.stride,
+    C.decoderY + C.decoderH - C.lineGap,
+    ["восстанавливает пиксели"],
+    "small",
+    "middle"
+  );
+
+  route(
+    [
+      {
+        x: C.decoderX + C.decoderW,
+        y: C.arrowMidY
+      },
+      {
+        x: C.outputX,
+        y: C.arrowMidY
+      }
+    ],
+    "mask-flow",
+    "arrow-purple",
+    "right"
+  );
+
+  text(
+    C.outputTitleX,
+    C.outputTitleY,
+    ["Реконструкция"],
+    "heading",
+    "middle"
+  );
+  grid(C.outputX, C.outputY, "output");
+
+  route(
+    [
+      {
+        x: C.outputX + C.grid * C.patchStep / C.stride,
+        y: C.outputY + C.grid * C.patchStep
+      },
+      {
+        x: C.outputX + C.grid * C.patchStep / C.stride,
+        y: C.lossY
+      }
+    ],
+    "loss-flow",
+    "arrow-orange",
+    "down"
+  );
+
+  rect(
+    C.lossX,
+    C.lossY,
+    C.lossW,
+    C.lossH,
+    "loss-box"
+  );
+  text(
+    C.lossX + C.lossW / C.stride,
+    C.lossY + C.lineGap,
+    ["LOSS"],
+    "orange-text",
+    "middle"
+  );
+  text(
+    C.lossX + C.lossW / C.stride,
+    C.lossY + C.lineGap + C.lineGap,
+    ["только на 147 скрытых позициях"],
+    "label",
+    "middle"
+  );
+
+  text(
+    C.noteX,
+    C.noteY,
+    [
+      "Синие позиции проходят через энкодер; фиолетовые возникают только перед декодером."
+    ],
+    "small",
+    "start"
+  );
+} catch (error) {
+  const diagram = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  diagram.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать: из сетки 14×14 только 49 видимых патчей входят в большой ViT-энкодер; 147 скрытых заменяются mask-токенами перед маленьким декодером, а loss считается только на скрытых позициях.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

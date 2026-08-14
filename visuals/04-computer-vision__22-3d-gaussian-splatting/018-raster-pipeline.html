@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пять стадий rasterization 3DGS</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --panel-blue: #e8f1ff;
+    --panel-amber: #fff4d6;
+    --panel-green: #e4f8eb;
+    --ink: #172033;
+    --muted: #5d687c;
+    --line: #8a96aa;
+    --blue: #2563eb;
+    --blue-soft: #7ca7f8;
+    --cyan: #0891b2;
+    --amber: #d97706;
+    --yellow: #f4bd3d;
+    --red: #dc5a5a;
+    --green: #16a34a;
+    --violet: #7c5ce0;
+    --pixel: #44b978;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --panel: #1b2536;
+      --panel-blue: #172d50;
+      --panel-amber: #402f17;
+      --panel-green: #173627;
+      --ink: #edf3ff;
+      --muted: #b2bfd2;
+      --line: #78869c;
+      --blue: #72a5ff;
+      --blue-soft: #4e78bd;
+      --cyan: #54c9df;
+      --amber: #f1ad45;
+      --yellow: #ffd166;
+      --red: #ff8585;
+      --green: #58d487;
+      --violet: #aa92ff;
+      --pixel: #55ce8d;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 14px;
+  }
+
+  h1 {
+    font-size: 24px;
+    font-weight: bold;
+    margin: unset;
+    padding-block-end: 10px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    border: 2px solid var(--line);
+    padding: 16px;
+    font-size: 16px;
+  }
+
+  .card { fill: var(--panel); stroke: var(--line); }
+  .card-blue { fill: var(--panel-blue); }
+  .card-amber { fill: var(--panel-amber); }
+  .card-green { fill: var(--panel-green); }
+  .divider { stroke: var(--line); }
+  .flow { stroke: var(--blue); fill: none; }
+  .flow-head { fill: var(--blue); }
+  .soft-line { stroke: var(--line); fill: none; }
+  .grid-line { stroke: var(--line); fill: none; }
+  .screen-line { stroke: var(--cyan); }
+  .title-text { fill: var(--ink); font-weight: bold; }
+  .body-text { fill: var(--ink); }
+  .muted-text { fill: var(--muted); }
+  .blue-text { fill: var(--blue); font-weight: bold; }
+  .amber-text { fill: var(--amber); font-weight: bold; }
+  .green-text { fill: var(--green); font-weight: bold; }
+</style>
+</head>
+<body>
+<h1 id="heading">Пять стадий rasterization 3DGS</h1>
+<svg id="diagram" viewBox="0 0 1200 430" preserveAspectRatio="xMidYMid meet"
+     role="img" aria-labelledby="heading description">
+  <desc id="description">Миллионы 3D-гауссиан проецируются в 2D, назначаются тайлам 16×16, сортируются по глубине, смешиваются alpha-композитингом и дают цвет пикселя.</desc>
+</svg>
+<p id="fallback" hidden>Схема должна была показать путь миллионов 3D-гауссиан: проекцию в 2D, распределение по тайлам 16×16, сортировку по глубине, alpha-композитинг спереди назад и получение цвета пикселя.</p>
+
+<script>
+const DATA = {
+  canvas: { left: 0, top: 0, right: 120, bottom: 43 },
+  cards: [
+    { a: { x: 2, y: 3 }, b: { x: 24, y: 34 }, title: "Проекция на экран", note: "миллионы 3D-гауссиан", tone: "card-blue" },
+    { a: { x: 27, y: 3 }, b: { x: 47, y: 34 }, title: "Распределение", note: "тайлы 16×16 пикселей", tone: "" },
+    { a: { x: 50, y: 3 }, b: { x: 69, y: 34 }, title: "Сортировка", note: "по глубине в тайле", tone: "" },
+    { a: { x: 72, y: 3 }, b: { x: 95, y: 34 }, title: "Alpha-композитинг", note: "смешивание слоёв", tone: "card-amber" },
+    { a: { x: 98, y: 3 }, b: { x: 117, y: 34 }, title: "Результат", note: "накопленный цвет", tone: "card-green" }
+  ],
+  flows: [
+    { a: { x: 24.5, y: 20 }, b: { x: 26.4, y: 20 } },
+    { a: { x: 47.5, y: 20 }, b: { x: 49.4, y: 20 } },
+    { a: { x: 69.5, y: 20 }, b: { x: 71.4, y: 20 } },
+    { a: { x: 95.5, y: 20 }, b: { x: 97.4, y: 20 } }
+  ],
+  cloud: [
+    { x: 5.7, y: 16.4, rx: 1.4, ry: 2.4, rot: "blue" },
+    { x: 9.1, y: 13.8, rx: 1.8, ry: 1.1, rot: "violet" },
+    { x: 9.8, y: 20.4, rx: 2.2, ry: 1.3, rot: "cyan" },
+    { x: 6.8, y: 24.8, rx: 1.1, ry: 2.1, rot: "amber" },
+    { x: 11.4, y: 26.5, rx: 1.7, ry: 1.0, rot: "red" }
+  ],
+  projection: {
+    rays: [
+      { a: { x: 12.1, y: 14.1 }, b: { x: 18.1, y: 17.5 } },
+      { a: { x: 12.2, y: 25.7 }, b: { x: 18.1, y: 22.5 } }
+    ],
+    screenA: { x: 18.5, y: 12 },
+    screenB: { x: 18.5, y: 29 },
+    ellipse: { x: 18.5, y: 20, rx: 2.7, ry: 4.2 },
+    caption: { x: 13, y: 31.8 }
+  },
+  grid: {
+    xs: [29, 33, 37, 41, 45],
+    ys: [11, 15, 19, 23, 27],
+    a: { x: 29, y: 11 },
+    b: { x: 45, y: 27 },
+    ellipse: { x: 37.8, y: 19.3, rx: 6.1, ry: 3.8 },
+    marks: [
+      { a: { x: 33, y: 15 }, b: { x: 37, y: 19 } },
+      { a: { x: 37, y: 15 }, b: { x: 41, y: 19 } },
+      { a: { x: 33, y: 19 }, b: { x: 37, y: 23 } },
+      { a: { x: 37, y: 19 }, b: { x: 41, y: 23 } }
+    ],
+    caption: { x: 37, y: 31.2 }
+  },
+  sort: {
+    axisA: { x: 53.5, y: 12.7 },
+    axisB: { x: 53.5, y: 28.4 },
+    near: { x: 55.1, y: 13.6 },
+    far: { x: 55.1, y: 28.5 },
+    items: [
+      { x: 59, y: 14, rx: 3.2, ry: 1.1, fill: "red", label: "ближняя" },
+      { x: 60.2, y: 18.6, rx: 2.7, ry: 1.1, fill: "yellow", label: "" },
+      { x: 61.2, y: 23.1, rx: 2.3, ry: 1.0, fill: "cyan", label: "" },
+      { x: 62, y: 27.4, rx: 1.9, ry: 0.9, fill: "violet", label: "дальняя" }
+    ],
+    caption: { x: 59.5, y: 31.2 }
+  },
+  alpha: {
+    items: [
+      { x: 77.3, y: 20.7, rx: 4.2, ry: 6.2, fill: "red", opacity: 0.68 },
+      { x: 82.7, y: 19.2, rx: 4.5, ry: 5.7, fill: "yellow", opacity: 0.62 },
+      { x: 88.1, y: 20.7, rx: 4.3, ry: 6.1, fill: "blue", opacity: 0.58 }
+    ],
+    arrowA: { x: 76, y: 28.7 },
+    arrowB: { x: 91.4, y: 28.7 },
+    caption: { x: 83.7, y: 31.4 }
+  },
+  pixel: {
+    outerA: { x: 102, y: 12.2 },
+    outerB: { x: 113, y: 27.2 },
+    cells: [
+      { a: { x: 102.8, y: 13 }, b: { x: 107.5, y: 19.5 }, fill: "blue" },
+      { a: { x: 107.5, y: 13 }, b: { x: 112.2, y: 19.5 }, fill: "yellow" },
+      { a: { x: 102.8, y: 19.5 }, b: { x: 107.5, y: 26.4 }, fill: "red" },
+      { a: { x: 107.5, y: 19.5 }, b: { x: 112.2, y: 26.4 }, fill: "pixel" }
+    ],
+    focusA: { x: 107.5, y: 19.5 },
+    focusB: { x: 112.2, y: 26.4 },
+    caption: { x: 107.5, y: 31.1 }
+  },
+  footer: {
+    a: { x: 2, y: 35.5 },
+    b: { x: 117, y: 40.3 },
+    first: { x: 59.5, y: 37.7 },
+    second: { x: 59.5, y: 39.3 }
+  },
+  geom: {
+    radius: 0.8,
+    inset: 1.1,
+    arrowLength: 0.8,
+    arrowHalf: 0.55,
+    screenDot: 0.32,
+    focusInset: 0.35
+  },
+  style: {
+    line: 2,
+    fine: 1,
+    strong: 3,
+    titleFont: 16,
+    bodyFont: 14,
+    smallFont: 12,
+    footerFont: 14,
+    fullOpacity: 1,
+    softOpacity: 0.34,
+    selectedOpacity: 0.24
+  },
+  colors: {
+    blue: "var(--blue)",
+    violet: "var(--violet)",
+    cyan: "var(--cyan)",
+    amber: "var(--amber)",
+    red: "var(--red)",
+    yellow: "var(--yellow)",
+    green: "var(--green)",
+    pixel: "var(--pixel)",
+    panel: "var(--panel)",
+    ink: "var(--ink)"
+  }
+};
+const origin = { x: 20, y: 18 };
+const scale = 10;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attributes, parent = svg) => {
+    const element = document.createElementNS(NS, tag);
+    Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+    parent.appendChild(element);
+    return element;
+  };
+
+  const rect = (a, b, attributes = {}) => make("rect", {
+    x: sx(a.x),
+    y: sy(a.y),
+    width: sx(b.x) - sx(a.x),
+    height: sy(b.y) - sy(a.y),
+    ...attributes
+  });
+
+  const line = (a, b, attributes = {}) => make("line", {
+    x1: sx(a.x),
+    y1: sy(a.y),
+    x2: sx(b.x),
+    y2: sy(b.y),
+    ...attributes
+  });
+
+  const ellipse = (item, attributes = {}) => make("ellipse", {
+    cx: sx(item.x),
+    cy: sy(item.y),
+    rx: sx(item.rx) - sx(DATA.canvas.left),
+    ry: sy(item.ry) - sy(DATA.canvas.top),
+    ...attributes
+  });
+
+  const label = (point, value, attributes = {}) => {
+    const node = make("text", {
+      x: sx(point.x),
+      y: sy(point.y),
+      "dominant-baseline": "middle",
+      ...attributes
+    });
+    node.textContent = value;
+    return node;
+  };
+
+  const arrow = (a, b, attributes = {}) => {
+    line(a, b, { class: "flow", "stroke-width": DATA.style.strong, ...attributes });
+    make("polygon", {
+      points: [
+        `${sx(b.x)},${sy(b.y)}`,
+        `${sx(b.x - DATA.geom.arrowLength)},${sy(b.y - DATA.geom.arrowHalf)}`,
+        `${sx(b.x - DATA.geom.arrowLength)},${sy(b.y + DATA.geom.arrowHalf)}`
+      ].join(" "),
+      class: "flow-head"
+    });
+  };
+
+  DATA.cards.forEach(card => {
+    rect(card.a, card.b, {
+      class: `card ${card.tone}`,
+      rx: sx(DATA.geom.radius) - sx(DATA.canvas.left),
+      "stroke-width": DATA.style.line
+    });
+    line(
+      { x: card.a.x + DATA.geom.inset, y: 9.4 },
+      { x: card.b.x - DATA.geom.inset, y: 9.4 },
+      { class: "divider", "stroke-width": DATA.style.fine }
+    );
+    label(
+      { x: (card.a.x + card.b.x) / (DATA.geom.fullOpacity + DATA.geom.fullOpacity), y: 5.5 },
+      card.title,
+      { class: "title-text", "font-size": DATA.style.titleFont, "text-anchor": "middle" }
+    );
+    label(
+      { x: (card.a.x + card.b.x) / (DATA.geom.fullOpacity + DATA.geom.fullOpacity), y: 8 },
+      card.note,
+      { class: "muted-text", "font-size": DATA.style.smallFont, "text-anchor": "middle" }
+    );
+  });
+
+  DATA.flows.forEach(flow => arrow(flow.a, flow.b));
+
+  DATA.cloud.forEach(item => ellipse(item, {
+    fill: DATA.colors[item.rot],
+    "fill-opacity": DATA.style.softOpacity,
+    stroke: DATA.colors[item.rot],
+    "stroke-width": DATA.style.line
+  }));
+
+  DATA.projection.rays.forEach(ray => line(ray.a, ray.b, {
+    class: "soft-line",
+    "stroke-width": DATA.style.fine
+  }));
+  line(DATA.projection.screenA, DATA.projection.screenB, {
+    class: "screen-line",
+    "stroke-width": DATA.style.strong
+  });
+  ellipse(DATA.projection.ellipse, {
+    fill: DATA.colors.cyan,
+    "fill-opacity": DATA.style.selectedOpacity,
+    stroke: DATA.colors.cyan,
+    "stroke-width": DATA.style.line
+  });
+  make("circle", {
+    cx: sx(DATA.projection.ellipse.x),
+    cy: sy(DATA.projection.ellipse.y),
+    r: sx(DATA.geom.screenDot) - sx(DATA.canvas.left),
+    fill: DATA.colors.cyan
+  });
+  label(DATA.projection.caption, "3D → 2D-эллипс", {
+    class: "blue-text",
+    "font-size": DATA.style.bodyFont,
+    "text-anchor": "middle"
+  });
+
+  DATA.grid.xs.forEach(x => line(
+    { x, y: DATA.grid.a.y },
+    { x, y: DATA.grid.b.y },
+    { class: "grid-line", "stroke-width": DATA.style.fine }
+  ));
+  DATA.grid.ys.forEach(y => line(
+    { x: DATA.grid.a.x, y },
+    { x: DATA.grid.b.x, y },
+    { class: "grid-line", "stroke-width": DATA.style.fine }
+  ));
+  DATA.grid.marks.forEach(mark => rect(mark.a, mark.b, {
+    fill: DATA.colors.blue,
+    "fill-opacity": DATA.style.selectedOpacity
+  }));
+  ellipse(DATA.grid.ellipse, {
+    fill: DATA.colors.blue,
+    "fill-opacity": DATA.style.selectedOpacity,
+    stroke: DATA.colors.blue,
+    "stroke-width": DATA.style.line
+  });
+  label(DATA.grid.caption, "в каждом пересечённом тайле", {
+    class: "body-text",
+    "font-size": DATA.style.smallFont,
+    "text-anchor": "middle"
+  });
+
+  arrow(DATA.sort.axisA, DATA.sort.axisB, { class: "soft-line" });
+  label(DATA.sort.near, "ближе", {
+    class: "muted-text",
+    "font-size": DATA.style.smallFont,
+    "text-anchor": "start"
+  });
+  label(DATA.sort.far, "дальше", {
+    class: "muted-text",
+    "font-size": DATA.style.smallFont,
+    "text-anchor": "start"
+  });
+  DATA.sort.items.forEach(item => ellipse(item, {
+    fill: DATA.colors[item.fill],
+    "fill-opacity": DATA.style.softOpacity,
+    stroke: DATA.colors[item.fill],
+    "stroke-width": DATA.style.line
+  }));
+  label(DATA.sort.caption, "ближние идут раньше", {
+    class: "blue-text",
+    "font-size": DATA.style.smallFont,
+    "text-anchor": "middle"
+  });
+
+  DATA.alpha.items.forEach(item => ellipse(item, {
+    fill: DATA.colors[item.fill],
+    "fill-opacity": item.opacity,
+    stroke: DATA.colors[item.fill],
+    "stroke-width": DATA.style.line
+  }));
+  arrow(DATA.alpha.arrowA, DATA.alpha.arrowB);
+  label(DATA.alpha.caption, "спереди → назад", {
+    class: "amber-text",
+    "font-size": DATA.style.bodyFont,
+    "text-anchor": "middle"
+  });
+
+  rect(DATA.pixel.outerA, DATA.pixel.outerB, {
+    fill: DATA.colors.panel,
+    stroke: DATA.colors.green,
+    "stroke-width": DATA.style.strong,
+    rx: sx(DATA.geom.radius) - sx(DATA.canvas.left)
+  });
+  DATA.pixel.cells.forEach(cell => rect(cell.a, cell.b, {
+    fill: DATA.colors[cell.fill],
+    "fill-opacity": DATA.style.fullOpacity,
+    stroke: DATA.colors.panel,
+    "stroke-width": DATA.style.line
+  }));
+  rect(
+    {
+      x: DATA.pixel.focusA.x + DATA.geom.focusInset,
+      y: DATA.pixel.focusA.y + DATA.geom.focusInset
+    },
+    {
+      x: DATA.pixel.focusB.x - DATA.geom.focusInset,
+      y: DATA.pixel.focusB.y - DATA.geom.focusInset
+    },
+    {
+      fill: "none",
+      stroke: DATA.colors.ink,
+      "stroke-width": DATA.style.strong
+    }
+  );
+  label(DATA.pixel.caption, "цвет пикселя", {
+    class: "green-text",
+    "font-size": DATA.style.bodyFont,
+    "text-anchor": "middle"
+  });
+
+  rect(DATA.footer.a, DATA.footer.b, {
+    class: "card card-blue",
+    rx: sx(DATA.geom.radius) - sx(DATA.canvas.left),
+    "stroke-width": DATA.style.line
+  });
+  label(DATA.footer.first, "6 млн splat → 6,8 мс на кадр → 147 кадров/с на RTX 3080 Ti", {
+    class: "blue-text",
+    "font-size": DATA.style.footerFont,
+    "text-anchor": "middle"
+  });
+  label(DATA.footer.second, "Короткий повторяемый GPU-конвейер — без MLP-запроса для каждого пикселя", {
+    class: "muted-text",
+    "font-size": DATA.style.smallFont,
+    "text-anchor": "middle"
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Два маршрута оценки позы</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:white;
+  --ink:midnightblue;
+  --muted:slategray;
+  --top-bg:aliceblue;
+  --bottom-bg:oldlace;
+  --card:white;
+  --top:royalblue;
+  --bottom:darkorange;
+  --person-a:mediumblue;
+  --person-b:crimson;
+  --points:darkviolet;
+  --field:darkorange;
+  --frame:lightsteelblue;
+}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+h1{font-size:21px;text-align:center}
+svg{display:block;width:100%;height:auto;max-height:450px}
+.panel{stroke-width:2;vector-effect:non-scaling-stroke}
+.top-panel{fill:var(--top-bg);stroke:var(--top)}
+.bottom-panel{fill:var(--bottom-bg);stroke:var(--bottom)}
+.card{fill:var(--card);stroke:var(--frame);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.detector-a,.detector-b{fill:none;stroke-width:2.5;vector-effect:non-scaling-stroke}
+.detector-a{stroke:var(--person-a)}
+.detector-b{stroke:var(--person-b)}
+.pose-a,.pose-b,.field,.ghost{fill:none;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.pose-a{stroke:var(--person-a);stroke-width:2.5}
+.pose-b{stroke:var(--person-b);stroke-width:2.5}
+.ghost{stroke:var(--muted);stroke-width:2}
+.field{stroke:var(--field);stroke-width:2}
+.dot-a{fill:var(--person-a)}
+.dot-b{fill:var(--person-b)}
+.dot-all{fill:var(--points)}
+.arrow{stroke:var(--ink);stroke-width:2;fill:none;vector-effect:non-scaling-stroke}
+.arrow-head{fill:var(--ink)}
+.field-head{fill:var(--field)}
+.route{font-size:18px;font-weight:bold}
+.stage{font-size:14px;font-weight:bold}
+.note{font-size:13px;fill:var(--muted)}
+.result{font-size:15px;font-weight:bold}
+.fallback{font-size:17px;fill:var(--ink)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:midnightblue;
+    --ink:white;
+    --muted:lightsteelblue;
+    --top-bg:darkslateblue;
+    --bottom-bg:darkslategray;
+    --card:midnightblue;
+    --top:lightskyblue;
+    --bottom:orange;
+    --person-a:deepskyblue;
+    --person-b:lightcoral;
+    --points:violet;
+    --field:orange;
+    --frame:slategray;
+  }
+}
+</style>
+</head>
+<body>
+<h1>Два маршрута оценки позы</h1>
+<svg viewBox="0 0 1120 450" width="1120" height="450"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Два маршрута оценки позы</title>
+  <desc id="svg-desc">Слева top-down сначала разделяет людей на вырезы, справа bottom-up сначала находит все точки и поля связей, а затем группирует их.</desc>
+  <g id="drawing"></g>
+  <noscript>Слева: детектор людей, отдельные вырезы и 17 ключевых точек. Справа: один проход, общие точки и поля связей, затем группировка по людям.</noscript>
+</svg>
+<script>
+const D={
+  zero:0,corner:10,dot:2.8,smallDot:2.2,arrowLength:10,arrowWing:5,
+  panels:{
+    top:{x:16,y:10,w:534,h:428},
+    bottom:{x:570,y:10,w:534,h:428}
+  },
+  titles:{
+    top:{x:283,y:42,text:"TOP-DOWN · сначала разделить людей"},
+    bottom:{x:837,y:42,text:"BOTTOM-UP · сначала найти детали"}
+  },
+  boxes:{
+    topScene:{x:38,y:96,w:138,h:218},
+    cropA:{x:215,y:105,w:104,h:88},
+    cropB:{x:215,y:220,w:104,h:88},
+    outA:{x:362,y:105,w:162,h:88},
+    outB:{x:362,y:220,w:162,h:88},
+    bottomScene:{x:592,y:96,w:138,h:218},
+    map:{x:770,y:96,w:138,h:218},
+    groupA:{x:947,y:105,w:130,h:88},
+    groupB:{x:947,y:220,w:130,h:88}
+  },
+  detectorBoxes:{
+    a:{x:53,y:119,w:91,h:171},
+    b:{x:81,y:127,w:81,h:166}
+  },
+  labels:[
+    {x:107,y:79,text:"детектор людей",cls:"stage"},
+    {x:267,y:79,text:"отдельный crop",cls:"stage"},
+    {x:443,y:79,text:"17 keypoint",cls:"stage"},
+    {x:107,y:338,text:"прямоугольники людей",cls:"note"},
+    {x:267,y:338,text:"каждый человек отдельно",cls:"note"},
+    {x:443,y:338,text:"поза внутри своего crop",cls:"note"},
+    {x:283,y:389,text:"принадлежность решена до поиска точек",cls:"result"},
+    {x:283,y:416,text:"результат: отдельная поза каждого человека",cls:"note"},
+    {x:661,y:79,text:"один проход по кадру",cls:"stage"},
+    {x:839,y:79,text:"точки + поля связей",cls:"stage"},
+    {x:1012,y:79,text:"группировка",cls:"stage"},
+    {x:661,y:338,text:"людей заранее не делят",cls:"note"},
+    {x:839,y:338,text:"все детали в общем поле",cls:"note"},
+    {x:1012,y:338,text:"точки собраны по людям",cls:"note"},
+    {x:837,y:389,text:"принадлежность решена после поиска точек",cls:"result"},
+    {x:837,y:416,text:"результат: отдельная поза каждого человека",cls:"note"}
+  ],
+  arrows:[
+    {x1:181,y1:205,x2:207,y2:205,cls:"arrow",head:"arrow-head"},
+    {x1:327,y1:205,x2:354,y2:205,cls:"arrow",head:"arrow-head"},
+    {x1:735,y1:205,x2:762,y2:205,cls:"arrow",head:"arrow-head"},
+    {x1:915,y1:205,x2:939,y2:205,cls:"arrow",head:"arrow-head"}
+  ],
+  joints:{
+    a:{
+      nose:{x:0,y:-43},leye:{x:-5,y:-47},reye:{x:5,y:-47},
+      lear:{x:-10,y:-44},rear:{x:10,y:-44},
+      ls:{x:-15,y:-28},rs:{x:15,y:-28},
+      le:{x:-27,y:-14},re:{x:12,y:-12},
+      lw:{x:-38,y:-2},rw:{x:19,y:-1},
+      lh:{x:-10,y:3},rh:{x:10,y:3},
+      lk:{x:-15,y:27},rk:{x:14,y:27},
+      la:{x:-20,y:49},ra:{x:19,y:49}
+    },
+    b:{
+      nose:{x:0,y:-43},leye:{x:-5,y:-47},reye:{x:5,y:-47},
+      lear:{x:-10,y:-44},rear:{x:10,y:-44},
+      ls:{x:-15,y:-28},rs:{x:15,y:-28},
+      le:{x:-12,y:-4},re:{x:27,y:-15},
+      lw:{x:-24,y:-9},rw:{x:38,y:-29},
+      lh:{x:-10,y:3},rh:{x:10,y:3},
+      lk:{x:-14,y:27},rk:{x:17,y:26},
+      la:{x:-20,y:49},ra:{x:23,y:47}
+    }
+  },
+  bones:[
+    ["nose","leye"],["nose","reye"],["leye","lear"],["reye","rear"],
+    ["ls","rs"],["ls","le"],["le","lw"],["rs","re"],["re","rw"],
+    ["ls","lh"],["rs","rh"],["lh","rh"],["lh","lk"],["lk","la"],
+    ["rh","rk"],["rk","ra"],["nose","ls"],["nose","rs"]
+  ],
+  fieldBones:[
+    ["ls","le"],["le","lw"],["rs","re"],["re","rw"],
+    ["lh","lk"],["lk","la"],["rh","rk"],["rk","ra"]
+  ],
+  poses:{
+    topSceneA:{set:"a",x:91,y:202,mx:1.34,my:1.34},
+    topSceneB:{set:"b",x:123,y:205,mx:1.28,my:1.28},
+    cropA:{set:"a",x:267,y:151,mx:.66,my:.66},
+    cropB:{set:"b",x:267,y:266,mx:.66,my:.66},
+    outA:{set:"a",x:443,y:151,mx:.66,my:.66},
+    outB:{set:"b",x:443,y:266,mx:.66,my:.66},
+    bottomSceneA:{set:"a",x:646,y:202,mx:1.34,my:1.34},
+    bottomSceneB:{set:"b",x:678,y:205,mx:1.28,my:1.28},
+    mapA:{set:"a",x:823,y:202,mx:1.22,my:1.22},
+    mapB:{set:"b",x:855,y:205,mx:1.16,my:1.16},
+    groupA:{set:"a",x:1012,y:151,mx:.66,my:.66},
+    groupB:{set:"b",x:1012,y:266,mx:.66,my:.66}
+  },
+  fallback:{x:560,y:210}
+};
+const origin={x:0,y:0};
+const scale={x:1,y:1};
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const NS="http://www.w3.org/2000/svg";
+const root=document.getElementById("drawing");
+
+function node(tag,attrs,text){
+  const n=document.createElementNS(NS,tag);
+  Object.entries(attrs).forEach(([key,value])=>n.setAttribute(key,value));
+  if(text!==undefined)n.textContent=text;
+  root.appendChild(n);
+  return n;
+}
+function rect(b,cls){
+  node("rect",{
+    x:sx(b.x),y:sy(b.y),
+    width:sx(b.x+b.w)-sx(b.x),
+    height:sy(b.y+b.h)-sy(b.y),
+    rx:sx(D.corner)-sx(D.zero),
+    class:cls
+  });
+}
+function line(a,b,cls){
+  node("line",{x1:sx(a.x),y1:sy(a.y),x2:sx(b.x),y2:sy(b.y),class:cls});
+}
+function circle(p,cls,r){
+  node("circle",{cx:sx(p.x),cy:sy(p.y),r:sx(r)-sx(D.zero),class:cls});
+}
+function text(item){
+  node("text",{x:sx(item.x),y:sy(item.y),class:item.cls,"text-anchor":"middle"},item.text);
+}
+function arrow(a){
+  line({x:a.x1,y:a.y1},{x:a.x2,y:a.y2},a.cls);
+  const dx=a.x2-a.x1,dy=a.y2-a.y1,length=Math.hypot(dx,dy);
+  const ux=dx/length,uy=dy/length;
+  const bx=a.x2-ux*D.arrowLength,by=a.y2-uy*D.arrowLength;
+  const px=-uy*D.arrowWing,py=ux*D.arrowWing;
+  const points=[
+    {x:a.x2,y:a.y2},
+    {x:bx+px,y:by+py},
+    {x:bx-px,y:by-py}
+  ];
+  node("polygon",{points:points.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" "),class:a.head});
+}
+function mappedPose(inst){
+  const mapped={};
+  Object.entries(D.joints[inst.set]).forEach(([name,p])=>{
+    mapped[name]={x:inst.x+p.x*inst.mx,y:inst.y+p.y*inst.my};
+  });
+  return mapped;
+}
+function pose(inst,lineClass,dotClass){
+  const points=mappedPose(inst);
+  D.bones.forEach(([from,to])=>line(points[from],points[to],lineClass));
+  Object.values(points).forEach(p=>circle(p,dotClass,D.smallDot));
+}
+function association(inst){
+  const points=mappedPose(inst);
+  D.fieldBones.forEach(([from,to])=>{
+    arrow({
+      x1:points[from].x,y1:points[from].y,
+      x2:points[to].x,y2:points[to].y,
+      cls:"field",head:"field-head"
+    });
+  });
+  Object.values(points).forEach(p=>circle(p,"dot-all",D.dot));
+}
+
+try{
+  rect(D.panels.top,"panel top-panel");
+  rect(D.panels.bottom,"panel bottom-panel");
+  text({x:D.titles.top.x,y:D.titles.top.y,text:D.titles.top.text,cls:"route"});
+  text({x:D.titles.bottom.x,y:D.titles.bottom.y,text:D.titles.bottom.text,cls:"route"});
+
+  Object.values(D.boxes).forEach(b=>rect(b,"card"));
+  pose(D.poses.topSceneA,"ghost","dot-a");
+  pose(D.poses.topSceneB,"ghost","dot-b");
+  rect(D.detectorBoxes.a,"detector-a");
+  rect(D.detectorBoxes.b,"detector-b");
+
+  pose(D.poses.cropA,"pose-a","dot-a");
+  pose(D.poses.cropB,"pose-b","dot-b");
+  pose(D.poses.outA,"pose-a","dot-a");
+  pose(D.poses.outB,"pose-b","dot-b");
+
+  pose(D.poses.bottomSceneA,"ghost","dot-a");
+  pose(D.poses.bottomSceneB,"ghost","dot-b");
+  association(D.poses.mapA);
+  association(D.poses.mapB);
+  pose(D.poses.groupA,"pose-a","dot-a");
+  pose(D.poses.groupB,"pose-b","dot-b");
+
+  D.arrows.forEach(arrow);
+  D.labels.forEach(text);
+}catch(error){
+  root.replaceChildren();
+  node("text",{
+    x:sx(D.fallback.x),y:sy(D.fallback.y),
+    class:"fallback","text-anchor":"middle"
+  },"Схема должна показать два маршрута: crop каждого человека или общие точки с последующей группировкой.");
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

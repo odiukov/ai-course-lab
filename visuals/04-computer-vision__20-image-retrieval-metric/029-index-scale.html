@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как размер каталога меняет выбор индекса</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5d687d;
+      --axis: #77839a;
+      --guide: #c9d0dc;
+      --flat: #2774d8;
+      --flat-fill: #eaf3ff;
+      --ivf: #7a55c7;
+      --ivf-fill: #f2edff;
+      --pq: #c15a26;
+      --pq-fill: #fff0e8;
+      --hnsw: #16806c;
+      --hnsw-fill: #e8f7f3;
+      --shadow: #dfe3eb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #10141d;
+        --panel: #171d29;
+        --ink: #eef2fb;
+        --muted: #aeb8ca;
+        --axis: #8f9bb0;
+        --guide: #3b4659;
+        --flat: #68a8ff;
+        --flat-fill: #172b48;
+        --ivf: #ae8cff;
+        --ivf-fill: #2a2342;
+        --pq: #ff9865;
+        --pq-fill: #40271e;
+        --hnsw: #55d1b8;
+        --hnsw-fill: #173a34;
+        --shadow: #090c12;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    body {
+      width: 100%;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--guide);
+      box-shadow: 0 1px 0 var(--shadow);
+    }
+
+    .heading {
+      padding: 16px 28px 10px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: normal;
+      letter-spacing: -0.02em;
+    }
+
+    .heading p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 425px;
+      background: var(--panel);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .branch {
+      stroke: var(--hnsw);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .tick {
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .card {
+      stroke-width: 2;
+    }
+
+    .flat-card {
+      fill: var(--flat-fill);
+      stroke: var(--flat);
+    }
+
+    .ivf-card {
+      fill: var(--ivf-fill);
+      stroke: var(--ivf);
+    }
+
+    .pq-card {
+      fill: var(--pq-fill);
+      stroke: var(--pq);
+    }
+
+    .hnsw-card {
+      fill: var(--hnsw-fill);
+      stroke: var(--hnsw);
+    }
+
+    .flat-stroke {
+      stroke: var(--flat);
+    }
+
+    .ivf-stroke {
+      stroke: var(--ivf);
+    }
+
+    .pq-stroke {
+      stroke: var(--pq);
+    }
+
+    .hnsw-stroke {
+      stroke: var(--hnsw);
+    }
+
+    .flat-fill {
+      fill: var(--flat);
+    }
+
+    .ivf-fill {
+      fill: var(--ivf);
+    }
+
+    .pq-fill {
+      fill: var(--pq);
+    }
+
+    .hnsw-fill {
+      fill: var(--hnsw);
+    }
+
+    .icon-line {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .icon-node {
+      stroke: var(--panel);
+      stroke-width: 2;
+    }
+
+    .name {
+      fill: var(--ink);
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .copy {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .detail {
+      fill: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .scale-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .branch-label {
+      fill: var(--hnsw);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    #fallback {
+      margin: 18px 28px 24px;
+      padding: 14px;
+      color: var(--ink);
+      background: var(--bg);
+      border: 1px solid var(--guide);
+      font-size: 14px;
+    }
+
+    noscript {
+      display: block;
+      padding: 18px 28px 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-title">
+    <header class="heading">
+      <h1 id="diagram-title">Как размер каталога меняет выбор индекса</h1>
+      <p>Три ориентира масштаба и отдельная развилка для быстрого HNSW</p>
+    </header>
+
+    <svg id="diagram"
+         viewBox="0 0 1100 425"
+         width="1100"
+         height="425"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">Шкала выбора индекса: IndexFlatIP для ста тысяч векторов, IndexIVFFlat для десяти миллионов, IndexIVFPQ для ста миллионов и больше. HNSW показан отдельным быстрым, но более требовательным к памяти вариантом.</desc>
+    </svg>
+
+    <div id="fallback" hidden>
+      Схема должна была показать переход от IndexFlatIP к IndexIVFFlat и
+      IndexIVFPQ по мере роста каталога, а также отдельный вариант HNSW:
+      быстрый поиск ценой большего расхода памяти.
+    </div>
+
+    <noscript>
+      Шкала выбора индекса: 100 тысяч — IndexFlatIP; 10 миллионов —
+      IndexIVFFlat; 100 миллионов и больше — IndexIVFPQ. HNSW — быстрый,
+      но более прожорливый по памяти вариант.
+    </noscript>
+  </main>
+
+  <script>
+    const data = [{
+      zero: 0,
+      origin: { x: 0, y: 400 },
+      scale: { x: 1, y: 1 },
+      radius: 10,
+      axis: {
+        from: { x: 72, y: 150 },
+        to: { x: 1028, y: 150 },
+        arrow: [
+          { x: 1042, y: 150 },
+          { x: 1026, y: 159 },
+          { x: 1026, y: 141 }
+        ],
+        label: { x: 72, y: 168, text: "Размер каталога", anchor: "start", className: "axis-label" }
+      },
+      stages: [
+        {
+          kind: "flat",
+          point: { x: 175, y: 150 },
+          tick: { from: { x: 175, y: 142 }, to: { x: 175, y: 158 } },
+          connector: { from: { x: 175, y: 160 }, to: { x: 175, y: 190 } },
+          box: { x: 40, y: 190, w: 270, h: 120 },
+          scaleLabel: { x: 175, y: 126, text: "100 тысяч", anchor: "middle", className: "scale-label" },
+          texts: [
+            { x: 145, y: 279, text: "IndexFlatIP", anchor: "start", className: "name" },
+            { x: 145, y: 250, text: "Точный полный перебор", anchor: "start", className: "copy" },
+            { x: 145, y: 225, text: "обучение не нужно", anchor: "start", className: "copy" },
+            { x: 145, y: 202, text: "64 числа → ≈ 6,4 млн умножений", anchor: "start", className: "detail" }
+          ],
+          iconEdges: [
+            { from: { x: 76, y: 218 }, to: { x: 76, y: 282 } },
+            { from: { x: 76, y: 270 }, to: { x: 112, y: 270 } },
+            { from: { x: 76, y: 250 }, to: { x: 112, y: 250 } },
+            { from: { x: 76, y: 230 }, to: { x: 112, y: 230 } }
+          ],
+          iconNodes: [
+            { x: 76, y: 270, r: 6 },
+            { x: 76, y: 250, r: 6 },
+            { x: 76, y: 230, r: 6 },
+            { x: 112, y: 270, r: 6 },
+            { x: 112, y: 250, r: 6 },
+            { x: 112, y: 230, r: 6 }
+          ]
+        },
+        {
+          kind: "ivf",
+          point: { x: 550, y: 150 },
+          tick: { from: { x: 550, y: 142 }, to: { x: 550, y: 158 } },
+          connector: { from: { x: 550, y: 160 }, to: { x: 550, y: 190 } },
+          box: { x: 385, y: 190, w: 330, h: 120 },
+          scaleLabel: { x: 550, y: 126, text: "10 миллионов", anchor: "middle", className: "scale-label" },
+          texts: [
+            { x: 492, y: 279, text: "IndexIVFFlat", anchor: "start", className: "name" },
+            { x: 492, y: 250, text: "Ищет в ближайших ячейках", anchor: "start", className: "copy" },
+            { x: 492, y: 225, text: "быстрее, но приближённо", anchor: "start", className: "copy" },
+            { x: 492, y: 202, text: "полный перебор: ≈ 640 млн", anchor: "start", className: "detail" }
+          ],
+          miniBoxes: [
+            { x: 410, y: 250, w: 28, h: 28, active: false },
+            { x: 446, y: 250, w: 28, h: 28, active: true },
+            { x: 410, y: 214, w: 28, h: 28, active: false },
+            { x: 446, y: 214, w: 28, h: 28, active: false }
+          ]
+        },
+        {
+          kind: "pq",
+          point: { x: 925, y: 150 },
+          tick: { from: { x: 925, y: 142 }, to: { x: 925, y: 158 } },
+          connector: { from: { x: 925, y: 160 }, to: { x: 925, y: 190 } },
+          box: { x: 790, y: 190, w: 270, h: 120 },
+          scaleLabel: { x: 925, y: 126, text: "100 миллионов и больше", anchor: "middle", className: "scale-label" },
+          texts: [
+            { x: 880, y: 279, text: "IndexIVFPQ", anchor: "start", className: "name" },
+            { x: 880, y: 250, text: "IVF + product quantisation", anchor: "start", className: "copy" },
+            { x: 880, y: 225, text: "сжатое хранение векторов", anchor: "start", className: "copy" },
+            { x: 880, y: 202, text: "экономит вычисления и память", anchor: "start", className: "detail" }
+          ],
+          miniBoxes: [
+            { x: 815, y: 265, w: 45, h: 12, active: false },
+            { x: 815, y: 242, w: 37, h: 12, active: false },
+            { x: 815, y: 219, w: 27, h: 12, active: true }
+          ]
+        }
+      ],
+      hnsw: {
+        box: { x: 160, y: 10, w: 780, h: 70 },
+        branch: { from: { x: 550, y: 135 }, to: { x: 550, y: 87 } },
+        arrow: [
+          { x: 550, y: 80 },
+          { x: 542, y: 91 },
+          { x: 558, y: 91 }
+        ],
+        label: { x: 568, y: 108, text: "если особенно важна скорость запросов", anchor: "start", className: "branch-label" },
+        texts: [
+          { x: 350, y: 45, text: "HNSW", anchor: "start", className: "name" },
+          { x: 455, y: 45, text: "быстрый поиск при большом потоке", anchor: "start", className: "copy" },
+          { x: 755, y: 45, text: "граф требует больше памяти", anchor: "start", className: "detail" }
+        ],
+        edges: [
+          { from: { x: 190, y: 28 }, to: { x: 224, y: 60 } },
+          { from: { x: 190, y: 28 }, to: { x: 260, y: 28 } },
+          { from: { x: 224, y: 60 }, to: { x: 260, y: 28 } },
+          { from: { x: 224, y: 60 }, to: { x: 292, y: 54 } },
+          { from: { x: 260, y: 28 }, to: { x: 292, y: 54 } }
+        ],
+        nodes: [
+          { x: 190, y: 28, r: 7 },
+          { x: 224, y: 60, r: 7 },
+          { x: 260, y: 28, r: 7 },
+          { x: 292, y: 54, r: 7 }
+        ]
+      },
+      note: {
+        x: 550,
+        y: -10,
+        text: "Это ориентиры: выбор также зависит от размерности, железа, нагрузки и допустимой задержки",
+        anchor: "middle",
+        className: "note"
+      }
+    }];
+
+    const [cfg] = data;
+    const origin = Object.freeze(cfg.origin);
+    const scale = Object.freeze(cfg.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, parent = svg) => {
+        const node = document.createElementNS(ns, tag);
+        for (const [name, value] of Object.entries(attributes)) {
+          node.setAttribute(name, value);
+        }
+        parent.appendChild(node);
+        return node;
+      };
+
+      const line = (segment, className, parent = svg) =>
+        make("line", {
+          x1: sx(segment.from.x),
+          y1: sy(segment.from.y),
+          x2: sx(segment.to.x),
+          y2: sy(segment.to.y),
+          class: className
+        }, parent);
+
+      const polygon = (points, className, parent = svg) =>
+        make("polygon", {
+          points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          class: className
+        }, parent);
+
+      const rect = (box, className, parent = svg) =>
+        make("rect", {
+          x: sx(box.x),
+          y: sy(box.y + box.h),
+          width: sx(box.x + box.w) - sx(box.x),
+          height: sy(box.y) - sy(box.y + box.h),
+          rx: sx(cfg.radius) - sx(cfg.zero),
+          class: className
+        }, parent);
+
+      const circle = (node, className, parent = svg) =>
+        make("circle", {
+          cx: sx(node.x),
+          cy: sy(node.y),
+          r: sx(node.r) - sx(cfg.zero),
+          class: className
+        }, parent);
+
+      const text = (label, parent = svg) => {
+        const node = make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          "text-anchor": label.anchor,
+          class: label.className
+        }, parent);
+        node.textContent = label.text;
+        return node;
+      };
+
+      line(cfg.axis, "axis");
+      polygon(cfg.axis.arrow, "flat-fill");
+      text(cfg.axis.label);
+
+      for (const stage of cfg.stages) {
+        const group = make("g", {
+          "aria-label": `${stage.scaleLabel.text}: ${stage.texts.map(item => item.text).join(". ")}`
+        });
+
+        line(stage.connector, `guide ${stage.kind}-stroke`, group);
+        line(stage.tick, `tick ${stage.kind}-stroke`, group);
+        circle({ x: stage.point.x, y: stage.point.y, r: cfg.radius }, `${stage.kind}-fill icon-node`, group);
+        rect(stage.box, `card ${stage.kind}-card`, group);
+        text(stage.scaleLabel, group);
+
+        for (const edge of stage.iconEdges || []) {
+          line(edge, `icon-line ${stage.kind}-stroke`, group);
+        }
+
+        for (const node of stage.iconNodes || []) {
+          circle(node, `${stage.kind}-fill icon-node`, group);
+        }
+
+        for (const box of stage.miniBoxes || []) {
+          rect(box, `card ${box.active ? `${stage.kind}-fill` : `${stage.kind}-card`}`, group);
+        }
+
+        for (const label of stage.texts) {
+          text(label, group);
+        }
+      }
+
+      const hnswGroup = make("g", {
+        "aria-label": "HNSW: быстрый поиск при большом потоке, но граф требует больше памяти"
+      });
+
+      line(cfg.hnsw.branch, "branch", hnswGroup);
+      polygon(cfg.hnsw.arrow, "hnsw-fill", hnswGroup);
+      text(cfg.hnsw.label, hnswGroup);
+      rect(cfg.hnsw.box, "card hnsw-card", hnswGroup);
+
+      for (const edge of cfg.hnsw.edges) {
+        line(edge, "icon-line hnsw-stroke", hnswGroup);
+      }
+
+      for (const node of cfg.hnsw.nodes) {
+        circle(node, "hnsw-fill icon-node", hnswGroup);
+      }
+
+      for (const label of cfg.hnsw.texts) {
+        text(label, hnswGroup);
+      }
+
+      text(cfg.note);
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.replaceChildren();
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

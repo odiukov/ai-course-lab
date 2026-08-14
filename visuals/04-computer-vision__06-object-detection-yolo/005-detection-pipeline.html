@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный путь от изображения до итоговых рамок</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #526079;
+    --line: #64748b;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
+    --amber: #c26803;
+    --amber-soft: #fef3c7;
+    --red: #dc2626;
+    --red-soft: #fee2e2;
+    --green: #16803c;
+    --green-soft: #dcfce7;
+    --grid: #93a4bc;
+    --road: #475569;
+    --sky: #bfdbfe;
+    --building: #94a3b8;
+    --white: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --panel: #1f2937;
+      --text: #f1f5f9;
+      --muted: #bac5d5;
+      --line: #94a3b8;
+      --blue: #60a5fa;
+      --blue-soft: #172f52;
+      --violet: #a78bfa;
+      --violet-soft: #312454;
+      --amber: #fbbf24;
+      --amber-soft: #4a3516;
+      --red: #fb7185;
+      --red-soft: #4b2029;
+      --green: #4ade80;
+      --green-soft: #153d29;
+      --grid: #64748b;
+      --road: #334155;
+      --sky: #26476b;
+      --building: #64748b;
+      --white: #f8fafc;
+    }
+  }
+
+  html, body, figure {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  figure {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figcaption {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .flow {
+    stroke: var(--line);
+    stroke-width: 2;
+    fill: none;
+  }
+
+  .arrowhead {
+    fill: var(--line);
+  }
+
+  .stage-title {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .stage-note {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .legend {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--text);
+    font-size: 10px;
+  }
+
+  .sky { fill: var(--sky); }
+  .road { fill: var(--road); }
+  .building { fill: var(--building); }
+  .window { fill: var(--blue-soft); }
+  .car { fill: var(--blue); }
+  .person { fill: var(--amber); }
+  .wheel { fill: var(--text); }
+  .lane { stroke: var(--white); stroke-width: 2; }
+  .layer-a { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 2; }
+  .layer-b { fill: var(--violet-soft); stroke: var(--violet); stroke-width: 2; }
+  .feature-bg { fill: var(--violet-soft); stroke: var(--violet); stroke-width: 2; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .prediction { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 2; }
+  .candidate-a { fill: none; stroke: var(--red); stroke-width: 2; }
+  .candidate-b { fill: none; stroke: var(--amber); stroke-width: 2; }
+  .candidate-c { fill: none; stroke: var(--blue); stroke-width: 2; }
+  .rejected { fill: none; stroke: var(--grid); stroke-width: 1; }
+  .selected { fill: none; stroke: var(--green); stroke-width: 3; }
+  .cross { stroke: var(--red); stroke-width: 2; }
+  .result-row { fill: var(--green-soft); stroke: var(--green); stroke-width: 2; }
+  .result-chip-a { fill: var(--blue); }
+  .result-chip-b { fill: var(--amber); }
+  .frame { fill: var(--bg); stroke: var(--line); stroke-width: 2; }
+
+  #fallback {
+    color: var(--text);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Полный путь от изображения до итоговых рамок</figcaption>
+  <svg id="diagram" width="1200" height="390" viewBox="0 0 1200 390"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Конвейер YOLO от изображения 416 на 416 до списка итоговых рамок"></svg>
+  <p id="fallback" hidden>
+    Схема должна была показать путь: изображение 416 × 416 → backbone →
+    карта признаков 13 × 13 → YOLO-голова → декодирование → NMS →
+    список итоговых рамок.
+  </p>
+</figure>
+
+<script>
+const DATA = [
+  {
+    origin: { x: 0, y: 0 },
+    scale: 10,
+    zero: 0,
+    one: 1,
+    domain: { w: 120, h: 39 },
+    card: { y: 8, h: 20 },
+    titleY: 5.8,
+    noteY: 31,
+    arrowY: 18,
+    arrowInset: 0.5,
+    arrowHead: { length: 1.1, half: 0.65 },
+    legend: {
+      x: 60,
+      y: 36,
+      text: "изображение → признаки → сырые гипотезы → координаты → NMS → итоговые рамки"
+    },
+    grid: 13,
+    image: {
+      sky: { x: 3, y: 9.5, w: 14, h: 7 },
+      road: { x: 3, y: 16.5, w: 14, h: 10 },
+      buildings: [
+        { x: 3.6, y: 11.5, w: 3.1, h: 5 },
+        { x: 7.2, y: 10.5, w: 2.6, h: 6 },
+        { x: 13.4, y: 12, w: 2.8, h: 4.5 }
+      ],
+      windows: [
+        { x: 4.2, y: 12.3, w: 0.7, h: 0.8 },
+        { x: 5.3, y: 12.3, w: 0.7, h: 0.8 },
+        { x: 7.8, y: 11.4, w: 0.7, h: 0.8 },
+        { x: 14, y: 12.8, w: 0.7, h: 0.8 }
+      ],
+      lane: { x1: 4, y1: 23.8, x2: 8, y2: 23.8 },
+      car: [
+        { x: 7.1, y: 19, w: 5.4, h: 2.8 },
+        { x: 8.2, y: 17.8, w: 2.8, h: 1.7 }
+      ],
+      wheels: [
+        { x: 8.2, y: 22, r: 0.65 },
+        { x: 11.4, y: 22, r: 0.65 }
+      ],
+      person: [
+        { x: 14.5, y: 18.4, r: 0.55 },
+        { x: 14.1, y: 19, w: 0.8, h: 3.5 }
+      ]
+    },
+    backbone: {
+      layers: [
+        { x: 23, y: 11, w: 3.4, h: 14, cls: "layer-a" },
+        { x: 27, y: 12.2, w: 3.4, h: 11.6, cls: "layer-b" },
+        { x: 31, y: 13.5, w: 3.4, h: 9, cls: "layer-a" }
+      ],
+      links: [
+        { x1: 26.4, y1: 18, x2: 27, y2: 18 },
+        { x1: 30.4, y1: 18, x2: 31, y2: 18 }
+      ]
+    },
+    feature: { x: 41.5, y: 11.5, size: 13 },
+    head: {
+      cells: [
+        { x: 59.1, y: 11.2, w: 2.1, h: 2.1 },
+        { x: 62.1, y: 13.1, w: 2.1, h: 2.1 },
+        { x: 65.1, y: 15, w: 2.1, h: 2.1 },
+        { x: 68.1, y: 16.9, w: 2.1, h: 2.1 },
+        { x: 60.6, y: 19.4, w: 2.1, h: 2.1 },
+        { x: 63.6, y: 21.3, w: 2.1, h: 2.1 },
+        { x: 66.6, y: 23.2, w: 2.1, h: 2.1 }
+      ]
+    },
+    decode: {
+      frame: { x: 76.4, y: 10.2, w: 11.2, h: 15.6 },
+      boxes: [
+        { x: 77.5, y: 15.3, w: 6.2, h: 6.7, cls: "candidate-a" },
+        { x: 78.4, y: 14.5, w: 6.5, h: 7, cls: "candidate-b" },
+        { x: 79.2, y: 15.8, w: 6, h: 6.3, cls: "candidate-c" }
+      ]
+    },
+    nms: {
+      frame: { x: 93, y: 10.2, w: 8.8, h: 15.6 },
+      boxes: [
+        { x: 93.9, y: 14.8, w: 5.7, h: 6.8, cls: "rejected" },
+        { x: 94.8, y: 15.5, w: 5.6, h: 6.5, cls: "rejected" },
+        { x: 94.2, y: 14.3, w: 5.8, h: 6.9, cls: "selected" }
+      ],
+      cross: [
+        { x1: 99.4, y1: 11.6, x2: 100.8, y2: 13 },
+        { x1: 100.8, y1: 11.6, x2: 99.4, y2: 13 }
+      ]
+    },
+    result: {
+      rows: [
+        { x: 106.8, y: 12, w: 9.8, h: 5, chipX: 107.5, chipY: 13.2, chipW: 1.5, chipH: 2.6, textX: 110, textY: 14.5, text: "машина", cls: "result-chip-a" },
+        { x: 106.8, y: 19, w: 9.8, h: 5, chipX: 107.5, chipY: 20.2, chipW: 1.5, chipH: 2.6, textX: 110, textY: 21.5, text: "человек", cls: "result-chip-b" }
+      ]
+    }
+  },
+  { kind: "image", x: 2, w: 16, title: "Изображение", note: "416 × 416" },
+  { kind: "backbone", x: 21, w: 15, title: "Backbone", note: "извлечение признаков" },
+  { kind: "feature", x: 39, w: 17, title: "Карта признаков", note: "13 × 13" },
+  { kind: "head", x: 58, w: 14, title: "YOLO-голова", note: "сырые гипотезы" },
+  { kind: "decode", x: 75, w: 14, title: "Декодирование", note: "точные координаты" },
+  { kind: "nms", x: 92, w: 11, title: "NMS", note: "без дублей" },
+  { kind: "result", x: 106, w: 12, title: "Список рамок", note: "готовый ответ" }
+];
+
+const [C, ...STAGES] = DATA;
+const origin = C.origin;
+const scale = C.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const NS = "http://www.w3.org/2000/svg";
+
+  function make(tag, attrs, content) {
+    const item = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+    if (content !== undefined) item.textContent = content;
+    return item;
+  }
+
+  function rect(parent, box, cls) {
+    parent.appendChild(make("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.w) - sx(C.zero),
+      height: sy(box.h) - sy(C.zero),
+      class: cls
+    }));
+  }
+
+  function line(parent, segment, cls) {
+    parent.appendChild(make("line", {
+      x1: sx(segment.x1),
+      y1: sy(segment.y1),
+      x2: sx(segment.x2),
+      y2: sy(segment.y2),
+      class: cls
+    }));
+  }
+
+  function circle(parent, dot, cls) {
+    parent.appendChild(make("circle", {
+      cx: sx(dot.x),
+      cy: sy(dot.y),
+      r: sx(dot.r) - sx(C.zero),
+      class: cls
+    }));
+  }
+
+  function textAt(parent, content, x, y, cls, anchor = "middle") {
+    parent.appendChild(make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: cls,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content));
+  }
+
+  function arrow(parent, fromX, toX) {
+    const tipX = toX;
+    const baseX = tipX - C.arrowHead.length;
+    line(parent, {
+      x1: fromX,
+      y1: C.arrowY,
+      x2: baseX,
+      y2: C.arrowY
+    }, "flow");
+    parent.appendChild(make("polygon", {
+      points: [
+        sx(tipX) + "," + sy(C.arrowY),
+        sx(baseX) + "," + sy(C.arrowY - C.arrowHead.half),
+        sx(baseX) + "," + sy(C.arrowY + C.arrowHead.half)
+      ].join(" "),
+      class: "arrowhead"
+    }));
+  }
+
+  function drawImage(parent) {
+    rect(parent, C.image.sky, "sky");
+    rect(parent, C.image.road, "road");
+    C.image.buildings.forEach(box => rect(parent, box, "building"));
+    C.image.windows.forEach(box => rect(parent, box, "window"));
+    line(parent, C.image.lane, "lane");
+    C.image.car.forEach(box => rect(parent, box, "car"));
+    C.image.wheels.forEach(dot => circle(parent, dot, "wheel"));
+    circle(parent, C.image.person[C.zero], "person");
+    rect(parent, C.image.person[C.one], "person");
+  }
+
+  function drawBackbone(parent) {
+    C.backbone.links.forEach(link => line(parent, link, "flow"));
+    C.backbone.layers.forEach(layer => rect(parent, layer, layer.cls));
+  }
+
+  function drawFeature(parent) {
+    const g = C.feature;
+    rect(parent, { x: g.x, y: g.y, w: g.size, h: g.size }, "feature-bg");
+    for (let i = C.one; i < C.grid; i += C.one) {
+      const offset = g.size * i / C.grid;
+      line(parent, {
+        x1: g.x + offset,
+        y1: g.y,
+        x2: g.x + offset,
+        y2: g.y + g.size
+      }, "grid-line");
+      line(parent, {
+        x1: g.x,
+        y1: g.y + offset,
+        x2: g.x + g.size,
+        y2: g.y + offset
+      }, "grid-line");
+    }
+  }
+
+  function drawHead(parent) {
+    C.head.cells.forEach(cell => rect(parent, cell, "prediction"));
+  }
+
+  function drawDecode(parent) {
+    rect(parent, C.decode.frame, "frame");
+    C.decode.boxes.forEach(box => rect(parent, box, box.cls));
+  }
+
+  function drawNms(parent) {
+    rect(parent, C.nms.frame, "frame");
+    C.nms.boxes.forEach(box => rect(parent, box, box.cls));
+    C.nms.cross.forEach(segment => line(parent, segment, "cross"));
+  }
+
+  function drawResult(parent) {
+    C.result.rows.forEach(row => {
+      rect(parent, row, "result-row");
+      rect(parent, {
+        x: row.chipX,
+        y: row.chipY,
+        w: row.chipW,
+        h: row.chipH
+      }, row.cls);
+      textAt(parent, row.text, row.textX, row.textY, "small", "start");
+    });
+  }
+
+  function drawStage(parent, stage) {
+    rect(parent, {
+      x: stage.x,
+      y: C.card.y,
+      w: stage.w,
+      h: C.card.h
+    }, "panel");
+
+    textAt(parent, stage.title, stage.x + stage.w / (C.one + C.one),
+      C.titleY, "stage-title");
+    textAt(parent, stage.note, stage.x + stage.w / (C.one + C.one),
+      C.noteY, "stage-note");
+
+    if (stage.kind === "image") drawImage(parent);
+    if (stage.kind === "backbone") drawBackbone(parent);
+    if (stage.kind === "feature") drawFeature(parent);
+    if (stage.kind === "head") drawHead(parent);
+    if (stage.kind === "decode") drawDecode(parent);
+    if (stage.kind === "nms") drawNms(parent);
+    if (stage.kind === "result") drawResult(parent);
+  }
+
+  svg.replaceChildren();
+
+  rect(svg, {
+    x: C.zero,
+    y: C.zero,
+    w: C.domain.w,
+    h: C.domain.h
+  }, "frame");
+
+  for (let i = C.zero; i < STAGES.length - C.one; i += C.one) {
+    const current = STAGES[i];
+    const next = STAGES[i + C.one];
+    arrow(svg,
+      current.x + current.w + C.arrowInset,
+      next.x - C.arrowInset
+    );
+  }
+
+  STAGES.forEach(stage => drawStage(svg, stage));
+  textAt(svg, C.legend.text, C.legend.x, C.legend.y, "legend");
+  fallback.hidden = true;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

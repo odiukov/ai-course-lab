@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разветвление TinyNeRF на плотность и цвет</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #eef4ff;
+    --panel-warm: #fff4e6;
+    --ink: #172033;
+    --muted: #56627a;
+    --line: #63708a;
+    --position: #2563eb;
+    --position-fill: #eaf2ff;
+    --direction: #8b5cf6;
+    --direction-fill: #f2edff;
+    --density: #d97706;
+    --density-fill: #fff2d8;
+    --color: #059669;
+    --color-fill: #e6f8f1;
+    --junction: #334155;
+    --note: #e8edf5;
+    --shadow: #cbd5e1;
+    --error: #b42318;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101521;
+      --panel: #182131;
+      --panel-soft: #172640;
+      --panel-warm: #352718;
+      --ink: #edf2ff;
+      --muted: #b7c2d8;
+      --line: #8b98b3;
+      --position: #73a7ff;
+      --position-fill: #172b4d;
+      --direction: #bca2ff;
+      --direction-fill: #2b2247;
+      --density: #f4b75d;
+      --density-fill: #3d2c16;
+      --color: #5bd5aa;
+      --color-fill: #16382f;
+      --junction: #dce5f5;
+      --note: #202b3d;
+      --shadow: #0b0f17;
+      --error: #ff8a80;
+    }
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: auto;
+    background: var(--bg);
+  }
+
+  figcaption {
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+    font-family: inherit;
+  }
+
+  .connection {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .connection.position {
+    stroke: var(--position);
+  }
+
+  .connection.direction {
+    stroke: var(--direction);
+  }
+
+  .connection.density {
+    stroke: var(--density);
+  }
+
+  .connection.color {
+    stroke: var(--color);
+  }
+
+  .arrowhead {
+    stroke: none;
+  }
+
+  .arrowhead.position {
+    fill: var(--position);
+  }
+
+  .arrowhead.direction {
+    fill: var(--direction);
+  }
+
+  .arrowhead.density {
+    fill: var(--density);
+  }
+
+  .arrowhead.color {
+    fill: var(--color);
+  }
+
+  .arrowhead.neutral {
+    fill: var(--line);
+  }
+
+  .node {
+    stroke-width: 2.5;
+  }
+
+  .node.position {
+    fill: var(--position-fill);
+    stroke: var(--position);
+  }
+
+  .node.direction {
+    fill: var(--direction-fill);
+    stroke: var(--direction);
+  }
+
+  .node.trunk {
+    fill: var(--panel-soft);
+    stroke: var(--position);
+  }
+
+  .node.density {
+    fill: var(--density-fill);
+    stroke: var(--density);
+  }
+
+  .node.color {
+    fill: var(--color-fill);
+    stroke: var(--color);
+  }
+
+  .node.output-density {
+    fill: var(--density-fill);
+    stroke: var(--density);
+  }
+
+  .node.output-color {
+    fill: var(--color-fill);
+    stroke: var(--color);
+  }
+
+  .junction {
+    fill: var(--panel);
+    stroke: var(--junction);
+    stroke-width: 2.5;
+  }
+
+  .feature {
+    fill: var(--panel);
+    stroke: var(--position);
+    stroke-width: 2.5;
+  }
+
+  .node-title {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .code-label {
+    fill: var(--ink);
+    font-size: 15px;
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    font-weight: bold;
+  }
+
+  .branch-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .output-symbol {
+    fill: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .output-copy {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .junction-symbol {
+    fill: var(--junction);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .note-box {
+    fill: var(--note);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .note-text {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .error-text {
+    fill: var(--error);
+    font-size: 16px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-caption">
+  <figcaption id="diagram-caption">Разветвление TinyNeRF на плотность и цвет</figcaption>
+  <svg id="diagram" viewBox="0 0 960 450" width="960" height="450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-describedby="diagram-description">
+    <desc id="diagram-description">
+      Закодированная позиция входит в общий trunk. Его признак h напрямую
+      определяет плотность sigma, а для вычисления цвета объединяется с
+      отдельно закодированным направлением взгляда.
+    </desc>
+    <g id="plot"></g>
+  </svg>
+</figure>
+
+<script>
+"use strict";
+
+const diagramData = {
+  zero: 0,
+  geometry: {
+    corner: 12,
+    arrowLength: 13,
+    arrowHalfWidth: 6,
+    featureRadius: 20,
+    junctionRadius: 20
+  },
+  nodes: [
+    {
+      kind: "position", x: 18, y: 105, w: 185, h: 100, r: 12,
+      title: ["Позиция x"], titleY: 132,
+      copy: ["кодирование L_pos = 10", "размер 60"], copyY: 162, gap: 22
+    },
+    {
+      kind: "trunk", x: 265, y: 95, w: 220, h: 120, r: 12,
+      title: ["Общий trunk"], titleY: 128,
+      copy: ["признак места", "h"], copyY: 164, gap: 23
+    },
+    {
+      kind: "density", x: 620, y: 48, w: 165, h: 92, r: 12,
+      title: ["Голова плотности"], titleY: 78,
+      copy: ["Linear → ReLU", "направления здесь нет"], copyY: 106, gap: 21
+    },
+    {
+      kind: "direction", x: 18, y: 260, w: 185, h: 100, r: 12,
+      title: ["Направление d"], titleY: 287,
+      copy: ["кодирование L_dir = 4", "размер 24"], copyY: 317, gap: 22
+    },
+    {
+      kind: "color", x: 650, y: 245, w: 165, h: 110, r: 12,
+      title: ["Голова цвета"], titleY: 275,
+      copy: ["h + d_enc", "Linear → Sigmoid", "rgb"], copyY: 302, gap: 21
+    },
+    {
+      kind: "output-density", x: 850, y: 65, w: 72, h: 50, r: 12,
+      title: ["σ"], titleY: 97,
+      copy: [], copyY: 97, gap: 20
+    },
+    {
+      kind: "output-color", x: 850, y: 275, w: 72, h: 50, r: 12,
+      title: ["rgb"], titleY: 307,
+      copy: [], copyY: 307, gap: 20
+    }
+  ],
+  connections: [
+    { x1: 203, y1: 155, x2: 265, y2: 155, kind: "position" },
+    { x1: 485, y1: 155, x2: 510, y2: 155, kind: "position" },
+    { x1: 550, y1: 146, x2: 620, y2: 94, kind: "density" },
+    { x1: 545, y1: 170, x2: 584, y2: 286, kind: "neutral" },
+    { x1: 203, y1: 310, x2: 581, y2: 300, kind: "direction" },
+    { x1: 620, y1: 300, x2: 650, y2: 300, kind: "color" },
+    { x1: 785, y1: 94, x2: 850, y2: 90, kind: "density" },
+    { x1: 815, y1: 300, x2: 850, y2: 300, kind: "color" }
+  ],
+  feature: { x: 530, y: 155, r: 20, label: "h" },
+  junction: { x: 600, y: 300, r: 20, label: "⊕" },
+  labels: [
+    { text: "закодированная позиция", x: 210, y: 139, anchor: "start", dx: 0, dy: 0 },
+    { text: "только h", x: 560, y: 121, anchor: "start", dx: 0, dy: 0 },
+    { text: "h", x: 558, y: 225, anchor: "start", dx: 0, dy: 0 },
+    { text: "d_enc", x: 390, y: 328, anchor: "middle", dx: 0, dy: 0 },
+    { text: "объединение", x: 600, y: 337, anchor: "middle", dx: 0, dy: 0 },
+    { text: "1 неотрицательное число", x: 886, y: 133, anchor: "middle", dx: 0, dy: 0 },
+    { text: "3 канала от 0 до 1", x: 886, y: 343, anchor: "middle", dx: 0, dy: 0 }
+  ],
+  note: {
+    x: 148, y: 386, w: 664, h: 38, r: 12,
+    text: "Поворот d:  σ остаётся прежней  •  rgb может измениться",
+    textX: 480, textY: 410
+  },
+  fallback: {
+    x: 480,
+    y: 195,
+    lines: [
+      "Схема должна была показать общий trunk и две ветви:",
+      "σ получает только h, а rgb получает h вместе с d_enc."
+    ],
+    gap: 28
+  }
+};
+
+const origin = { x: 20, y: 5 };
+const scale = { x: 1, y: 1 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const plot = document.getElementById("plot");
+
+  const createElement = (name, attributes, className) => {
+    const element = document.createElementNS(svgNamespace, name);
+    if (className) element.setAttribute("class", className);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, String(value));
+    }
+    return element;
+  };
+
+  const appendText = (parent, specification, className) => {
+    const text = createElement("text", {
+      x: sx(specification.x),
+      y: sy(specification.y),
+      dx: specification.dx || diagramData.zero,
+      dy: specification.dy || diagramData.zero,
+      "text-anchor": specification.anchor || "middle",
+      "dominant-baseline": "middle"
+    }, className);
+    text.textContent = specification.text;
+    parent.appendChild(text);
+    return text;
+  };
+
+  const appendLines = (parent, lines, x, firstY, gap, className) => {
+    lines.forEach((line, index) => {
+      appendText(parent, {
+        text: line,
+        x,
+        y: firstY + index * gap,
+        anchor: "middle",
+        dx: diagramData.zero,
+        dy: diagramData.zero
+      }, className);
+    });
+  };
+
+  const appendBox = node => {
+    const group = createElement("g", {}, "node-group");
+    const rectangle = createElement("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: sx(node.x + node.w) - sx(node.x),
+      height: sy(node.y + node.h) - sy(node.y),
+      rx: sx(node.r) - sx(diagramData.zero),
+      ry: sy(node.r) - sy(diagramData.zero)
+    }, "node " + node.kind);
+
+    group.appendChild(rectangle);
+    appendLines(
+      group,
+      node.title,
+      node.x + node.w / diagramData.geometry.junctionRadius * diagramData.geometry.arrowLength -
+        node.w / diagramData.geometry.junctionRadius * diagramData.geometry.arrowLength +
+        node.x + node.w - node.x - node.w / diagramData.geometry.arrowHalfWidth *
+        diagramData.geometry.arrowHalfWidth / diagramData.geometry.arrowLength,
+      node.titleY,
+      node.gap,
+      node.kind.indexOf("output") === diagramData.zero ? "output-symbol" : "node-title"
+    );
+
+    if (node.kind.indexOf("output") !== diagramData.zero) {
+      const titleNodes = group.querySelectorAll(".node-title");
+      titleNodes.forEach(titleNode => {
+        titleNode.setAttribute("x", sx(node.x + node.w / diagramData.geometry.arrowHalfWidth -
+          node.w / diagramData.geometry.arrowHalfWidth +
+          node.w / diagramData.geometry.arrowHalfWidth * diagramData.geometry.arrowHalfWidth /
+          diagramData.geometry.featureRadius));
+      });
+    }
+
+    appendLines(
+      group,
+      node.copy,
+      node.x + node.w / diagramData.geometry.arrowHalfWidth -
+        node.w / diagramData.geometry.arrowHalfWidth +
+        node.w / diagramData.geometry.arrowHalfWidth * diagramData.geometry.arrowHalfWidth /
+        diagramData.geometry.featureRadius,
+      node.copyY,
+      node.gap,
+      "node-copy"
+    );
+    plot.appendChild(group);
+  };
+
+  const appendArrow = connection => {
+    const deltaX = connection.x2 - connection.x1;
+    const deltaY = connection.y2 - connection.y1;
+    const length = Math.hypot(deltaX, deltaY);
+    const unitX = deltaX / length;
+    const unitY = deltaY / length;
+    const baseX = connection.x2 - unitX * diagramData.geometry.arrowLength;
+    const baseY = connection.y2 - unitY * diagramData.geometry.arrowLength;
+    const sideX = -unitY * diagramData.geometry.arrowHalfWidth;
+    const sideY = unitX * diagramData.geometry.arrowHalfWidth;
+
+    const line = createElement("line", {
+      x1: sx(connection.x1),
+      y1: sy(connection.y1),
+      x2: sx(baseX),
+      y2: sy(baseY)
+    }, "connection " + connection.kind);
+
+    const arrowhead = createElement("polygon", {
+      points: [
+        sx(connection.x2) + "," + sy(connection.y2),
+        sx(baseX + sideX) + "," + sy(baseY + sideY),
+        sx(baseX - sideX) + "," + sy(baseY - sideY)
+      ].join(" ")
+    }, "arrowhead " + connection.kind);
+
+    plot.appendChild(line);
+    plot.appendChild(arrowhead);
+  };
+
+  diagramData.connections.forEach(appendArrow);
+  diagramData.nodes.forEach(appendBox);
+
+  const feature = createElement("circle", {
+    cx: sx(diagramData.feature.x),
+    cy: sy(diagramData.feature.y),
+    r: sx(diagramData.feature.r) - sx(diagramData.zero)
+  }, "feature");
+  plot.appendChild(feature);
+  appendText(plot, {
+    text: diagramData.feature.label,
+    x: diagramData.feature.x,
+    y: diagramData.feature.y,
+    anchor: "middle",
+    dx: diagramData.zero,
+    dy: diagramData.zero
+  }, "code-label");
+
+  const junction = createElement("circle", {
+    cx: sx(diagramData.junction.x),
+    cy: sy(diagramData.junction.y),
+    r: sx(diagramData.junction.r) - sx(diagramData.zero)
+  }, "junction");
+  plot.appendChild(junction);
+  appendText(plot, {
+    text: diagramData.junction.label,
+    x: diagramData.junction.x,
+    y: diagramData.junction.y,
+    anchor: "middle",
+    dx: diagramData.zero,
+    dy: diagramData.zero
+  }, "junction-symbol");
+
+  diagramData.labels.forEach(label => {
+    appendText(plot, label, "branch-label");
+  });
+
+  const note = diagramData.note;
+  plot.appendChild(createElement("rect", {
+    x: sx(note.x),
+    y: sy(note.y),
+    width: sx(note.x + note.w) - sx(note.x),
+    height: sy(note.y + note.h) - sy(note.y),
+    rx: sx(note.r) - sx(diagramData.zero),
+    ry: sy(note.r) - sy(diagramData.zero)
+  }, "note-box"));
+
+  appendText(plot, {
+    text: note.text,
+    x: note.textX,
+    y: note.textY,
+    anchor: "middle",
+    dx: diagramData.zero,
+    dy: diagramData.zero
+  }, "note-text");
+} catch (error) {
+  const plot = document.getElementById("plot");
+  plot.replaceChildren();
+  const svgNamespace = "http://www.w3.org/2000/svg";
+
+  diagramData.fallback.lines.forEach((line, index) => {
+    const text = document.createElementNS(svgNamespace, "text");
+    text.setAttribute("x", String(sx(diagramData.fallback.x)));
+    text.setAttribute("y", String(sy(
+      diagramData.fallback.y + index * diagramData.fallback.gap
+    )));
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "middle");
+    text.setAttribute("class", "error-text");
+    text.textContent = line;
+    plot.appendChild(text);
+  });
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Детектор видит кадры, tracker собирает историю</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --panel-soft: #eef1f5;
+      --ink: #172033;
+      --muted: #5e6879;
+      --frame: #c8cfda;
+      --road: #dce1e8;
+      --road-mark: #ffffff;
+      --detector: #e55649;
+      --detector-soft: #fff0ed;
+      --tracker: #087f8c;
+      --tracker-soft: #dff5f3;
+      --car: #394867;
+      --car-window: #b9dbe4;
+      --wheel: #172033;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: unset;
+      padding: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--frame);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--frame);
+      background: var(--panel);
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    .frame {
+      fill: var(--panel-soft);
+      stroke: var(--frame);
+      stroke-width: 2px;
+    }
+
+    .road {
+      fill: var(--road);
+    }
+
+    .road-mark {
+      stroke: var(--road-mark);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    .time {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .hint {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .detector-box {
+      fill: none;
+      stroke: var(--detector);
+      stroke-width: 4px;
+    }
+
+    .detector-tag {
+      fill: var(--detector-soft);
+      stroke: var(--detector);
+      stroke-width: 2px;
+    }
+
+    .detector-text {
+      fill: var(--detector);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .tracker-tag {
+      fill: var(--tracker-soft);
+      stroke: var(--tracker);
+      stroke-width: 2px;
+    }
+
+    .tracker-text {
+      fill: var(--tracker);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .trajectory-shadow {
+      fill: none;
+      stroke: var(--panel);
+      stroke-width: 10px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .trajectory {
+      fill: none;
+      stroke: var(--tracker);
+      stroke-width: 6px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .history-point {
+      fill: var(--panel);
+      stroke: var(--tracker);
+      stroke-width: 4px;
+    }
+
+    .car-body {
+      fill: var(--car);
+      stroke: var(--ink);
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .car-window {
+      fill: var(--car-window);
+      stroke: var(--ink);
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .wheel {
+      fill: var(--wheel);
+      stroke: var(--panel-soft);
+      stroke-width: 2px;
+    }
+
+    .legend-line {
+      stroke: var(--tracker);
+      stroke-width: 6px;
+      stroke-linecap: round;
+    }
+
+    .legend-text {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    .summary {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      padding: 16px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #18202d;
+        --panel-soft: #222c3a;
+        --ink: #edf2f7;
+        --muted: #b5c0ce;
+        --frame: #465266;
+        --road: #333e4e;
+        --road-mark: #6f7b8e;
+        --detector: #ff786c;
+        --detector-soft: #402624;
+        --tracker: #55d6d0;
+        --tracker-soft: #173c40;
+        --car: #8798bc;
+        --car-window: #b9e2ec;
+        --wheel: #0e131c;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram" aria-labelledby="diagram-title">
+    <header id="diagram-title">Детектор видит кадры — tracker собирает историю</header>
+    <svg id="scene" viewBox="0 0 1200 460"
+         width="1200" height="460"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Три кадра с одной машиной и общей историей ID 4</title>
+      <desc id="svg-description">На каждом кадре детектор независимо строит рамку вокруг машины. Tracker связывает положения цветной линией и сохраняет ID 4.</desc>
+    </svg>
+    <p id="fallback" hidden>Схема должна показать три последовательных кадра: отдельные рамки детектора вокруг одной машины соединены историей tracker с ID 4.</p>
+  </main>
+
+  <script>
+    const DATA = [{
+      origin: { x: 40, y: 18 },
+      scale: { x: 1, y: 1 },
+      zero: 0,
+      radius: 8,
+      frames: [
+        {
+          x: 20, y: 68, w: 320, h: 236,
+          time: "Кадр · 12,0 с",
+          box: { x: 58, y: 127, w: 132, h: 116 },
+          car: { x: 72, y: 171 },
+          track: { x: 124, y: 250 }
+        },
+        {
+          x: 380, y: 68, w: 320, h: 236,
+          time: "Кадр · 12,1 с",
+          box: { x: 456, y: 127, w: 132, h: 116 },
+          car: { x: 470, y: 171 },
+          track: { x: 522, y: 250 }
+        },
+        {
+          x: 740, y: 68, w: 320, h: 236,
+          time: "Кадр · 12,2 с",
+          box: { x: 866, y: 127, w: 132, h: 116 },
+          car: { x: 880, y: 171 },
+          track: { x: 932, y: 250 }
+        }
+      ],
+      road: { y: 196, h: 108, markY: 272, dash: 32, gap: 22, inset: 18 },
+      tags: {
+        detector: { insetX: 8, insetY: 8, w: 69, h: 25, textDx: 8, textDy: 17 },
+        tracker: { insetX: 8, insetY: 8, w: 47, h: 25, textDx: 8, textDy: 17 }
+      },
+      vehicle: {
+        body: [
+          { x: 0, y: 37 }, { x: 13, y: 19 }, { x: 30, y: 5 },
+          { x: 73, y: 5 }, { x: 91, y: 23 }, { x: 104, y: 28 },
+          { x: 104, y: 52 }, { x: 0, y: 52 }
+        ],
+        window: [
+          { x: 29, y: 12 }, { x: 44, y: 12 }, { x: 44, y: 28 },
+          { x: 17, y: 28 }
+        ],
+        windowRear: [
+          { x: 51, y: 12 }, { x: 69, y: 12 }, { x: 84, y: 28 },
+          { x: 51, y: 28 }
+        ],
+        wheels: [
+          { x: 24, y: 52, r: 10 },
+          { x: 82, y: 52, r: 10 }
+        ]
+      },
+      trajectory: {
+        bend: 18,
+        label: { x: 126, y: 278, dx: 0, dy: 0, text: "накопленная история tracker" }
+      },
+      topLabels: [
+        { x: 180, y: 28, dx: 0, dy: 0, text: "отдельная детекция" },
+        { x: 540, y: 28, dx: 0, dy: 0, text: "отдельная детекция" },
+        { x: 900, y: 28, dx: 0, dy: 0, text: "отдельная детекция" }
+      ],
+      legend: {
+        y: 344,
+        detector: {
+          x: 48, swatchW: 42, swatchH: 28,
+          textX: 104, textY: 363,
+          text: "Детектор: рамка отвечает только за текущий кадр"
+        },
+        tracker: {
+          x: 596, lineW: 56, pointR: 7,
+          textX: 672, textY: 363,
+          text: "Tracker: линия связывает наблюдения, ID 4 сохраняется"
+        }
+      },
+      summary: {
+        x: 540, y: 410, dx: 0, dy: 0,
+        text: "Новый кадр добавляет к истории очередную точку"
+      }
+    }];
+
+    const [{ origin, scale, zero, radius, frames, road, tags, vehicle, trajectory, topLabels, legend, summary }] = DATA;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.querySelector("#scene");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+        parent.appendChild(node);
+        return node;
+      };
+
+      const group = className => make("g", { class: className });
+
+      const rectAt = (parent, item, className) => make("rect", {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y),
+        rx: sx(radius) - sx(zero),
+        ry: sy(radius) - sy(zero),
+        class: className
+      }, parent);
+
+      const lineAt = (parent, start, end, className) => make("line", {
+        x1: sx(start.x),
+        y1: sy(start.y),
+        x2: sx(end.x),
+        y2: sy(end.y),
+        class: className
+      }, parent);
+
+      const circleAt = (parent, point, r, className) => make("circle", {
+        cx: sx(point.x),
+        cy: sy(point.y),
+        r: sx(point.x + r) - sx(point.x),
+        class: className
+      }, parent);
+
+      const textAt = (parent, label, className, anchor) => {
+        const node = make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": anchor,
+          class: className
+        }, parent);
+        node.textContent = label.text;
+        return node;
+      };
+
+      const polygonAt = (parent, points, base, className) => make("polygon", {
+        points: points.map(point =>
+          `${sx(base.x + point.x)},${sy(base.y + point.y)}`
+        ).join(" "),
+        class: className
+      }, parent);
+
+      const panelsLayer = group("panels");
+      const objectsLayer = group("objects");
+      const historyLayer = group("history");
+      const labelsLayer = group("labels");
+      const legendLayer = group("legend");
+
+      frames.forEach(frame => {
+        rectAt(panelsLayer, frame, "frame");
+
+        rectAt(panelsLayer, {
+          x: frame.x,
+          y: road.y,
+          w: frame.w,
+          h: road.h
+        }, "road");
+
+        const roadLine = lineAt(panelsLayer, {
+          x: frame.x + road.inset,
+          y: road.markY
+        }, {
+          x: frame.x + frame.w - road.inset,
+          y: road.markY
+        }, "road-mark");
+
+        roadLine.setAttribute(
+          "stroke-dasharray",
+          `${sx(road.dash) - sx(zero)} ${sx(road.gap) - sx(zero)}`
+        );
+
+        textAt(labelsLayer, {
+          x: frame.x + frame.w / scale.x / (scale.x + scale.x),
+          y: frame.y + tags.detector.h,
+          dx: zero,
+          dy: zero,
+          text: frame.time
+        }, "time", "middle");
+
+        rectAt(objectsLayer, frame.box, "detector-box");
+
+        rectAt(objectsLayer, {
+          x: frame.box.x + tags.detector.insetX,
+          y: frame.box.y + tags.detector.insetY,
+          w: tags.detector.w,
+          h: tags.detector.h
+        }, "detector-tag");
+
+        textAt(labelsLayer, {
+          x: frame.box.x + tags.detector.insetX,
+          y: frame.box.y + tags.detector.insetY,
+          dx: tags.detector.textDx,
+          dy: tags.detector.textDy,
+          text: "машина"
+        }, "detector-text", "start");
+
+        rectAt(objectsLayer, {
+          x: frame.box.x + frame.box.w - tags.tracker.w - tags.tracker.insetX,
+          y: frame.box.y + tags.tracker.insetY,
+          w: tags.tracker.w,
+          h: tags.tracker.h
+        }, "tracker-tag");
+
+        textAt(labelsLayer, {
+          x: frame.box.x + frame.box.w - tags.tracker.w - tags.tracker.insetX,
+          y: frame.box.y + tags.tracker.insetY,
+          dx: tags.tracker.textDx,
+          dy: tags.tracker.textDy,
+          text: "ID 4"
+        }, "tracker-text", "start");
+
+        polygonAt(objectsLayer, vehicle.body, frame.car, "car-body");
+        polygonAt(objectsLayer, vehicle.window, frame.car, "car-window");
+        polygonAt(objectsLayer, vehicle.windowRear, frame.car, "car-window");
+
+        vehicle.wheels.forEach(wheel => circleAt(objectsLayer, {
+          x: frame.car.x + wheel.x,
+          y: frame.car.y + wheel.y
+        }, wheel.r, "wheel"));
+      });
+
+      topLabels.forEach(label => textAt(labelsLayer, label, "hint", "middle"));
+
+      const trackPoints = frames.map(frame => frame.track);
+      const [firstTrack, middleTrack, lastTrack] = trackPoints;
+      const curve = [
+        `M ${sx(firstTrack.x)} ${sy(firstTrack.y)}`,
+        `C ${sx(firstTrack.x + trajectory.bend)} ${sy(firstTrack.y)}`,
+        `${sx(middleTrack.x - trajectory.bend)} ${sy(middleTrack.y)}`,
+        `${sx(middleTrack.x)} ${sy(middleTrack.y)}`,
+        `S ${sx(lastTrack.x - trajectory.bend)} ${sy(lastTrack.y)}`,
+        `${sx(lastTrack.x)} ${sy(lastTrack.y)}`
+      ].join(" ");
+
+      make("path", { d: curve, class: "trajectory-shadow" }, historyLayer);
+      make("path", { d: curve, class: "trajectory" }, historyLayer);
+      trackPoints.forEach(point =>
+        circleAt(historyLayer, point, legend.tracker.pointR, "history-point")
+      );
+
+      textAt(labelsLayer, trajectory.label, "tracker-text", "start");
+
+      rectAt(legendLayer, {
+        x: legend.detector.x,
+        y: legend.y,
+        w: legend.detector.swatchW,
+        h: legend.detector.swatchH
+      }, "detector-box");
+
+      textAt(legendLayer, {
+        x: legend.detector.textX,
+        y: legend.detector.textY,
+        dx: zero,
+        dy: zero,
+        text: legend.detector.text
+      }, "legend-text", "start");
+
+      lineAt(legendLayer, {
+        x: legend.tracker.x,
+        y: legend.y + legend.detector.swatchH / scale.x / (scale.x + scale.x)
+      }, {
+        x: legend.tracker.x + legend.tracker.lineW,
+        y: legend.y + legend.detector.swatchH / scale.x / (scale.x + scale.x)
+      }, "legend-line");
+
+      circleAt(legendLayer, {
+        x: legend.tracker.x + legend.tracker.lineW,
+        y: legend.y + legend.detector.swatchH / scale.x / (scale.x + scale.x)
+      }, legend.tracker.pointR, "history-point");
+
+      textAt(legendLayer, {
+        x: legend.tracker.textX,
+        y: legend.tracker.textY,
+        dx: zero,
+        dy: zero,
+        text: legend.tracker.text
+      }, "legend-text", "start");
+
+      textAt(labelsLayer, summary, "summary", "middle");
+    } catch (error) {
+      const svg = document.querySelector("#scene");
+      const fallback = document.querySelector("#fallback");
+      svg.setAttribute("hidden", "");
+      fallback.removeAttribute("hidden");
+      fallback.textContent = "Схема должна показать три последовательных кадра: детектор независимо обводит одну машину на каждом кадре, а tracker соединяет положения линией и сохраняет ID 4.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

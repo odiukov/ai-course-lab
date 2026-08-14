@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Свёртка временных выходов CTC</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #657086;
+    --line: #aeb7c7;
+    --blank-fill: #eef1f6;
+    --blank-ink: #5c6679;
+    --process: #e8edf7;
+    --focus: #7758c8;
+    --g0: #2477c9;
+    --g1: #16846f;
+    --g2: #b06b13;
+    --g3: #8a54b8;
+    --g4: #c44f65;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171a21;
+      --panel: #202530;
+      --ink: #eef2fa;
+      --muted: #aeb8ca;
+      --line: #596477;
+      --blank-fill: #2b313d;
+      --blank-ink: #c0c8d6;
+      --process: #293345;
+      --focus: #b39aef;
+      --g0: #6db4f5;
+      --g1: #5fd1b5;
+      --g2: #efb35f;
+      --g3: #c69be8;
+      --g4: #f08ba0;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  .heading {
+    padding: 12px 18px 4px;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+  }
+
+  .row-label {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .token {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .blank-token {
+    fill: var(--blank-ink);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .target-token {
+    fill: var(--ink);
+    font-size: 23px;
+    font-weight: 750;
+  }
+
+  .cell {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .blank-cell {
+    fill: var(--blank-fill);
+  }
+
+  .focus-cell {
+    stroke: var(--focus);
+    stroke-width: 3px;
+  }
+
+  .target-cell {
+    fill: var(--panel);
+    stroke: var(--group);
+    stroke-width: 3px;
+  }
+
+  .bracket,
+  .connector {
+    fill: none;
+    stroke: var(--group);
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .callout {
+    fill: none;
+    stroke: var(--focus);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .process-box {
+    fill: var(--process);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .process-label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .arrow-head {
+    fill: var(--group);
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: 650;
+  }
+
+  noscript {
+    display: block;
+    padding: 18px;
+    color: var(--ink);
+    background: var(--bg);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-heading">
+  <figcaption class="heading" id="diagram-heading">
+    15 временных шагов → одна целевая строка
+  </figcaption>
+  <svg id="diagram"
+       viewBox="0 0 1040 380"
+       width="1040"
+       height="380"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Пятнадцать временных выходов сворачиваются в hello</title>
+    <desc id="svg-desc">
+      Последовательность h h h blank blank e e l l blank l l o blank blank
+      после склейки повторов и удаления blank превращается в слово hello.
+    </desc>
+  </svg>
+  <noscript>
+    Схема должна показать, как 15 временных выходов
+    «h h h blank blank e e l l blank l l o blank blank»
+    сворачиваются в целевую строку «hello» из 5 символов.
+  </noscript>
+</figure>
+
+<script>
+const DATA = Object.freeze({
+  tokens: Object.freeze([
+    "h", "h", "h", "blank", "blank",
+    "e", "e", "l", "l", "blank",
+    "l", "l", "o", "blank", "blank"
+  ]),
+  target: Object.freeze(["h", "e", "l", "l", "o"]),
+  groups: Object.freeze([
+    Object.freeze({ from: 0, to: 5, color: 0 }),
+    Object.freeze({ from: 5, to: 7, color: 1 }),
+    Object.freeze({ from: 7, to: 10, color: 2 }),
+    Object.freeze({ from: 10, to: 12, color: 3 }),
+    Object.freeze({ from: 12, to: 15, color: 4 })
+  ]),
+  origin: Object.freeze({ x: 43, y: 23 }),
+  scale: Object.freeze({ x: 63, y: 43 }),
+  geometry: Object.freeze({
+    zero: 0,
+    one: 1,
+    half: 0.5,
+    left: 0.28,
+    right: 15.18,
+    headerY: 0.35,
+    startX: 0.45,
+    pitch: 1,
+    cellY: 0.78,
+    cellW: 0.86,
+    cellH: 0.92,
+    tokenY: 1.34,
+    bracketY: 1.94,
+    bracketTip: 0.19,
+    bracketInset: 0.06,
+    calloutX: 10.24,
+    calloutY: 2.43,
+    calloutJointY: 2.18,
+    focusIndex: 9,
+    processX: 4.62,
+    processY: 3.14,
+    processW: 6.18,
+    processH: 0.88,
+    processTextY: 3.68,
+    processAnchorStart: 5.25,
+    processAnchorPitch: 1.22,
+    targetLabelY: 4.72,
+    targetX: 5.14,
+    targetPitch: 1.12,
+    targetY: 5.30,
+    targetW: 0.92,
+    targetH: 1.02,
+    targetTextY: 5.94,
+    arrowTipY: 5.20,
+    arrowBaseY: 4.99,
+    arrowHalfW: 0.11,
+    lowerStartY: 4.05,
+    summaryY: 6.78,
+    fallbackY: 4.10,
+    labelPad: 6,
+    groupCount: 5
+  })
+});
+
+const origin = Object.freeze(DATA.origin);
+const scale = Object.freeze(DATA.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const g = DATA.geometry;
+  const NS = "http://www.w3.org/2000/svg";
+
+  function element(tag, attributes, content) {
+    const node = document.createElementNS(NS, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      node.setAttribute(name, String(value));
+    });
+    if (content !== undefined) {
+      node.textContent = content;
+    }
+    return node;
+  }
+
+  function add(node) {
+    svg.appendChild(node);
+    return node;
+  }
+
+  function pointList(points) {
+    return points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+  }
+
+  function textAt(x, y, content, className, anchor, dx, dy) {
+    return add(element("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      dx: dx,
+      dy: dy,
+      "dominant-baseline": "middle"
+    }, content));
+  }
+
+  function rectAt(x, y, width, height, className, style) {
+    return add(element("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(x + g.bracketInset) - sx(x),
+      class: className,
+      style: style
+    }));
+  }
+
+  function polyline(points, className, style) {
+    return add(element("polyline", {
+      points: pointList(points),
+      class: className,
+      style: style
+    }));
+  }
+
+  function groupStyle(index) {
+    return `--group:var(--g${index})`;
+  }
+
+  textAt(
+    g.left,
+    g.headerY,
+    "15 временных выходов",
+    "row-label",
+    "start",
+    g.labelPad,
+    g.zero
+  );
+
+  textAt(
+    g.right,
+    g.headerY,
+    "blank — модель ничего не выдаёт",
+    "note",
+    "end",
+    -g.labelPad,
+    g.zero
+  );
+
+  DATA.tokens.forEach((token, index) => {
+    const x = g.startX + index * g.pitch;
+    const isBlank = token === "blank";
+    const isFocus = index === g.focusIndex;
+    const cellClasses = [
+      "cell",
+      isBlank ? "blank-cell" : "",
+      isFocus ? "focus-cell" : ""
+    ].filter(Boolean).join(" ");
+
+    rectAt(x, g.cellY, g.cellW, g.cellH, cellClasses, "");
+    textAt(
+      x + g.cellW * g.half,
+      g.tokenY,
+      token,
+      isBlank ? "blank-token" : "token",
+      "middle",
+      g.zero,
+      g.zero
+    );
+  });
+
+  DATA.groups.forEach((group, index) => {
+    const x1 = g.startX + group.from * g.pitch + g.bracketInset;
+    const x2 = g.startX + group.to * g.pitch - g.pitch + g.cellW - g.bracketInset;
+    const center = (x1 + x2) * g.half;
+    const processAnchor = g.processAnchorStart + index * g.processAnchorPitch;
+    const style = groupStyle(group.color);
+
+    polyline([
+      { x: x1, y: g.bracketY - g.bracketTip },
+      { x: x1, y: g.bracketY },
+      { x: x2, y: g.bracketY },
+      { x: x2, y: g.bracketY - g.bracketTip }
+    ], "bracket", style);
+
+    polyline([
+      { x: center, y: g.bracketY },
+      { x: center, y: g.calloutJointY },
+      { x: processAnchor, y: g.processY }
+    ], "connector", style);
+  });
+
+  const focusCenter =
+    g.startX + g.focusIndex * g.pitch + g.cellW * g.half;
+
+  polyline([
+    { x: focusCenter, y: g.cellY + g.cellH },
+    { x: focusCenter, y: g.calloutJointY },
+    { x: g.calloutX - g.bracketTip, y: g.calloutJointY }
+  ], "callout", "");
+
+  textAt(
+    g.calloutX,
+    g.calloutY,
+    "этот blank разделяет две пары «l»",
+    "note",
+    "start",
+    g.labelPad,
+    g.zero
+  );
+
+  rectAt(
+    g.processX,
+    g.processY,
+    g.processW,
+    g.processH,
+    "process-box",
+    ""
+  );
+
+  textAt(
+    g.processX + g.processW * g.half,
+    g.processTextY,
+    "склеить повторы → удалить blank",
+    "process-label",
+    "middle",
+    g.zero,
+    g.zero
+  );
+
+  textAt(
+    g.targetX - g.bracketTip,
+    g.targetLabelY,
+    "после свёртки",
+    "row-label",
+    "end",
+    -g.labelPad,
+    g.zero
+  );
+
+  DATA.target.forEach((token, index) => {
+    const targetX = g.targetX + index * g.targetPitch;
+    const targetCenter = targetX + g.targetW * g.half;
+    const processAnchor = g.processAnchorStart + index * g.processAnchorPitch;
+    const style = groupStyle(index);
+
+    polyline([
+      { x: processAnchor, y: g.lowerStartY },
+      { x: processAnchor, y: g.targetLabelY },
+      { x: targetCenter, y: g.arrowTipY }
+    ], "connector", style);
+
+    add(element("polygon", {
+      points: pointList([
+        { x: targetCenter, y: g.arrowTipY },
+        { x: targetCenter - g.arrowHalfW, y: g.arrowBaseY },
+        { x: targetCenter + g.arrowHalfW, y: g.arrowBaseY }
+      ]),
+      class: "arrow-head",
+      style: style
+    }));
+
+    rectAt(
+      targetX,
+      g.targetY,
+      g.targetW,
+      g.targetH,
+      "target-cell",
+      style
+    );
+
+    textAt(
+      targetCenter,
+      g.targetTextY,
+      token,
+      "target-token",
+      "middle",
+      g.zero,
+      g.zero
+    );
+  });
+
+  textAt(
+    g.targetX + ((DATA.target.length - g.one) * g.targetPitch + g.targetW) * g.half,
+    g.summaryY,
+    "одна целевая строка: «hello» — 5 символов",
+    "row-label",
+    "middle",
+    g.zero,
+    g.zero
+  );
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const g = DATA.geometry;
+
+  while (svg.lastChild) {
+    svg.removeChild(svg.lastChild);
+  }
+
+  const fallback = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "text"
+  );
+
+  fallback.setAttribute("x", String(sx(g.left)));
+  fallback.setAttribute("y", String(sy(g.fallbackY)));
+  fallback.setAttribute("class", "fallback");
+  fallback.setAttribute("text-anchor", "start");
+  fallback.textContent =
+    "15 временных выходов h h h blank blank e e l l blank l l o blank blank сворачиваются в «hello».";
+
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

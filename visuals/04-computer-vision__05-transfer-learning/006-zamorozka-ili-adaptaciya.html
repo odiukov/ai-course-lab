@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Что обучается в двух режимах переноса</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --canvas: whitesmoke;
+    --panel: white;
+    --panel-border: lightgray;
+    --text: darkslategray;
+    --muted: slategray;
+    --frozen: gainsboro;
+    --frozen-border: slategray;
+    --train-soft: honeydew;
+    --train: palegreen;
+    --train-border: seagreen;
+    --train-strong: darkgreen;
+    --flow: slategray;
+    --note: cornsilk;
+    --note-border: goldenrod;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: darkslategray;
+      --canvas: #172126;
+      --panel: #202d33;
+      --panel-border: slategray;
+      --text: whitesmoke;
+      --muted: lightgray;
+      --frozen: #465158;
+      --frozen-border: lightgray;
+      --train-soft: #263d35;
+      --train: #315f48;
+      --train-border: lightgreen;
+      --train-strong: palegreen;
+      --flow: lightgray;
+      --note: #443a22;
+      --note-border: gold;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+    color: var(--text);
+  }
+
+  .figure {
+    width: 100%;
+    background: var(--canvas);
+    border: 1px solid var(--panel-border);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: 0;
+    padding: 14px 20px 8px;
+    font-size: 22px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 466px;
+    background: var(--canvas);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--panel-border);
+    stroke-width: 2px;
+  }
+
+  .frozen-block {
+    fill: var(--frozen);
+    stroke: var(--frozen-border);
+    stroke-width: 2px;
+  }
+
+  .soft-train-block {
+    fill: var(--train-soft);
+    stroke: var(--train-border);
+    stroke-width: 2px;
+  }
+
+  .head-block {
+    fill: var(--train);
+    stroke: var(--train-border);
+    stroke-width: 2px;
+  }
+
+  .frozen-status {
+    fill: var(--frozen);
+    stroke: var(--frozen-border);
+    stroke-width: 2px;
+  }
+
+  .train-status {
+    fill: var(--train-soft);
+    stroke: var(--train-border);
+    stroke-width: 2px;
+  }
+
+  .note-status {
+    fill: var(--note);
+    stroke: var(--note-border);
+    stroke-width: 2px;
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--flow);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .update-line {
+    fill: none;
+    stroke: var(--train-border);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrow-flow {
+    fill: var(--flow);
+  }
+
+  .arrow-update {
+    fill: var(--train-border);
+  }
+
+  .lock-line {
+    fill: none;
+    stroke: var(--frozen-border);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .lock-body {
+    fill: var(--frozen-border);
+  }
+
+  .panel-title {
+    fill: var(--text);
+    font-size: 21px;
+    font-weight: 700;
+  }
+
+  .panel-subtitle {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .block-title {
+    fill: var(--text);
+    font-size: 19px;
+    font-weight: 700;
+  }
+
+  .block-detail {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .status-title {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .status-detail {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .train-word {
+    fill: var(--train-strong);
+  }
+
+  .flow-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Что обучается в двух режимах переноса</h1>
+  <svg id="diagram"
+       viewBox="0 0 1000 430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Сравнение feature extraction и fine-tuning</title>
+    <desc id="svg-desc">В первом режиме backbone работает, но заморожен, а новая голова обучается. Во втором режиме обе части обучаются, но backbone получает маленький LR, а голова — обычный LR.</desc>
+    <g id="drawing"></g>
+  </svg>
+</main>
+
+<script>
+const data = [{
+  zero: 0,
+  originX: 0,
+  originY: 0,
+  scaleX: 1,
+  scaleY: 1,
+
+  panels: [
+    { x: 25, y: 18, w: 462, h: 390, r: 18 },
+    { x: 513, y: 18, w: 462, h: 390, r: 18 }
+  ],
+
+  headings: [
+    {
+      x: 256, titleY: 53, subtitleY: 76,
+      title: "Feature extraction",
+      subtitle: "backbone заморожен"
+    },
+    {
+      x: 744, titleY: 53, subtitleY: 76,
+      title: "Fine-tuning",
+      subtitle: "обучение всей модели"
+    }
+  ],
+
+  blocks: [
+    {
+      x: 51, y: 103, w: 251, h: 139, r: 14,
+      className: "frozen-block", centerX: 176,
+      titleY: 145, title: "Предобученный",
+      secondY: 171, second: "backbone",
+      detailY: 208, detail: "извлекает признаки"
+    },
+    {
+      x: 348, y: 103, w: 113, h: 139, r: 14,
+      className: "head-block", centerX: 404,
+      titleY: 151, title: "Новая",
+      secondY: 177, second: "голова",
+      detailY: 208, detail: "классы"
+    },
+    {
+      x: 539, y: 103, w: 251, h: 139, r: 14,
+      className: "soft-train-block", centerX: 664,
+      titleY: 145, title: "Предобученный",
+      secondY: 171, second: "backbone",
+      detailY: 208, detail: "адаптирует признаки"
+    },
+    {
+      x: 836, y: 103, w: 113, h: 139, r: 14,
+      className: "head-block", centerX: 892,
+      titleY: 151, title: "Новая",
+      secondY: 177, second: "голова",
+      detailY: 208, detail: "классы"
+    }
+  ],
+
+  flows: [
+    {
+      x1: 302, y1: 172, x2: 348, y2: 172,
+      tip: [
+        { x: 348, y: 172 },
+        { x: 336, y: 164 },
+        { x: 336, y: 180 }
+      ]
+    },
+    {
+      x1: 790, y1: 172, x2: 836, y2: 172,
+      tip: [
+        { x: 836, y: 172 },
+        { x: 824, y: 164 },
+        { x: 824, y: 180 }
+      ]
+    }
+  ],
+
+  statuses: [
+    {
+      x: 51, y: 276, w: 251, h: 79, r: 12,
+      className: "frozen-status", centerX: 176,
+      titleY: 307, title: "Заморожен",
+      detailY: 335, detail: "веса не меняются",
+      titleClass: "status-title"
+    },
+    {
+      x: 348, y: 276, w: 113, h: 79, r: 12,
+      className: "train-status", centerX: 404,
+      titleY: 307, title: "Обучается",
+      detailY: 335, detail: "обычный LR",
+      titleClass: "status-title train-word"
+    },
+    {
+      x: 539, y: 276, w: 251, h: 79, r: 12,
+      className: "note-status", centerX: 664,
+      titleY: 307, title: "Обучается",
+      detailY: 335, detail: "маленький LR",
+      titleClass: "status-title train-word"
+    },
+    {
+      x: 836, y: 276, w: 113, h: 79, r: 12,
+      className: "train-status", centerX: 892,
+      titleY: 307, title: "Обучается",
+      detailY: 335, detail: "обычный LR",
+      titleClass: "status-title train-word"
+    }
+  ],
+
+  updateLinks: [
+    {
+      x1: 176, y1: 276, x2: 176, y2: 249,
+      className: "flow-line",
+      tipClass: "arrow-flow",
+      tip: [
+        { x: 176, y: 249 },
+        { x: 169, y: 261 },
+        { x: 183, y: 261 }
+      ]
+    },
+    {
+      x1: 404, y1: 276, x2: 404, y2: 249,
+      className: "update-line",
+      tipClass: "arrow-update",
+      tip: [
+        { x: 404, y: 249 },
+        { x: 397, y: 261 },
+        { x: 411, y: 261 }
+      ]
+    },
+    {
+      x1: 664, y1: 276, x2: 664, y2: 249,
+      className: "update-line",
+      tipClass: "arrow-update",
+      tip: [
+        { x: 664, y: 249 },
+        { x: 657, y: 261 },
+        { x: 671, y: 261 }
+      ]
+    },
+    {
+      x1: 892, y1: 276, x2: 892, y2: 249,
+      className: "update-line",
+      tipClass: "arrow-update",
+      tip: [
+        { x: 892, y: 249 },
+        { x: 885, y: 261 },
+        { x: 899, y: 261 }
+      ]
+    }
+  ],
+
+  captions: [
+    {
+      x: 256, y: 384,
+      text: "Меняется только новая голова"
+    },
+    {
+      x: 744, y: 384,
+      text: "Меняются обе части — с разным шагом"
+    }
+  ],
+
+  lock: {
+    body: { x: 72, y: 299, w: 25, h: 21, r: 4 },
+    path: [
+      { command: "M", x: 77, y: 299 },
+      { command: "C", x: 77, y: 285, cx1: 77, cy1: 289, cx2: 81, cy2: 285 },
+      { command: "C", x: 92, y: 285, cx1: 88, cy1: 285, cx2: 92, cy2: 289 },
+      { command: "L", x: 92, y: 299 }
+    ]
+  },
+
+  fallback: {
+    x: 500,
+    y: 200,
+    lines: [
+      "Feature extraction: backbone заморожен,",
+      "обучается только новая голова.",
+      "Fine-tuning: backbone — маленький LR,",
+      "новая голова — обычный LR."
+    ],
+    ys: [168, 194, 232, 258]
+  }
+}];
+
+const [cfg] = data;
+const origin = { x: cfg.originX, y: cfg.originY };
+const scale = { x: cfg.scaleX, y: cfg.scaleY };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const root = document.getElementById("drawing");
+  const ns = svg.namespaceURI;
+
+  const make = (tag, className) => {
+    const element = document.createElementNS(ns, tag);
+    if (className) element.setAttribute("class", className);
+    return element;
+  };
+
+  const rect = box => {
+    const element = make("rect", box.className);
+    element.setAttribute("x", sx(box.x));
+    element.setAttribute("y", sy(box.y));
+    element.setAttribute("width", sx(box.x + box.w) - sx(box.x));
+    element.setAttribute("height", sy(box.y + box.h) - sy(box.y));
+    element.setAttribute("rx", sx(box.x + box.r) - sx(box.x));
+    root.appendChild(element);
+    return element;
+  };
+
+  const line = item => {
+    const element = make("line", item.className);
+    element.setAttribute("x1", sx(item.x1));
+    element.setAttribute("y1", sy(item.y1));
+    element.setAttribute("x2", sx(item.x2));
+    element.setAttribute("y2", sy(item.y2));
+    root.appendChild(element);
+    return element;
+  };
+
+  const polygon = (points, className) => {
+    const element = make("polygon", className);
+    element.setAttribute(
+      "points",
+      points.map(point => sx(point.x) + "," + sy(point.y)).join(" ")
+    );
+    root.appendChild(element);
+    return element;
+  };
+
+  const text = (x, y, value, className, anchor) => {
+    const element = make("text", className);
+    element.setAttribute("x", sx(x));
+    element.setAttribute("y", sy(y));
+    element.setAttribute("text-anchor", anchor);
+    element.textContent = value;
+    root.appendChild(element);
+    return element;
+  };
+
+  cfg.panels.forEach(panel => {
+    rect({ ...panel, className: "panel" });
+  });
+
+  cfg.headings.forEach(heading => {
+    text(
+      heading.x,
+      heading.titleY,
+      heading.title,
+      "panel-title",
+      "middle"
+    );
+    text(
+      heading.x,
+      heading.subtitleY,
+      heading.subtitle,
+      "panel-subtitle",
+      "middle"
+    );
+  });
+
+  cfg.blocks.forEach(block => {
+    rect(block);
+    text(
+      block.centerX,
+      block.titleY,
+      block.title,
+      "block-title",
+      "middle"
+    );
+    text(
+      block.centerX,
+      block.secondY,
+      block.second,
+      "block-title",
+      "middle"
+    );
+    text(
+      block.centerX,
+      block.detailY,
+      block.detail,
+      "block-detail",
+      "middle"
+    );
+  });
+
+  cfg.flows.forEach(flow => {
+    line({ ...flow, className: "flow-line" });
+    polygon(flow.tip, "arrow-flow");
+  });
+
+  cfg.updateLinks.forEach(link => {
+    line(link);
+    polygon(link.tip, link.tipClass);
+  });
+
+  cfg.statuses.forEach(status => {
+    rect(status);
+    text(
+      status.centerX,
+      status.titleY,
+      status.title,
+      status.titleClass,
+      "middle"
+    );
+    text(
+      status.centerX,
+      status.detailY,
+      status.detail,
+      "status-detail",
+      "middle"
+    );
+  });
+
+  const lockBody = rect({
+    ...cfg.lock.body,
+    className: "lock-body"
+  });
+  lockBody.setAttribute(
+    "rx",
+    sx(cfg.lock.body.x + cfg.lock.body.r) - sx(cfg.lock.body.x)
+  );
+
+  const lockPath = make("path", "lock-line");
+  lockPath.setAttribute(
+    "d",
+    cfg.lock.path.map(segment => {
+      if (segment.command === "M" || segment.command === "L") {
+        return segment.command + " " + sx(segment.x) + " " + sy(segment.y);
+      }
+      return segment.command + " " +
+        sx(segment.cx1) + " " + sy(segment.cy1) + " " +
+        sx(segment.cx2) + " " + sy(segment.cy2) + " " +
+        sx(segment.x) + " " + sy(segment.y);
+    }).join(" ")
+  );
+  root.appendChild(lockPath);
+
+  cfg.captions.forEach(caption => {
+    text(
+      caption.x,
+      caption.y,
+      caption.text,
+      "flow-label",
+      "middle"
+    );
+  });
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const root = document.getElementById("drawing");
+  const ns = svg.namespaceURI;
+  root.replaceChildren();
+
+  cfg.fallback.lines.forEach((lineValue, position) => {
+    const element = document.createElementNS(ns, "text");
+    element.setAttribute("class", "fallback");
+    element.setAttribute("x", sx(cfg.fallback.x));
+    element.setAttribute("y", sy(cfg.fallback.ys[position]));
+    element.setAttribute("text-anchor", "middle");
+    element.textContent = lineValue;
+    root.appendChild(element);
+  });
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

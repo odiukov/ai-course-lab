@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Полный маршрут запроса и каталога</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#f8fafc;
+  --ink:#172033;
+  --muted:#526078;
+  --line:#8793a8;
+  --lane-online:#eef6ff;
+  --lane-offline:#f4f1ff;
+  --node:#ffffff;
+  --node-stroke:#aab5c7;
+  --blue:#2563eb;
+  --blue-soft:#dbeafe;
+  --violet:#7c3aed;
+  --violet-soft:#ede9fe;
+  --amber:#b76005;
+  --amber-soft:#fef3c7;
+  --green:#168348;
+  --green-soft:#dcfce7;
+  --badge:#e8edf5;
+  --shadow:#dce3ed;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#111827;
+    --ink:#f1f5f9;
+    --muted:#b7c2d3;
+    --line:#7f8da3;
+    --lane-online:#14233a;
+    --lane-offline:#211b38;
+    --node:#1d2736;
+    --node-stroke:#58677e;
+    --blue:#76a7ff;
+    --blue-soft:#183766;
+    --violet:#b99aff;
+    --violet-soft:#352660;
+    --amber:#f4b654;
+    --amber-soft:#4b3516;
+    --green:#63d595;
+    --green-soft:#153e2a;
+    --badge:#2c3748;
+    --shadow:#0a0f18;
+  }
+}
+*{box-sizing:border-box}
+body{margin:unset;background:var(--page);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{border:1px solid var(--node-stroke);background:var(--page);overflow:hidden}
+h1{margin:unset;padding:14px 18px 8px;font-size:18px;text-align:center}
+svg{display:block;width:100%;height:auto;max-height:480px}
+text{font-family:inherit;fill:var(--ink)}
+.label{font-weight:bold}
+.small{fill:var(--muted)}
+.lane-label{font-weight:bold;letter-spacing:.04em}
+.arrow{fill:none;stroke:var(--line);stroke-linecap:round;stroke-linejoin:round}
+.arrow-online{stroke:var(--blue)}
+.arrow-offline{stroke:var(--violet)}
+.arrow-out{stroke:var(--green)}
+.head-online{fill:var(--blue)}
+.head-offline{fill:var(--violet)}
+.head-out{fill:var(--green)}
+.node{fill:var(--node);stroke:var(--node-stroke)}
+.encoder{fill:var(--blue-soft);stroke:var(--blue)}
+.vector{fill:var(--violet-soft);stroke:var(--violet)}
+.index{fill:var(--amber-soft);stroke:var(--amber)}
+.result{fill:var(--green-soft);stroke:var(--green)}
+.badge{fill:var(--badge);stroke:var(--node-stroke)}
+.guide{stroke:var(--line);fill:none}
+.fallback{padding:18px;font-size:15px;text-align:center;color:var(--ink)}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Полный маршрут запроса и каталога</h1>
+  <svg id="diagram" role="img" aria-labelledby="diagram-title diagram-description"></svg>
+  <p id="fallback" class="fallback" hidden>Схема должна была показать два маршрута: запрос и заранее подготовленный каталог проходят через одну модель, превращаются в эмбеддинги, встречаются в FAISS-индексе и дают ранжированный top-k.</p>
+  <noscript><p class="fallback">Включите JavaScript, чтобы увидеть схему маршрута запроса и каталога.</p></noscript>
+</main>
+<script>
+const data={
+  canvas:{w:1200,h:450},
+  frame:{x:0,y:0,w:1200,h:450,r:0},
+  n:{zero:0,one:1,two:2},
+  metrics:{stroke:2,thin:1,font:16,fontSmall:13,fontTiny:11,fontBig:19,gap:19,head:10,radius:12,dash:"6 6"},
+  lanes:[
+    {x:24,y:58,w:660,h:158,r:18,cls:"online",label:"НА КАЖДЫЙ ЗАПРОС",lx:42,ly:82},
+    {x:24,y:270,w:660,h:146,r:18,cls:"offline",label:"ЗАРАНЕЕ · ДО 1 000 000 ИЗОБРАЖЕНИЙ",lx:42,ly:294}
+  ],
+  nodes:[
+    {id:"query",x:42,y:108,w:166,h:78,r:12,cls:"node",lines:["Запрос"],cy:128},
+    {id:"encQ",x:270,y:108,w:136,h:78,r:12,cls:"encoder",lines:["Энкодер"],cy:147},
+    {id:"embQ",x:470,y:108,w:170,h:78,r:12,cls:"vector",lines:["Эмбеддинг","запроса"],cy:147},
+    {id:"catalog",x:42,y:316,w:166,h:78,r:12,cls:"node",lines:["Изображения","каталога"],cy:355},
+    {id:"encC",x:270,y:316,w:136,h:78,r:12,cls:"encoder",lines:["Энкодер"],cy:355},
+    {id:"embC",x:470,y:316,w:170,h:78,r:12,cls:"vector",lines:["Эмбеддинги","каталога"],cy:347},
+    {id:"index",x:718,y:166,w:164,h:142,r:16,cls:"index",lines:["FAISS-индекс","ближайших","эмбеддингов"],cy:224},
+    {id:"result",x:950,y:166,w:218,h:142,r:16,cls:"result",lines:["Ранжированный top-k","10 ближайших","товаров"],cy:224}
+  ],
+  queryPills:[
+    {x:57,y:146,w:61,h:25,r:8,text:"ФОТО"},
+    {x:126,y:146,w:67,h:25,r:8,text:"ТЕКСТ"}
+  ],
+  arrows:[
+    {points:[{x:208,y:147},{x:270,y:147}],tone:"online",label:"кодирование",lx:239,ly:132,anchor:"middle"},
+    {points:[{x:406,y:147},{x:470,y:147}],tone:"online",label:"вектор",lx:438,ly:132,anchor:"middle"},
+    {points:[{x:640,y:147},{x:674,y:147},{x:674,y:204},{x:718,y:204}],tone:"online",label:"быстрый поиск",lx:655,ly:126,anchor:"middle"},
+    {points:[{x:208,y:355},{x:270,y:355}],tone:"offline",label:"кодирование",lx:239,ly:379,anchor:"middle"},
+    {points:[{x:406,y:355},{x:470,y:355}],tone:"offline",label:"векторы",lx:438,ly:379,anchor:"middle"},
+    {points:[{x:640,y:355},{x:674,y:355},{x:674,y:270},{x:718,y:270}],tone:"offline",label:"построение индекса",lx:651,ly:389,anchor:"middle"},
+    {points:[{x:882,y:237},{x:950,y:237}],tone:"out",label:"cosine / L2",lx:916,ly:218,anchor:"middle"}
+  ],
+  sameModel:{x:338,y1:186,y2:316,bx:262,by:238,bw:152,bh:28,r:9,text:"ОДНА МОДЕЛЬ"},
+  indexNote:{x:800,y:126,text:"ДВА МАРШРУТА ВСТРЕЧАЮТСЯ ЗДЕСЬ",lineY1:136,lineY2:160},
+  catalogNote:{x:555,y:376,text:"готовы до запроса"},
+  resultBars:[
+    {x:976,y:270,w:24,h:17},{x:1007,y:263,w:24,h:24},{x:1038,y:256,w:24,h:31},
+    {x:1069,y:249,w:24,h:38},{x:1100,y:242,w:24,h:45}
+  ],
+  legend:[
+    {x:270,y:431,tone:"online",text:"онлайн: один новый эмбеддинг и поиск"},
+    {x:676,y:431,tone:"offline",text:"офлайн: каталог кодируется один раз"}
+  ],
+  description:"Верхняя ветка кодирует фото или текст запроса. Нижняя заранее кодирует изображения каталога. Эмбеддинги встречаются в FAISS-индексе, который возвращает десять ближайших товаров."
+};
+const origin={x:0,y:0};
+const scale={x:1,y:1};
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+(()=>{
+  const svg=document.getElementById("diagram");
+  const fallback=document.getElementById("fallback");
+  const ns="http://www.w3.org/2000/svg";
+  try{
+    const make=(name,attrs,cls)=>{
+      const node=document.createElementNS(ns,name);
+      if(cls)node.setAttribute("class",cls);
+      Object.entries(attrs||{}).forEach(([key,value])=>node.setAttribute(key,value));
+      return node;
+    };
+    const add=node=>(svg.appendChild(node),node);
+    const width=(x,w)=>sx(x+w)-sx(x);
+    const height=(y,h)=>sy(y+h)-sy(y);
+    const rect=(box,cls)=>{
+      const node=make("rect",{
+        x:sx(box.x),y:sy(box.y),width:width(box.x,box.w),height:height(box.y,box.h),
+        rx:width(data.n.zero,box.r),ry:height(data.n.zero,box.r),
+        "stroke-width":data.metrics.stroke,"vector-effect":"non-scaling-stroke"
+      },cls);
+      add(node);
+      return node;
+    };
+    const line=(a,b,cls,stroke=data.metrics.stroke,dash)=>{
+      const attrs={
+        x1:sx(a.x),y1:sy(a.y),x2:sx(b.x),y2:sy(b.y),
+        "stroke-width":stroke,"vector-effect":"non-scaling-stroke"
+      };
+      if(dash)attrs["stroke-dasharray"]=dash;
+      return add(make("line",attrs,cls));
+    };
+    const text=(lines,x,y,options={})=>{
+      const list=Array.isArray(lines)?lines:[lines];
+      const gap=options.gap||data.metrics.gap;
+      const font=options.font||data.metrics.font;
+      const anchor=options.anchor||"middle";
+      const node=make("text",{
+        "text-anchor":anchor,"font-size":font,
+        "dominant-baseline":"middle"
+      },options.cls||"label");
+      list.forEach((value,index)=>{
+        const offset=(index-(list.length-data.n.one)/data.n.two)*gap;
+        const span=make("tspan",{x:sx(x),y:sy(y+offset)});
+        span.textContent=value;
+        node.appendChild(span);
+      });
+      add(node);
+      return node;
+    };
+    const arrow=item=>{
+      const poly=make("polyline",{
+        points:item.points.map(point=>`${sx(point.x)},${sy(point.y)}`).join(" "),
+        "stroke-width":data.metrics.stroke,"vector-effect":"non-scaling-stroke"
+      },`arrow arrow-${item.tone}`);
+      add(poly);
+      const last=item.points.at(-data.n.one);
+      const before=item.points.at(-data.n.two);
+      const dx=last.x-before.x;
+      const dy=last.y-before.y;
+      const head=data.metrics.head;
+      let vertices;
+      if(dx!==data.n.zero){
+        const back=last.x-Math.sign(dx)*head;
+        vertices=[
+          last,
+          {x:back,y:last.y-head/data.n.two},
+          {x:back,y:last.y+head/data.n.two}
+        ];
+      }else{
+        const back=last.y-Math.sign(dy)*head;
+        vertices=[
+          last,
+          {x:last.x-head/data.n.two,y:back},
+          {x:last.x+head/data.n.two,y:back}
+        ];
+      }
+      add(make("polygon",{
+        points:vertices.map(point=>`${sx(point.x)},${sy(point.y)}`).join(" ")
+      },`head-${item.tone}`));
+      text(item.label,item.lx,item.ly,{
+        font:data.metrics.fontSmall,anchor:item.anchor,cls:"small"
+      });
+    };
+
+    svg.setAttribute("viewBox",[
+      sx(data.frame.x),sy(data.frame.y),
+      width(data.frame.x,data.frame.w),height(data.frame.y,data.frame.h)
+    ].join(" "));
+    svg.setAttribute("width",width(data.frame.x,data.canvas.w));
+    svg.setAttribute("height",height(data.frame.y,data.canvas.h));
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+
+    const desc=make("desc",{id:"diagram-description"});
+    desc.textContent=data.description;
+    add(desc);
+    rect(data.frame,"background");
+    svg.lastChild.setAttribute("fill","var(--page)");
+
+    data.lanes.forEach(lane=>{
+      rect(lane,lane.cls==="online"?"lane-online":"lane-offline");
+      svg.lastChild.setAttribute("fill",lane.cls==="online"?"var(--lane-online)":"var(--lane-offline)");
+      text(lane.label,lane.lx,lane.ly,{
+        font:data.metrics.fontSmall,anchor:"start",
+        cls:`lane-label ${lane.cls==="online"?"arrow-online":"arrow-offline"}`
+      });
+    });
+
+    line(
+      {x:data.sameModel.x,y:data.sameModel.y1},
+      {x:data.sameModel.x,y:data.sameModel.y2},
+      "guide",data.metrics.thin,data.metrics.dash
+    );
+    line(
+      {x:data.indexNote.x,y:data.indexNote.lineY1},
+      {x:data.indexNote.x,y:data.indexNote.lineY2},
+      "guide",data.metrics.thin
+    );
+    text(data.indexNote.text,data.indexNote.x,data.indexNote.y,{
+      font:data.metrics.fontTiny,cls:"small"
+    });
+
+    data.arrows.forEach(arrow);
+    data.nodes.forEach(node=>{
+      rect(node,node.cls);
+      text(node.lines,node.x+node.w/data.n.two,node.cy,{
+        font:node.id==="index"||node.id==="result"?data.metrics.fontBig:data.metrics.font
+      });
+    });
+
+    data.queryPills.forEach(pill=>{
+      rect(pill,"badge");
+      text(pill.text,pill.x+pill.w/data.n.two,pill.y+pill.h/data.n.two,{
+        font:data.metrics.fontTiny
+      });
+    });
+
+    rect({
+      x:data.sameModel.bx,y:data.sameModel.by,w:data.sameModel.bw,
+      h:data.sameModel.bh,r:data.sameModel.r
+    },"badge");
+    text(
+      data.sameModel.text,
+      data.sameModel.bx+data.sameModel.bw/data.n.two,
+      data.sameModel.by+data.sameModel.bh/data.n.two,
+      {font:data.metrics.fontTiny}
+    );
+
+    text(data.catalogNote.text,data.catalogNote.x,data.catalogNote.y,{
+      font:data.metrics.fontTiny,cls:"small"
+    });
+
+    data.resultBars.forEach(bar=>rect({
+      x:bar.x,y:bar.y,w:bar.w,h:bar.h,r:data.metrics.radius/data.n.two
+    },"result"));
+
+    data.legend.forEach(item=>{
+      rect({
+        x:item.x,y:item.y-data.metrics.radius/data.n.two,
+        w:data.metrics.radius,h:data.metrics.radius,r:data.metrics.radius/data.n.two
+      },item.tone==="online"?"encoder":"vector");
+      text(item.text,item.x+data.metrics.radius+data.metrics.head,item.y,{
+        font:data.metrics.fontSmall,anchor:"start",cls:"small"
+      });
+    });
+  }catch(error){
+    svg.hidden=true;
+    fallback.hidden=false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

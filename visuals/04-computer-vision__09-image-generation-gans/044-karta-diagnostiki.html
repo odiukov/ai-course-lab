@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Карта диагностики трёх типичных отказов GAN</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f8fafc;
+  --panel:#ffffff;
+  --panel-alt:#f1f5f9;
+  --ink:#172033;
+  --muted:#586579;
+  --grid:#cbd5e1;
+  --axis:#64748b;
+  --g:#2563eb;
+  --d:#dc2626;
+  --accuracy:#a16207;
+  --sample:#dbeafe;
+  --sample-ink:#2563eb;
+  --noise-a:#94a3b8;
+  --noise-b:#475569;
+  --noise-c:#cbd5e1;
+  --warning:#b91c1c;
+  --fix:#166534;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0b1120;
+    --panel:#111827;
+    --panel-alt:#172033;
+    --ink:#e5edf8;
+    --muted:#aab6c8;
+    --grid:#334155;
+    --axis:#718096;
+    --g:#60a5fa;
+    --d:#fb7185;
+    --accuracy:#fbbf24;
+    --sample:#172f55;
+    --sample-ink:#93c5fd;
+    --noise-a:#64748b;
+    --noise-b:#cbd5e1;
+    --noise-c:#334155;
+    --warning:#fda4af;
+    --fix:#86efac;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+figure{margin:0;background:var(--bg)}
+header{
+  background:var(--panel);
+  border-bottom:1px solid var(--grid);
+  color:var(--ink);
+  font-size:18px;
+  font-weight:700;
+  text-align:center;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:480px;
+  background:var(--bg);
+}
+.card{fill:var(--panel);stroke:var(--grid);stroke-width:1}
+.axis{fill:none;stroke:var(--axis);stroke-width:1.5}
+.gridline{stroke:var(--grid);stroke-width:1}
+.curve-g{fill:none;stroke:var(--g);stroke-width:2.5}
+.curve-d{fill:none;stroke:var(--d);stroke-width:2.5}
+.curve-a{fill:none;stroke:var(--accuracy);stroke-width:2}
+.sample-frame{fill:var(--panel-alt);stroke:var(--grid);stroke-width:1}
+.sample-circle{fill:var(--sample);stroke:var(--sample-ink);stroke-width:1.5}
+.noise-a{fill:var(--noise-a);stroke:var(--noise-a);stroke-width:1}
+.noise-b{fill:var(--noise-b);stroke:var(--noise-b);stroke-width:1}
+.noise-c{fill:var(--noise-c);stroke:var(--noise-c);stroke-width:1}
+.noise-line{fill:none;stroke:var(--sample-ink);stroke-width:1.5}
+.heading{fill:var(--muted);font-size:11px;font-weight:700}
+.name{fill:var(--ink);font-size:15px;font-weight:750}
+.sign{fill:var(--warning);font-size:12px;font-weight:700}
+.body{fill:var(--ink);font-size:12px}
+.fix{fill:var(--fix);font-size:12px;font-weight:650}
+.micro{fill:var(--muted);font-size:10px}
+.legend-g{fill:var(--g);font-size:10px;font-weight:700}
+.legend-d{fill:var(--d);font-size:10px;font-weight:700}
+.legend-a{fill:var(--accuracy);font-size:10px;font-weight:700}
+.fallback{fill:var(--ink);font-size:15px}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+<header id="diagram-title">Карта диагностики трёх типичных отказов GAN</header>
+<svg id="map" viewBox="0 0 1100 470" width="1100" height="470"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-label="Три диагностических маршрута: mode collapse, победа discriminator и осцилляция">
+  <title>Кривые потерь и сетки из 16 сэмплов для трёх отказов GAN</title>
+  <g id="drawing"></g>
+</svg>
+</figure>
+<script>
+const data={
+  zero:0,
+  frame:{x:1,y:5.4,w:108,h:12.1},
+  axis:{left:22.5,right:52,top:8,bottom:15.7,ticks:[22.5,29.875,37.25,44.625,52]},
+  tile:{w:2,h:2,mid:1,r:.55},
+  cells:[
+    {x:0,y:0,v:0},{x:2.4,y:0,v:1},{x:4.8,y:0,v:2},{x:7.2,y:0,v:3},
+    {x:0,y:2.4,v:2},{x:2.4,y:2.4,v:3},{x:4.8,y:2.4,v:0},{x:7.2,y:2.4,v:1},
+    {x:0,y:4.8,v:1},{x:2.4,y:4.8,v:0},{x:4.8,y:4.8,v:3},{x:7.2,y:4.8,v:2},
+    {x:0,y:7.2,v:3},{x:2.4,y:7.2,v:2},{x:4.8,y:7.2,v:1},{x:7.2,y:7.2,v:0}
+  ],
+  noise:[
+    [
+      {k:"rect",x:.18,y:.24,w:.68,h:.34,c:"noise-a"},
+      {k:"rect",x:1.12,y:.18,w:.58,h:.65,c:"noise-b"},
+      {k:"rect",x:.42,y:1.17,w:.92,h:.52,c:"noise-c"},
+      {k:"line",x:.15,y:1.82,x2:1.82,y2:.92,c:"noise-line"}
+    ],
+    [
+      {k:"rect",x:.15,y:.16,w:.52,h:.82,c:"noise-b"},
+      {k:"rect",x:.92,y:.35,w:.86,h:.38,c:"noise-c"},
+      {k:"rect",x:.58,y:1.18,w:.46,h:.63,c:"noise-a"},
+      {k:"line",x:.12,y:1.05,x2:1.84,y2:1.72,c:"noise-line"}
+    ],
+    [
+      {k:"rect",x:.28,y:.18,w:1.35,h:.31,c:"noise-c"},
+      {k:"rect",x:.16,y:.78,w:.62,h:.74,c:"noise-a"},
+      {k:"rect",x:1.18,y:.92,w:.59,h:.76,c:"noise-b"},
+      {k:"line",x:.28,y:1.78,x2:1.62,y2:.58,c:"noise-line"}
+    ],
+    [
+      {k:"rect",x:.2,y:.28,w:.38,h:1.35,c:"noise-c"},
+      {k:"rect",x:.82,y:.18,w:.92,h:.58,c:"noise-a"},
+      {k:"rect",x:.92,y:1.08,w:.72,h:.62,c:"noise-b"},
+      {k:"line",x:.12,y:.92,x2:1.82,y2:.35,c:"noise-line"}
+    ]
+  ],
+  rows:[
+    {
+      y:5.4,gridY:6.6,type:"collapse",
+      name:"MODE COLLAPSE",sub:"разнообразие исчезает",
+      lines:[
+        {x:2.3,y:7.5,t:"MODE COLLAPSE",c:"name"},
+        {x:2.3,y:9.8,t:"разнообразие ↓",c:"sign"},
+        {x:2.3,y:12.2,t:"G повторяет удачный образ",c:"body"},
+        {x:67,y:7.5,t:"ПОДПИСЬ: 16 одинаковых кругов",c:"sign"},
+        {x:67,y:10.1,t:"Проверка: разнообразие сэмплов",c:"body"},
+        {x:67,y:12.6,t:"Spectral norm · сходство в батче",c:"fix"},
+        {x:67,y:15.1,t:"или метки желаемых классов",c:"fix"}
+      ],
+      g:[[22.5,11.2],[26,9.6],[29.5,12.1],[33,9.9],[36.5,12.4],[40,9.8],[43.5,12.2],[47,10.1],[52,11.7]],
+      d:[[22.5,13.9],[26,14.5],[29.5,14.7],[33,14.4],[36.5,14.9],[40,14.6],[43.5,14.8],[47,14.7],[52,14.9]]
+    },
+    {
+      y:18.9,gridY:20.1,type:"noise",
+      name:"D ПОБЕЖДАЕТ",sub:"градиент G исчезает",
+      lines:[
+        {x:2.3,y:21,t:"D ПОБЕЖДАЕТ",c:"name"},
+        {x:2.3,y:23.3,t:"точность D ≈ 100%",c:"sign"},
+        {x:2.3,y:25.8,t:"сэмплы остаются шумом",c:"body"},
+        {x:67,y:21,t:"ПОДПИСЬ: шум, D ≈ 100%",c:"sign"},
+        {x:67,y:23.6,t:"Loss D низкий, loss G большой",c:"body"},
+        {x:67,y:26.1,t:"Уменьшить D · снизить learning rate",c:"fix"},
+        {x:67,y:28.6,t:"смягчить настоящую метку до 0,9",c:"fix"}
+      ],
+      g:[[22.5,9.4],[26,9.2],[29.5,9.5],[33,9.3],[36.5,9.4],[40,9.25],[43.5,9.45],[47,9.3],[52,9.4]],
+      d:[[22.5,14.7],[26,15],[29.5,14.9],[33,15.1],[36.5,15],[40,15.15],[43.5,15],[47,15.1],[52,15.05]],
+      a:[[22.5,8.5],[26,8.35],[29.5,8.3],[33,8.35],[36.5,8.3],[40,8.32],[43.5,8.3],[47,8.31],[52,8.3]],
+      note:{x:51.7,y:8.15,t:"точность D ≈ 100%",c:"legend-a",a:"end",dx:0,dy:-3}
+    },
+    {
+      y:32.4,gridY:33.6,type:"oscillation",
+      name:"ОСЦИЛЛЯЦИЯ",sub:"победы ходят по кругу",
+      lines:[
+        {x:2.3,y:34.5,t:"ОСЦИЛЛЯЦИЯ",c:"name"},
+        {x:2.3,y:36.8,t:"оба loss резко качаются",c:"sign"},
+        {x:2.3,y:39.3,t:"качество не растёт",c:"body"},
+        {x:67,y:34.5,t:"ПОДПИСЬ: loss резко меняются",c:"sign"},
+        {x:67,y:37.1,t:"Сэмплы меняются, но не лучше",c:"body"},
+        {x:67,y:39.6,t:"Развести скорости через TTUR",c:"fix"},
+        {x:67,y:42.1,t:"или взять Wasserstein-потерю",c:"fix"}
+      ],
+      g:[[22.5,9.2],[25.5,14.5],[28.5,8.7],[31.5,15],[34.5,9.1],[37.5,14.7],[40.5,8.5],[43.5,15.1],[46.5,9],[49,14.6],[52,8.8]],
+      d:[[22.5,14.6],[25.5,8.8],[28.5,14.9],[31.5,9.1],[34.5,14.5],[37.5,8.6],[40.5,15],[43.5,9],[46.5,14.8],[49,8.7],[52,14.7]]
+    }
+  ],
+  headings:[
+    {x:2.3,y:4.2,t:"ДИАГНОЗ",a:"start"},
+    {x:22.5,y:4.2,t:"КРИВЫЕ ДО 20-Й ЭПОХИ",a:"start"},
+    {x:54.5,y:4.2,t:"СЕТКА: 16 СЭМПЛОВ",a:"start"},
+    {x:67,y:4.2,t:"ПРИЗНАК → ИСПРАВЛЕНИЕ",a:"start"}
+  ],
+  legends:[
+    {x:38,y:4.2,t:"потеря G",c:"legend-g",a:"start",dx:0,dy:0},
+    {x:45,y:4.2,t:"потеря D",c:"legend-d",a:"start",dx:0,dy:0}
+  ],
+  fallback:[
+    {x:3,y:20,t:"Схема должна была показать три отказа GAN по кривым loss и сеткам из 16 сэмплов."},
+    {x:3,y:23,t:"Mode collapse: одинаковые круги; победа D: шум и ≈100%; осцилляция: скачки без улучшения."}
+  ]
+};
+const origin=Object.freeze({x:0,y:0});
+const scale=Object.freeze({x:10,y:10});
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const NS="http://www.w3.org/2000/svg";
+const root=document.getElementById("drawing");
+function el(tag,attrs,parent=root){
+  const node=document.createElementNS(NS,tag);
+  for(const [key,value] of Object.entries(attrs)) node.setAttribute(key,String(value));
+  parent.appendChild(node);
+  return node;
+}
+function text(item,parent=root){
+  const node=el("text",{
+    x:sx(item.x),y:sy(item.y),class:item.c||"body",
+    "text-anchor":item.a||"start",dx:item.dx||data.zero,dy:item.dy||data.zero
+  },parent);
+  node.textContent=item.t;
+  return node;
+}
+function path(points,css,parent=root){
+  let d="";
+  for(const [x,y] of points) d+=(d?" L ":"M ")+sx(x)+" "+sy(y);
+  return el("path",{d,class:css},parent);
+}
+function rect(x,y,w,h,css,parent=root){
+  return el("rect",{
+    x:sx(x),y:sy(y),width:sx(x+w)-sx(x),height:sy(y+h)-sy(y),class:css
+  },parent);
+}
+function drawNoise(baseX,baseY,variant,parent){
+  for(const mark of data.noise[variant]){
+    if(mark.k==="rect"){
+      rect(baseX+mark.x,baseY+mark.y,mark.w,mark.h,mark.c,parent);
+    }else{
+      el("line",{
+        x1:sx(baseX+mark.x),y1:sy(baseY+mark.y),
+        x2:sx(baseX+mark.x2),y2:sy(baseY+mark.y2),class:mark.c
+      },parent);
+    }
+  }
+}
+try{
+  for(const h of data.headings) text({...h,c:"heading"});
+  for(const l of data.legends) text(l);
+
+  for(const row of data.rows){
+    const group=el("g",{"aria-label":row.name});
+    rect(data.frame.x,row.y,data.frame.w,data.frame.h,"card",group);
+
+    for(const tick of data.axis.ticks){
+      el("line",{
+        x1:sx(tick),y1:sy(row.y+data.axis.top-data.frame.y),
+        x2:sx(tick),y2:sy(row.y+data.axis.bottom-data.frame.y),
+        class:"gridline"
+      },group);
+    }
+    el("line",{
+      x1:sx(data.axis.left),y1:sy(row.y+data.axis.top-data.frame.y),
+      x2:sx(data.axis.left),y2:sy(row.y+data.axis.bottom-data.frame.y),
+      class:"axis"
+    },group);
+    el("line",{
+      x1:sx(data.axis.left),y1:sy(row.y+data.axis.bottom-data.frame.y),
+      x2:sx(data.axis.right),y2:sy(row.y+data.axis.bottom-data.frame.y),
+      class:"axis"
+    },group);
+
+    path(row.g.map(([x,y])=>[x,row.y+y-data.frame.y]),"curve-g",group);
+    path(row.d.map(([x,y])=>[x,row.y+y-data.frame.y]),"curve-d",group);
+    if(row.a) path(row.a.map(([x,y])=>[x,row.y+y-data.frame.y]),"curve-a",group);
+
+    text({x:data.axis.right,y:row.y+data.axis.bottom-data.frame.y,
+      t:"20-я эпоха",c:"micro",a:"end",dx:0,dy:12},group);
+    if(row.note) text({...row.note,y:row.y+row.note.y-data.frame.y},group);
+    for(const label of row.lines) text(label,group);
+
+    for(const cell of data.cells){
+      const bx=54.5+cell.x;
+      const by=row.gridY+cell.y;
+      rect(bx,by,data.tile.w,data.tile.h,"sample-frame",group);
+      if(row.type==="collapse"){
+        el("circle",{
+          cx:sx(bx+data.tile.mid),cy:sy(by+data.tile.mid),
+          r:sx(data.tile.r)-sx(data.zero),class:"sample-circle"
+        },group);
+      }else{
+        drawNoise(bx,by,cell.v,group);
+      }
+    }
+  }
+}catch(error){
+  root.replaceChildren();
+  for(const line of data.fallback) text({...line,c:"fallback"},root);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

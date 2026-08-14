@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный маршрут от промпта и шума до изображения</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --canvas: #ffffff;
+    --ink: #172033;
+    --muted: #556176;
+    --line: #52627a;
+    --lane: #f4f7fb;
+    --lane-stroke: #d6deea;
+    --text-fill: #e8f2ff;
+    --text-stroke: #3976c5;
+    --noise-fill: #f0edff;
+    --noise-stroke: #7562c8;
+    --unet-fill: #fff1c9;
+    --unet-stroke: #c77a0a;
+    --scheduler-fill: #ffe0dc;
+    --scheduler-stroke: #c94e43;
+    --latent-fill: #e9f4ec;
+    --latent-stroke: #47865b;
+    --vae-fill: #e5f6f4;
+    --vae-stroke: #287f78;
+    --image-fill: #dcf8e7;
+    --image-stroke: #269451;
+    --check-fill: #f3f4f6;
+    --check-stroke: #747b87;
+    --cycle: #a95f0c;
+    --optional: #747b87;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: unset;
+    padding: 10px;
+    background: var(--page);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    margin: unset;
+    padding: 4px 8px 10px;
+    font-size: 20px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--canvas);
+    border: 1px solid var(--lane-stroke);
+  }
+
+  .lane {
+    fill: var(--lane);
+    stroke: var(--lane-stroke);
+    stroke-width: 1px;
+  }
+
+  .node {
+    stroke-width: 2px;
+  }
+
+  .textual {
+    fill: var(--text-fill);
+    stroke: var(--text-stroke);
+  }
+
+  .noise {
+    fill: var(--noise-fill);
+    stroke: var(--noise-stroke);
+  }
+
+  .denoiser {
+    fill: var(--unet-fill);
+    stroke: var(--unet-stroke);
+  }
+
+  .scheduler {
+    fill: var(--scheduler-fill);
+    stroke: var(--scheduler-stroke);
+  }
+
+  .latent {
+    fill: var(--latent-fill);
+    stroke: var(--latent-stroke);
+  }
+
+  .vae {
+    fill: var(--vae-fill);
+    stroke: var(--vae-stroke);
+  }
+
+  .output {
+    fill: var(--image-fill);
+    stroke: var(--image-stroke);
+  }
+
+  .check {
+    fill: var(--check-fill);
+    stroke: var(--check-stroke);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .return-line {
+    stroke: var(--cycle);
+  }
+
+  .optional-line {
+    stroke: var(--optional);
+  }
+
+  .arrow-head {
+    fill: var(--line);
+    stroke: none;
+  }
+
+  .arrow-head.return-line {
+    fill: var(--cycle);
+  }
+
+  .arrow-head.optional-line {
+    fill: var(--optional);
+  }
+
+  .node-label {
+    fill: var(--ink);
+    font-size: 14px;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  .heading {
+    font-weight: bold;
+  }
+
+  .section-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  #fallback {
+    margin: unset;
+    padding: 18px;
+    background: var(--canvas);
+    border: 1px solid var(--lane-stroke);
+    color: var(--ink);
+    font-size: 16px;
+  }
+
+  [hidden] {
+    display: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --canvas: #182132;
+      --ink: #edf2fa;
+      --muted: #b8c3d5;
+      --line: #aebbd0;
+      --lane: #1d293b;
+      --lane-stroke: #3b4a61;
+      --text-fill: #203b60;
+      --text-stroke: #71a8ef;
+      --noise-fill: #332d59;
+      --noise-stroke: #a99bec;
+      --unet-fill: #493819;
+      --unet-stroke: #efb44e;
+      --scheduler-fill: #522d2c;
+      --scheduler-stroke: #ee8a81;
+      --latent-fill: #243e2d;
+      --latent-stroke: #79ba8d;
+      --vae-fill: #20423f;
+      --vae-stroke: #68bbb4;
+      --image-fill: #204630;
+      --image-stroke: #68c88c;
+      --check-fill: #303746;
+      --check-stroke: #9aa5b4;
+      --cycle: #efb44e;
+      --optional: #a8b1bf;
+    }
+  }
+</style>
+</head>
+<body>
+<h1>Полный маршрут от промпта и шума до изображения</h1>
+
+<svg id="diagram" hidden
+     viewBox="0 0 1140 470"
+     width="1140"
+     height="470"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="svg-title svg-description">
+  <title id="svg-title">Маршрут генерации изображения диффузионной моделью</title>
+  <desc id="svg-description">Текст превращается в эмбеддинг, который направляет повторяющееся очищение шумового латента в U-Net и scheduler. VAE-декодер преобразует чистый латент в RGB-изображение, после чего возможна проверка безопасности.</desc>
+  <g id="drawing"></g>
+</svg>
+
+<p id="fallback">
+  Схема должна была показать маршрут: текстовый промпт → текстовый энкодер →
+  эмбеддинг; шумовой латент 4 × 64 × 64 вместе с эмбеддингом поступает в U-Net,
+  затем scheduler многократно обновляет латент; чистый латент 4 × 64 × 64
+  проходит через VAE-декодер и становится RGB-изображением 512 × 512.
+  После результата возможна необязательная проверка безопасности.
+</p>
+
+<script>
+const diagramData = [
+  [0, 10, 1, 2, 1.15, 0.72, 0.8, 1.55, 0.62, 0.46],
+  [
+    [0.8, 1, 64.8, 12.2, "lane"],
+    [0.8, 16.2, 111.2, 15.9, "lane"],
+    [0.8, 33, 111.2, 13.4, "lane"]
+  ],
+  [
+    ["prompt", 2, 4, 18, 7, "textual", ["Текстовый промпт", "«рыжий кот в скафандре»"]],
+    ["encoder", 25, 4, 17, 7, "textual", ["Текстовый энкодер", "смысл фразы → числа"]],
+    ["embedding", 47, 4, 17, 7, "textual", ["Эмбеддинг", "текстовые подсказки"]],
+    ["noise", 2, 20.5, 18, 7.5, "noise", ["Шумовой латент", "4 × 64 × 64"]],
+    ["unet", 47, 20, 17, 8, "denoiser", ["U-Net", "шумоподавитель", "сверка с текстом"]],
+    ["scheduler", 70, 20, 17, 8, "scheduler", ["Scheduler", "размер следующего шага"]],
+    ["latent", 93, 20.5, 17, 7.5, "latent", ["Чистый латент", "4 × 64 × 64"]],
+    ["vae", 70, 35.5, 17, 6, "vae", ["VAE-декодер", "разворачивает латент"]],
+    ["image", 93, 35.5, 17, 6, "output", ["RGB-изображение", "512 × 512"]],
+    ["safety", 92, 43, 19, 3.2, "check", ["Safety checker · необязателен"]]
+  ],
+  [
+    [20, 7.5, 25, 7.5, "flow"],
+    [42, 7.5, 47, 7.5, "flow"],
+    [55.5, 11, 55.5, 20, "flow"],
+    [20, 24.25, 47, 24.25, "flow"],
+    [64, 24, 70, 24, "flow"],
+    [87, 24, 93, 24.25, "flow"],
+    [101.5, 28, 78.5, 35.5, "flow"],
+    [87, 38.5, 93, 38.5, "flow"],
+    [101.5, 41.5, 101.5, 43, "optional"]
+  ],
+  [
+    [[[78.5, 28], [78.5, 30.8], [55.5, 30.8], [55.5, 28]], "return"]
+  ],
+  [
+    [2, 2.35, "start", "section-label", ["ТЕКСТОВОЕ УСЛОВИЕ"]],
+    [2, 17.75, "start", "section-label", ["ПОШАГОВОЕ ОЧИЩЕНИЕ ЛАТЕНТА"]],
+    [2, 34.55, "start", "section-label", ["ДЕКОДИРОВАНИЕ И ПРОВЕРКА"]],
+    [54.2, 15.4, "end", "edge-label", ["текстовые эмбеддинги"]],
+    [33.5, 22.2, "middle", "edge-label", ["зашумлённый латент"]],
+    [66.8, 31.8, "middle", "edge-label", ["цикл повторяется много раз"]]
+  ]
+];
+
+const [
+  constants,
+  lanes,
+  nodes,
+  straightRoutes,
+  bentRoutes,
+  freeLabels
+] = diagramData;
+
+const [
+  zero,
+  unit,
+  one,
+  two,
+  arrowLength,
+  arrowWing,
+  cornerRadius,
+  lineGap,
+  dashLength,
+  dashGap
+] = constants;
+
+const origin = Object.freeze({ x: zero, y: zero });
+const scale = unit;
+
+const sx = x => (origin.x + x) * scale;
+const sy = y => (origin.y + y) * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes = {}) => {
+    const element = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+    return element;
+  };
+
+  const lineClass = kind => {
+    if (kind === "return") return "flow-line return-line";
+    if (kind === "optional") return "flow-line optional-line";
+    return "flow-line";
+  };
+
+  const headClass = kind => {
+    if (kind === "return") return "arrow-head return-line";
+    if (kind === "optional") return "arrow-head optional-line";
+    return "arrow-head";
+  };
+
+  const applyDash = (element, kind) => {
+    if (kind === "return" || kind === "optional") {
+      const dash = sx(dashLength) - sx(zero);
+      const gap = sx(dashGap) - sx(zero);
+      element.setAttribute("stroke-dasharray", `${dash} ${gap}`);
+    }
+  };
+
+  const appendArrowHead = (parent, x1, y1, x2, y2, kind) => {
+    const length = Math.hypot(x2 - x1, y2 - y1);
+    if (!length) throw new Error("У стрелки отсутствует направление");
+
+    const ux = (x2 - x1) / length;
+    const uy = (y2 - y1) / length;
+    const baseX = x2 - arrowLength * ux;
+    const baseY = y2 - arrowLength * uy;
+    const leftX = baseX - arrowWing * uy;
+    const leftY = baseY + arrowWing * ux;
+    const rightX = baseX + arrowWing * uy;
+    const rightY = baseY - arrowWing * ux;
+
+    parent.appendChild(make("polygon", {
+      points: `${sx(x2)},${sy(y2)} ${sx(leftX)},${sy(leftY)} ${sx(rightX)},${sy(rightY)}`,
+      class: headClass(kind)
+    }));
+  };
+
+  const background = make("g", { "aria-hidden": "true" });
+  for (const [x, y, width, height, kind] of lanes) {
+    background.appendChild(make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(cornerRadius) - sx(zero),
+      ry: sy(cornerRadius) - sy(zero),
+      class: kind
+    }));
+  }
+  drawing.appendChild(background);
+
+  const routes = make("g", { "aria-hidden": "true" });
+
+  for (const [x1, y1, x2, y2, kind] of straightRoutes) {
+    const route = make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: lineClass(kind)
+    });
+    applyDash(route, kind);
+    routes.appendChild(route);
+    appendArrowHead(routes, x1, y1, x2, y2, kind);
+  }
+
+  for (const [points, kind] of bentRoutes) {
+    const route = make("polyline", {
+      points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+      class: lineClass(kind)
+    });
+    applyDash(route, kind);
+    routes.appendChild(route);
+
+    const [previousX, previousY] = points.at(-two);
+    const [lastX, lastY] = points.at(-one);
+    appendArrowHead(routes, previousX, previousY, lastX, lastY, kind);
+  }
+
+  drawing.appendChild(routes);
+
+  const nodeLayer = make("g");
+  for (const [id, x, y, width, height, kind, lines] of nodes) {
+    const group = make("g", {
+      role: "group",
+      "aria-label": lines.join(". "),
+      "data-node": id
+    });
+
+    group.appendChild(make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(cornerRadius) - sx(zero),
+      ry: sy(cornerRadius) - sy(zero),
+      class: `node ${kind}`
+    }));
+
+    const centerX = x + width / two;
+    const centerY = y + height / two;
+    const firstY = centerY - (lines.length - one) * lineGap / two;
+    const text = make("text", { class: "node-label" });
+    let lineY = firstY;
+    let isHeading = true;
+
+    for (const line of lines) {
+      const span = make("tspan", {
+        x: sx(centerX),
+        y: sy(lineY)
+      });
+      if (isHeading) span.setAttribute("class", "heading");
+      span.textContent = line;
+      text.appendChild(span);
+      lineY += lineGap;
+      isHeading = false;
+    }
+
+    group.appendChild(text);
+    nodeLayer.appendChild(group);
+  }
+  drawing.appendChild(nodeLayer);
+
+  const labelLayer = make("g", { "aria-hidden": "true" });
+  for (const [x, y, anchor, kind, lines] of freeLabels) {
+    const text = make("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      class: kind
+    });
+
+    let lineY = y;
+    for (const line of lines) {
+      const span = make("tspan", {
+        x: sx(x),
+        y: sy(lineY)
+      });
+      span.textContent = line;
+      text.appendChild(span);
+      lineY += lineGap;
+    }
+    labelLayer.appendChild(text);
+  }
+  drawing.appendChild(labelLayer);
+
+  svg.removeAttribute("hidden");
+  fallback.setAttribute("hidden", "");
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  svg.setAttribute("hidden", "");
+  fallback.removeAttribute("hidden");
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

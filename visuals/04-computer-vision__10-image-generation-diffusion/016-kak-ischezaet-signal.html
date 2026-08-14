@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как изображение превращается в гауссов шум</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #657085;
+    --line: #cbd3df;
+    --track: #e5e9f0;
+    --signal: #087f72;
+    --noise: #7651c9;
+    --frame: #9ba7b8;
+    --error: #9f2f3f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--page);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 12px 18px 8px;
+    font-size: 22px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 468px;
+    background: var(--panel);
+  }
+
+  .time {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .coefficient {
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  .signal-text { fill: var(--signal); }
+  .noise-text { fill: var(--noise); }
+
+  .summary {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: 650;
+  }
+
+  .hint {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .frame {
+    fill: none;
+    stroke: var(--frame);
+    stroke-width: 2px;
+  }
+
+  .guide {
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .track { fill: var(--track); }
+  .signal-bar { fill: var(--signal); }
+  .noise-bar { fill: var(--noise); }
+
+  #fallback {
+    margin: 0;
+    padding: 18px;
+    color: var(--error);
+    background: var(--panel);
+    font-size: 16px;
+    text-align: center;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #11151d;
+      --panel: #171c25;
+      --ink: #edf2f8;
+      --muted: #a7b1c1;
+      --line: #3b4554;
+      --track: #2b3340;
+      --signal: #55d6c2;
+      --noise: #b79af4;
+      --frame: #606d80;
+      --error: #ff9cab;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Как изображение превращается в гауссов шум</h1>
+  <svg id="diagram"
+       viewBox="0 0 1600 420"
+       width="1600"
+       height="420"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Шесть версий одной картинки при t = 0, 100, 250, 500, 750 и 999:
+      влияние исходного изображения постепенно ослабевает, а влияние
+      гауссова шума усиливается.
+    </desc>
+  </svg>
+  <p id="fallback" hidden>
+    Схема должна была показать шесть стадий превращения одной картинки
+    в гауссов шум: от t = 0 до t = 999.
+  </p>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const frames = Object.freeze([
+    { t: "0",   sub: "₀",   signal: 1.000, noise: 0.000 },
+    { t: "100", sub: "₁₀₀", signal: 0.946, noise: 0.324 },
+    { t: "250", sub: "₂₅₀", signal: 0.723, noise: 0.691 },
+    { t: "500", sub: "₅₀₀", signal: 0.279, noise: 0.960 },
+    { t: "750", sub: "₇₅₀", signal: 0.057, noise: 0.998 },
+    { t: "999", sub: "₉₉₉", signal: 0.006, noise: 1.000 }
+  ]);
+
+  const layoutData = Object.freeze([
+    {
+      canvasWidth: 1600,
+      canvasHeight: 420,
+      left: 25,
+      gap: 22,
+      panelWidth: 240,
+      imageTop: 105,
+      imageSize: 240,
+      coefficientOneY: 20,
+      signalBarY: 31,
+      coefficientTwoY: 53,
+      noiseBarY: 64,
+      timeY: 92,
+      barWidth: 104,
+      barHeight: 6,
+      summaryRuleY: 372,
+      summaryY: 397,
+      summaryRuleStart: 25,
+      summaryRuleEnd: 1575,
+      summaryRuleGap: 330,
+      pixelCount: 30
+    }
+  ]);
+
+  const mappingData = Object.freeze([
+    { originX: 0, originY: 0, scaleX: 1, scaleY: 1 }
+  ]);
+
+  const numericData = Object.freeze([
+    {
+      zero: 0,
+      one: 1,
+      two: 2,
+      half: 0.5,
+      minusOne: -1,
+      byteMax: 255,
+      epsilon: 0.000001,
+      tau: 6.283185307179586,
+      hashA: 12.9898,
+      hashB: 78.233,
+      hashC: 37.719,
+      hashD: 43758.5453,
+      seedStride: 19.19,
+      clipLow: -1,
+      clipHigh: 1
+    }
+  ]);
+
+  const sceneData = Object.freeze([
+    {
+      horizon: 0.72,
+      skyTop: [102, 174, 214],
+      skyBottom: [202, 229, 231],
+      groundTop: [103, 153, 103],
+      groundBottom: [50, 91, 67],
+      sun: [0.79, 0.19, 0.105],
+      sunColor: [255, 224, 139],
+      tail: [0.69, 0.62, 0.16],
+      body: [0.51, 0.62, 0.19, 0.27],
+      head: [0.49, 0.39, 0.19],
+      belly: [0.51, 0.67, 0.105, 0.17],
+      muzzleLeft: [0.435, 0.445, 0.075],
+      muzzleRight: [0.545, 0.445, 0.075],
+      eyeLeft: [0.425, 0.355, 0.035],
+      eyeRight: [0.555, 0.355, 0.035],
+      pupilLeft: [0.425, 0.36, 0.014],
+      pupilRight: [0.555, 0.36, 0.014],
+      nose: [0.49, 0.445, 0.026],
+      earLeft: [[0.34, 0.31], [0.38, 0.13], [0.46, 0.26]],
+      earRight: [[0.52, 0.26], [0.61, 0.13], [0.65, 0.31]],
+      innerEarLeft: [[0.37, 0.27], [0.39, 0.18], [0.43, 0.26]],
+      innerEarRight: [[0.56, 0.26], [0.60, 0.18], [0.62, 0.27]],
+      orange: [207, 105, 45],
+      orangeDark: [151, 68, 34],
+      cream: [244, 211, 169],
+      eye: [239, 224, 126],
+      pupil: [38, 31, 34],
+      pink: [198, 91, 94]
+    }
+  ]);
+
+  const [layout] = layoutData;
+  const [mapping] = mappingData;
+  const [numbers] = numericData;
+  const [scene] = sceneData;
+
+  const origin = Object.freeze({
+    x: mapping.originX,
+    y: mapping.originY
+  });
+
+  const scale = Object.freeze({
+    x: mapping.scaleX,
+    y: mapping.scaleY
+  });
+
+  function sx(x) {
+    return origin.x + x * scale.x;
+  }
+
+  function sy(y) {
+    return origin.y + y * scale.y;
+  }
+
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function make(tag, attributes, parent = svg) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      node.setAttribute(name, String(value));
+    });
+    parent.appendChild(node);
+    return node;
+  }
+
+  function textAt(value, x, y, className, anchor, parent = svg) {
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, parent);
+    node.textContent = value;
+    return node;
+  }
+
+  function mixColor(first, second, amount) {
+    return first.map((value, channel) =>
+      value + (second[channel] - value) * amount
+    );
+  }
+
+  function inCircle(x, y, shape) {
+    const [cx, cy, radius] = shape;
+    const dx = x - cx;
+    const dy = y - cy;
+    return dx * dx + dy * dy <= radius * radius;
+  }
+
+  function inEllipse(x, y, shape) {
+    const [cx, cy, rx, ry] = shape;
+    const dx = (x - cx) / rx;
+    const dy = (y - cy) / ry;
+    return dx * dx + dy * dy <= numbers.one;
+  }
+
+  function inTriangle(x, y, points) {
+    const [a, b, c] = points;
+    const sign = (p, q, r) =>
+      (p[numbers.zero] - r[numbers.zero]) *
+      (q[numbers.one] - r[numbers.one]) -
+      (q[numbers.zero] - r[numbers.zero]) *
+      (p[numbers.one] - r[numbers.one]);
+
+    const point = [x, y];
+    const dOne = sign(point, a, b);
+    const dTwo = sign(point, b, c);
+    const dThree = sign(point, c, a);
+    const hasNegative =
+      dOne < numbers.zero ||
+      dTwo < numbers.zero ||
+      dThree < numbers.zero;
+    const hasPositive =
+      dOne > numbers.zero ||
+      dTwo > numbers.zero ||
+      dThree > numbers.zero;
+    return !(hasNegative && hasPositive);
+  }
+
+  function cleanPixel(x, y) {
+    let color;
+
+    if (y < scene.horizon) {
+      color = mixColor(scene.skyTop, scene.skyBottom, y / scene.horizon);
+    } else {
+      color = mixColor(
+        scene.groundTop,
+        scene.groundBottom,
+        (y - scene.horizon) / (numbers.one - scene.horizon)
+      );
+    }
+
+    if (inCircle(x, y, scene.sun)) color = scene.sunColor;
+    if (inCircle(x, y, scene.tail)) color = scene.orangeDark;
+    if (inEllipse(x, y, scene.body)) color = scene.orange;
+    if (inTriangle(x, y, scene.earLeft)) color = scene.orange;
+    if (inTriangle(x, y, scene.earRight)) color = scene.orange;
+    if (inCircle(x, y, scene.head)) color = scene.orange;
+    if (inTriangle(x, y, scene.innerEarLeft)) color = scene.pink;
+    if (inTriangle(x, y, scene.innerEarRight)) color = scene.pink;
+    if (inEllipse(x, y, scene.belly)) color = scene.cream;
+    if (inCircle(x, y, scene.muzzleLeft)) color = scene.cream;
+    if (inCircle(x, y, scene.muzzleRight)) color = scene.cream;
+    if (inCircle(x, y, scene.eyeLeft)) color = scene.eye;
+    if (inCircle(x, y, scene.eyeRight)) color = scene.eye;
+    if (inCircle(x, y, scene.pupilLeft)) color = scene.pupil;
+    if (inCircle(x, y, scene.pupilRight)) color = scene.pupil;
+    if (inCircle(x, y, scene.nose)) color = scene.pink;
+
+    return color.map(value =>
+      value / numbers.byteMax * numbers.two - numbers.one
+    );
+  }
+
+  function hash(x, y, channel, seed) {
+    const raw = Math.sin(
+      x * numbers.hashA +
+      y * numbers.hashB +
+      channel * numbers.hashC +
+      seed * numbers.seedStride
+    ) * numbers.hashD;
+    return raw - Math.floor(raw);
+  }
+
+  function gaussian(x, y, channel) {
+    const first = Math.max(
+      numbers.epsilon,
+      hash(x, y, channel, numbers.one)
+    );
+    const second = hash(x, y, channel, numbers.two);
+    return Math.sqrt(-numbers.two * Math.log(first)) *
+      Math.cos(numbers.tau * second);
+  }
+
+  function clamp(value) {
+    return Math.max(
+      numbers.clipLow,
+      Math.min(numbers.clipHigh, value)
+    );
+  }
+
+  function displayColor(frame, x, y) {
+    const clean = cleanPixel(
+      (x + numbers.half) / layout.pixelCount,
+      (y + numbers.half) / layout.pixelCount
+    );
+
+    return clean.map((value, channel) => {
+      const mixed =
+        frame.signal * value +
+        frame.noise * gaussian(x, y, channel);
+      return Math.round(
+        (clamp(mixed) + numbers.one) /
+        numbers.two *
+        numbers.byteMax
+      );
+    });
+  }
+
+  function drawBar(group, centerX, y, amount, className) {
+    const left = centerX - layout.barWidth * numbers.half;
+
+    make("rect", {
+      x: sx(left),
+      y: sy(y),
+      width: sx(left + layout.barWidth) - sx(left),
+      height: sy(y + layout.barHeight) - sy(y),
+      class: "track"
+    }, group);
+
+    make("rect", {
+      x: sx(left),
+      y: sy(y),
+      width: sx(left + layout.barWidth * amount) - sx(left),
+      height: sy(y + layout.barHeight) - sy(y),
+      class: className
+    }, group);
+  }
+
+  function drawFrame(frame, index) {
+    const x =
+      layout.left +
+      index * (layout.panelWidth + layout.gap);
+    const centerX = x + layout.panelWidth * numbers.half;
+    const group = make("g", {
+      "aria-label": `t = ${frame.t}`
+    });
+
+    const title = make("title", {}, group);
+    title.textContent =
+      `t = ${frame.t}: сигнал ослабевает, гауссов шум усиливается`;
+
+    textAt(
+      `сигнал  √ᾱ${frame.sub}`,
+      centerX,
+      layout.coefficientOneY,
+      "coefficient signal-text",
+      "middle",
+      group
+    );
+
+    drawBar(
+      group,
+      centerX,
+      layout.signalBarY,
+      frame.signal,
+      "signal-bar"
+    );
+
+    textAt(
+      `шум  √(1 − ᾱ${frame.sub})`,
+      centerX,
+      layout.coefficientTwoY,
+      "coefficient noise-text",
+      "middle",
+      group
+    );
+
+    drawBar(
+      group,
+      centerX,
+      layout.noiseBarY,
+      frame.noise,
+      "noise-bar"
+    );
+
+    textAt(
+      `t = ${frame.t}`,
+      centerX,
+      layout.timeY,
+      "time",
+      "middle",
+      group
+    );
+
+    const pixelSize = layout.imageSize / layout.pixelCount;
+    const pixels = make("g", {
+      "shape-rendering": "crispEdges"
+    }, group);
+
+    for (
+      let row = numbers.zero;
+      row < layout.pixelCount;
+      row += numbers.one
+    ) {
+      for (
+        let column = numbers.zero;
+        column < layout.pixelCount;
+        column += numbers.one
+      ) {
+        const [red, green, blue] =
+          displayColor(frame, column, row);
+        const pixelX = x + column * pixelSize;
+        const pixelY = layout.imageTop + row * pixelSize;
+
+        make("rect", {
+          x: sx(pixelX),
+          y: sy(pixelY),
+          width: sx(pixelX + pixelSize) - sx(pixelX),
+          height: sy(pixelY + pixelSize) - sy(pixelY),
+          fill: `rgb(${red} ${green} ${blue})`
+        }, pixels);
+      }
+    }
+
+    make("rect", {
+      x: sx(x),
+      y: sy(layout.imageTop),
+      width: sx(x + layout.imageSize) - sx(x),
+      height: sy(layout.imageTop + layout.imageSize) -
+        sy(layout.imageTop),
+      class: "frame"
+    }, group);
+  }
+
+  try {
+    frames.forEach(drawFrame);
+
+    const center = layout.canvasWidth * numbers.half;
+    const gapHalf = layout.summaryRuleGap * numbers.half;
+
+    make("line", {
+      x1: sx(layout.summaryRuleStart),
+      y1: sy(layout.summaryRuleY),
+      x2: sx(center - gapHalf),
+      y2: sy(layout.summaryRuleY),
+      class: "guide"
+    });
+
+    make("line", {
+      x1: sx(center + gapHalf),
+      y1: sy(layout.summaryRuleY),
+      x2: sx(layout.summaryRuleEnd),
+      y2: sy(layout.summaryRuleY),
+      class: "guide"
+    });
+
+    textAt(
+      "изображение говорит тише  →  случайный шум говорит громче",
+      center,
+      layout.summaryY,
+      "summary",
+      "middle"
+    );
+  } catch (error) {
+    svg.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

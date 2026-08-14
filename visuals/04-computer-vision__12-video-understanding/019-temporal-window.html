@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как временное ядро видит соседние кадры</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --frame: #c8d1df;
+      --frame-fill: #f4f7fb;
+      --track: #d6dde8;
+      --ball: #e7526b;
+      --ball-edge: #a92d45;
+      --patch: #e7526b22;
+      --first: #2477d4;
+      --first-soft: #2477d418;
+      --second: #7450c7;
+      --second-soft: #7450c718;
+      --third: #d16d23;
+      --third-soft: #d16d2318;
+      --time: #536176;
+      --shadow: #14213d18;
+      --error: #a92d45;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2c;
+        --text: #edf2fa;
+        --muted: #a8b2c2;
+        --frame: #526075;
+        --frame-fill: #202a39;
+        --track: #465267;
+        --ball: #ff7086;
+        --ball-edge: #ffb0bc;
+        --patch: #ff708622;
+        --first: #66aaf2;
+        --first-soft: #66aaf21c;
+        --second: #ac8cf2;
+        --second-soft: #ac8cf21c;
+        --third: #f1a05f;
+        --third-soft: #f1a05f1c;
+        --time: #a8b4c8;
+        --shadow: #00000030;
+        --error: #ff9aaa;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      margin: auto;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--panel);
+      margin: auto;
+      max-width: 1100px;
+    }
+
+    header {
+      text-align: center;
+    }
+
+    h1 {
+      color: var(--text);
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    header p {
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 410px;
+      background: var(--panel);
+    }
+
+    .frame {
+      fill: var(--frame-fill);
+      stroke: var(--frame);
+      stroke-width: 2px;
+    }
+
+    .frame-top {
+      stroke: var(--frame);
+      stroke-width: 1px;
+    }
+
+    .track {
+      stroke: var(--track);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .ball {
+      fill: var(--ball);
+      stroke: var(--ball-edge);
+      stroke-width: 2px;
+    }
+
+    .motion {
+      fill: none;
+      stroke: var(--ball);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .patch {
+      fill: var(--patch);
+      stroke: var(--ball);
+      stroke-width: 1px;
+    }
+
+    .window-first {
+      fill: none;
+      stroke: var(--first);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .window-second {
+      fill: none;
+      stroke: var(--second);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .window-third {
+      fill: none;
+      stroke: var(--third);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .wash-first {
+      fill: var(--first-soft);
+    }
+
+    .wash-second {
+      fill: var(--second-soft);
+    }
+
+    .wash-third {
+      fill: var(--third-soft);
+    }
+
+    .label-first {
+      fill: var(--first);
+    }
+
+    .label-second {
+      fill: var(--second);
+    }
+
+    .label-third {
+      fill: var(--third);
+    }
+
+    .window-label {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .frame-label {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .small-label {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .time-line {
+      fill: none;
+      stroke: var(--time);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .time-label {
+      fill: var(--time);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--error);
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Как временное ядро видит соседние кадры</h1>
+      <p>Глубина ядра: 3 кадра</p>
+    </header>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1100 410"
+      width="1100"
+      height="410"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <title id="diagram-title">Три последовательных положения временного окна</title>
+      <desc id="diagram-description">
+        Восемь кадров расположены по времени слева направо. Окно глубиной три
+        сначала охватывает кадры 0–2, затем 1–3 и затем 2–4.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const data = [
+      {
+        kind: "config",
+        zero: 0,
+        origin: { x: 20, y: 10 },
+        scale: 8,
+        frame: {
+          x: 3,
+          y: 21,
+          width: 14,
+          height: 16,
+          gap: 1.5,
+          top: 2.2,
+          radius: 0.7
+        },
+        ball: {
+          y: 8.8,
+          radius: 1.25,
+          patchRadius: 2.4,
+          trail: 2.1,
+          trailLift: 0.65
+        },
+        label: {
+          frameY: 39.5,
+          windowRise: 1.55,
+          timeY: 44,
+          captionY: 47.4
+        },
+        window: {
+          cap: 1.15,
+          washHeight: 0.75,
+          washLift: 0.45
+        },
+        arrow: {
+          x1: 3,
+          x2: 125.5,
+          head: 1.25,
+          wing: 0.8
+        },
+        fallback: {
+          x: 4,
+          y: 23
+        }
+      },
+      { kind: "frame", id: 0, ballX: 2.4 },
+      { kind: "frame", id: 1, ballX: 3.65 },
+      { kind: "frame", id: 2, ballX: 4.9 },
+      { kind: "frame", id: 3, ballX: 6.15 },
+      { kind: "frame", id: 4, ballX: 7.4 },
+      { kind: "frame", id: 5, ballX: 8.65 },
+      { kind: "frame", id: 6, ballX: 9.9 },
+      { kind: "frame", id: 7, ballX: 11.15 },
+      {
+        kind: "window",
+        from: 0,
+        to: 2,
+        y: 5,
+        label: "окно 0–2",
+        lineClass: "window-first",
+        labelClass: "label-first",
+        washClass: "wash-first"
+      },
+      {
+        kind: "window",
+        from: 1,
+        to: 3,
+        y: 10,
+        label: "окно 1–3",
+        lineClass: "window-second",
+        labelClass: "label-second",
+        washClass: "wash-second"
+      },
+      {
+        kind: "window",
+        from: 2,
+        to: 4,
+        y: 15,
+        label: "окно 2–4",
+        lineClass: "window-third",
+        labelClass: "label-third",
+        washClass: "wash-third"
+      }
+    ];
+
+    const config = data.find((item) => item.kind === "config");
+    const origin = Object.freeze({
+      x: config.origin.x,
+      y: config.origin.y
+    });
+    const scale = config.scale;
+
+    const sx = (x) => origin.x + x * scale;
+    const sy = (y) => origin.y + y * scale;
+
+    const svg = document.getElementById("diagram");
+    const ns = "http://www.w3.org/2000/svg";
+    const frames = data.filter((item) => item.kind === "frame");
+    const windows = data.filter((item) => item.kind === "window");
+    const z = config.zero;
+
+    function node(name, attributes, text) {
+      const element = document.createElementNS(ns, name);
+      Object.entries(attributes).forEach(([key, value]) => {
+        element.setAttribute(key, String(value));
+      });
+      if (text !== undefined) element.textContent = text;
+      return element;
+    }
+
+    function add(parent, name, attributes, text) {
+      const element = node(name, attributes, text);
+      parent.appendChild(element);
+      return element;
+    }
+
+    function frameX(id) {
+      return config.frame.x +
+        id * (config.frame.width + config.frame.gap);
+    }
+
+    function rect(parent, x, y, width, height, className, radius) {
+      return add(parent, "rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + width) - sx(x),
+        height: sy(y + height) - sy(y),
+        rx: sx(radius) - sx(z),
+        ry: sy(radius) - sy(z),
+        class: className
+      });
+    }
+
+    function line(parent, x1, y1, x2, y2, className) {
+      return add(parent, "line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: className
+      });
+    }
+
+    function circle(parent, x, y, radius, className) {
+      return add(parent, "circle", {
+        cx: sx(x),
+        cy: sy(y),
+        r: sx(radius) - sx(z),
+        class: className
+      });
+    }
+
+    function text(parent, x, y, value, className, anchor) {
+      return add(parent, "text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, value);
+    }
+
+    function path(parent, points, className, close) {
+      const commands = points.map((point, index) => {
+        const command = index === z ? "M" : "L";
+        return command + " " + sx(point.x) + " " + sy(point.y);
+      });
+      if (close) commands.push("Z");
+      return add(parent, "path", {
+        d: commands.join(" "),
+        class: className
+      });
+    }
+
+    function drawWindow(parent, item) {
+      const x1 = frameX(item.from);
+      const x2 = frameX(item.to) + config.frame.width;
+      const center = (x1 + x2) / (config.scale - config.scale + 2);
+      const washY = config.frame.y - config.window.washLift;
+
+      rect(
+        parent,
+        x1,
+        washY,
+        x2 - x1,
+        config.window.washHeight,
+        item.washClass,
+        config.frame.radius
+      );
+
+      path(parent, [
+        { x: x1, y: item.y + config.window.cap },
+        { x: x1, y: item.y },
+        { x: x2, y: item.y },
+        { x: x2, y: item.y + config.window.cap }
+      ], item.lineClass, false);
+
+      text(
+        parent,
+        center,
+        item.y - config.label.windowRise,
+        item.label,
+        "window-label " + item.labelClass,
+        "middle"
+      );
+    }
+
+    function drawFrame(parent, item) {
+      const x = frameX(item.id);
+      const y = config.frame.y;
+      const centerY = y + config.ball.y;
+      const ballX = x + item.ballX;
+      const trailStart = ballX - config.ball.trail;
+
+      rect(
+        parent,
+        x,
+        y,
+        config.frame.width,
+        config.frame.height,
+        "frame",
+        config.frame.radius
+      );
+
+      line(
+        parent,
+        x,
+        y + config.frame.top,
+        x + config.frame.width,
+        y + config.frame.top,
+        "frame-top"
+      );
+
+      line(
+        parent,
+        x + config.ball.radius,
+        centerY,
+        x + config.frame.width - config.ball.radius,
+        centerY,
+        "track"
+      );
+
+      rect(
+        parent,
+        ballX - config.ball.patchRadius,
+        centerY - config.ball.patchRadius,
+        config.ball.patchRadius + config.ball.patchRadius,
+        config.ball.patchRadius + config.ball.patchRadius,
+        "patch",
+        config.frame.radius
+      );
+
+      path(parent, [
+        {
+          x: trailStart,
+          y: centerY + config.ball.trailLift
+        },
+        {
+          x: ballX - config.ball.radius,
+          y: centerY
+        }
+      ], "motion", false);
+
+      circle(
+        parent,
+        ballX,
+        centerY,
+        config.ball.radius,
+        "ball"
+      );
+
+      text(
+        parent,
+        x + config.frame.width /
+          (config.scale - config.scale + 2),
+        config.label.frameY,
+        String(item.id),
+        "frame-label",
+        "middle"
+      );
+    }
+
+    function drawTimeAxis(parent) {
+      const axis = config.arrow;
+      const y = config.label.timeY;
+
+      path(parent, [
+        { x: axis.x1, y: y },
+        { x: axis.x2, y: y }
+      ], "time-line", false);
+
+      path(parent, [
+        {
+          x: axis.x2 - axis.head,
+          y: y - axis.wing
+        },
+        { x: axis.x2, y: y },
+        {
+          x: axis.x2 - axis.head,
+          y: y + axis.wing
+        }
+      ], "time-line", false);
+
+      text(
+        parent,
+        axis.x1,
+        config.label.captionY,
+        "Порядок кадров сохраняется",
+        "small-label",
+        "start"
+      );
+
+      text(
+        parent,
+        axis.x2,
+        config.label.captionY,
+        "время",
+        "time-label",
+        "end"
+      );
+    }
+
+    try {
+      const windowsLayer = add(svg, "g", {
+        "aria-label": "Положения временного окна"
+      });
+
+      const framesLayer = add(svg, "g", {
+        "aria-label": "Последовательность кадров"
+      });
+
+      const axisLayer = add(svg, "g", {
+        "aria-label": "Направление времени"
+      });
+
+      windows.forEach((item) => drawWindow(windowsLayer, item));
+      frames.forEach((item) => drawFrame(framesLayer, item));
+      drawTimeAxis(axisLayer);
+    } catch (error) {
+      Array.from(svg.children).forEach((child) => {
+        if (child.tagName !== "title" && child.tagName !== "desc") {
+          child.remove();
+        }
+      });
+
+      text(
+        svg,
+        config.fallback.x,
+        config.fallback.y,
+        "Схема: окно из 3 кадров сдвигается 0–2 → 1–3 → 2–4.",
+        "fallback",
+        "start"
+      );
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

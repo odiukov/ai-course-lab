@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Как окна превращаются в столбцы</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #596579;
+      --line: #778398;
+      --soft-line: #cbd5e1;
+      --blue: #2563eb;
+      --blue-fill: #dbeafe;
+      --green: #16845b;
+      --green-fill: #d9f6e8;
+      --amber: #b76a08;
+      --amber-fill: #fef0c7;
+      --violet: #7950c7;
+      --violet-fill: #eee5ff;
+      --matrix-a: #e8f1ff;
+      --matrix-b: #f3f7fc;
+      --shadow: rgba(34, 50, 75, .12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #182235;
+        --text: #edf3ff;
+        --muted: #b4bfd1;
+        --line: #97a6bb;
+        --soft-line: #46546a;
+        --blue: #77a7ff;
+        --blue-fill: #203d70;
+        --green: #66d6a7;
+        --green-fill: #164c3b;
+        --amber: #f5bd61;
+        --amber-fill: #5b3d16;
+        --violet: #c0a0ff;
+        --violet-fill: #46336d;
+        --matrix-a: #243d61;
+        --matrix-b: #202c40;
+        --shadow: rgba(0, 0, 0, .3);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 14px 10px;
+      background: var(--bg);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      text-align: center;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 720;
+      letter-spacing: -.01em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      overflow: visible;
+      background: var(--panel);
+      border: 1px solid var(--soft-line);
+      border-radius: 14px;
+      box-shadow: 0 5px 18px var(--shadow);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 15px;
+    }
+
+    .label {
+      font-weight: 680;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .dimension {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .channel {
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .grid-line,
+    .outline,
+    .guide,
+    .arrow,
+    .dimension-line {
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .grid-line {
+      stroke: var(--soft-line);
+      stroke-width: 1;
+    }
+
+    .outline {
+      fill: none;
+      stroke-width: 2.5;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.5;
+      stroke-dasharray: 5 5;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .dimension-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.5;
+    }
+
+    #fallback {
+      display: none;
+      margin: 0;
+      min-height: 260px;
+      padding: 40px;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--soft-line);
+      border-radius: 14px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Как окна превращаются в столбцы</h1>
+    <svg id="diagram" viewBox="0 0 1200 440" role="img"
+         aria-labelledby="svg-title svg-desc"
+         preserveAspectRatio="xMidYMid meet">
+      <title id="svg-title">Преобразование окон трёхканального входа в матрицу столбцов</title>
+      <desc id="svg-desc">Окно три на три из каждого из трёх каналов даёт двадцать семь значений. Каждое окно становится отдельным столбцом, а для выхода шестнадцать на шестнадцать получается матрица двадцать семь на двести пятьдесят шесть.</desc>
+      <g id="drawing"></g>
+    </svg>
+    <p id="fallback">
+      Схема должна показать: окно 3×3 берёт значения из 3 каналов,
+      разворачивается в столбец из 27 значений, а 256 положений выхода
+      16×16 образуют матрицу 27×256.
+    </p>
+  </main>
+
+  <script>
+    const DATA = [{
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      canvas: { width: 1200, height: 440 },
+      input: {
+        startX: 42, y: 116, patch: 90, gap: 22, cells: 3,
+        labelY: 42, captionY: 245, formulaY: 270
+      },
+      samples: {
+        x: 442, y: 92, width: 24, height: 270, count: 3,
+        gap: 12, rows: 27, group: 9, titleY: 42, subtitleY: 64,
+        ellipsisX: 557, ellipsisY: 231
+      },
+      matrix: {
+        x: 710, y: 116, width: 424, height: 216,
+        rows: 27, shownColumns: 14, firstColumns: 8,
+        gapWidth: 44, titleY: 42, subtitleY: 64,
+        bottomLabelY: 367, sideLabelX: 678
+      },
+      output: {
+        x: 996, y: 12, size: 96, cells: 16,
+        labelX: 1044, labelY: 424
+      },
+      arrows: {
+        firstStartX: 370, firstEndX: 424, y: 224,
+        secondStartX: 588, secondEndX: 688,
+        outputStartX: 1044, outputStartY: 104,
+        outputEndX: 1044, outputEndY: 112,
+        head: 9, wing: 6,
+        firstLabelX: 397, firstLabelY: 199,
+        secondLabelX: 638, secondLabelY: 199
+      },
+      dimensions: {
+        tick: 7, matrixLeft: 700, matrixRight: 1144,
+        matrixTop: 106, matrixBottom: 342,
+        sampleLeft: 430, sampleRight: 554,
+        sampleTop: 82, sampleBottom: 372
+      },
+      style: {
+        radius: 7, selectedInset: 4, selectedRadius: 5,
+        labelPad: 10, matrixRadius: 5
+      },
+      colors: [
+        { fill: "var(--blue-fill)", stroke: "var(--blue)", name: "R" },
+        { fill: "var(--green-fill)", stroke: "var(--green)", name: "G" },
+        { fill: "var(--amber-fill)", stroke: "var(--amber)", name: "B" }
+      ]
+    }];
+
+    const origin = DATA.find(Boolean).origin;
+    const scale = DATA.find(Boolean).scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const d = DATA.find(Boolean);
+      const root = document.getElementById("drawing");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const node = (name, attrs, parent = root) => {
+        const item = document.createElementNS(ns, name);
+        Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+        parent.appendChild(item);
+        return item;
+      };
+
+      const group = (label, parent = root) =>
+        node("g", { role: "group", "aria-label": label }, parent);
+
+      const rect = (x, y, width, height, attrs = {}, parent = root) =>
+        node("rect", {
+          x: sx(x), y: sy(y),
+          width: sx(x + width) - sx(x),
+          height: sy(y + height) - sy(y),
+          ...attrs
+        }, parent);
+
+      const line = (x1, y1, x2, y2, attrs = {}, parent = root) =>
+        node("line", {
+          x1: sx(x1), y1: sy(y1),
+          x2: sx(x2), y2: sy(y2),
+          ...attrs
+        }, parent);
+
+      const text = (x, y, value, attrs = {}, parent = root) => {
+        const item = node("text", { x: sx(x), y: sy(y), ...attrs }, parent);
+        item.textContent = value;
+        return item;
+      };
+
+      const polygon = (points, attrs = {}, parent = root) =>
+        node("polygon", {
+          points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          ...attrs
+        }, parent);
+
+      const arrow = (x1, y1, x2, y2, parent = root) => {
+        const a = d.arrows;
+        line(x1, y1, x2, y2, { class: "arrow" }, parent);
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const backX = x2 - a.head * Math.cos(angle);
+        const backY = y2 - a.head * Math.sin(angle);
+        const leftX = backX + a.wing * Math.sin(angle);
+        const leftY = backY - a.wing * Math.cos(angle);
+        const rightX = backX - a.wing * Math.sin(angle);
+        const rightY = backY + a.wing * Math.cos(angle);
+        polygon([
+          { x: x2, y: y2 },
+          { x: leftX, y: leftY },
+          { x: rightX, y: rightY }
+        ], { fill: "var(--line)" }, parent);
+      };
+
+      const bracketVertical = (x, top, bottom, side, parent = root) => {
+        const tick = d.dimensions.tick * side;
+        line(x, top, x, bottom, { class: "dimension-line" }, parent);
+        line(x, top, x + tick, top, { class: "dimension-line" }, parent);
+        line(x, bottom, x + tick, bottom, { class: "dimension-line" }, parent);
+      };
+
+      const bracketHorizontal = (left, right, y, side, parent = root) => {
+        const tick = d.dimensions.tick * side;
+        line(left, y, right, y, { class: "dimension-line" }, parent);
+        line(left, y, left, y + tick, { class: "dimension-line" }, parent);
+        line(right, y, right, y + tick, { class: "dimension-line" }, parent);
+      };
+
+      const drawGrid = (x, y, size, cells, palette, parent) => {
+        const cell = size / cells;
+        rect(x, y, size, size, {
+          rx: sx(d.style.radius),
+          ry: sy(d.style.radius),
+          fill: palette.fill,
+          stroke: palette.stroke,
+          "stroke-width": "2.5",
+          class: "outline"
+        }, parent);
+
+        Array.from({ length: cells }).forEach((unused, index) => {
+          const position = index * cell;
+          line(x + position, y, x + position, y + size,
+            { class: "grid-line" }, parent);
+          line(x, y + position, x + size, y + position,
+            { class: "grid-line" }, parent);
+        });
+
+        const inset = d.style.selectedInset;
+        rect(x + inset, y + inset, size - inset - inset, size - inset - inset, {
+          rx: sx(d.style.selectedRadius),
+          ry: sy(d.style.selectedRadius),
+          fill: "none",
+          stroke: palette.stroke,
+          "stroke-width": "3"
+        }, parent);
+      };
+
+      const inputGroup = group("Три канала и окно три на три");
+      text(
+        d.input.startX,
+        d.input.labelY,
+        "Одно пространственное окно берёт сразу 3 канала",
+        { class: "label", "text-anchor": "start" },
+        inputGroup
+      );
+
+      d.colors.forEach((palette, index) => {
+        const x = d.input.startX + index * (d.input.patch + d.input.gap);
+        drawGrid(x, d.input.y, d.input.patch, d.input.cells, palette, inputGroup);
+        text(
+          x + d.input.patch / d.input.cells,
+          d.input.y - d.style.labelPad,
+          `канал ${palette.name}`,
+          {
+            class: "channel",
+            fill: palette.stroke,
+            "text-anchor": "middle"
+          },
+          inputGroup
+        );
+      });
+
+      text(
+        d.input.startX,
+        d.input.captionY,
+        "В каждом канале: окно 3×3",
+        { class: "small", "text-anchor": "start" },
+        inputGroup
+      );
+      text(
+        d.input.startX,
+        d.input.formulaY,
+        "3 · 3 · 3 = 27 значений",
+        { class: "dimension", "text-anchor": "start" },
+        inputGroup
+      );
+
+      const sampleGroup = group("Каждое окно становится столбцом");
+      text(
+        d.samples.x,
+        d.samples.titleY,
+        "Каждое окно → свой столбец",
+        { class: "label", "text-anchor": "middle" },
+        sampleGroup
+      );
+      text(
+        d.samples.x,
+        d.samples.subtitleY,
+        "одинаковый порядок значений",
+        { class: "small", "text-anchor": "middle" },
+        sampleGroup
+      );
+
+      const sampleCellHeight = d.samples.height / d.samples.rows;
+      d.colors.forEach((palette, colorIndex) => {
+        const guideY = d.input.y + d.input.patch / d.input.cells
+          + colorIndex * d.input.patch / d.input.cells;
+        const targetY = d.samples.y
+          + colorIndex * d.samples.group * sampleCellHeight
+          + d.samples.group * sampleCellHeight / d.input.cells;
+        line(
+          d.input.startX + d.input.cells * (d.input.patch + d.input.gap) - d.input.gap,
+          guideY,
+          d.samples.x,
+          targetY,
+          { class: "guide", stroke: palette.stroke },
+          sampleGroup
+        );
+      });
+
+      Array.from({ length: d.samples.count }).forEach((unused, columnIndex) => {
+        const x = d.samples.x
+          + columnIndex * (d.samples.width + d.samples.gap);
+
+        Array.from({ length: d.samples.rows }).forEach((empty, rowIndex) => {
+          const colorIndex = Math.floor(rowIndex / d.samples.group);
+          const palette = d.colors[colorIndex];
+          rect(
+            x,
+            d.samples.y + rowIndex * sampleCellHeight,
+            d.samples.width,
+            sampleCellHeight,
+            {
+              fill: palette.fill,
+              stroke: palette.stroke,
+              "stroke-width": "0.7"
+            },
+            sampleGroup
+          );
+        });
+
+        rect(x, d.samples.y, d.samples.width, d.samples.height, {
+          fill: "none",
+          stroke: "var(--line)",
+          "stroke-width": "1.5"
+        }, sampleGroup);
+      });
+
+      text(
+        d.samples.ellipsisX,
+        d.samples.ellipsisY,
+        "…",
+        { class: "label", "text-anchor": "middle" },
+        sampleGroup
+      );
+
+      bracketVertical(
+        d.dimensions.sampleLeft,
+        d.dimensions.sampleTop,
+        d.dimensions.sampleBottom,
+        d.scale.x,
+        sampleGroup
+      );
+      text(
+        d.dimensions.sampleLeft - d.style.labelPad,
+        d.samples.y + d.samples.height / d.input.cells,
+        "27",
+        {
+          class: "dimension",
+          "text-anchor": "end",
+          transform: `rotate(-90 ${sx(d.dimensions.sampleLeft - d.style.labelPad)} ${sy(d.samples.y + d.samples.height / d.input.cells)})`
+        },
+        sampleGroup
+      );
+
+      const arrowGroup = group("Направление преобразования");
+      arrow(
+        d.arrows.firstStartX,
+        d.arrows.y,
+        d.arrows.firstEndX,
+        d.arrows.y,
+        arrowGroup
+      );
+      text(
+        d.arrows.firstLabelX,
+        d.arrows.firstLabelY,
+        "развернуть",
+        { class: "small", "text-anchor": "middle" },
+        arrowGroup
+      );
+      arrow(
+        d.arrows.secondStartX,
+        d.arrows.y,
+        d.arrows.secondEndX,
+        d.arrows.y,
+        arrowGroup
+      );
+      text(
+        d.arrows.secondLabelX,
+        d.arrows.secondLabelY,
+        "поставить рядом",
+        { class: "small", "text-anchor": "middle" },
+        arrowGroup
+      );
+
+      const matrixGroup = group("Матрица двадцать семь на двести пятьдесят шесть");
+      text(
+        d.matrix.x,
+        d.matrix.titleY,
+        "Матрица всех окон",
+        { class: "label", "text-anchor": "start" },
+        matrixGroup
+      );
+      text(
+        d.matrix.x,
+        d.matrix.subtitleY,
+        "один столбец ↔ одно место выхода",
+        { class: "small", "text-anchor": "start" },
+        matrixGroup
+      );
+
+      rect(
+        d.matrix.x,
+        d.matrix.y,
+        d.matrix.width,
+        d.matrix.height,
+        {
+          rx: sx(d.style.matrixRadius),
+          ry: sy(d.style.matrixRadius),
+          fill: "var(--matrix-b)",
+          stroke: "var(--line)",
+          "stroke-width": "2"
+        },
+        matrixGroup
+      );
+
+      const visibleWidth = d.matrix.width - d.matrix.gapWidth;
+      const columnWidth = visibleWidth / d.matrix.shownColumns;
+      const rowHeight = d.matrix.height / d.matrix.rows;
+      const trailingColumns = d.matrix.shownColumns - d.matrix.firstColumns;
+
+      Array.from({ length: d.matrix.rows }).forEach((unused, rowIndex) => {
+        Array.from({ length: d.matrix.firstColumns }).forEach((empty, columnIndex) => {
+          rect(
+            d.matrix.x + columnIndex * columnWidth,
+            d.matrix.y + rowIndex * rowHeight,
+            columnWidth,
+            rowHeight,
+            {
+              fill: rowIndex < d.samples.group
+                ? "var(--matrix-a)"
+                : rowIndex < d.samples.group + d.samples.group
+                  ? "var(--green-fill)"
+                  : "var(--amber-fill)",
+              stroke: "var(--soft-line)",
+              "stroke-width": "0.55"
+            },
+            matrixGroup
+          );
+        });
+
+        Array.from({ length: trailingColumns }).forEach((empty, columnIndex) => {
+          const start = d.matrix.x
+            + d.matrix.firstColumns * columnWidth
+            + d.matrix.gapWidth;
+          rect(
+            start + columnIndex * columnWidth,
+            d.matrix.y + rowIndex * rowHeight,
+            columnWidth,
+            rowHeight,
+            {
+              fill: rowIndex < d.samples.group
+                ? "var(--matrix-a)"
+                : rowIndex < d.samples.group + d.samples.group
+                  ? "var(--green-fill)"
+                  : "var(--amber-fill)",
+              stroke: "var(--soft-line)",
+              "stroke-width": "0.55"
+            },
+            matrixGroup
+          );
+        });
+      });
+
+      text(
+        d.matrix.x
+          + d.matrix.firstColumns * columnWidth
+          + d.matrix.gapWidth / d.input.cells,
+        d.matrix.y + d.matrix.height / d.input.cells,
+        "⋯",
+        { class: "label", "text-anchor": "middle" },
+        matrixGroup
+      );
+      text(
+        d.matrix.x
+          + d.matrix.firstColumns * columnWidth
+          + d.matrix.gapWidth / d.input.cells,
+        d.matrix.y + d.matrix.height / d.input.cells
+          + d.matrix.height / d.input.cells,
+        "⋯",
+        { class: "label", "text-anchor": "middle" },
+        matrixGroup
+      );
+
+      bracketVertical(
+        d.dimensions.matrixLeft,
+        d.matrix.y,
+        d.matrix.y + d.matrix.height,
+        d.scale.x,
+        matrixGroup
+      );
+      text(
+        d.matrix.sideLabelX,
+        d.matrix.y + d.matrix.height / d.input.cells,
+        "27 строк",
+        {
+          class: "dimension",
+          "text-anchor": "middle",
+          transform: `rotate(-90 ${sx(d.matrix.sideLabelX)} ${sy(d.matrix.y + d.matrix.height / d.input.cells)})`
+        },
+        matrixGroup
+      );
+
+      bracketHorizontal(
+        d.matrix.x,
+        d.matrix.x + d.matrix.width,
+        d.dimensions.matrixBottom,
+        -d.scale.y,
+        matrixGroup
+      );
+      text(
+        d.matrix.x + d.matrix.width / d.input.cells,
+        d.matrix.bottomLabelY,
+        "256 столбцов",
+        { class: "dimension", "text-anchor": "middle" },
+        matrixGroup
+      );
+
+      const outputGroup = group("Выход шестнадцать на шестнадцать");
+      const outputCell = d.output.size / d.output.cells;
+      rect(
+        d.output.x,
+        d.output.y,
+        d.output.size,
+        d.output.size,
+        {
+          rx: sx(d.style.matrixRadius),
+          ry: sy(d.style.matrixRadius),
+          fill: "var(--violet-fill)",
+          stroke: "var(--violet)",
+          "stroke-width": "2"
+        },
+        outputGroup
+      );
+
+      Array.from({ length: d.output.cells }).forEach((unused, index) => {
+        const position = index * outputCell;
+        line(
+          d.output.x + position,
+          d.output.y,
+          d.output.x + position,
+          d.output.y + d.output.size,
+          { class: "grid-line" },
+          outputGroup
+        );
+        line(
+          d.output.x,
+          d.output.y + position,
+          d.output.x + d.output.size,
+          d.output.y + position,
+          { class: "grid-line" },
+          outputGroup
+        );
+      });
+
+      arrow(
+        d.arrows.outputStartX,
+        d.arrows.outputStartY,
+        d.arrows.outputEndX,
+        d.arrows.outputEndY,
+        outputGroup
+      );
+      text(
+        d.output.labelX,
+        d.output.labelY,
+        "выход 16×16 → 256 мест",
+        { class: "dimension", "text-anchor": "middle" },
+        outputGroup
+      );
+
+      text(
+        d.matrix.x + d.matrix.width / d.input.cells,
+        d.canvas.height - d.style.labelPad,
+        "Итоговая форма: 27 × 256",
+        { class: "label", "text-anchor": "middle" },
+        matrixGroup
+      );
+    } catch (error) {
+      document.getElementById("diagram").style.display = "none";
+      document.getElementById("fallback").style.display = "flex";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

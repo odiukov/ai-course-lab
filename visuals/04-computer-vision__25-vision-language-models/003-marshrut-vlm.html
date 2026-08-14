@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный маршрут изображения и текста через VLM</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --panel-soft: #f1f5f9;
+    --text: #172033;
+    --muted: #526079;
+    --line: #738099;
+    --vision: #dbeafe;
+    --vision-edge: #2563eb;
+    --projector: #fef3c7;
+    --projector-edge: #d97706;
+    --language: #dcfce7;
+    --language-edge: #16a34a;
+    --merge: #ede9fe;
+    --merge-edge: #7c3aed;
+    --answer: #ffe4e6;
+    --answer-edge: #e11d48;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101522;
+      --panel: #192131;
+      --panel-soft: #141c2a;
+      --text: #edf3ff;
+      --muted: #aebbd0;
+      --line: #8997af;
+      --vision: #172f55;
+      --vision-edge: #60a5fa;
+      --projector: #493916;
+      --projector-edge: #fbbf24;
+      --language: #173c2a;
+      --language-edge: #4ade80;
+      --merge: #34245b;
+      --merge-edge: #a78bfa;
+      --answer: #4b2030;
+      --answer-edge: #fb7185;
+    }
+  }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .canvas {
+    fill: var(--bg);
+  }
+
+  .title {
+    fill: var(--text);
+    font-size: 25px;
+    font-weight: 750;
+  }
+
+  .lane-label {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: .04em;
+  }
+
+  .lane-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5px;
+    stroke-dasharray: 6px 7px;
+    opacity: .42;
+  }
+
+  .card {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .card.vision {
+    fill: var(--vision);
+    stroke: var(--vision-edge);
+  }
+
+  .card.projector {
+    fill: var(--projector);
+    stroke: var(--projector-edge);
+  }
+
+  .card.language {
+    fill: var(--language);
+    stroke: var(--language-edge);
+  }
+
+  .card.merge {
+    fill: var(--merge);
+    stroke: var(--merge-edge);
+  }
+
+  .card.answer {
+    fill: var(--answer);
+    stroke: var(--answer-edge);
+  }
+
+  .accent {
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .accent.vision {
+    stroke: var(--vision-edge);
+  }
+
+  .accent.projector {
+    stroke: var(--projector-edge);
+  }
+
+  .accent.language {
+    stroke: var(--language-edge);
+  }
+
+  .accent.merge {
+    stroke: var(--merge-edge);
+  }
+
+  .accent.answer {
+    stroke: var(--answer-edge);
+  }
+
+  .box-title {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 720;
+  }
+
+  .box-detail {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 520;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow-head {
+    fill: var(--line);
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .token {
+    fill: var(--panel);
+    stroke-width: 1.5px;
+  }
+
+  .token.vision {
+    stroke: var(--vision-edge);
+  }
+
+  .token.language {
+    stroke: var(--language-edge);
+  }
+
+  .footer {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .footer-text {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 17px;
+    font-weight: 650;
+  }
+</style>
+</head>
+<body>
+<svg id="diagram" viewBox="0 0 1200 500" width="1200" height="500"
+     role="img" aria-labelledby="diagram-title diagram-description"
+     preserveAspectRatio="xMidYMid meet">
+  <title id="diagram-description">Изображение проходит через ViT и MLP-projector, текст превращается в токены, обе последовательности объединяются и поступают в decoder LLM.</title>
+  <rect id="canvas-background" class="canvas"></rect>
+  <text id="diagram-title" class="title">Полный маршрут изображения и текста через VLM</text>
+  <g id="runtime-content"></g>
+</svg>
+
+<script>
+const DATA = [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 },
+  {
+    zero: 0, one: 1, two: 2,
+    canvasW: 1200, canvasH: 500,
+    titleX: 22, titleY: 34,
+    radius: 13, accentInset: 12, accentY: 9,
+    textLine: 19, detailGap: 4,
+    arrowHead: 11, arrowHalf: 6,
+    laneTopY: 71, laneBottomY: 288,
+    laneStartX: 18, laneTopEndX: 1182,
+    laneBottomStartX: 310, laneBottomEndX: 835,
+    upperCenterY: 144, lowerCenterY: 357,
+    labelPad: 13, tokenRadius: 4,
+    footerX: 18, footerY: 438, footerW: 1164, footerH: 44,
+    footerTextX: 600, footerTextY: 460,
+    fallbackX: 600, fallbackY: 250
+  },
+  [
+    {
+      x: 18, y: 92, w: 107, h: 104, kind: "vision",
+      title: ["Изображение"], detail: ["H × W × 3"]
+    },
+    {
+      x: 152, y: 92, w: 118, h: 104, kind: "vision",
+      title: ["Vision encoder"], detail: ["ViT"]
+    },
+    {
+      x: 297, y: 92, w: 123, h: 104, kind: "vision",
+      title: ["N image tokens"], detail: ["размерность dᵥᵢₜ"],
+      tokens: [
+        { x: 312, y: 171, w: 16, h: 9 },
+        { x: 334, y: 171, w: 16, h: 9 },
+        { x: 356, y: 171, w: 16, h: 9 },
+        { x: 378, y: 171, w: 16, h: 9 }
+      ]
+    },
+    {
+      x: 447, y: 92, w: 123, h: 104, kind: "projector",
+      title: ["MLP-projector"], detail: ["перевод формата"]
+    },
+    {
+      x: 597, y: 92, w: 123, h: 104, kind: "language",
+      title: ["N image tokens"], detail: ["размерность dₗₗₘ"],
+      tokens: [
+        { x: 612, y: 171, w: 16, h: 9 },
+        { x: 634, y: 171, w: 16, h: 9 },
+        { x: 656, y: 171, w: 16, h: 9 },
+        { x: 678, y: 171, w: 16, h: 9 }
+      ]
+    },
+    {
+      x: 755, y: 116, w: 80, h: 164, kind: "merge",
+      title: ["Объеди-", "нение"], detail: ["одна", "последо-", "вательность"]
+    },
+    {
+      x: 870, y: 116, w: 125, h: 164, kind: "language",
+      title: ["Decoder LLM"], detail: ["читает общий", "контекст"]
+    },
+    {
+      x: 1030, y: 116, w: 152, h: 164, kind: "answer",
+      title: ["Ответ"], detail: ["«Собака держит", "красный мяч»"]
+    }
+  ],
+  [
+    {
+      x: 310, y: 310, w: 145, h: 94, kind: "card",
+      title: ["Текст вопроса"], detail: ["«Что животное", "держит в пасти?»"]
+    },
+    {
+      x: 510, y: 310, w: 165, h: 94, kind: "language",
+      title: ["M text tokens"], detail: ["размерность dₗₗₘ"],
+      tokens: [
+        { x: 529, y: 380, w: 19, h: 9 },
+        { x: 554, y: 380, w: 19, h: 9 },
+        { x: 579, y: 380, w: 19, h: 9 },
+        { x: 604, y: 380, w: 19, h: 9 },
+        { x: 629, y: 380, w: 19, h: 9 }
+      ]
+    }
+  ],
+  [
+    { points: [{ x: 125, y: 144 }, { x: 152, y: 144 }] },
+    { points: [{ x: 270, y: 144 }, { x: 297, y: 144 }] },
+    { points: [{ x: 420, y: 144 }, { x: 447, y: 144 }] },
+    { points: [{ x: 570, y: 144 }, { x: 597, y: 144 }] },
+    {
+      points: [
+        { x: 720, y: 144 }, { x: 737, y: 144 },
+        { x: 737, y: 164 }, { x: 755, y: 164 }
+      ]
+    },
+    { points: [{ x: 835, y: 198 }, { x: 870, y: 198 }] },
+    { points: [{ x: 995, y: 198 }, { x: 1030, y: 198 }] },
+    {
+      points: [{ x: 455, y: 357 }, { x: 510, y: 357 }],
+      label: { text: "tokenizer", x: 482, y: 337, anchor: "middle" }
+    },
+    {
+      points: [
+        { x: 675, y: 357 }, { x: 726, y: 357 },
+        { x: 726, y: 232 }, { x: 755, y: 232 }
+      ]
+    }
+  ],
+  [
+    { text: "ВИЗУАЛЬНАЯ ВЕТКА", x: 18, y: 71, anchor: "start" },
+    { text: "ТЕКСТОВАЯ ВЕТКА", x: 310, y: 288, anchor: "start" }
+  ]
+];
+
+const [origin, scale, C, upperCards, lowerCards, connectors, laneLabels] = DATA;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const canvas = document.getElementById("canvas-background");
+const title = document.getElementById("diagram-title");
+const content = document.getElementById("runtime-content");
+const NS = "http://www.w3.org/2000/svg";
+
+function make(tag, attrs, className, parent) {
+  const element = document.createElementNS(NS, tag);
+  if (className) element.setAttribute("class", className);
+  for (const [name, value] of Object.entries(attrs || {})) {
+    element.setAttribute(name, String(value));
+  }
+  (parent || content).appendChild(element);
+  return element;
+}
+
+function drawText(lines, x, y, titleLines, parent) {
+  const total = lines.length + titleLines.length;
+  const top = y - (total - C.one) * C.textLine / C.two;
+  const text = make("text", {
+    "text-anchor": "middle",
+    "dominant-baseline": "middle"
+  }, "", parent);
+
+  titleLines.forEach((line, index) => {
+    const span = make("tspan", {
+      x: sx(x),
+      y: sy(top + index * C.textLine)
+    }, "box-title", text);
+    span.textContent = line;
+  });
+
+  lines.forEach((line, index) => {
+    const span = make("tspan", {
+      x: sx(x),
+      y: sy(top + (titleLines.length + index) * C.textLine + C.detailGap)
+    }, "box-detail", text);
+    span.textContent = line;
+  });
+}
+
+function drawCard(box) {
+  const group = make("g", {}, "", content);
+  make("rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: sx(box.w) - sx(C.zero),
+    height: sy(box.h) - sy(C.zero),
+    rx: sx(C.radius) - sx(C.zero),
+    ry: sy(C.radius) - sy(C.zero)
+  }, `card ${box.kind}`, group);
+
+  make("line", {
+    x1: sx(box.x + C.accentInset),
+    y1: sy(box.y + C.accentY),
+    x2: sx(box.x + box.w - C.accentInset),
+    y2: sy(box.y + C.accentY)
+  }, `accent ${box.kind}`, group);
+
+  const hasTokens = Array.isArray(box.tokens);
+  const centerShift = hasTokens ? -C.detailGap : C.zero;
+  drawText(
+    box.detail,
+    box.x + box.w / C.two,
+    box.y + box.h / C.two + centerShift,
+    box.title,
+    group
+  );
+
+  if (hasTokens) {
+    box.tokens.forEach(token => {
+      make("rect", {
+        x: sx(token.x),
+        y: sy(token.y),
+        width: sx(token.w) - sx(C.zero),
+        height: sy(token.h) - sy(C.zero),
+        rx: sx(C.tokenRadius) - sx(C.zero),
+        ry: sy(C.tokenRadius) - sy(C.zero)
+      }, `token ${box.kind}`, group);
+    });
+  }
+}
+
+function drawArrow(item) {
+  const points = item.points;
+  make("polyline", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+  }, "connector", content);
+
+  const end = points[points.length - C.one];
+  const previous = points[points.length - C.two];
+  const dx = end.x - previous.x;
+  const dy = end.y - previous.y;
+  const length = Math.hypot(dx, dy) || C.one;
+  const ux = dx / length;
+  const uy = dy / length;
+  const baseX = end.x - ux * C.arrowHead;
+  const baseY = end.y - uy * C.arrowHead;
+  const sideX = -uy * C.arrowHalf;
+  const sideY = ux * C.arrowHalf;
+
+  make("polygon", {
+    points: [
+      `${sx(end.x)},${sy(end.y)}`,
+      `${sx(baseX + sideX)},${sy(baseY + sideY)}`,
+      `${sx(baseX - sideX)},${sy(baseY - sideY)}`
+    ].join(" ")
+  }, "arrow-head", content);
+
+  if (item.label) {
+    const label = make("text", {
+      x: sx(item.label.x),
+      y: sy(item.label.y),
+      "text-anchor": item.label.anchor,
+      "dominant-baseline": "middle"
+    }, "edge-label", content);
+    label.textContent = item.label.text;
+  }
+}
+
+try {
+  canvas.setAttribute("x", sx(C.zero));
+  canvas.setAttribute("y", sy(C.zero));
+  canvas.setAttribute("width", sx(C.canvasW) - sx(C.zero));
+  canvas.setAttribute("height", sy(C.canvasH) - sy(C.zero));
+
+  title.setAttribute("x", sx(C.titleX));
+  title.setAttribute("y", sy(C.titleY));
+
+  make("line", {
+    x1: sx(C.laneStartX),
+    y1: sy(C.laneTopY),
+    x2: sx(C.laneTopEndX),
+    y2: sy(C.laneTopY)
+  }, "lane-line", content);
+
+  make("line", {
+    x1: sx(C.laneBottomStartX),
+    y1: sy(C.laneBottomY),
+    x2: sx(C.laneBottomEndX),
+    y2: sy(C.laneBottomY)
+  }, "lane-line", content);
+
+  laneLabels.forEach(item => {
+    const label = make("text", {
+      x: sx(item.x),
+      y: sy(item.y - C.labelPad),
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle"
+    }, "lane-label", content);
+    label.textContent = item.text;
+  });
+
+  connectors.forEach(drawArrow);
+  upperCards.forEach(drawCard);
+  lowerCards.forEach(drawCard);
+
+  make("rect", {
+    x: sx(C.footerX),
+    y: sy(C.footerY),
+    width: sx(C.footerW) - sx(C.zero),
+    height: sy(C.footerH) - sy(C.zero),
+    rx: sx(C.radius) - sx(C.zero),
+    ry: sy(C.radius) - sy(C.zero)
+  }, "footer", content);
+
+  const footer = make("text", {
+    x: sx(C.footerTextX),
+    y: sy(C.footerTextY),
+    "text-anchor": "middle",
+    "dominant-baseline": "middle"
+  }, "footer-text", content);
+  footer.textContent = "Общий контекст: N визуальных токенов + M текстовых токенов → последовательная генерация ответа";
+} catch (error) {
+  content.replaceChildren();
+  title.setAttribute("x", sx(C.titleX));
+  title.setAttribute("y", sy(C.titleY));
+
+  const fallback = make("text", {
+    x: sx(C.fallbackX),
+    y: sy(C.fallbackY),
+    "text-anchor": "middle",
+    "dominant-baseline": "middle"
+  }, "fallback", content);
+  fallback.textContent = "Схема должна была показать путь изображения и текста через ViT, projector и decoder LLM.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

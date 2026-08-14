@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DDPM и DDIM: одно расписание, разное число остановок</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59647a;
+      --grid: #cbd3e2;
+      --ddpm: #e05269;
+      --ddpm-soft: #fff0f3;
+      --ddim: #2477d4;
+      --ddim-soft: #edf6ff;
+      --accent: #7357c8;
+      --clean: #2c9367;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    body {
+      padding: 12px;
+    }
+
+    figure {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 14px 18px 8px;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    #fallback {
+      margin: 0;
+      padding: 28px;
+      font-size: 17px;
+      line-height: 1.45;
+      color: var(--ink);
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 2;
+      stroke-linecap: round;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .ddpm-line {
+      fill: none;
+      stroke: var(--ddpm);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .ddim-line {
+      fill: none;
+      stroke: var(--ddim);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .ddpm-ticks {
+      fill: none;
+      stroke: var(--ddpm);
+      stroke-width: 1;
+    }
+
+    .jump {
+      fill: none;
+      stroke: var(--ddim);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .noise-arrow {
+      fill: none;
+      stroke: var(--ddpm);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-guide {
+      fill: var(--accent);
+    }
+
+    .arrow-ddpm {
+      fill: var(--ddpm);
+    }
+
+    .arrow-ddim {
+      fill: var(--ddim);
+    }
+
+    .ddim-dot {
+      fill: var(--panel);
+      stroke: var(--ddim);
+      stroke-width: 2;
+    }
+
+    .clean-dot {
+      fill: var(--clean);
+      stroke: var(--panel);
+      stroke-width: 2;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .number {
+      fill: var(--ink);
+      font-size: 15px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ddpm-text {
+      fill: var(--ddpm);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .ddim-text {
+      fill: var(--ddim);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .schedule-text {
+      fill: var(--accent);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .clean-text {
+      fill: var(--clean);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .legend-ddpm {
+      fill: var(--ddpm-soft);
+      stroke: var(--ddpm);
+      stroke-width: 1;
+    }
+
+    .legend-ddim {
+      fill: var(--ddim-soft);
+      stroke: var(--ddim);
+      stroke-width: 1;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --panel: #181e2c;
+        --ink: #f2f5fb;
+        --muted: #b2bdd0;
+        --grid: #465168;
+        --ddpm: #ff7589;
+        --ddpm-soft: #35212a;
+        --ddim: #6cb4ff;
+        --ddim-soft: #192d43;
+        --accent: #b29aff;
+        --clean: #66d6a2;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure>
+    <h1>Одно расписание шума — разное число остановок</h1>
+    <p id="fallback">
+      Схема должна показать одну шкалу от t = 999 до чистого изображения:
+      DDPM посещает все 1000 индексов со случайным z, а DDIM делает 50
+      детерминированных остановок примерно через 20 индексов.
+    </p>
+    <svg id="diagram"
+         width="1120"
+         height="430"
+         viewBox="0 0 1120 430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">DDPM и DDIM проходят одно расписание шума</title>
+      <desc id="svg-desc">
+        DDPM отмечает все 1000 индексов и использует случайный z.
+        DDIM с eta равным нулю выбирает 50 точек той же шкалы и делает
+        детерминированные переходы.
+      </desc>
+    </svg>
+  </figure>
+
+  <script>
+    const data = Object.freeze({
+      zero: 0,
+      one: 1,
+      half: 0.5,
+      canvas: [1120, 430],
+      indices: {
+        first: 999,
+        ddpmNext: [998, 997],
+        ddimNext: [979, 959],
+        last: 0,
+        stride: 20
+      },
+      counts: {
+        ddpm: 1000,
+        ddim: 50
+      },
+      axis: {
+        left: 205,
+        right: 1030,
+        arrowLength: 13,
+        arrowHalf: 7,
+        tickHalf: 5,
+        largeTickHalf: 8
+      },
+      rows: {
+        schedule: 54,
+        ddpm: 157,
+        ddim: 275
+      },
+      labels: {
+        scheduleTop: 25,
+        scheduleBottom: 82,
+        rowNameX: 178,
+        indexYShift: 31,
+        noteYShift: 53,
+        cleanYShift: 31
+      },
+      callout: {
+        ddpmX: 550,
+        ddpmY: 102,
+        ddpmTargetX: 590,
+        ddpmTargetY: 149,
+        ddimStartX: 460,
+        ddimEndX: 570,
+        ddimArcY: 236,
+        ddimLabelX: 515,
+        ddimLabelY: 215,
+        noiseRadiusX: 27,
+        noiseRadiusY: 15
+      },
+      dots: {
+        ddim: 4,
+        clean: 7
+      },
+      legend: {
+        top: 340,
+        bottom: 405,
+        left: 78,
+        split: 552,
+        right: 1042,
+        pad: 17,
+        swatchStart: 99,
+        swatchEnd: 159,
+        textX: 178,
+        titleY: 365,
+        detailY: 389,
+        secondSwatchStart: 573,
+        secondSwatchEnd: 633,
+        secondTextX: 652
+      },
+      offsets: {
+        lineGap: 11,
+        labelGap: 10,
+        sampleGap: 12
+      }
+    });
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+    const ns = "http://www.w3.org/2000/svg";
+
+    try {
+      const make = (name, attrs, parent = svg) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attrs || {}).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        parent.appendChild(node);
+        return node;
+      };
+
+      const text = (value, x, y, className, anchor = "start", parent = svg) => {
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const line = (x1, y1, x2, y2, className, parent = svg) =>
+        make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        }, parent);
+
+      const circle = (x, y, radius, className, parent = svg) =>
+        make("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(data.zero),
+          class: className
+        }, parent);
+
+      const arrowHead = (x, y, className, parent = svg) => {
+        const back = x - data.axis.arrowLength;
+        const upper = y - data.axis.arrowHalf;
+        const lower = y + data.axis.arrowHalf;
+        return make("path", {
+          d: [
+            "M", sx(x), sy(y),
+            "L", sx(back), sy(upper),
+            "L", sx(back), sy(lower),
+            "Z"
+          ].join(" "),
+          class: className
+        }, parent);
+      };
+
+      const roundedBox = (left, top, right, bottom, className, parent = svg) =>
+        make("rect", {
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top),
+          rx: sx(data.offsets.lineGap) - sx(data.zero),
+          class: className
+        }, parent);
+
+      const indexToX = index => {
+        const elapsed = data.indices.first - index;
+        const range = data.indices.first - data.indices.last;
+        return data.axis.left +
+          elapsed / range * (data.axis.right - data.axis.left);
+      };
+
+      const schedule = make("g", {
+        "aria-label": "Полное расписание шума"
+      });
+
+      text(
+        "одно полное расписание: 1000 индексов t",
+        (data.axis.left + data.axis.right) * data.half,
+        data.labels.scheduleTop,
+        "schedule-text",
+        "middle",
+        schedule
+      );
+
+      line(
+        data.axis.left,
+        data.rows.schedule,
+        data.axis.right,
+        data.rows.schedule,
+        "guide",
+        schedule
+      );
+      arrowHead(
+        data.axis.right,
+        data.rows.schedule,
+        "arrow-guide",
+        schedule
+      );
+
+      line(
+        data.axis.left,
+        data.rows.schedule - data.axis.largeTickHalf,
+        data.axis.left,
+        data.rows.schedule + data.axis.largeTickHalf,
+        "guide",
+        schedule
+      );
+
+      text(
+        "t = 999 · максимум шума",
+        data.axis.left,
+        data.labels.scheduleBottom,
+        "number",
+        "start",
+        schedule
+      );
+      text(
+        "чистое изображение",
+        data.axis.right,
+        data.labels.scheduleBottom,
+        "clean-text",
+        "end",
+        schedule
+      );
+
+      const ddpm = make("g", {
+        "aria-label": "DDPM, все 1000 остановок"
+      });
+
+      text(
+        "DDPM",
+        data.labels.rowNameX,
+        data.rows.ddpm - data.offsets.lineGap,
+        "ddpm-text",
+        "end",
+        ddpm
+      );
+      text(
+        "1000 вызовов U-Net",
+        data.labels.rowNameX,
+        data.rows.ddpm + data.offsets.lineGap,
+        "small",
+        "end",
+        ddpm
+      );
+
+      line(
+        data.axis.left,
+        data.rows.ddpm,
+        data.axis.right,
+        data.rows.ddpm,
+        "ddpm-line",
+        ddpm
+      );
+      arrowHead(
+        data.axis.right,
+        data.rows.ddpm,
+        "arrow-ddpm",
+        ddpm
+      );
+
+      const ddpmMarks = [];
+      Array.from({ length: data.counts.ddpm }, (_, step) => {
+        const index = data.indices.first - step;
+        const x = indexToX(index);
+        ddpmMarks.push(
+          "M", sx(x), sy(data.rows.ddpm - data.axis.tickHalf),
+          "L", sx(x), sy(data.rows.ddpm + data.axis.tickHalf)
+        );
+      });
+      make("path", {
+        d: ddpmMarks.join(" "),
+        class: "ddpm-ticks"
+      }, ddpm);
+
+      circle(
+        data.axis.right,
+        data.rows.ddpm,
+        data.dots.clean,
+        "clean-dot",
+        ddpm
+      );
+
+      text(
+        "999, 998, 997, …",
+        data.axis.left,
+        data.rows.ddpm + data.labels.indexYShift,
+        "number",
+        "start",
+        ddpm
+      );
+      text(
+        "каждый соседний индекс",
+        data.axis.left,
+        data.rows.ddpm + data.labels.noteYShift,
+        "small",
+        "start",
+        ddpm
+      );
+      text(
+        "чистое изображение",
+        data.axis.right,
+        data.rows.ddpm + data.labels.cleanYShift,
+        "clean-text",
+        "end",
+        ddpm
+      );
+
+      const noiseBoxLeft =
+        data.callout.ddpmX - data.callout.noiseRadiusX;
+      const noiseBoxRight =
+        data.callout.ddpmX + data.callout.noiseRadiusX;
+      const noiseBoxTop =
+        data.callout.ddpmY - data.callout.noiseRadiusY;
+      const noiseBoxBottom =
+        data.callout.ddpmY + data.callout.noiseRadiusY;
+
+      roundedBox(
+        noiseBoxLeft,
+        noiseBoxTop,
+        noiseBoxRight,
+        noiseBoxBottom,
+        "legend-ddpm",
+        ddpm
+      );
+      text(
+        "z",
+        data.callout.ddpmX,
+        data.callout.ddpmY + data.offsets.sampleGap * data.half,
+        "ddpm-text",
+        "middle",
+        ddpm
+      );
+      text(
+        "случайный шум",
+        noiseBoxLeft - data.offsets.labelGap,
+        data.callout.ddpmY + data.offsets.sampleGap * data.half,
+        "ddpm-text",
+        "end",
+        ddpm
+      );
+
+      make("path", {
+        d: [
+          "M", sx(data.callout.ddpmX), sy(noiseBoxBottom),
+          "L", sx(data.callout.ddpmTargetX), sy(data.callout.ddpmTargetY)
+        ].join(" "),
+        class: "noise-arrow"
+      }, ddpm);
+      arrowHead(
+        data.callout.ddpmTargetX,
+        data.callout.ddpmTargetY,
+        "arrow-ddpm",
+        ddpm
+      );
+
+      const ddim = make("g", {
+        "aria-label": "DDIM, 50 выбранных остановок"
+      });
+
+      text(
+        "DDIM",
+        data.labels.rowNameX,
+        data.rows.ddim - data.offsets.lineGap,
+        "ddim-text",
+        "end",
+        ddim
+      );
+      text(
+        "50 вызовов U-Net",
+        data.labels.rowNameX,
+        data.rows.ddim + data.offsets.lineGap,
+        "small",
+        "end",
+        ddim
+      );
+
+      line(
+        data.axis.left,
+        data.rows.ddim,
+        data.axis.right,
+        data.rows.ddim,
+        "axis",
+        ddim
+      );
+      arrowHead(
+        data.axis.right,
+        data.rows.ddim,
+        "arrow-ddim",
+        ddim
+      );
+
+      const selected = Array.from(
+        { length: data.counts.ddim },
+        (_, step) => data.indices.first - step * data.indices.stride
+      );
+
+      selected.forEach(index => {
+        circle(
+          indexToX(index),
+          data.rows.ddim,
+          data.dots.ddim,
+          "ddim-dot",
+          ddim
+        );
+      });
+
+      circle(
+        data.axis.right,
+        data.rows.ddim,
+        data.dots.clean,
+        "clean-dot",
+        ddim
+      );
+
+      make("path", {
+        d: [
+          "M", sx(data.callout.ddimStartX), sy(data.rows.ddim),
+          "L", sx(data.callout.ddimStartX), sy(data.callout.ddimArcY),
+          "L", sx(data.callout.ddimEndX), sy(data.callout.ddimArcY),
+          "L", sx(data.callout.ddimEndX), sy(data.rows.ddim)
+        ].join(" "),
+        class: "jump"
+      }, ddim);
+      arrowHead(
+        data.callout.ddimEndX,
+        data.rows.ddim,
+        "arrow-ddim",
+        ddim
+      );
+
+      text(
+        "η = 0 · детерминированный прыжок",
+        data.callout.ddimLabelX,
+        data.callout.ddimLabelY,
+        "ddim-text",
+        "middle",
+        ddim
+      );
+      text(
+        "999, 979, 959, …",
+        data.axis.left,
+        data.rows.ddim + data.labels.indexYShift,
+        "number",
+        "start",
+        ddim
+      );
+      text(
+        "остановка примерно через 20 индексов",
+        data.axis.left,
+        data.rows.ddim + data.labels.noteYShift,
+        "small",
+        "start",
+        ddim
+      );
+      text(
+        "чистое изображение",
+        data.axis.right,
+        data.rows.ddim + data.labels.cleanYShift,
+        "clean-text",
+        "end",
+        ddim
+      );
+
+      const legend = make("g", {
+        "aria-label": "Сравнение маршрутов"
+      });
+
+      roundedBox(
+        data.legend.left,
+        data.legend.top,
+        data.legend.split - data.legend.pad,
+        data.legend.bottom,
+        "legend-ddpm",
+        legend
+      );
+      roundedBox(
+        data.legend.split + data.legend.pad,
+        data.legend.top,
+        data.legend.right,
+        data.legend.bottom,
+        "legend-ddim",
+        legend
+      );
+
+      line(
+        data.legend.swatchStart,
+        data.legend.titleY,
+        data.legend.swatchEnd,
+        data.legend.titleY,
+        "ddpm-line",
+        legend
+      );
+      line(
+        data.legend.secondSwatchStart,
+        data.legend.titleY,
+        data.legend.secondSwatchEnd,
+        data.legend.titleY,
+        "ddim-line",
+        legend
+      );
+
+      text(
+        "DDPM: все точки",
+        data.legend.textX,
+        data.legend.titleY + data.offsets.sampleGap * data.half,
+        "label",
+        "start",
+        legend
+      );
+      text(
+        "случайный z на каждом переходе",
+        data.legend.textX,
+        data.legend.detailY,
+        "small",
+        "start",
+        legend
+      );
+      text(
+        "DDIM: 50 точек той же шкалы",
+        data.legend.secondTextX,
+        data.legend.titleY + data.offsets.sampleGap * data.half,
+        "label",
+        "start",
+        legend
+      );
+      text(
+        "η = 0: переходы детерминированы · примерно 20× меньше проходов",
+        data.legend.secondTextX,
+        data.legend.detailY,
+        "small",
+        "start",
+        legend
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

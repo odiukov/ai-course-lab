@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoU и memory bank при перекрытии</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f5f1e8;
+    --panel: #fffaf0;
+    --ink: #292821;
+    --muted: #68675f;
+    --grid: #cbc5b7;
+    --orange: #d96f24;
+    --orange-dark: #934414;
+    --blue: #3479b9;
+    --blue-dark: #21557f;
+    --bus: #d8c269;
+    --bus-edge: #776623;
+    --window: #d8eef2;
+    --lost: #c9473d;
+    --memory: #27856f;
+    --memory-fill: #d9f0e8;
+    --white: #fffdf7;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #171815;
+      --panel: #22231f;
+      --ink: #f2eee4;
+      --muted: #b9b6ad;
+      --grid: #505149;
+      --orange: #ed8a45;
+      --orange-dark: #ffc08c;
+      --blue: #64a7df;
+      --blue-dark: #a8d6f6;
+      --bus: #88792f;
+      --bus-edge: #d6c86d;
+      --window: #29444c;
+      --lost: #ff7e73;
+      --memory: #62c6a9;
+      --memory-fill: #183d34;
+      --white: #f7f3e8;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 12px;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    max-width: 1120px;
+    margin-inline: auto;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 2;
+  }
+
+  .divider,
+  .time,
+  .connector {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .divider { stroke: var(--grid); stroke-width: 2; }
+  .time { stroke: var(--muted); stroke-width: 2; }
+  .connector { stroke-width: 4; }
+  .lost-line { stroke: var(--lost); }
+  .memory-line { stroke: var(--memory); }
+
+  .person-line {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+
+  .head {
+    fill: var(--white);
+    stroke: var(--ink);
+    stroke-width: 2;
+  }
+
+  .orange-jacket {
+    fill: var(--orange);
+    stroke: var(--orange-dark);
+    stroke-width: 2;
+  }
+
+  .blue-jacket {
+    fill: var(--blue);
+    stroke: var(--blue-dark);
+    stroke-width: 2;
+  }
+
+  .track {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .orange-track { stroke: var(--orange-dark); }
+  .blue-track { stroke: var(--blue-dark); }
+  .lost-track { stroke: var(--lost); }
+  .memory-track { stroke: var(--memory); }
+
+  .bus-body {
+    fill: var(--bus);
+    stroke: var(--bus-edge);
+    stroke-width: 3;
+  }
+
+  .bus-window {
+    fill: var(--window);
+    stroke: var(--bus-edge);
+    stroke-width: 2;
+  }
+
+  .wheel {
+    fill: var(--ink);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .memory-card {
+    fill: var(--memory-fill);
+    stroke: var(--memory);
+    stroke-width: 2;
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .branch {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .summary {
+    font-size: 15px;
+    fill: var(--muted);
+  }
+
+  .label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .small {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .bus-label {
+    font-size: 14px;
+    font-weight: bold;
+    fill: var(--ink);
+  }
+
+  .lost-text { fill: var(--lost); }
+  .memory-text { fill: var(--memory); }
+  .fallback {
+    padding: 14px;
+    border: 2px solid var(--grid);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1 id="diagram-title">Перекрытие на 60 кадров: IoU и memory bank</h1>
+  <svg id="diagram" hidden viewBox="0 0 960 468"
+       width="960" height="468"
+       preserveAspectRatio="xMidYMid meet"
+       role="img" aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">IoU теряет старый идентификатор рыжей куртки после автобуса, а memory bank восстанавливает ID 4 по внешности.</desc>
+  </svg>
+  <div id="fallback" class="fallback">
+    Схема должна показать: человек в рыжей куртке исчезает за автобусом на 60 кадров; IoU теряет старый ID, а memory bank узнаёт внешность и сохраняет ID 4.
+  </div>
+</main>
+
+<script>
+const data = [{
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  zero: 0,
+
+  panels: [
+    { x: 18, y: 10, w: 924, h: 214, rx: 16 },
+    { x: 18, y: 234, w: 924, h: 224, rx: 16 }
+  ],
+
+  rows: [
+    {
+      kind: "iou",
+      header: "IoU",
+      summary: "помнит положение рамки — старый трек удалён",
+      headerAt: { x: 40, y: 39 },
+      summaryAt: { x: 103, y: 39 },
+      labelY: 68,
+      personY: 78,
+      bus: { x: 410, y: 61 },
+      time: { x1: 82, y: 205, x2: 900 },
+      event: { x: 480, y: 190, text: "60 кадров · связь потеряна" },
+      beforeOrange: {
+        x: 170, labelX: 194, anchor: "end",
+        label: "рыжая · ID 4", frame: "orange-track"
+      },
+      beforeBlue: {
+        x: 300, labelX: 274, anchor: "start",
+        label: "синяя", frame: "blue-track"
+      },
+      afterBlue: {
+        x: 640, labelX: 665, anchor: "end",
+        label: "синяя", frame: "blue-track"
+      },
+      afterOrange: {
+        x: 760, labelX: 734, anchor: "start",
+        label: "рыжая · новый ID", frame: "lost-track"
+      },
+      links: [
+        { x1: 198, y1: 151, x2: 402, y2: 151 },
+        { x1: 558, y1: 151, x2: 732, y2: 151 }
+      ]
+    },
+    {
+      kind: "memory",
+      header: "MEMORY BANK",
+      summary: "помнит внешность — идентичность проходит через перекрытие",
+      headerAt: { x: 40, y: 263 },
+      summaryAt: { x: 190, y: 263 },
+      labelY: 292,
+      personY: 302,
+      bus: { x: 410, y: 285 },
+      time: { x1: 82, y: 439, x2: 900 },
+      event: { x: 480, y: 424, text: "60 кадров · признаки остались" },
+      beforeOrange: {
+        x: 170, labelX: 194, anchor: "end",
+        label: "рыжая · ID 4", frame: "orange-track"
+      },
+      beforeBlue: {
+        x: 300, labelX: 274, anchor: "start",
+        label: "синяя", frame: "blue-track"
+      },
+      afterBlue: {
+        x: 640, labelX: 665, anchor: "end",
+        label: "синяя", frame: "blue-track"
+      },
+      afterOrange: {
+        x: 760, labelX: 734, anchor: "start",
+        label: "рыжая · ID 4 сохранён", frame: "memory-track"
+      },
+      link: { x1: 198, y1: 375, x2: 732, y2: 375 },
+      memory: {
+        x: 374, y: 394, w: 212, h: 29, rx: 14,
+        labelX: 480, labelY: 414,
+        text: "признаки рыжей куртки"
+      }
+    }
+  ],
+
+  person: {
+    headY: 10, headR: 10,
+    jacketX: -14, jacketY: 23, jacketW: 28, jacketH: 37, jacketRx: 8,
+    armY1: 30, armX: 24, armY2: 49,
+    hipY: 59, footX: 18, footY: 80,
+    boxX: -29, boxY: -8, boxW: 58, boxH: 94, boxRx: 7
+  },
+
+  bus: {
+    w: 140, h: 101, rx: 10,
+    windowX: 12, windowY: 13, windowW: 48, windowH: 31, windowGap: 67,
+    stripeY: 55, stripeX1: 8, stripeX2: 132,
+    wheelY: 98, wheelR: 10, wheelX1: 29, wheelX2: 111,
+    labelX: 70, labelY: 75
+  },
+
+  arrow: { back: 12, wing: 7 },
+  dash: { long: 9, gap: 7, short: 5 },
+  text: { timeX: 907, topY: 210, bottomY: 444 }
+}];
+
+const [d] = data;
+const origin = { x: d.origin.x, y: d.origin.y };
+const scale = { x: d.scale.x, y: d.scale.y };
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+const svg = document.getElementById("diagram");
+const fallback = document.getElementById("fallback");
+
+try {
+  function node(name, attrs, content) {
+    const item = document.createElementNS(svg.namespaceURI, name);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+    if (content !== undefined) item.textContent = content;
+    svg.appendChild(item);
+    return item;
+  }
+
+  function rect(x, y, w, h, rx, className) {
+    return node("rect", {
+      x: sx(x), y: sy(y),
+      width: sx(x + w) - sx(x),
+      height: sy(y + h) - sy(y),
+      rx: sx(x + rx) - sx(x),
+      class: className
+    });
+  }
+
+  function line(x1, y1, x2, y2, className) {
+    return node("line", {
+      x1: sx(x1), y1: sy(y1),
+      x2: sx(x2), y2: sy(y2),
+      class: className
+    });
+  }
+
+  function text(x, y, value, className, anchor) {
+    return node("text", {
+      x: sx(x), y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, value);
+  }
+
+  function circle(x, y, r, className) {
+    return node("circle", {
+      cx: sx(x), cy: sy(y),
+      r: sx(x + r) - sx(x),
+      class: className
+    });
+  }
+
+  function dash(item, length, gap) {
+    item.setAttribute(
+      "stroke-dasharray",
+      `${sx(length) - sx(d.zero)} ${sx(gap) - sx(d.zero)}`
+    );
+  }
+
+  function arrow(x1, y1, x2, y2, className) {
+    line(x1, y1, x2, y2, className);
+    node("polyline", {
+      points:
+        `${sx(x2 - d.arrow.back)},${sy(y2 - d.arrow.wing)} ` +
+        `${sx(x2)},${sy(y2)} ` +
+        `${sx(x2 - d.arrow.back)},${sy(y2 + d.arrow.wing)}`,
+      class: className
+    });
+  }
+
+  function drawPerson(item, y, jacketClass) {
+    rect(
+      item.x + d.person.boxX,
+      y + d.person.boxY,
+      d.person.boxW,
+      d.person.boxH,
+      d.person.boxRx,
+      `track ${item.frame}`
+    );
+
+    circle(item.x, y + d.person.headY, d.person.headR, "head");
+
+    rect(
+      item.x + d.person.jacketX,
+      y + d.person.jacketY,
+      d.person.jacketW,
+      d.person.jacketH,
+      d.person.jacketRx,
+      jacketClass
+    );
+
+    line(
+      item.x - d.person.jacketX,
+      y + d.person.armY1,
+      item.x - d.person.armX,
+      y + d.person.armY2,
+      "person-line"
+    );
+
+    line(
+      item.x + d.person.jacketX,
+      y + d.person.armY1,
+      item.x + d.person.armX,
+      y + d.person.armY2,
+      "person-line"
+    );
+
+    line(
+      item.x,
+      y + d.person.hipY,
+      item.x - d.person.footX,
+      y + d.person.footY,
+      "person-line"
+    );
+
+    line(
+      item.x,
+      y + d.person.hipY,
+      item.x + d.person.footX,
+      y + d.person.footY,
+      "person-line"
+    );
+  }
+
+  function drawBus(at) {
+    rect(at.x, at.y, d.bus.w, d.bus.h, d.bus.rx, "bus-body");
+
+    rect(
+      at.x + d.bus.windowX,
+      at.y + d.bus.windowY,
+      d.bus.windowW,
+      d.bus.windowH,
+      d.bus.rx,
+      "bus-window"
+    );
+
+    rect(
+      at.x + d.bus.windowGap,
+      at.y + d.bus.windowY,
+      d.bus.windowW,
+      d.bus.windowH,
+      d.bus.rx,
+      "bus-window"
+    );
+
+    line(
+      at.x + d.bus.stripeX1,
+      at.y + d.bus.stripeY,
+      at.x + d.bus.stripeX2,
+      at.y + d.bus.stripeY,
+      "divider"
+    );
+
+    circle(
+      at.x + d.bus.wheelX1,
+      at.y + d.bus.wheelY,
+      d.bus.wheelR,
+      "wheel"
+    );
+
+    circle(
+      at.x + d.bus.wheelX2,
+      at.y + d.bus.wheelY,
+      d.bus.wheelR,
+      "wheel"
+    );
+
+    text(
+      at.x + d.bus.labelX,
+      at.y + d.bus.labelY,
+      "автобус",
+      "bus-label",
+      "middle"
+    );
+  }
+
+  d.panels.forEach(panel => {
+    rect(panel.x, panel.y, panel.w, panel.h, panel.rx, "panel");
+  });
+
+  d.rows.forEach(row => {
+    text(row.headerAt.x, row.headerAt.y, row.header, "branch", "start");
+    text(row.summaryAt.x, row.summaryAt.y, row.summary, "summary", "start");
+
+    arrow(row.time.x1, row.time.y, row.time.x2, row.time.y, "time");
+    text(
+      d.text.timeX,
+      row.kind === "iou" ? d.text.topY : d.text.bottomY,
+      "время",
+      "small",
+      "start"
+    );
+
+    if (row.kind === "iou") {
+      row.links.forEach(link => {
+        const segment = line(
+          link.x1, link.y1, link.x2, link.y2,
+          "connector lost-line"
+        );
+        dash(segment, d.dash.long, d.dash.gap);
+      });
+    } else {
+      const memoryLink = line(
+        row.link.x1, row.link.y1,
+        row.link.x2, row.link.y2,
+        "connector memory-line"
+      );
+      dash(memoryLink, d.dash.long, d.dash.gap);
+    }
+
+    drawPerson(row.beforeOrange, row.personY, "orange-jacket");
+    drawPerson(row.beforeBlue, row.personY, "blue-jacket");
+    drawPerson(row.afterBlue, row.personY, "blue-jacket");
+    drawPerson(row.afterOrange, row.personY, "orange-jacket");
+
+    text(
+      row.beforeOrange.labelX, row.labelY,
+      row.beforeOrange.label, "label", row.beforeOrange.anchor
+    );
+    text(
+      row.beforeBlue.labelX, row.labelY,
+      row.beforeBlue.label, "label", row.beforeBlue.anchor
+    );
+    text(
+      row.afterBlue.labelX, row.labelY,
+      row.afterBlue.label, "label", row.afterBlue.anchor
+    );
+    text(
+      row.afterOrange.labelX, row.labelY,
+      row.afterOrange.label,
+      row.kind === "iou" ? "label lost-text" : "label memory-text",
+      row.afterOrange.anchor
+    );
+
+    drawBus(row.bus);
+
+    if (row.kind === "memory") {
+      rect(
+        row.memory.x, row.memory.y,
+        row.memory.w, row.memory.h,
+        row.memory.rx, "memory-card"
+      );
+      text(
+        row.memory.labelX, row.memory.labelY,
+        row.memory.text, "label memory-text", "middle"
+      );
+    }
+
+    text(
+      row.event.x, row.event.y,
+      row.event.text,
+      row.kind === "iou" ? "label lost-text" : "label memory-text",
+      "middle"
+    );
+  });
+
+  svg.hidden = false;
+  fallback.hidden = true;
+} catch (error) {
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна показать: человек в рыжей куртке исчезает за автобусом на 60 кадров; IoU теряет старый ID, а memory bank узнаёт внешность и сохраняет ID 4.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

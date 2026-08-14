@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Почему Sobel загорается на границе</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --ink: #172033;
+    --muted: #596579;
+    --grid: #95a0b2;
+    --zero: #202938;
+    --zero-text: #d9e0ea;
+    --one: #f4f7fb;
+    --one-text: #263143;
+    --negative: #d85b63;
+    --negative-fill: #f6c9cc;
+    --neutral-fill: #dce3ed;
+    --positive: #16845b;
+    --positive-fill: #99e0bd;
+    --activation: #00a66f;
+    --activation-fill: #59d69d;
+    --arrow: #596579;
+    --panel: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #edf2fa;
+      --muted: #aeb9ca;
+      --grid: #647187;
+      --zero: #06090e;
+      --zero-text: #8995a8;
+      --one: #dce4ee;
+      --one-text: #101722;
+      --negative: #ff8790;
+      --negative-fill: #682f38;
+      --neutral-fill: #424d60;
+      --positive: #5ee0a8;
+      --positive-fill: #155d45;
+      --activation: #62ecb1;
+      --activation-fill: #177958;
+      --arrow: #aeb9ca;
+      --panel: #18202d;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .frame {
+    max-width: 1200px;
+    background: var(--page);
+  }
+
+  .title {
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 1200px;
+    background: var(--panel);
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .cell-text {
+    font-size: 8px;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  .kernel-text {
+    fill: var(--ink);
+    font-size: 9px;
+    font-weight: bold;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  .activation-text {
+    fill: var(--ink);
+    font-size: 9px;
+    font-weight: bold;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  .cell {
+    stroke: var(--grid);
+    stroke-width: 1px;
+    shape-rendering: crispEdges;
+  }
+
+  .kernel-cell {
+    stroke: var(--ink);
+    stroke-width: 1.5px;
+  }
+
+  .kernel-frame {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2.5px;
+  }
+
+  .boundary {
+    stroke: var(--negative);
+    stroke-width: 2.5px;
+  }
+
+  .callout {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 1.5px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 2.5px;
+  }
+
+  .fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="title">Почему Sobel загорается на границе</div>
+  <svg id="diagram" viewBox="0 0 1200 460" role="img"
+       aria-label="Изображение 16 на 16 с переходом от нулей к единицам, ядро Sobel-x на границе и яркий столбец положительных активаций"
+       preserveAspectRatio="xMidYMid meet"></svg>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать изображение 16×16: слева нули, справа единицы,
+    ядро Sobel-x поперёк границы и положительный отклик 4 около перехода.
+  </div>
+</div>
+
+<script>
+const diagramData = [
+  [0, 1, 2, 3, 4, 6, 7, 8, 9, 16],
+  [36, 18],
+  [10, 10],
+  [2, 8, 1.65, 16],
+  [75, 8, 1.65, 16],
+  [6, 6, 3],
+  [33, 69, 21.2, 1.25, 0.78],
+  [15.2, 6.35, 7.45, 8],
+  [87.375, 6.35, 7.45, 8],
+  [2, 4.1, 75, 4.1],
+  [51, 17.25, 51, 25.7],
+  [2, 38.6, 2, 41.6, 75, 38.6, 75, 41.6],
+  [29.3, 11.2, 29, 11.6, 16.95, 17.75],
+  [
+    [-1, 0, 1],
+    [-2, 0, 2],
+    [-1, 0, 1]
+  ]
+];
+
+const [
+  numeric,
+  originData,
+  scaleData,
+  inputData,
+  outputData,
+  kernelData,
+  arrowData,
+  boundaryData,
+  activationData,
+  headingData,
+  equationData,
+  legendData,
+  kernelLabelData,
+  sobel
+] = diagramData;
+
+const [zero, one, two, three, four, six, seven, eight, nine, sixteen] = numeric;
+const [originX, originY] = originData;
+const [scaleX, scaleY] = scaleData;
+const origin = { x: originX, y: originY };
+const scale = { x: scaleX, y: scaleY };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes, content) => {
+    const node = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, String(value));
+    }
+    if (content !== undefined) node.textContent = content;
+    svg.appendChild(node);
+    return node;
+  };
+
+  const line = (x1, y1, x2, y2, className) =>
+    make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    });
+
+  const rect = (x, y, width, height, attributes) =>
+    make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      ...attributes
+    });
+
+  const text = (x, y, content, className, anchor) =>
+    make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, content);
+
+  const [
+    inputX,
+    inputY,
+    inputCell,
+    inputSize
+  ] = inputData;
+
+  const [
+    outputX,
+    outputY,
+    outputCell,
+    outputSize
+  ] = outputData;
+
+  const [
+    kernelColumn,
+    kernelRow,
+    kernelSize
+  ] = kernelData;
+
+  const [
+    arrowStart,
+    arrowEnd,
+    arrowY,
+    arrowHeadLength,
+    arrowHeadHalfHeight
+  ] = arrowData;
+
+  const [
+    boundaryX,
+    boundaryLabelY,
+    boundaryLeaderY,
+    boundaryGridY
+  ] = boundaryData;
+
+  const [
+    activationX,
+    activationLabelY,
+    activationLeaderY,
+    activationGridY
+  ] = activationData;
+
+  const [
+    inputHeadingX,
+    inputHeadingY,
+    outputHeadingX,
+    outputHeadingY
+  ] = headingData;
+
+  const [
+    flowLabelX,
+    flowLabelY,
+    equationX,
+    equationY
+  ] = equationData;
+
+  const [
+    leftLegendX,
+    leftLegendY,
+    leftNoteX,
+    leftNoteY,
+    rightLegendX,
+    rightLegendY,
+    rightNoteX,
+    rightNoteY
+  ] = legendData;
+
+  const [
+    kernelTextX,
+    kernelTextY,
+    kernelLeaderStartX,
+    kernelLeaderStartY,
+    kernelLeaderEndX,
+    kernelLeaderEndY
+  ] = kernelLabelData;
+
+  text(
+    inputHeadingX,
+    inputHeadingY,
+    "Вход: изображение 16×16",
+    "heading",
+    "start"
+  );
+
+  text(
+    outputHeadingX,
+    outputHeadingY,
+    "Карта признаков",
+    "heading",
+    "start"
+  );
+
+  text(
+    boundaryX,
+    boundaryLabelY,
+    "переход в столбце 8",
+    "label",
+    "middle"
+  );
+
+  line(
+    boundaryX,
+    boundaryLeaderY,
+    boundaryX,
+    boundaryGridY,
+    "callout"
+  );
+
+  text(
+    activationX,
+    activationLabelY,
+    "столбец 7: положительный отклик",
+    "label",
+    "middle"
+  );
+
+  line(
+    activationX,
+    activationLeaderY,
+    activationX,
+    activationGridY,
+    "callout"
+  );
+
+  for (let row = zero; row < inputSize; row += one) {
+    for (let column = zero; column < inputSize; column += one) {
+      const value = column < eight ? zero : one;
+      const underKernel =
+        column >= kernelColumn &&
+        column < kernelColumn + kernelSize &&
+        row >= kernelRow &&
+        row < kernelRow + kernelSize;
+
+      rect(
+        inputX + column * inputCell,
+        inputY + row * inputCell,
+        inputCell,
+        inputCell,
+        {
+          class: "cell",
+          fill: value === zero ? "var(--zero)" : "var(--one)"
+        }
+      );
+
+      if (!underKernel) {
+        const valueColor =
+          value === zero ? "var(--zero-text)" : "var(--one-text)";
+
+        make("text", {
+          x: sx(inputX + (column + one / two) * inputCell),
+          y: sy(inputY + (row + one / two) * inputCell),
+          class: "cell-text",
+          fill: valueColor
+        }, value);
+      }
+    }
+  }
+
+  line(
+    boundaryX,
+    inputY,
+    boundaryX,
+    inputY + inputSize * inputCell,
+    "boundary"
+  );
+
+  for (let kernelY = zero; kernelY < kernelSize; kernelY += one) {
+    for (let kernelX = zero; kernelX < kernelSize; kernelX += one) {
+      const weight = sobel[kernelY][kernelX];
+      const fill =
+        weight < zero
+          ? "var(--negative-fill)"
+          : weight > zero
+            ? "var(--positive-fill)"
+            : "var(--neutral-fill)";
+
+      rect(
+        inputX + (kernelColumn + kernelX) * inputCell,
+        inputY + (kernelRow + kernelY) * inputCell,
+        inputCell,
+        inputCell,
+        {
+          class: "kernel-cell",
+          fill
+        }
+      );
+
+      make("text", {
+        x: sx(inputX + (kernelColumn + kernelX + one / two) * inputCell),
+        y: sy(inputY + (kernelRow + kernelY + one / two) * inputCell),
+        class: "kernel-text"
+      }, String(weight).replace("-", "−"));
+    }
+  }
+
+  rect(
+    inputX + kernelColumn * inputCell,
+    inputY + kernelRow * inputCell,
+    kernelSize * inputCell,
+    kernelSize * inputCell,
+    { class: "kernel-frame" }
+  );
+
+  text(
+    kernelTextX,
+    kernelTextY,
+    "ядро Sobel-x 3×3",
+    "label",
+    "start"
+  );
+
+  line(
+    kernelLeaderStartX,
+    kernelLeaderStartY,
+    kernelLeaderEndX,
+    kernelLeaderEndY,
+    "callout"
+  );
+
+  line(
+    arrowStart,
+    arrowY,
+    arrowEnd - arrowHeadLength,
+    arrowY,
+    "flow"
+  );
+
+  make("polygon", {
+    points: [
+      [sx(arrowEnd), sy(arrowY)],
+      [
+        sx(arrowEnd - arrowHeadLength),
+        sy(arrowY - arrowHeadHalfHeight)
+      ],
+      [
+        sx(arrowEnd - arrowHeadLength),
+        sy(arrowY + arrowHeadHalfHeight)
+      ]
+    ].map(point => point.join(",")).join(" "),
+    fill: "var(--arrow)"
+  });
+
+  text(
+    flowLabelX,
+    flowLabelY,
+    "сдвигаем окно слева направо",
+    "small",
+    "middle"
+  );
+
+  text(
+    equationX,
+    equationY,
+    "0·(−1−2−1) + 1·(1+2+1) = 4",
+    "label",
+    "middle"
+  );
+
+  for (let row = zero; row < outputSize; row += one) {
+    for (let column = zero; column < outputSize; column += one) {
+      const active = column === seven;
+      const value = active ? four : zero;
+
+      rect(
+        outputX + column * outputCell,
+        outputY + row * outputCell,
+        outputCell,
+        outputCell,
+        {
+          class: "cell",
+          fill: active
+            ? "var(--activation-fill)"
+            : "var(--neutral-fill)"
+        }
+      );
+
+      make("text", {
+        x: sx(outputX + (column + one / two) * outputCell),
+        y: sy(outputY + (row + one / two) * outputCell),
+        class: active ? "activation-text" : "cell-text",
+        fill: active ? "var(--ink)" : "var(--muted)"
+      }, value);
+    }
+  }
+
+  rect(
+    outputX + seven * outputCell,
+    outputY,
+    outputCell,
+    outputSize * outputCell,
+    {
+      fill: "none",
+      stroke: "var(--activation)",
+      "stroke-width": "2.5px"
+    }
+  );
+
+  text(
+    leftLegendX,
+    leftLegendY,
+    "Однородная область",
+    "label",
+    "start"
+  );
+
+  text(
+    leftNoteX,
+    leftNoteY,
+    "одинаковые соседи → сумма 0",
+    "small",
+    "start"
+  );
+
+  text(
+    rightLegendX,
+    rightLegendY,
+    "Граница",
+    "label",
+    "start"
+  );
+
+  text(
+    rightNoteX,
+    rightNoteY,
+    "разные соседи → активация 4",
+    "small",
+    "start"
+  );
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

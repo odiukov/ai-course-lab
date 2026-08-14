@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный маршрут zero-shot классификации</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #eef2ff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #75829a;
+    --accent: #5268d9;
+    --accent-soft: #dfe5ff;
+    --image: #dff3ee;
+    --image-line: #27806f;
+    --score: #e5e9f2;
+    --winner: #f0b429;
+    --winner-soft: #fff1bd;
+    --note: #e8f5f1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111522;
+      --panel: #1a2030;
+      --panel-soft: #222a43;
+      --ink: #eef1f8;
+      --muted: #aeb8cc;
+      --line: #7f8ca5;
+      --accent: #91a2ff;
+      --accent-soft: #303a64;
+      --image: #173b37;
+      --image-line: #73d2bd;
+      --score: #30384b;
+      --winner: #ffd166;
+      --winner-soft: #4b3c19;
+      --note: #17332f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--bg);
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .encoder {
+    fill: var(--panel-soft);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .arrow-head { fill: var(--line); }
+  .heading { fill: var(--ink); font-size: 15px; font-weight: bold; }
+  .label { fill: var(--ink); font-size: 13px; }
+  .small { fill: var(--muted); font-size: 12px; }
+  .shape { fill: var(--accent); font-size: 16px; font-weight: bold; }
+  .formula { fill: var(--accent); font-size: 18px; font-weight: bold; }
+  .class-name { fill: var(--ink); font-size: 12px; }
+  .matrix-row { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1px; }
+  .vector-cell { fill: var(--image); stroke: var(--image-line); stroke-width: 1px; }
+  .score-cell { fill: var(--score); stroke: var(--line); stroke-width: 1px; }
+  .score-cell.winner { fill: var(--winner-soft); stroke: var(--winner); stroke-width: 2px; }
+  .photo-frame { fill: var(--image); stroke: var(--image-line); stroke-width: 1.5px; }
+  .photo-line { fill: none; stroke: var(--image-line); stroke-width: 2px; }
+  .photo-fill { fill: var(--image-line); }
+  .result { fill: var(--winner-soft); stroke: var(--winner); stroke-width: 2px; }
+  .result-word { fill: var(--ink); font-size: 16px; font-weight: bold; }
+  .note { fill: var(--note); stroke: var(--image-line); stroke-width: 1px; }
+  .note-text { fill: var(--ink); font-size: 14px; font-weight: bold; }
+
+  #fallback {
+    font-size: 16px;
+    color: var(--ink);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Полный маршрут zero-shot классификации</h1>
+  <svg id="diagram"
+       viewBox="0 0 1230 440"
+       width="1230"
+       height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Маршрут zero-shot классификации</title>
+    <desc id="svg-desc">Десять названий классов кодируются в матрицу десять на пятьсот двенадцать, картинка — в вектор один на пятьсот двенадцать. Их произведение создаёт десять оценок, после чего argmax выбирает максимальную.</desc>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать: 10 названий классов → матрица (10, 512), 1 картинка → вектор (1, 512), произведение → оценки (1, 10), затем выбор максимума.</p>
+  <noscript>Схема: 10 названий классов → (10, 512); 1 картинка → (1, 512); произведение → (1, 10); argmax выбирает максимум.</noscript>
+</main>
+
+<script>
+const data = [{
+  zero: 0,
+  one: 1,
+  origin: { x: 24, y: 12 },
+  scale: 10,
+  radius: 0.7,
+  arrow: { head: 1.05, wing: 0.62 },
+
+  classes: {
+    x: 1, y: 5.2, w: 22, h: 14.8,
+    titleY: 3.8, leftX: 2.2, rightX: 12.5,
+    firstY: 7.6, row: 2.15, split: 5
+  },
+  names: [
+    "кошка", "велосипед", "пицца", "собака", "самолёт",
+    "корабль", "автобус", "лошадь", "птица", "автомобиль"
+  ],
+
+  textEncoder: { x: 28.5, y: 8.2, w: 16.5, h: 8.6, cx: 36.75, line1: 11.5, line2: 14 },
+  textFlow: { x1: 23.7, y1: 12.6, x2: 27.7, y2: 12.6 },
+  textOut: { x1: 45.8, y1: 12.6, x2: 50.2, y2: 12.6 },
+
+  matrix: {
+    x: 51, y: 5.2, w: 17, h: 14.8, titleY: 3.8,
+    padX: 1.4, rowY: 6.7, rowW: 14.2, rowH: 0.72,
+    rowGap: 0.9, shapeY: 18.8
+  },
+
+  image: {
+    x: 1, y: 26, w: 22, h: 8.8, titleY: 24.5,
+    frameX: 2.1, frameY: 27, frameW: 7.8, frameH: 6.8,
+    sunX: 8.1, sunY: 28.7, sunR: 0.65,
+    mountain: [[2.8, 32.9], [5, 29.7], [6.5, 31.4], [7.5, 30.5], [9.2, 32.9]],
+    captionX: 11.2, captionY: 29.4, captionY2: 31.8
+  },
+  imageFlow: { x1: 23.7, y1: 30.4, x2: 27.7, y2: 30.4 },
+  visualEncoder: { x: 28.5, y: 26.1, w: 16.5, h: 8.6, cx: 36.75, line1: 29.4, line2: 31.9 },
+  imageOut: { x1: 45.8, y1: 30.4, x2: 50.2, y2: 30.4 },
+
+  vector: {
+    x: 51, y: 26, w: 17, h: 8.8, titleY: 24.5,
+    startX: 52.4, cellY: 28.1, cellW: 1.35,
+    cellH: 2.3, step: 1.72, cells: 8, shapeY: 33.5
+  },
+
+  multiply: { x: 73, y: 17.5, w: 10, h: 8, cx: 78, formulaY: 21, subtitleY: 23.4 },
+  matrixToMultiply: { x1: 68.8, y1: 12.6, x2: 72.3, y2: 19.3 },
+  vectorToMultiply: { x1: 68.8, y1: 30.4, x2: 72.3, y2: 23.7 },
+  productFlow: { x1: 83.8, y1: 21.5, x2: 85.5, y2: 21.5 },
+
+  scores: {
+    x: 86.2, y: 16.8, w: 15.5, h: 10, titleY: 15,
+    startX: 87.3, cellY: 19.4, cellW: 1,
+    cellH: 3.2, step: 1.42, shapeY: 25.5
+  },
+  maxIndex: 0,
+  maxFlow: { x1: 102.4, y1: 21.8, x2: 106.2, y2: 21.8 },
+  argmax: { x: 104.3, y: 19.8 },
+
+  result: {
+    x: 107, y: 17.5, w: 10.5, h: 9,
+    titleX: 112.25, titleY: 15,
+    wordX: 112.25, wordY: 21.3,
+    subX: 112.25, subY: 24
+  },
+
+  note: { x: 1, y: 38, w: 116.5, h: 3.4, cx: 59.25, textY: 40.3 }
+}];
+
+const [d] = data;
+const origin = d.origin;
+const scale = d.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function add(tag, attrs, content) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (content !== undefined) node.textContent = content;
+    svg.appendChild(node);
+    return node;
+  }
+
+  function rect(box, cls) {
+    return add("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.w) - sx(d.zero),
+      height: sy(box.h) - sy(d.zero),
+      rx: sx(d.radius) - sx(d.zero),
+      ry: sy(d.radius) - sy(d.zero),
+      class: cls
+    });
+  }
+
+  function text(x, y, content, cls, anchor) {
+    return add("text", {
+      x: sx(x),
+      y: sy(y),
+      class: cls,
+      "text-anchor": anchor
+    }, content);
+  }
+
+  function arrow(a, b, c, e) {
+    const dx = c - a;
+    const dy = e - b;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = c - d.arrow.head * ux;
+    const baseY = e - d.arrow.head * uy;
+    const leftX = baseX - d.arrow.wing * uy;
+    const leftY = baseY + d.arrow.wing * ux;
+    const rightX = baseX + d.arrow.wing * uy;
+    const rightY = baseY - d.arrow.wing * ux;
+
+    add("line", {
+      x1: sx(a), y1: sy(b),
+      x2: sx(baseX), y2: sy(baseY),
+      class: "flow"
+    });
+    add("polygon", {
+      points: [
+        `${sx(c)},${sy(e)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      class: "arrow-head"
+    });
+  }
+
+  arrow(d.textFlow.x1, d.textFlow.y1, d.textFlow.x2, d.textFlow.y2);
+  arrow(d.textOut.x1, d.textOut.y1, d.textOut.x2, d.textOut.y2);
+  arrow(d.imageFlow.x1, d.imageFlow.y1, d.imageFlow.x2, d.imageFlow.y2);
+  arrow(d.imageOut.x1, d.imageOut.y1, d.imageOut.x2, d.imageOut.y2);
+  arrow(d.matrixToMultiply.x1, d.matrixToMultiply.y1, d.matrixToMultiply.x2, d.matrixToMultiply.y2);
+  arrow(d.vectorToMultiply.x1, d.vectorToMultiply.y1, d.vectorToMultiply.x2, d.vectorToMultiply.y2);
+  arrow(d.productFlow.x1, d.productFlow.y1, d.productFlow.x2, d.productFlow.y2);
+  arrow(d.maxFlow.x1, d.maxFlow.y1, d.maxFlow.x2, d.maxFlow.y2);
+
+  rect(d.classes, "node");
+  text(d.classes.x, d.classes.titleY, "10 названий классов", "heading", "start");
+
+  d.names.forEach((name, index) => {
+    const column = index < d.classes.split ? d.zero : d.one;
+    const row = index % d.classes.split;
+    const x = column === d.zero ? d.classes.leftX : d.classes.rightX;
+    const y = d.classes.firstY + row * d.classes.row;
+    text(x, y, name, "class-name", "start");
+  });
+
+  rect(d.textEncoder, "encoder");
+  text(d.textEncoder.cx, d.textEncoder.line1, "текстовый", "heading", "middle");
+  text(d.textEncoder.cx, d.textEncoder.line2, "энкодер", "label", "middle");
+
+  rect(d.matrix, "node");
+  text(d.matrix.x, d.matrix.titleY, "T — матрица текстов", "heading", "start");
+  d.names.forEach((name, index) => {
+    add("rect", {
+      x: sx(d.matrix.x + d.matrix.padX),
+      y: sy(d.matrix.rowY + index * d.matrix.rowGap),
+      width: sx(d.matrix.rowW) - sx(d.zero),
+      height: sy(d.matrix.rowH) - sy(d.zero),
+      class: "matrix-row"
+    });
+  });
+  text(d.matrix.x + d.matrix.w / d.classes.split * d.classes.split / d.classes.split,
+       d.matrix.shapeY, "(10, 512)", "shape", "middle");
+
+  rect(d.image, "node");
+  text(d.image.x, d.image.titleY, "1 тестовая картинка", "heading", "start");
+  add("rect", {
+    x: sx(d.image.frameX),
+    y: sy(d.image.frameY),
+    width: sx(d.image.frameW) - sx(d.zero),
+    height: sy(d.image.frameH) - sy(d.zero),
+    rx: sx(d.radius) - sx(d.zero),
+    ry: sy(d.radius) - sy(d.zero),
+    class: "photo-frame"
+  });
+  add("circle", {
+    cx: sx(d.image.sunX),
+    cy: sy(d.image.sunY),
+    r: sx(d.image.sunR) - sx(d.zero),
+    class: "photo-fill"
+  });
+  add("polyline", {
+    points: d.image.mountain.map(point => `${sx(point[d.zero])},${sy(point[d.one])}`).join(" "),
+    class: "photo-line"
+  });
+  text(d.image.captionX, d.image.captionY, "неподписанная", "label", "start");
+  text(d.image.captionX, d.image.captionY2, "фотография", "small", "start");
+
+  rect(d.visualEncoder, "encoder");
+  text(d.visualEncoder.cx, d.visualEncoder.line1, "визуальный", "heading", "middle");
+  text(d.visualEncoder.cx, d.visualEncoder.line2, "энкодер", "label", "middle");
+
+  rect(d.vector, "node");
+  text(d.vector.x, d.vector.titleY, "I — вектор картинки", "heading", "start");
+  Array.from({ length: d.vector.cells }).forEach((item, index) => {
+    add("rect", {
+      x: sx(d.vector.startX + index * d.vector.step),
+      y: sy(d.vector.cellY),
+      width: sx(d.vector.cellW) - sx(d.zero),
+      height: sy(d.vector.cellH) - sy(d.zero),
+      class: "vector-cell"
+    });
+  });
+  text(d.vector.x + d.vector.w / d.classes.split * d.classes.split / d.classes.split,
+       d.vector.shapeY, "(1, 512)", "shape", "middle");
+
+  rect(d.multiply, "encoder");
+  text(d.multiply.cx, d.multiply.formulaY, "I @ Tᵀ", "formula", "middle");
+  text(d.multiply.cx, d.multiply.subtitleY, "сравнение", "small", "middle");
+
+  rect(d.scores, "node");
+  text(d.scores.x, d.scores.titleY, "оценки похожести", "heading", "start");
+  d.names.forEach((name, index) => {
+    add("rect", {
+      x: sx(d.scores.startX + index * d.scores.step),
+      y: sy(d.scores.cellY),
+      width: sx(d.scores.cellW) - sx(d.zero),
+      height: sy(d.scores.cellH) - sy(d.zero),
+      class: index === d.maxIndex ? "score-cell winner" : "score-cell"
+    });
+  });
+  text(d.scores.x + d.scores.w / d.classes.split * d.classes.split / d.classes.split,
+       d.scores.shapeY, "(1, 10)", "shape", "middle");
+
+  text(d.argmax.x, d.argmax.y, "argmax", "small", "middle");
+
+  rect(d.result, "result");
+  text(d.result.titleX, d.result.titleY, "максимальная оценка", "heading", "middle");
+  text(d.result.wordX, d.result.wordY, "кошка", "result-word", "middle");
+  text(d.result.subX, d.result.subY, "предсказанный класс", "small", "middle");
+
+  rect(d.note, "note");
+  text(
+    d.note.cx,
+    d.note.textY,
+    "Новый набор названий → новый классификатор; энкодеры переобучать не нужно",
+    "note-text",
+    "middle"
+  );
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

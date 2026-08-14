@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как сетка патчей возвращается к разрешению изображения</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #526078;
+    --border: #cbd5e1;
+    --grid: #64748b;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --orange: #d97706;
+    --orange-soft: #fef3c7;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --sky: #bfdbfe;
+    --ground: #d6d3d1;
+    --object: #334155;
+    --accent: #ea580c;
+    --far: #dbeafe;
+    --middle: #93c5fd;
+    --near: #1d4ed8;
+    --white: #ffffff;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    border: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  figcaption {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .scene-sky {
+    fill: var(--sky);
+  }
+
+  .scene-ground {
+    fill: var(--ground);
+  }
+
+  .scene-object {
+    fill: var(--object);
+    stroke: var(--ink);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+
+  .patch-grid {
+    stroke: var(--grid);
+    stroke-width: 0.35;
+  }
+
+  .patch-focus {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+
+  .encoder {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 2;
+  }
+
+  .feature {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 2;
+  }
+
+  .feature-grid {
+    stroke: var(--blue);
+    stroke-width: 0.4;
+  }
+
+  .decoder {
+    fill: var(--orange-soft);
+    stroke: var(--orange);
+    stroke-width: 2;
+  }
+
+  .decoder-grid {
+    stroke: var(--orange);
+    stroke-width: 0.45;
+  }
+
+  .depth-frame {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 2;
+  }
+
+  .depth-far {
+    fill: var(--far);
+  }
+
+  .depth-middle {
+    fill: var(--middle);
+  }
+
+  .depth-near {
+    fill: var(--near);
+    stroke: var(--white);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+
+  .depth-contour {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow {
+    stroke: var(--ink);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    fill: var(--ink);
+  }
+
+  .leader {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .box-text {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .accent-text {
+    fill: var(--accent);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .flow-note {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0b1220;
+      --panel: #111827;
+      --ink: #f1f5f9;
+      --muted: #aebbd0;
+      --border: #475569;
+      --grid: #94a3b8;
+      --blue: #60a5fa;
+      --blue-soft: #172b4d;
+      --orange: #fbbf24;
+      --orange-soft: #3b2b12;
+      --green: #4ade80;
+      --green-soft: #123222;
+      --sky: #24446d;
+      --ground: #4b5563;
+      --object: #cbd5e1;
+      --accent: #fb923c;
+      --far: #203959;
+      --middle: #2563a7;
+      --near: #60a5fa;
+      --white: #0f172a;
+    }
+  }
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>Как сетка патчей возвращается к разрешению изображения</figcaption>
+  <svg id="diagram" viewBox="0 0 1180 420" role="img"
+       aria-labelledby="svg-title svg-description"
+       preserveAspectRatio="xMidYMid meet">
+    <title id="svg-title">Преобразование изображения в сетку признаков и плотную карту глубины</title>
+    <desc id="svg-description">Изображение 518 на 518 делится на сетку 37 на 37 патчей размером 14 на 14 пикселей. Энкодер создаёт 1369 признаков, а DPT-декодер восстанавливает карту глубины 518 на 518 на 1.</desc>
+    <g id="generated"></g>
+  </svg>
+</figure>
+
+<script>
+const diagramData = Object.freeze({
+  zero: 0,
+  one: 1,
+  two: 2,
+  origin: [32, 18],
+  scale: [1, 1],
+  patchCount: 37,
+  patchPixels: 14,
+  imagePixels: 518,
+  featureCount: 1369,
+  depthChannels: 1,
+  image: { x: 0, y: 52, w: 220, h: 220 },
+  encoder: { x: 255, y: 112, w: 110, h: 92 },
+  features: { x: 400, y: 92, w: 135, h: 135 },
+  decoderStages: [
+    { x: 580, y: 126, w: 60, h: 60 },
+    { x: 667, y: 113, w: 86, h: 86 },
+    { x: 780, y: 96, w: 120, h: 120 }
+  ],
+  output: { x: 932, y: 52, w: 220, h: 220 },
+  arrow: { headLength: 11, headHalf: 6 },
+  labels: {
+    imageTitle: [110, 28],
+    patch: [110, 302],
+    encoder: [310, 139],
+    featureTitle: [467.5, 66],
+    featureCount: [467.5, 253],
+    decoderTitle: [740, 55],
+    decoderNote: [740, 253],
+    outputTitle: [1042, 28],
+    outputNote: [1042, 302],
+    footerA: [110, 354],
+    footerB: [467.5, 354],
+    footerC: [740, 354],
+    footerD: [1042, 354],
+    summary: [576, 390]
+  },
+  textOffset: { above: -8, below: 16, line: 19 },
+  focus: { column: 19, row: 15 },
+  scene: {
+    ground: [[0, 154], [54, 143], [112, 151], [168, 137], [220, 148], [220, 220], [0, 220]],
+    personHead: [76, 74, 15],
+    personBody: [[63, 92], [88, 92], [97, 146], [85, 166], [65, 166], [54, 146]],
+    personLeftLeg: [[66, 162], [76, 162], [70, 213], [57, 213]],
+    personRightLeg: [[78, 162], [88, 162], [101, 213], [88, 213]],
+    personArm: [[59, 101], [67, 110], [43, 147], [35, 140]],
+    chairBack: [[139, 98], [174, 98], [171, 144], [143, 144]],
+    chairSeat: [[132, 142], [181, 142], [181, 155], [132, 155]],
+    chairLeftLeg: [[139, 154], [149, 154], [144, 210], [135, 210]],
+    chairRightLeg: [[168, 154], [177, 154], [185, 210], [176, 210]],
+    depthBand: [[0, 151], [57, 139], [111, 148], [165, 134], [220, 145], [220, 220], [0, 220]],
+    contour: [[12, 177], [55, 168], [105, 176], [153, 160], [207, 171]]
+  },
+  footerLine: { y: 329, starts: [0, 390, 625, 918], widths: [220, 155, 230, 224] },
+  fallback: [576, 190]
+});
+
+const [originX, originY] = diagramData.origin;
+const [scaleX, scaleY] = diagramData.scale;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svgNS = "http://www.w3.org/2000/svg";
+const layer = document.getElementById("generated");
+
+function node(name, attributes, className) {
+  const element = document.createElementNS(svgNS, name);
+  if (className) element.setAttribute("class", className);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+  return element;
+}
+
+function spanX(value) {
+  return sx(value) - sx(diagramData.zero);
+}
+
+function spanY(value) {
+  return sy(value) - sy(diagramData.zero);
+}
+
+function rect(parent, box, className) {
+  const element = node("rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: spanX(box.w),
+    height: spanY(box.h)
+  }, className);
+  parent.appendChild(element);
+  return element;
+}
+
+function line(parent, x1, y1, x2, y2, className) {
+  const element = node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2)
+  }, className);
+  parent.appendChild(element);
+  return element;
+}
+
+function polygon(parent, points, className) {
+  const value = points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  const element = node("polygon", { points: value }, className);
+  parent.appendChild(element);
+  return element;
+}
+
+function polyline(parent, points, className) {
+  const value = points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  const element = node("polyline", { points: value }, className);
+  parent.appendChild(element);
+  return element;
+}
+
+function circle(parent, cx, cy, radius, className) {
+  const element = node("circle", {
+    cx: sx(cx),
+    cy: sy(cy),
+    r: spanX(radius)
+  }, className);
+  parent.appendChild(element);
+  return element;
+}
+
+function text(parent, anchor, content, className, textAnchor, dy) {
+  const element = node("text", {
+    x: sx(anchor[diagramData.zero]),
+    y: sy(anchor[diagramData.one]),
+    "text-anchor": textAnchor,
+    dy: `${dy}px`
+  }, className);
+  element.textContent = content;
+  parent.appendChild(element);
+  return element;
+}
+
+function multiline(parent, anchor, lines, className, textAnchor) {
+  const element = node("text", {
+    x: sx(anchor[diagramData.zero]),
+    y: sy(anchor[diagramData.one]),
+    "text-anchor": textAnchor
+  }, className);
+
+  lines.forEach((content, index) => {
+    const part = node("tspan", {
+      x: sx(anchor[diagramData.zero]),
+      y: sy(anchor[diagramData.one]),
+      dy: `${index * diagramData.textOffset.line}px`
+    });
+    part.textContent = content;
+    element.appendChild(part);
+  });
+
+  parent.appendChild(element);
+  return element;
+}
+
+function arrow(parent, x1, y1, x2, y2) {
+  line(parent, x1, y1, x2, y2, "arrow");
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.hypot(dx, dy);
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+  const baseX = x2 - ux * diagramData.arrow.headLength;
+  const baseY = y2 - uy * diagramData.arrow.headLength;
+
+  polygon(parent, [
+    [x2, y2],
+    [
+      baseX + px * diagramData.arrow.headHalf,
+      baseY + py * diagramData.arrow.headHalf
+    ],
+    [
+      baseX - px * diagramData.arrow.headHalf,
+      baseY - py * diagramData.arrow.headHalf
+    ]
+  ], "arrow-head");
+}
+
+function shifted(points, box) {
+  return points.map(([x, y]) => [box.x + x, box.y + y]);
+}
+
+function grid(parent, box, count, className) {
+  const stepX = box.w / count;
+  const stepY = box.h / count;
+
+  for (let index = diagramData.zero; index <= count; index += diagramData.one) {
+    const x = box.x + index * stepX;
+    const y = box.y + index * stepY;
+    line(parent, x, box.y, x, box.y + box.h, className);
+    line(parent, box.x, y, box.x + box.w, y, className);
+  }
+}
+
+function drawScene(parent, box, depthMode) {
+  rect(parent, box, depthMode ? "depth-far" : "scene-sky");
+  polygon(parent, shifted(
+    depthMode ? diagramData.scene.depthBand : diagramData.scene.ground,
+    box
+  ), depthMode ? "depth-middle" : "scene-ground");
+
+  const [headX, headY, headRadius] = diagramData.scene.personHead;
+  const objectClass = depthMode ? "depth-near" : "scene-object";
+
+  circle(parent, box.x + headX, box.y + headY, headRadius, objectClass);
+  polygon(parent, shifted(diagramData.scene.personBody, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.personLeftLeg, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.personRightLeg, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.personArm, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.chairBack, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.chairSeat, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.chairLeftLeg, box), objectClass);
+  polygon(parent, shifted(diagramData.scene.chairRightLeg, box), objectClass);
+
+  if (depthMode) {
+    polyline(parent, shifted(diagramData.scene.contour, box), "depth-contour");
+  }
+}
+
+function drawFooter(parent) {
+  diagramData.footerLine.starts.forEach((start, index) => {
+    line(
+      parent,
+      start,
+      diagramData.footerLine.y,
+      start + diagramData.footerLine.widths[index],
+      diagramData.footerLine.y,
+      "leader"
+    );
+  });
+
+  text(parent, diagramData.labels.footerA, "Режем на патчи", "flow-note", "middle", diagramData.textOffset.below);
+  text(parent, diagramData.labels.footerB, "Кодируем признаки", "flow-note", "middle", diagramData.textOffset.below);
+  text(parent, diagramData.labels.footerC, "Увеличиваем и уточняем", "flow-note", "middle", diagramData.textOffset.below);
+  text(parent, diagramData.labels.footerD, "Глубина каждого пикселя", "flow-note", "middle", diagramData.textOffset.below);
+  text(
+    parent,
+    diagramData.labels.summary,
+    "Не растяжение клеток, а обученная реконструкция пространственных границ",
+    "label",
+    "middle",
+    diagramData.textOffset.below
+  );
+}
+
+try {
+  drawScene(layer, diagramData.image, false);
+  grid(layer, diagramData.image, diagramData.patchCount, "patch-grid");
+  rect(layer, diagramData.image, "panel");
+
+  const focusStepX = diagramData.image.w / diagramData.patchCount;
+  const focusStepY = diagramData.image.h / diagramData.patchCount;
+  const focusBox = {
+    x: diagramData.image.x + diagramData.focus.column * focusStepX,
+    y: diagramData.image.y + diagramData.focus.row * focusStepY,
+    w: focusStepX,
+    h: focusStepY
+  };
+  rect(layer, focusBox, "patch-focus");
+  line(
+    layer,
+    focusBox.x + focusBox.w,
+    focusBox.y + focusBox.h,
+    diagramData.labels.patch[diagramData.zero],
+    diagramData.labels.patch[diagramData.one] + diagramData.textOffset.above,
+    "leader"
+  );
+
+  text(layer, diagramData.labels.imageTitle, "Изображение 518 × 518", "label", "middle", diagramData.textOffset.below);
+  text(layer, diagramData.labels.patch, "Патч 14 × 14 пикселей • сетка 37 × 37", "accent-text", "middle", diagramData.textOffset.below);
+
+  rect(layer, diagramData.encoder, "encoder");
+  multiline(
+    layer,
+    diagramData.labels.encoder,
+    ["ViT-энкодер", "создаёт богатые", "признаки"],
+    "box-text",
+    "middle"
+  );
+
+  arrow(
+    layer,
+    diagramData.image.x + diagramData.image.w,
+    diagramData.image.y + diagramData.image.h / diagramData.two,
+    diagramData.encoder.x,
+    diagramData.encoder.y + diagramData.encoder.h / diagramData.two
+  );
+
+  rect(layer, diagramData.features, "feature");
+  grid(layer, diagramData.features, diagramData.patchCount, "feature-grid");
+  text(layer, diagramData.labels.featureTitle, "Сетка признаков 37 × 37", "label", "middle", diagramData.textOffset.below);
+  text(layer, diagramData.labels.featureCount, "1369 признаков", "small", "middle", diagramData.textOffset.below);
+
+  arrow(
+    layer,
+    diagramData.encoder.x + diagramData.encoder.w,
+    diagramData.encoder.y + diagramData.encoder.h / diagramData.two,
+    diagramData.features.x,
+    diagramData.features.y + diagramData.features.h / diagramData.two
+  );
+
+  text(layer, diagramData.labels.decoderTitle, "DPT-декодер", "label", "middle", diagramData.textOffset.below);
+
+  let previousBox = diagramData.features;
+  diagramData.decoderStages.forEach(stage => {
+    arrow(
+      layer,
+      previousBox.x + previousBox.w,
+      previousBox.y + previousBox.h / diagramData.two,
+      stage.x,
+      stage.y + stage.h / diagramData.two
+    );
+    rect(layer, stage, "decoder");
+    grid(layer, stage, diagramData.patchCount, "decoder-grid");
+    previousBox = stage;
+  });
+
+  text(
+    layer,
+    diagramData.labels.decoderNote,
+    "Интерполяция + свёртки: плавные области, чёткие края",
+    "small",
+    "middle",
+    diagramData.textOffset.below
+  );
+
+  arrow(
+    layer,
+    previousBox.x + previousBox.w,
+    previousBox.y + previousBox.h / diagramData.two,
+    diagramData.output.x,
+    diagramData.output.y + diagramData.output.h / diagramData.two
+  );
+
+  drawScene(layer, diagramData.output, true);
+  rect(layer, diagramData.output, "depth-frame");
+  text(layer, diagramData.labels.outputTitle, "Depth map 518 × 518 × 1", "label", "middle", diagramData.textOffset.below);
+  text(layer, diagramData.labels.outputNote, "Своя глубина у каждого пикселя", "small", "middle", diagramData.textOffset.below);
+
+  drawFooter(layer);
+} catch (error) {
+  while (layer.firstChild) layer.removeChild(layer.firstChild);
+  text(
+    layer,
+    diagramData.fallback,
+    "Изображение 518 × 518 → 37 × 37 патчей по 14 пикселей → 1369 признаков → depth map 518 × 518 × 1",
+    "fallback",
+    "middle",
+    diagramData.zero
+  );
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Поток данных через MLP</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #59657a;
+      --line: #64748b;
+      --guide: #cbd5e1;
+      --input: #dbeafe;
+      --input-stroke: #3b82f6;
+      --linear: #e0e7ff;
+      --linear-stroke: #6366f1;
+      --relu: #dcfce7;
+      --relu-stroke: #22c55e;
+      --drop: #fef3c7;
+      --drop-stroke: #d97706;
+      --output: #fce7f3;
+      --output-stroke: #db2777;
+      --funnel: #eef2ff;
+      --accent: #4338ca;
+      --shadow: #dbe2ee;
+      --lane: #ffffff;
+      --fallback: #991b1b;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111827;
+        --panel: #182235;
+        --text: #f1f5f9;
+        --muted: #b8c2d1;
+        --line: #a6b2c4;
+        --guide: #46556c;
+        --input: #17365d;
+        --input-stroke: #60a5fa;
+        --linear: #292d63;
+        --linear-stroke: #a5b4fc;
+        --relu: #123f30;
+        --relu-stroke: #4ade80;
+        --drop: #4b3513;
+        --drop-stroke: #fbbf24;
+        --output: #55203f;
+        --output-stroke: #f472b6;
+        --funnel: #20294c;
+        --accent: #c7d2fe;
+        --shadow: #0b1020;
+        --lane: #dbeafe;
+        --fallback: #fecaca;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--guide);
+    }
+
+    .diagram__title {
+      margin: 0;
+      padding: 12px 18px 6px;
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    .diagram__subtitle {
+      margin: 0;
+      padding: 0 18px 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--panel);
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .guide-line {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    .funnel {
+      fill: var(--funnel);
+      stroke: var(--guide);
+      stroke-width: 1.5;
+      stroke-linejoin: round;
+    }
+
+    .input-node {
+      fill: var(--input);
+      stroke: var(--input-stroke);
+      stroke-width: 2;
+    }
+
+    .linear-node {
+      fill: var(--linear);
+      stroke: var(--linear-stroke);
+      stroke-width: 2;
+    }
+
+    .relu-node {
+      fill: var(--relu);
+      stroke: var(--relu-stroke);
+      stroke-width: 2;
+    }
+
+    .drop-node {
+      fill: var(--drop);
+      stroke: var(--drop-stroke);
+      stroke-width: 2;
+    }
+
+    .output-node {
+      fill: var(--output);
+      stroke: var(--output-stroke);
+      stroke-width: 2;
+    }
+
+    .batch-tile {
+      fill: var(--input);
+      stroke: var(--input-stroke);
+      stroke-width: 1.5;
+    }
+
+    .node-title {
+      fill: var(--text);
+      font-size: 18px;
+      font-weight: 760;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 560;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .annotation {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      dominant-baseline: middle;
+    }
+
+    .shape-label {
+      fill: var(--accent);
+      font-size: 14px;
+      font-weight: 720;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .digit {
+      fill: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .lane {
+      stroke: var(--lane);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      opacity: 0.82;
+    }
+
+    .fallback {
+      color: var(--fallback);
+      padding: 18px;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    noscript p {
+      margin: 0;
+      color: var(--fallback);
+      padding: 18px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="diagram" aria-labelledby="diagram-title">
+    <h2 class="diagram__title" id="diagram-title">Поток данных через MLP</h2>
+    <p class="diagram__subtitle">
+      Батч сохраняет 32 независимых примера, а сеть меняет только число признаков.
+    </p>
+    <svg
+      id="mlp-diagram"
+      viewBox="0 0 1200 390"
+      width="1200"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-desc"
+    >
+      <desc id="diagram-desc">
+        Батч из 32 изображений разворачивается из формы 32 на 1 на 28 на 28
+        в форму 32 на 784 и проходит слои 784, 256, ReLU, Dropout 0.2,
+        128, ReLU, Dropout 0.2 и 10 логитов.
+      </desc>
+    </svg>
+    <noscript>
+      <p>
+        Схема должна показать поток 784 → 256 → ReLU → Dropout 0.2 →
+        128 → ReLU → Dropout 0.2 → 10 логитов.
+      </p>
+    </noscript>
+  </figure>
+
+  <script>
+    const diagram = {
+      canvas: { viewBox: "0 0 1200 390", width: 1200, height: 390 },
+      arrow: {
+        markerWidth: 12,
+        markerHeight: 12,
+        refX: 10,
+        refY: 6,
+        points: [[1, 1], [10, 6], [1, 11]]
+      },
+      batch: {
+        tiles: [
+          { x: 76, y: 36, w: 72, h: 58 },
+          { x: 68, y: 44, w: 72, h: 58 },
+          { x: 60, y: 52, w: 72, h: 58 }
+        ],
+        label: { x: 96, y: 72, text: "1 × 28 × 28" },
+        shape: { x: 96, y: 126, text: "(32, 1, 28, 28)" }
+      },
+      flatten: {
+        line: { x1: 160, y1: 81, x2: 300, y2: 81 },
+        label: { x: 230, y: 58, text: "разворачивание" },
+        detail: { x: 230, y: 105, text: "пиксели сохранены" },
+        vector: { x: 320, y: 54, w: 164, h: 54, rx: 12 },
+        lanes: [
+          { x1: 338, y1: 68, x2: 466, y2: 68 },
+          { x1: 338, y1: 81, x2: 466, y2: 81 },
+          { x1: 338, y1: 94, x2: 466, y2: 94 }
+        ],
+        title: { x: 402, y: 80, text: "784 яркости" },
+        shape: { x: 402, y: 126, text: "(32, 784)" }
+      },
+      batchGuide: {
+        line: { x1: 512, y1: 81, x2: 1138, y2: 81 },
+        capLeft: { x1: 512, y1: 72, x2: 512, y2: 90 },
+        capRight: { x1: 1138, y1: 72, x2: 1138, y2: 90 },
+        label: { x: 825, y: 58, text: "32 независимые дорожки батча" },
+        detail: { x: 825, y: 105, text: "примеры не смешиваются между собой" }
+      },
+      funnel: {
+        points: [
+          [48, 180],
+          [1162, 228],
+          [1162, 300],
+          [48, 348]
+        ]
+      },
+      stages: [
+        {
+          id: "input",
+          kind: "input-node",
+          x: 50, y: 186, w: 120, h: 156, rx: 14,
+          title: "784",
+          detail: "яркости",
+          shape: "(32, 784)"
+        },
+        {
+          id: "linear256",
+          kind: "linear-node",
+          x: 218, y: 207, w: 120, h: 114, rx: 14,
+          title: "256",
+          detail: "Linear",
+          shape: "(32, 256)"
+        },
+        {
+          id: "relu1",
+          kind: "relu-node",
+          x: 382, y: 218, w: 106, h: 92, rx: 46,
+          title: "ReLU",
+          detail: "форма та же",
+          shape: "(32, 256)"
+        },
+        {
+          id: "drop1",
+          kind: "drop-node",
+          x: 526, y: 218, w: 126, h: 92, rx: 18,
+          title: "Dropout",
+          detail: "0.2",
+          shape: "(32, 256)"
+        },
+        {
+          id: "linear128",
+          kind: "linear-node",
+          x: 696, y: 226, w: 112, h: 76, rx: 14,
+          title: "128",
+          detail: "Linear",
+          shape: "(32, 128)"
+        },
+        {
+          id: "relu2",
+          kind: "relu-node",
+          x: 850, y: 230, w: 94, h: 68, rx: 34,
+          title: "ReLU",
+          detail: "форма та же",
+          shape: "(32, 128)"
+        },
+        {
+          id: "drop2",
+          kind: "drop-node",
+          x: 980, y: 230, w: 118, h: 68, rx: 16,
+          title: "Dropout",
+          detail: "0.2",
+          shape: "(32, 128)"
+        },
+        {
+          id: "output",
+          kind: "output-node",
+          x: 1130, y: 240, w: 58, h: 48, rx: 12,
+          title: "10",
+          detail: "логитов",
+          shape: "(32, 10)"
+        }
+      ],
+      connectors: [
+        { x1: 170, y1: 264, x2: 218, y2: 264 },
+        { x1: 338, y1: 264, x2: 382, y2: 264 },
+        { x1: 488, y1: 264, x2: 526, y2: 264 },
+        { x1: 652, y1: 264, x2: 696, y2: 264 },
+        { x1: 808, y1: 264, x2: 850, y2: 264 },
+        { x1: 944, y1: 264, x2: 980, y2: 264 },
+        { x1: 1098, y1: 264, x2: 1130, y2: 264 }
+      ],
+      digits: [
+        { x: 933, y: 365, text: "0" },
+        { x: 958, y: 365, text: "1" },
+        { x: 983, y: 365, text: "2" },
+        { x: 1008, y: 365, text: "3" },
+        { x: 1033, y: 365, text: "4" },
+        { x: 1058, y: 365, text: "5" },
+        { x: 1083, y: 365, text: "6" },
+        { x: 1108, y: 365, text: "7" },
+        { x: 1133, y: 365, text: "8" },
+        { x: 1158, y: 365, text: "9" }
+      ],
+      digitGuide: {
+        line: { x1: 933, y1: 344, x2: 1158, y2: 344 },
+        label: { x: 922, y: 344, text: "кандидаты:", anchor: "end" }
+      },
+      textOffsets: {
+        title: -16,
+        detail: 15,
+        shape: 22
+      }
+    };
+
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 1, y: 1 };
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("mlp-diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const element = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        parent.appendChild(element);
+        return element;
+      };
+
+      const line = (item, className, parent = svg, arrow = false) => {
+        const attributes = {
+          x1: sx(item.x1),
+          y1: sy(item.y1),
+          x2: sx(item.x2),
+          y2: sy(item.y2),
+          class: className
+        };
+        if (arrow) attributes["marker-end"] = "url(#arrowhead)";
+        return make("line", attributes, parent);
+      };
+
+      const text = (item, className, parent = svg) => {
+        const element = make("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          class: className,
+          "text-anchor": item.anchor || "middle"
+        }, parent);
+        element.textContent = item.text;
+        return element;
+      };
+
+      const defs = make("defs", {});
+      const marker = make("marker", {
+        id: "arrowhead",
+        markerWidth: sx(diagram.arrow.markerWidth) - sx(origin.x),
+        markerHeight: sy(diagram.arrow.markerHeight) - sy(origin.y),
+        refX: sx(diagram.arrow.refX),
+        refY: sy(diagram.arrow.refY),
+        orient: "auto",
+        markerUnits: "userSpaceOnUse",
+        viewBox: diagram.arrow.points
+          .map((point) => `${sx(point[0])} ${sy(point[1])}`)
+          .join(" ")
+      }, defs);
+
+      make("polygon", {
+        points: diagram.arrow.points
+          .map((point) => `${sx(point[0])},${sy(point[1])}`)
+          .join(" "),
+        fill: "var(--line)"
+      }, marker);
+
+      make("polygon", {
+        points: diagram.funnel.points
+          .map((point) => `${sx(point[0])},${sy(point[1])}`)
+          .join(" "),
+        class: "funnel"
+      });
+
+      const batchGroup = make("g", {
+        "aria-label": "Батч исходных изображений"
+      });
+
+      diagram.batch.tiles.forEach((tile) => {
+        make("rect", {
+          x: sx(tile.x),
+          y: sy(tile.y),
+          width: sx(tile.w) - sx(origin.x),
+          height: sy(tile.h) - sy(origin.y),
+          class: "batch-tile"
+        }, batchGroup);
+      });
+
+      text(diagram.batch.label, "node-detail", batchGroup);
+      text(diagram.batch.shape, "shape-label", batchGroup);
+
+      line(diagram.flatten.line, "flow-line", svg, true);
+      text(diagram.flatten.label, "annotation");
+      text(diagram.flatten.detail, "node-detail");
+
+      make("rect", {
+        x: sx(diagram.flatten.vector.x),
+        y: sy(diagram.flatten.vector.y),
+        width: sx(diagram.flatten.vector.w) - sx(origin.x),
+        height: sy(diagram.flatten.vector.h) - sy(origin.y),
+        rx: sx(diagram.flatten.vector.rx) - sx(origin.x),
+        ry: sy(diagram.flatten.vector.rx) - sy(origin.y),
+        class: "input-node"
+      });
+
+      diagram.flatten.lanes.forEach((laneItem) => {
+        line(laneItem, "lane");
+      });
+      text(diagram.flatten.title, "node-title");
+      text(diagram.flatten.shape, "shape-label");
+
+      line(diagram.batchGuide.line, "guide-line");
+      line(diagram.batchGuide.capLeft, "guide-line");
+      line(diagram.batchGuide.capRight, "guide-line");
+      text(diagram.batchGuide.label, "annotation");
+      text(diagram.batchGuide.detail, "node-detail");
+
+      diagram.connectors.forEach((connector) => {
+        line(connector, "flow-line", svg, true);
+      });
+
+      diagram.stages.forEach((stage) => {
+        const group = make("g", {
+          "aria-label": `${stage.title}, ${stage.detail}, ${stage.shape}`
+        });
+
+        make("rect", {
+          x: sx(stage.x),
+          y: sy(stage.y),
+          width: sx(stage.w) - sx(origin.x),
+          height: sy(stage.h) - sy(origin.y),
+          rx: sx(stage.rx) - sx(origin.x),
+          ry: sy(stage.rx) - sy(origin.y),
+          class: stage.kind
+        }, group);
+
+        const centerX = stage.x + stage.w / scale.x / scale.x;
+        const centerY = stage.y + stage.h / scale.y / scale.y;
+
+        text({
+          x: centerX,
+          y: centerY + diagram.textOffsets.title,
+          text: stage.title
+        }, "node-title", group);
+
+        text({
+          x: centerX,
+          y: centerY + diagram.textOffsets.detail,
+          text: stage.detail
+        }, "node-detail", group);
+
+        text({
+          x: centerX,
+          y: stage.y + stage.h + diagram.textOffsets.shape,
+          text: stage.shape
+        }, "shape-label", group);
+      });
+
+      line(diagram.digitGuide.line, "guide-line");
+      text(diagram.digitGuide.label, "annotation");
+      diagram.digits.forEach((digit) => text(digit, "digit"));
+    } catch (error) {
+      const svg = document.getElementById("mlp-diagram");
+      if (svg) svg.remove();
+
+      const fallback = document.createElement("p");
+      fallback.className = "fallback";
+      fallback.textContent =
+        "Схема должна показать поток 784 → 256 → ReLU → Dropout 0.2 → 128 → ReLU → Dropout 0.2 → 10 логитов; форма батча меняется от (32, 784) до (32, 10).";
+      document.querySelector(".diagram").appendChild(fallback);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

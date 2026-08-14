@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как 33 миллисекунды делятся между этапами обработки кадра</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --surface: #ffffff;
+      --ink: #172033;
+      --muted: #5c667a;
+      --axis: #445169;
+      --grid: #c9d1df;
+      --capture: #75cce8;
+      --preprocess: #a89be8;
+      --model: #f1b45c;
+      --postprocess: #77c99a;
+      --output: #e99bb3;
+      --stage-ink: #162033;
+      --accent: #3066d6;
+      --stroke-width: 2px;
+      --fine-stroke-width: 1px;
+      --small-font: 13px;
+      --base-font: 15px;
+      --large-font: 18px;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    h1 {
+      color: var(--ink);
+      font-size: 20px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 390px;
+      background: var(--surface);
+    }
+
+    .budget-line,
+    .axis-line,
+    .tick-line,
+    .bar-outline,
+    .separator,
+    .leader {
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .budget-line {
+      stroke: var(--accent);
+      stroke-width: var(--stroke-width);
+    }
+
+    .axis-line {
+      stroke: var(--axis);
+      stroke-width: var(--stroke-width);
+    }
+
+    .tick-line,
+    .leader {
+      stroke: var(--grid);
+      stroke-width: var(--fine-stroke-width);
+    }
+
+    .bar-outline {
+      stroke: var(--axis);
+      stroke-width: var(--stroke-width);
+    }
+
+    .separator {
+      stroke: var(--surface);
+      stroke-width: var(--stroke-width);
+    }
+
+    .capture {
+      fill: var(--capture);
+    }
+
+    .preprocess {
+      fill: var(--preprocess);
+    }
+
+    .model {
+      fill: var(--model);
+    }
+
+    .postprocess {
+      fill: var(--postprocess);
+    }
+
+    .output {
+      fill: var(--output);
+    }
+
+    .diagram-text {
+      fill: var(--ink);
+      font-size: var(--base-font);
+    }
+
+    .small-text {
+      fill: var(--muted);
+      font-size: var(--small-font);
+    }
+
+    .stage-text {
+      fill: var(--stage-ink);
+      font-size: var(--small-font);
+      font-weight: bold;
+    }
+
+    .budget-text {
+      fill: var(--accent);
+      font-size: var(--large-font);
+      font-weight: bold;
+    }
+
+    .total-text {
+      fill: var(--ink);
+      font-size: var(--large-font);
+      font-weight: bold;
+    }
+
+    .legend-title {
+      fill: var(--muted);
+      font-size: var(--small-font);
+      font-weight: bold;
+    }
+
+    .legend-swatch {
+      stroke: var(--axis);
+      stroke-width: var(--fine-stroke-width);
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: var(--base-font);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --surface: #182130;
+        --ink: #edf2fa;
+        --muted: #b5c0d2;
+        --axis: #c3ccdb;
+        --grid: #566277;
+        --capture: #4ca9c9;
+        --preprocess: #8375cc;
+        --model: #d79539;
+        --postprocess: #4ba977;
+        --output: #cc708f;
+        --stage-ink: #08111e;
+        --accent: #82a9ff;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Как 33 миллисекунды делятся между этапами обработки кадра</h1>
+
+  <svg
+    id="diagram"
+    viewBox="0 0 1000 390"
+    width="1000"
+    height="390"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description"
+  >
+    <title id="diagram-title">Временная шкала обработки одного кадра за 33 миллисекунды</title>
+    <desc id="diagram-description">
+      Бюджет кадра последовательно занимают 4 миллисекунды захвата,
+      3 миллисекунды препроцессинга, 20 миллисекунд работы модели,
+      4 миллисекунды постобработки и 2 миллисекунды передачи или отрисовки.
+    </desc>
+    <g id="plot"></g>
+  </svg>
+
+  <script>
+    const data = [
+      {
+        kind: "layout",
+        canvas: { width: 1000, height: 390 },
+        origin: { x: 72, y: 0 },
+        scale: { x: 25, y: 1 },
+        plot: {
+          start: 0,
+          end: 33,
+          budgetTextY: 27,
+          budgetY: 52,
+          budgetCapBottom: 68,
+          barTop: 91,
+          barBottom: 161,
+          axisY: 196,
+          tickTop: 186,
+          tickBottom: 205,
+          tickTextY: 224,
+          totalY: 257,
+          noteY: 278,
+          legendTitleY: 301,
+          legendFirstY: 327,
+          legendSecondY: 359,
+          swatchHalfWidth: 0.32,
+          swatchHalfHeight: 8,
+          fallbackX: 0,
+          fallbackFirstY: 150,
+          fallbackSecondY: 181,
+          fallbackThirdY: 212
+        },
+        math: { half: 0.5 },
+        style: {
+          labelPadding: 8,
+          strokeWidth: 2,
+          fineStrokeWidth: 1,
+          smallFont: 13,
+          baseFont: 15,
+          largeFont: 18
+        }
+      },
+      {
+        kind: "stage",
+        name: "Захват камеры",
+        compact: "4 мс",
+        className: "capture",
+        start: 0,
+        end: 4,
+        duration: 4,
+        legendX: 0.5,
+        legendRow: "first"
+      },
+      {
+        kind: "stage",
+        name: "Препроцессинг",
+        compact: "3 мс",
+        className: "preprocess",
+        start: 4,
+        end: 7,
+        duration: 3,
+        legendX: 10.5,
+        legendRow: "first"
+      },
+      {
+        kind: "stage",
+        name: "Модель · около",
+        compact: "МОДЕЛЬ · 20 мс",
+        className: "model",
+        start: 7,
+        end: 27,
+        duration: 20,
+        legendX: 24,
+        legendRow: "first"
+      },
+      {
+        kind: "stage",
+        name: "Постобработка",
+        compact: "4 мс",
+        className: "postprocess",
+        start: 27,
+        end: 31,
+        duration: 4,
+        legendX: 0.5,
+        legendRow: "second"
+      },
+      {
+        kind: "stage",
+        name: "Передача / отрисовка",
+        compact: "2 мс",
+        className: "output",
+        start: 31,
+        end: 33,
+        duration: 2,
+        legendX: 14,
+        legendRow: "second"
+      }
+    ];
+
+    const layout = data.find((item) => item.kind === "layout");
+    const origin = Object.freeze({
+      x: layout.origin.x,
+      y: layout.origin.y
+    });
+    const scale = Object.freeze({
+      x: layout.scale.x,
+      y: layout.scale.y
+    });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const plot = document.getElementById("plot");
+
+    try {
+      const stages = data.filter((item) => item.kind === "stage");
+      const p = layout.plot;
+      const half = layout.math.half;
+      const labelPadding = layout.style.labelPadding;
+
+      const make = (name, attributes, content) => {
+        const node = document.createElementNS(SVG_NS, name);
+
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+
+        return node;
+      };
+
+      const add = (node) => {
+        plot.appendChild(node);
+        return node;
+      };
+
+      const addLine = (x1, y1, x2, y2, className) => {
+        add(make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        }));
+      };
+
+      const addText = (x, y, content, className, anchor) => {
+        add(make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content));
+      };
+
+      addText(
+        (p.start + p.end) * half,
+        p.budgetTextY,
+        `БЮДЖЕТ ОДНОГО КАДРА: ${p.end} мс`,
+        "budget-text",
+        "middle"
+      );
+
+      addLine(p.start, p.budgetY, p.end, p.budgetY, "budget-line");
+      addLine(p.start, p.budgetY, p.start, p.budgetCapBottom, "budget-line");
+      addLine(p.end, p.budgetY, p.end, p.budgetCapBottom, "budget-line");
+
+      stages.forEach((stage) => {
+        add(make("rect", {
+          x: sx(stage.start),
+          y: sy(p.barTop),
+          width: sx(stage.end) - sx(stage.start),
+          height: sy(p.barBottom) - sy(p.barTop),
+          class: `stage ${stage.className}`
+        }));
+
+        addText(
+          (stage.start + stage.end) * half,
+          (p.barTop + p.barBottom) * half,
+          stage.compact,
+          "stage-text",
+          "middle"
+        );
+      });
+
+      add(make("rect", {
+        x: sx(p.start),
+        y: sy(p.barTop),
+        width: sx(p.end) - sx(p.start),
+        height: sy(p.barBottom) - sy(p.barTop),
+        class: "bar-outline"
+      }));
+
+      stages.forEach((stage) => {
+        if (stage.end !== p.end) {
+          addLine(
+            stage.end,
+            p.barTop,
+            stage.end,
+            p.barBottom,
+            "separator"
+          );
+        }
+      });
+
+      addLine(p.start, p.axisY, p.end, p.axisY, "axis-line");
+
+      const boundaries = [
+        stages.find((stage) => stage.start === p.start).start,
+        ...stages.map((stage) => stage.end)
+      ];
+
+      boundaries.forEach((boundary) => {
+        addLine(
+          boundary,
+          p.tickTop,
+          boundary,
+          p.tickBottom,
+          "tick-line"
+        );
+
+        const suffix =
+          boundary === p.start || boundary === p.end ? " мс" : "";
+
+        addText(
+          boundary,
+          p.tickTextY,
+          `${boundary}${suffix}`,
+          "small-text",
+          "middle"
+        );
+      });
+
+      const total = stages.reduce(
+        (sum, stage) => sum + stage.duration,
+        p.start
+      );
+      const expression = stages
+        .map((stage) => stage.duration)
+        .join(" + ");
+
+      addText(
+        (p.start + p.end) * half,
+        p.totalY,
+        `${expression} = ${total} мс`,
+        "total-text",
+        "middle"
+      );
+
+      addText(
+        (p.start + p.end) * half,
+        p.noteY,
+        "Этапы идут последовательно — весь бюджет уже распределён",
+        "small-text",
+        "middle"
+      );
+
+      addText(
+        p.start,
+        p.legendTitleY,
+        "ЧТО ПРОИСХОДИТ НА КАЖДОМ УЧАСТКЕ",
+        "legend-title",
+        "start"
+      );
+
+      stages.forEach((stage) => {
+        const legendY =
+          stage.legendRow === "first"
+            ? p.legendFirstY
+            : p.legendSecondY;
+
+        add(make("rect", {
+          x: sx(stage.legendX - p.swatchHalfWidth),
+          y: sy(legendY - p.swatchHalfHeight),
+          width:
+            sx(stage.legendX + p.swatchHalfWidth) -
+            sx(stage.legendX - p.swatchHalfWidth),
+          height:
+            sy(legendY + p.swatchHalfHeight) -
+            sy(legendY - p.swatchHalfHeight),
+          class: `legend-swatch ${stage.className}`
+        }));
+
+        const legendLabel =
+          stage.className === "model"
+            ? `${stage.name} ${stage.duration} мс`
+            : `${stage.name} — ${stage.duration} мс`;
+
+        const label = make("text", {
+          x: sx(stage.legendX) + labelPadding,
+          y: sy(legendY),
+          class: "diagram-text",
+          "text-anchor": "start",
+          "dominant-baseline": "middle"
+        }, legendLabel);
+
+        add(label);
+      });
+    } catch (error) {
+      plot.replaceChildren();
+
+      const fallbackLines = [
+        {
+          y: layout.plot.fallbackFirstY,
+          text: "Схема должна была показать бюджет одного кадра: 33 мс."
+        },
+        {
+          y: layout.plot.fallbackSecondY,
+          text: "4 мс захват + 3 мс препроцессинг + 20 мс модель."
+        },
+        {
+          y: layout.plot.fallbackThirdY,
+          text: "4 мс постобработка + 2 мс передача или отрисовка."
+        }
+      ];
+
+      fallbackLines.forEach((line) => {
+        const text = document.createElementNS(SVG_NS, "text");
+        text.setAttribute("x", sx(layout.plot.fallbackX));
+        text.setAttribute("y", sy(line.y));
+        text.setAttribute("class", "fallback");
+        text.setAttribute("text-anchor", "start");
+        text.textContent = line.text;
+        plot.appendChild(text);
+      });
+
+      console.error(error);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

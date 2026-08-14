@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как generator увеличивает пространство и уменьшает число каналов</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #536078;
+      --outline: #263653;
+      --flow: #64748b;
+      --space: #2563eb;
+      --channels: #c24172;
+      --feature-fill: #dce8ff;
+      --feature-back: #edf3ff;
+      --noise-fill: #e9ddff;
+      --noise-back: #f4efff;
+      --output-fill: #f8fafc;
+      --red-fill: #ffdce2;
+      --green-fill: #d9f6e4;
+      --blue-fill: #dceaff;
+      --grid: #718096;
+      --note: #334155;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101521;
+        --panel: #161d2b;
+        --text: #edf2ff;
+        --muted: #b7c1d8;
+        --outline: #b9c8e8;
+        --flow: #8794ad;
+        --space: #75a7ff;
+        --channels: #f08ab3;
+        --feature-fill: #263b63;
+        --feature-back: #1e2c49;
+        --noise-fill: #473466;
+        --noise-back: #332746;
+        --output-fill: #202a3a;
+        --red-fill: #56303d;
+        --green-fill: #244a38;
+        --blue-fill: #263f66;
+        --grid: #9ca9bf;
+        --note: #d3dbeb;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 100%;
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: unset;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 21px;
+      font-weight: bold;
+      line-height: normal;
+      text-align: center;
+    }
+
+    .canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    .background {
+      fill: var(--panel);
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--flow);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-head {
+      fill: var(--flow);
+    }
+
+    .space-line {
+      fill: none;
+      stroke: var(--space);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .space-head {
+      fill: var(--space);
+    }
+
+    .channels-line {
+      fill: none;
+      stroke: var(--channels);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .channels-head {
+      fill: var(--channels);
+    }
+
+    .plate {
+      stroke: var(--outline);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .noise-back {
+      fill: var(--noise-back);
+    }
+
+    .noise-front {
+      fill: var(--noise-fill);
+    }
+
+    .feature-back {
+      fill: var(--feature-back);
+    }
+
+    .feature-front {
+      fill: var(--feature-fill);
+    }
+
+    .rgb-red {
+      fill: var(--red-fill);
+    }
+
+    .rgb-green {
+      fill: var(--green-fill);
+    }
+
+    .rgb-blue {
+      fill: var(--blue-fill);
+    }
+
+    .output-front {
+      fill: var(--output-fill);
+    }
+
+    .pixel-grid {
+      stroke: var(--grid);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .trend-label {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .space-label {
+      fill: var(--space);
+    }
+
+    .channels-label {
+      fill: var(--channels);
+    }
+
+    .stage-label {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .stage-kind {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      fill: var(--note);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Как generator увеличивает пространство и уменьшает число каналов</h1>
+
+    <svg
+      id="diagram"
+      class="canvas"
+      viewBox="0 0 1100 430"
+      width="1100"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-desc"
+    >
+      <desc id="diagram-desc">
+        Цепочка форм generator: шум 64 на 1 на 1 превращается в 128 на 4 на 4,
+        затем в 64 на 8 на 8, 32 на 16 на 16 и RGB-изображение 3 на 32 на 32.
+      </desc>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать: шум 64 × 1 × 1 → 128 × 4 × 4 →
+      64 × 8 × 8 → 32 × 16 × 16 → 3 × 32 × 32.
+    </p>
+  </main>
+
+  <script>
+    const DATA = Object.freeze([{
+      frame: { x: 0, y: 0, w: 110, h: 43 },
+
+      trendArrows: [
+        {
+          lineClass: "space-line",
+          headClass: "space-head",
+          from: { x: 20, y: 4 },
+          to: { x: 103, y: 4 },
+          head: [
+            { x: 103, y: 4 },
+            { x: 101.3, y: 3.1 },
+            { x: 101.3, y: 4.9 }
+          ],
+          label: {
+            text: "пространство растёт",
+            point: { x: 20, y: 4 },
+            offset: { dx: 0, dy: -9 },
+            anchor: "start",
+            class: "trend-label space-label"
+          }
+        },
+        {
+          lineClass: "channels-line",
+          headClass: "channels-head",
+          from: { x: 103, y: 9 },
+          to: { x: 20, y: 9 },
+          head: [
+            { x: 20, y: 9 },
+            { x: 21.7, y: 8.1 },
+            { x: 21.7, y: 9.9 }
+          ],
+          label: {
+            text: "каналов становится меньше",
+            point: { x: 103, y: 9 },
+            offset: { dx: 0, dy: -9 },
+            anchor: "end",
+            class: "trend-label channels-label"
+          }
+        }
+      ],
+
+      flowArrows: [
+        {
+          from: { x: 10.4, y: 24 },
+          to: { x: 21.5, y: 24 },
+          head: [
+            { x: 21.5, y: 24 },
+            { x: 20.2, y: 23.2 },
+            { x: 20.2, y: 24.8 }
+          ]
+        },
+        {
+          from: { x: 30.8, y: 24 },
+          to: { x: 43, y: 24 },
+          head: [
+            { x: 43, y: 24 },
+            { x: 41.7, y: 23.2 },
+            { x: 41.7, y: 24.8 }
+          ]
+        },
+        {
+          from: { x: 54.1, y: 24 },
+          to: { x: 65, y: 24 },
+          head: [
+            { x: 65, y: 24 },
+            { x: 63.7, y: 23.2 },
+            { x: 63.7, y: 24.8 }
+          ]
+        },
+        {
+          from: { x: 78.1, y: 24 },
+          to: { x: 88.3, y: 24 },
+          head: [
+            { x: 88.3, y: 24 },
+            { x: 87, y: 23.2 },
+            { x: 87, y: 24.8 }
+          ]
+        }
+      ],
+
+      stages: [
+        {
+          plates: [
+            { x: 6.2, y: 21.2, w: 2, h: 2, class: "noise-back" },
+            { x: 6.8, y: 21.8, w: 2, h: 2, class: "noise-back" },
+            { x: 7.4, y: 22.4, w: 2, h: 2, class: "noise-back" },
+            { x: 8, y: 23, w: 2, h: 2, class: "noise-front" }
+          ],
+          labels: [
+            {
+              text: "шум",
+              point: { x: 8.9, y: 19.2 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-kind"
+            },
+            {
+              text: "64 × 1 × 1",
+              point: { x: 8.9, y: 33.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-label"
+            }
+          ]
+        },
+        {
+          plates: [
+            { x: 22, y: 18.5, w: 6, h: 6, class: "feature-back" },
+            { x: 22.8, y: 19.3, w: 6, h: 6, class: "feature-back" },
+            { x: 23.6, y: 20.1, w: 6, h: 6, class: "feature-back" },
+            { x: 24.4, y: 20.9, w: 6, h: 6, class: "feature-front" }
+          ],
+          labels: [
+            {
+              text: "128 × 4 × 4",
+              point: { x: 27.2, y: 33.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-label"
+            }
+          ]
+        },
+        {
+          plates: [
+            { x: 43.5, y: 18.2, w: 8.5, h: 8.5, class: "feature-back" },
+            { x: 44.1, y: 18.8, w: 8.5, h: 8.5, class: "feature-back" },
+            { x: 44.7, y: 19.4, w: 8.5, h: 8.5, class: "feature-back" },
+            { x: 45.3, y: 20, w: 8.5, h: 8.5, class: "feature-front" }
+          ],
+          labels: [
+            {
+              text: "64 × 8 × 8",
+              point: { x: 49.1, y: 33.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-label"
+            }
+          ]
+        },
+        {
+          plates: [
+            { x: 65.5, y: 17.2, w: 11, h: 11, class: "feature-back" },
+            { x: 65.9, y: 17.6, w: 11, h: 11, class: "feature-back" },
+            { x: 66.3, y: 18, w: 11, h: 11, class: "feature-back" },
+            { x: 66.7, y: 18.4, w: 11, h: 11, class: "feature-front" }
+          ],
+          labels: [
+            {
+              text: "32 × 16 × 16",
+              point: { x: 72, y: 33.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-label"
+            }
+          ]
+        },
+        {
+          plates: [
+            { x: 88.8, y: 15.8, w: 14, h: 14, class: "rgb-red" },
+            { x: 89.4, y: 16.4, w: 14, h: 14, class: "rgb-green" },
+            { x: 90, y: 17, w: 14, h: 14, class: "rgb-blue output-front" }
+          ],
+          grid: {
+            vertical: [
+              { x: 93.5, y1: 17, y2: 31 },
+              { x: 97, y1: 17, y2: 31 },
+              { x: 100.5, y1: 17, y2: 31 }
+            ],
+            horizontal: [
+              { y: 20.5, x1: 90, x2: 104 },
+              { y: 24, x1: 90, x2: 104 },
+              { y: 27.5, x1: 90, x2: 104 }
+            ]
+          },
+          labels: [
+            {
+              text: "3 × 32 × 32",
+              point: { x: 97, y: 33.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-label"
+            },
+            {
+              text: "RGB-пиксели",
+              point: { x: 97, y: 36.8 },
+              offset: { dx: 0, dy: 0 },
+              anchor: "middle",
+              class: "stage-kind"
+            }
+          ]
+        }
+      ],
+
+      notes: [
+        {
+          text: "внутренние карты признаков",
+          point: { x: 50, y: 36.8 },
+          offset: { dx: 0, dy: 0 },
+          anchor: "middle",
+          class: "stage-kind"
+        },
+        {
+          text: "Карты признаков превращаются в подробную сетку пикселей",
+          point: { x: 55, y: 41 },
+          offset: { dx: 0, dy: 0 },
+          anchor: "middle",
+          class: "summary"
+        }
+      ]
+    }]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 10, y: 10 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const diagram = DATA.at(origin.x);
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function svgElement(name, attributes, content) {
+      const node = document.createElementNS(namespace, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (content) {
+        node.textContent = content;
+      }
+
+      return node;
+    }
+
+    function renderText(parent, specification) {
+      parent.appendChild(svgElement("text", {
+        x: sx(specification.point.x),
+        y: sy(specification.point.y),
+        dx: specification.offset.dx,
+        dy: specification.offset.dy,
+        "text-anchor": specification.anchor,
+        class: specification.class
+      }, specification.text));
+    }
+
+    function renderArrow(parent, arrow, lineClass, headClass) {
+      parent.appendChild(svgElement("line", {
+        x1: sx(arrow.from.x),
+        y1: sy(arrow.from.y),
+        x2: sx(arrow.to.x),
+        y2: sy(arrow.to.y),
+        class: lineClass
+      }));
+
+      parent.appendChild(svgElement("polygon", {
+        points: arrow.head
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" "),
+        class: headClass
+      }));
+
+      if (arrow.label) {
+        renderText(parent, arrow.label);
+      }
+    }
+
+    function renderPlate(parent, plate) {
+      parent.appendChild(svgElement("rect", {
+        x: sx(plate.x),
+        y: sy(plate.y),
+        width: sx(plate.x + plate.w) - sx(plate.x),
+        height: sy(plate.y + plate.h) - sy(plate.y),
+        class: `plate ${plate.class}`
+      }));
+    }
+
+    function renderGrid(parent, grid) {
+      grid.vertical.forEach(line => {
+        parent.appendChild(svgElement("line", {
+          x1: sx(line.x),
+          y1: sy(line.y1),
+          x2: sx(line.x),
+          y2: sy(line.y2),
+          class: "pixel-grid"
+        }));
+      });
+
+      grid.horizontal.forEach(line => {
+        parent.appendChild(svgElement("line", {
+          x1: sx(line.x1),
+          y1: sy(line.y),
+          x2: sx(line.x2),
+          y2: sy(line.y),
+          class: "pixel-grid"
+        }));
+      });
+    }
+
+    try {
+      const drawing = svgElement("g", {
+        "aria-hidden": "true"
+      });
+
+      drawing.appendChild(svgElement("rect", {
+        x: sx(diagram.frame.x),
+        y: sy(diagram.frame.y),
+        width: sx(diagram.frame.x + diagram.frame.w) - sx(diagram.frame.x),
+        height: sy(diagram.frame.y + diagram.frame.h) - sy(diagram.frame.y),
+        class: "background"
+      }));
+
+      diagram.trendArrows.forEach(arrow => {
+        renderArrow(
+          drawing,
+          arrow,
+          arrow.lineClass,
+          arrow.headClass
+        );
+      });
+
+      diagram.flowArrows.forEach(arrow => {
+        renderArrow(
+          drawing,
+          arrow,
+          "flow-line",
+          "flow-head"
+        );
+      });
+
+      diagram.stages.forEach(stage => {
+        const stageGroup = svgElement("g", {});
+
+        stage.plates.forEach(plate => {
+          renderPlate(stageGroup, plate);
+        });
+
+        if (stage.grid) {
+          renderGrid(stageGroup, stage.grid);
+        }
+
+        stage.labels.forEach(label => {
+          renderText(stageGroup, label);
+        });
+
+        drawing.appendChild(stageGroup);
+      });
+
+      diagram.notes.forEach(note => {
+        renderText(drawing, note);
+      });
+
+      svg.appendChild(drawing);
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

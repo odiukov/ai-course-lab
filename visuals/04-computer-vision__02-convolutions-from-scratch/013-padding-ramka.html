@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Нулевая рамка вокруг входа</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f5f9;
+    --ink: #172033;
+    --muted: #526176;
+    --grid: #9aa8ba;
+    --padding: #e7edf5;
+    --padding-focus: #dce7ff;
+    --input: #ffffff;
+    --input-focus: #dff5eb;
+    --input-line: #16856f;
+    --kernel: #7757c8;
+    --center: #d24b65;
+    --divider: #c8d1dc;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #182130;
+      --panel-soft: #202b3b;
+      --ink: #edf3fb;
+      --muted: #b8c5d6;
+      --grid: #69798d;
+      --padding: #263449;
+      --padding-focus: #30466c;
+      --input: #17202d;
+      --input-focus: #1c493f;
+      --input-line: #57d0b4;
+      --kernel: #b39cff;
+      --center: #ff8297;
+      --divider: #3d4b5e;
+    }
+  }
+
+  html,
+  body {
+    margin: unset;
+    padding: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--page);
+  }
+
+  h2 {
+    margin: unset;
+    padding: unset;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--page);
+  }
+
+  .card,
+  .footer {
+    fill: var(--panel);
+    stroke: var(--divider);
+    stroke-width: 1.5px;
+  }
+
+  .cell {
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .cell.pad {
+    fill: var(--padding);
+  }
+
+  .cell.input {
+    fill: var(--input);
+  }
+
+  .cell.pad.kernel {
+    fill: var(--padding-focus);
+  }
+
+  .cell.input.kernel {
+    fill: var(--input-focus);
+  }
+
+  .input-boundary {
+    fill: none;
+    stroke: var(--input-line);
+    stroke-width: 3px;
+  }
+
+  .kernel-boundary {
+    fill: none;
+    stroke: var(--kernel);
+    stroke-width: 4px;
+  }
+
+  .center-ring {
+    fill: none;
+    stroke: var(--center);
+    stroke-width: 4px;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--divider);
+    stroke-width: 2px;
+  }
+
+  .separator {
+    stroke: var(--divider);
+    stroke-width: 1.5px;
+  }
+
+  .value {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .zero {
+    fill: var(--muted);
+    font-size: 16px;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .formula {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .pad-swatch {
+    fill: var(--padding-focus);
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .input-swatch {
+    fill: var(--input-focus);
+    stroke: var(--input-line);
+    stroke-width: 2px;
+  }
+
+  .kernel-swatch {
+    fill: none;
+    stroke: var(--kernel);
+    stroke-width: 3px;
+  }
+
+  .center-dot {
+    fill: var(--center);
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption>
+    <h2 id="diagram-title">Нулевая рамка вокруг входа</h2>
+  </figcaption>
+  <svg viewBox="0 0 1000 460" width="1000" height="460"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Вход пять на пять внутри нулевой рамки, массив семь на семь и ядро три на три с центром на угловом пикселе">
+    <g id="diagram"></g>
+    <g id="fallback"></g>
+  </svg>
+</figure>
+
+<script>
+const canvas = Object.freeze({ width: 1000, height: 460 });
+
+const data = Object.freeze({
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  origin: { x: 18, y: 10 },
+  scale: 1,
+  inputSize: 5,
+  paddedSize: 7,
+  kernelSize: 3,
+  matrix: [
+    [1, 2, 0, 1, 2],
+    [0, 1, 3, 1, 0],
+    [2, 1, 0, 2, 1],
+    [1, 0, 2, 1, 3],
+    [2, 1, 1, 0, 1]
+  ],
+  grid: { x: 30, y: 70, cell: 42 },
+  gridTitle: { x: 177, y: 35 },
+  card: { x: 400, y: 55, w: 550, h: 300 },
+  cardTitle: { x: 425, y: 88 },
+  mini: { x: 435, y: 115, cell: 60 },
+  miniCaption: { x: 525, y: 325 },
+  notes: {
+    x: 660,
+    zeroY: 145,
+    realY: 200,
+    centerY: 255,
+    separatorY: 285,
+    edgeY: 320
+  },
+  swatches: {
+    x: 640,
+    size: 18,
+    zeroY: 132,
+    realY: 187,
+    centerY: 242
+  },
+  footer: { x: 30, y: 380, w: 922, h: 60 },
+  legend: {
+    y: 397,
+    size: 16,
+    firstX: 52,
+    firstTextX: 76,
+    secondX: 245,
+    secondTextX: 269,
+    thirdX: 420,
+    thirdTextX: 444,
+    fourthX: 590,
+    fourthTextX: 614
+  },
+  formula: { x: 491, y: 430 },
+  fallback: { x: 45, firstY: 160, secondY: 195 },
+  lines: { grid: 1, normal: 2, strong: 4 },
+  fonts: { small: 14, normal: 16, heading: 18 }
+});
+
+const origin = Object.freeze({
+  x: data.origin.x,
+  y: data.origin.y
+});
+
+const scale = data.scale;
+
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const namespace = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("diagram");
+
+  const node = (name, className) => {
+    const element = document.createElementNS(namespace, name);
+    if (className) element.setAttribute("class", className);
+    return element;
+  };
+
+  const add = element => {
+    root.appendChild(element);
+    return element;
+  };
+
+  const rectangle = (x, y, width, height, className) => {
+    const element = node("rect", className);
+    element.setAttribute("x", sx(x));
+    element.setAttribute("y", sy(y));
+    element.setAttribute("width", sx(x + width) - sx(x));
+    element.setAttribute("height", sy(y + height) - sy(y));
+    return add(element);
+  };
+
+  const line = (x1, y1, x2, y2, className) => {
+    const element = node("line", className);
+    element.setAttribute("x1", sx(x1));
+    element.setAttribute("y1", sy(y1));
+    element.setAttribute("x2", sx(x2));
+    element.setAttribute("y2", sy(y2));
+    return add(element);
+  };
+
+  const circle = (x, y, radius, className) => {
+    const element = node("circle", className);
+    element.setAttribute("cx", sx(x));
+    element.setAttribute("cy", sy(y));
+    element.setAttribute("r", sx(radius) - sx(data.zero));
+    return add(element);
+  };
+
+  const text = (value, x, y, className, anchor) => {
+    const element = node("text", className);
+    element.setAttribute("x", sx(x));
+    element.setAttribute("y", sy(y));
+    element.setAttribute("text-anchor", anchor);
+    element.setAttribute("dominant-baseline", "middle");
+    element.textContent = value;
+    return add(element);
+  };
+
+  const grid = data.grid;
+  const gridWidth = grid.cell * data.paddedSize;
+  const inputOffset = grid.cell;
+  const inputWidth = grid.cell * data.inputSize;
+  const kernelWidth = grid.cell * data.kernelSize;
+
+  text(
+    "Временный массив 7 × 7",
+    data.gridTitle.x,
+    data.gridTitle.y,
+    "heading",
+    "middle"
+  );
+
+  for (let row = data.zero; row < data.paddedSize; row += data.one) {
+    for (let column = data.zero; column < data.paddedSize; column += data.one) {
+      const x = grid.x + column * grid.cell;
+      const y = grid.y + row * grid.cell;
+      const isPadding =
+        row === data.zero ||
+        column === data.zero ||
+        row === data.paddedSize - data.one ||
+        column === data.paddedSize - data.one;
+      const isKernel =
+        row < data.kernelSize && column < data.kernelSize;
+      const classes = [
+        "cell",
+        isPadding ? "pad" : "input",
+        isKernel ? "kernel" : ""
+      ].filter(Boolean).join(" ");
+
+      rectangle(x, y, grid.cell, grid.cell, classes);
+
+      const value = isPadding
+        ? data.zero
+        : data.matrix[row - data.one][column - data.one];
+
+      text(
+        String(value),
+        x + grid.cell / data.two,
+        y + grid.cell / data.two,
+        isPadding ? "zero" : "value",
+        "middle"
+      );
+    }
+  }
+
+  rectangle(
+    grid.x + inputOffset,
+    grid.y + inputOffset,
+    inputWidth,
+    inputWidth,
+    "input-boundary"
+  );
+
+  rectangle(
+    grid.x,
+    grid.y,
+    kernelWidth,
+    kernelWidth,
+    "kernel-boundary"
+  );
+
+  circle(
+    grid.x + grid.cell + grid.cell / data.two,
+    grid.y + grid.cell + grid.cell / data.two,
+    grid.cell / data.three,
+    "center-ring"
+  );
+
+  line(
+    grid.x + gridWidth,
+    grid.y + grid.cell / data.two,
+    data.card.x,
+    grid.y + grid.cell / data.two,
+    "connector"
+  );
+
+  rectangle(
+    data.card.x,
+    data.card.y,
+    data.card.w,
+    data.card.h,
+    "card"
+  );
+
+  text(
+    "Ядро 3 × 3 на левом верхнем пикселе",
+    data.cardTitle.x,
+    data.cardTitle.y,
+    "heading",
+    "start"
+  );
+
+  const miniValues = [
+    [data.zero, data.zero, data.zero],
+    [data.zero, data.one, data.two],
+    [data.zero, data.zero, data.one]
+  ];
+
+  for (let row = data.zero; row < data.kernelSize; row += data.one) {
+    for (let column = data.zero; column < data.kernelSize; column += data.one) {
+      const x = data.mini.x + column * data.mini.cell;
+      const y = data.mini.y + row * data.mini.cell;
+      const isReal = row >= data.one && column >= data.one;
+
+      rectangle(
+        x,
+        y,
+        data.mini.cell,
+        data.mini.cell,
+        isReal ? "cell input kernel" : "cell pad kernel"
+      );
+
+      text(
+        String(miniValues[row][column]),
+        x + data.mini.cell / data.two,
+        y + data.mini.cell / data.two,
+        isReal ? "value" : "zero",
+        "middle"
+      );
+    }
+  }
+
+  circle(
+    data.mini.x + data.mini.cell + data.mini.cell / data.two,
+    data.mini.y + data.mini.cell + data.mini.cell / data.two,
+    data.mini.cell / data.four,
+    "center-ring"
+  );
+
+  text(
+    "центр = угловой пиксель входа",
+    data.miniCaption.x,
+    data.miniCaption.y,
+    "small",
+    "middle"
+  );
+
+  rectangle(
+    data.swatches.x,
+    data.swatches.zeroY,
+    data.swatches.size,
+    data.swatches.size,
+    "pad-swatch"
+  );
+
+  text(
+    "5 позиций — нулевая рамка",
+    data.notes.x,
+    data.notes.zeroY + data.swatches.size / data.two,
+    "label",
+    "start"
+  );
+
+  rectangle(
+    data.swatches.x,
+    data.swatches.realY,
+    data.swatches.size,
+    data.swatches.size,
+    "input-swatch"
+  );
+
+  text(
+    "4 позиции — реальные значения",
+    data.notes.x,
+    data.notes.realY + data.swatches.size / data.two,
+    "label",
+    "start"
+  );
+
+  circle(
+    data.swatches.x + data.swatches.size / data.two,
+    data.swatches.centerY + data.swatches.size / data.two,
+    data.swatches.size / data.three,
+    "center-dot"
+  );
+
+  text(
+    "центр — левый верхний пиксель",
+    data.notes.x,
+    data.notes.centerY + data.swatches.size / data.two,
+    "label",
+    "start"
+  );
+
+  line(
+    data.notes.x,
+    data.notes.separatorY,
+    data.card.x + data.card.w - data.notes.x + data.notes.x - data.swatches.size,
+    data.notes.separatorY,
+    "separator"
+  );
+
+  text(
+    "На краю: 3 нуля + 6 значений",
+    data.notes.x,
+    data.notes.edgeY,
+    "label",
+    "start"
+  );
+
+  rectangle(
+    data.footer.x,
+    data.footer.y,
+    data.footer.w,
+    data.footer.h,
+    "footer"
+  );
+
+  rectangle(
+    data.legend.firstX,
+    data.legend.y,
+    data.legend.size,
+    data.legend.size,
+    "pad-swatch"
+  );
+
+  text(
+    "нулевая рамка",
+    data.legend.firstTextX,
+    data.legend.y + data.legend.size / data.two,
+    "small",
+    "start"
+  );
+
+  rectangle(
+    data.legend.secondX,
+    data.legend.y,
+    data.legend.size,
+    data.legend.size,
+    "input-swatch"
+  );
+
+  text(
+    "вход 5 × 5",
+    data.legend.secondTextX,
+    data.legend.y + data.legend.size / data.two,
+    "small",
+    "start"
+  );
+
+  rectangle(
+    data.legend.thirdX,
+    data.legend.y,
+    data.legend.size,
+    data.legend.size,
+    "kernel-swatch"
+  );
+
+  text(
+    "ядро 3 × 3",
+    data.legend.thirdTextX,
+    data.legend.y + data.legend.size / data.two,
+    "small",
+    "start"
+  );
+
+  circle(
+    data.legend.fourthX + data.legend.size / data.two,
+    data.legend.y + data.legend.size / data.two,
+    data.legend.size / data.three,
+    "center-dot"
+  );
+
+  text(
+    "центр ядра",
+    data.legend.fourthTextX,
+    data.legend.y + data.legend.size / data.two,
+    "small",
+    "start"
+  );
+
+  text(
+    "рамка толщиной 1: 5 × 5 → 7 × 7 временно → выход 5 × 5",
+    data.formula.x,
+    data.formula.y,
+    "formula",
+    "middle"
+  );
+} catch (error) {
+  const namespace = "http://www.w3.org/2000/svg";
+  const fallback = document.getElementById("fallback");
+  const first = document.createElementNS(namespace, "text");
+  const second = document.createElementNS(namespace, "text");
+
+  first.setAttribute("x", sx(data.fallback.x));
+  first.setAttribute("y", sy(data.fallback.firstY));
+  first.setAttribute("class", "fallback");
+  first.textContent = "Схема должна показать вход 5 × 5 в нулевой рамке толщиной 1.";
+
+  second.setAttribute("x", sx(data.fallback.x));
+  second.setAttribute("y", sy(data.fallback.secondY));
+  second.setAttribute("class", "fallback");
+  second.textContent = "Итоговый массив — 7 × 7, ядро 3 × 3 центрировано на угловом пикселе.";
+
+  fallback.appendChild(first);
+  fallback.appendChild(second);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
