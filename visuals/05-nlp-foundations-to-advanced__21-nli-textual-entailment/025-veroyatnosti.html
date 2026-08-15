@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как читать распределение NLI-модели</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --track: gainsboro;
+      --track-stroke: lightslategray;
+      --entailment: royalblue;
+      --neutral: darkorange;
+      --contradiction: crimson;
+      --selected-ink: white;
+      --guide: steelblue;
+      --sum-background: aliceblue;
+      --error: firebrick;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: black;
+        --ink: whitesmoke;
+        --muted: lightsteelblue;
+        --track: darkslategray;
+        --track-stroke: slategray;
+        --entailment: cornflowerblue;
+        --neutral: goldenrod;
+        --contradiction: lightcoral;
+        --selected-ink: black;
+        --guide: lightsteelblue;
+        --sum-background: darkslategray;
+        --error: lightcoral;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--background);
+    }
+
+    body {
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      color: var(--ink);
+    }
+
+    .diagram {
+      width: 100%;
+      background: var(--background);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      overflow: visible;
+      background: var(--background);
+      font-family: inherit;
+      text-rendering: geometricPrecision;
+      shape-rendering: geometricPrecision;
+    }
+
+    .heading {
+      fill: var(--ink);
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .subtitle {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .category {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .value {
+      fill: var(--ink);
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+      font-weight: bold;
+    }
+
+    .track {
+      fill: var(--track);
+      stroke: var(--track-stroke);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fill {
+      stroke: none;
+    }
+
+    .fill-entailment {
+      fill: var(--entailment);
+    }
+
+    .fill-neutral {
+      fill: var(--neutral);
+    }
+
+    .fill-contradiction {
+      fill: var(--contradiction);
+    }
+
+    .selected {
+      fill: var(--selected-ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sum-panel {
+      fill: var(--sum-background);
+      stroke: var(--guide);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sum-title {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .sum-formula {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .fallback {
+      fill: var(--error);
+      font-size: 16px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <svg
+      id="nli-diagram"
+      viewBox="0 0 820 390"
+      width="820"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+      focusable="false"
+    >
+      <title id="svg-title">Как читать распределение NLI-модели</title>
+      <desc id="svg-description">
+        Три горизонтальные полосы: entailment — 0.97, neutral — 0.02,
+        contradiction — 0.01. Все значения вместе дают 1.00.
+      </desc>
+
+      <!-- Текст заголовка остаётся в статической разметке даже до построения геометрии. -->
+      <text id="diagram-heading" class="heading">
+        Как читать распределение NLI-модели
+      </text>
+      <text id="diagram-subtitle" class="subtitle">
+        Длина полосы показывает, какую долю поддержки получила каждая метка
+      </text>
+
+      <g id="plot" aria-hidden="true"></g>
+    </svg>
+  </main>
+
+  <script>
+    const data = Object.freeze([
+      Object.freeze({
+        originX: 300,
+        originY: 125,
+        scaleX: 400,
+        scaleY: 68,
+        zero: 0,
+        one: 1,
+        decimals: 2,
+        titleX: -0.66,
+        titleY: -1.17,
+        subtitleX: -0.66,
+        subtitleY: -0.70,
+        labelX: -0.06,
+        valueX: 1.05,
+        selectedX: 0.48,
+        barHalf: 0.19,
+        barHeight: 0.38,
+        guideY: 2.61,
+        guideTop: 2.48,
+        guideBottom: 2.74,
+        panelLeft: -0.66,
+        panelRight: 1.22,
+        panelTop: 2.82,
+        panelBottom: 3.72,
+        sumTitleX: 0.28,
+        sumTitleY: 3.09,
+        sumFormulaX: 0.28,
+        sumFormulaY: 3.48,
+        fallbackX: -0.66,
+        fallbackY: 0.18,
+        fallbackDetailY: 0.60,
+        labelPadding: 10,
+        lineWidth: 2
+      }),
+      Object.freeze({
+        label: "Следование",
+        modelLabel: "entailment",
+        score: 0.97,
+        row: 0,
+        fillClass: "fill-entailment",
+        selectedText: "выбранная метка"
+      }),
+      Object.freeze({
+        label: "Нейтрально",
+        modelLabel: "neutral",
+        score: 0.02,
+        row: 1,
+        fillClass: "fill-neutral",
+        selectedText: ""
+      }),
+      Object.freeze({
+        label: "Противоречие",
+        modelLabel: "contradiction",
+        score: 0.01,
+        row: 2,
+        fillClass: "fill-contradiction",
+        selectedText: ""
+      })
+    ]);
+
+    const [layout, ...rows] = data;
+    const origin = Object.freeze({ x: layout.originX, y: layout.originY });
+    const scale = Object.freeze({ x: layout.scaleX, y: layout.scaleY });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    (() => {
+      const namespace = "http://www.w3.org/2000/svg";
+      const plot = document.getElementById("plot");
+      const heading = document.getElementById("diagram-heading");
+      const subtitle = document.getElementById("diagram-subtitle");
+
+      /*
+       * Вся геометрия ниже задаётся в координатах данных.
+       * В пиксельные координаты её переводят только sx и sy.
+       */
+      const setAttributes = (element, attributes) => {
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        return element;
+      };
+
+      const makeElement = (tag, attributes, text) => {
+        const element = document.createElementNS(namespace, tag);
+        setAttributes(element, attributes);
+        if (text) {
+          element.textContent = text;
+        }
+        return element;
+      };
+
+      const makeText = (className, x, y, anchor, text) => {
+        return makeElement(
+          "text",
+          {
+            class: className,
+            x: sx(x),
+            y: sy(y),
+            "text-anchor": anchor,
+            "dominant-baseline": "middle"
+          },
+          text
+        );
+      };
+
+      const makeLine = (className, xStart, yStart, xEnd, yEnd) => {
+        return makeElement("line", {
+          class: className,
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd)
+        });
+      };
+
+      const makeRect = (className, left, top, right, bottom) => {
+        return makeElement("rect", {
+          class: className,
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top)
+        });
+      };
+
+      const scoreText = score => score.toFixed(layout.decimals);
+
+      const placeStaticText = (element, x, y) => {
+        setAttributes(element, {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": "start",
+          "dominant-baseline": "middle"
+        });
+      };
+
+      const buildRow = row => {
+        const group = makeElement("g", {
+          class: "distribution-row"
+        });
+
+        const top = row.row - layout.barHalf;
+        const bottom = top + layout.barHeight;
+        const categoryText = `${row.label} (${row.modelLabel})`;
+
+        group.append(
+          makeText(
+            "category",
+            layout.labelX,
+            row.row,
+            "end",
+            categoryText
+          )
+        );
+
+        group.append(
+          makeRect(
+            "track",
+            layout.zero,
+            top,
+            layout.one,
+            bottom
+          )
+        );
+
+        group.append(
+          makeRect(
+            `fill ${row.fillClass}`,
+            layout.zero,
+            top,
+            row.score,
+            bottom
+          )
+        );
+
+        group.append(
+          makeText(
+            "value",
+            layout.valueX,
+            row.row,
+            "start",
+            scoreText(row.score)
+          )
+        );
+
+        if (row.selectedText) {
+          group.append(
+            makeText(
+              "selected",
+              layout.selectedX,
+              row.row,
+              "middle",
+              row.selectedText
+            )
+          );
+        }
+
+        return group;
+      };
+
+      const buildGuide = () => {
+        const group = makeElement("g", {
+          class: "sum-guide"
+        });
+
+        group.append(
+          makeLine(
+            "guide",
+            layout.zero,
+            layout.guideY,
+            layout.one,
+            layout.guideY
+          )
+        );
+
+        group.append(
+          makeLine(
+            "guide",
+            layout.zero,
+            layout.guideTop,
+            layout.zero,
+            layout.guideBottom
+          )
+        );
+
+        group.append(
+          makeLine(
+            "guide",
+            layout.one,
+            layout.guideTop,
+            layout.one,
+            layout.guideBottom
+          )
+        );
+
+        return group;
+      };
+
+      const buildSumPanel = () => {
+        const group = makeElement("g", {
+          class: "sum"
+        });
+
+        const total = rows.reduce(
+          (sum, row) => sum + row.score,
+          layout.zero
+        );
+
+        const formula = `${rows
+          .map(row => scoreText(row.score))
+          .join(" + ")} = ${scoreText(total)}`;
+
+        group.append(
+          makeRect(
+            "sum-panel",
+            layout.panelLeft,
+            layout.panelTop,
+            layout.panelRight,
+            layout.panelBottom
+          )
+        );
+
+        group.append(
+          makeText(
+            "sum-title",
+            layout.sumTitleX,
+            layout.sumTitleY,
+            "middle",
+            "Общая сумма распределения"
+          )
+        );
+
+        group.append(
+          makeText(
+            "sum-formula",
+            layout.sumFormulaX,
+            layout.sumFormulaY,
+            "middle",
+            formula
+          )
+        );
+
+        return group;
+      };
+
+      const showFallback = () => {
+        plot.replaceChildren();
+
+        const firstLine = makeText(
+          "fallback",
+          layout.fallbackX,
+          layout.fallbackY,
+          "start",
+          "Схема должна была показать три полосы распределения:"
+        );
+
+        const secondLine = makeText(
+          "fallback",
+          layout.fallbackX,
+          layout.fallbackDetailY,
+          "start",
+          "entailment 0.97, neutral 0.02, contradiction 0.01; сумма 1.00."
+        );
+
+        plot.append(firstLine, secondLine);
+      };
+
+      try {
+        placeStaticText(heading, layout.titleX, layout.titleY);
+        placeStaticText(subtitle, layout.subtitleX, layout.subtitleY);
+
+        const fragment = document.createDocumentFragment();
+
+        rows.forEach(row => {
+          fragment.append(buildRow(row));
+        });
+
+        fragment.append(buildGuide());
+        fragment.append(buildSumPanel());
+        plot.replaceChildren(fragment);
+      } catch (error) {
+        showFallback();
+      }
+    })();
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

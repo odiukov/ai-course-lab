@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Четыре VAD при одинаковых 5% FPR</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f24;
+    --muted: #5b6672;
+    --axis: #8a94a0;
+    --grid: #e3e7ec;
+    --bar1: #b6bec8;
+    --bar2: #3f8f5c;
+    --bar3: #2f6fb8;
+    --bar4: #8a5cc0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181d;
+      --fg: #e8edf2;
+      --muted: #9aa6b3;
+      --axis: #6d7885;
+      --grid: #262d35;
+      --bar1: #6a737e;
+      --bar2: #57b47c;
+      --bar3: #5b9ede;
+      --bar4: #a883d8;
+    }
+  }
+  html, body { margin: 0; background: var(--bg); }
+  .wrap { background: var(--bg); color: var(--fg); font: 400 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 8px 0; }
+  h2 { margin: 0 0 4px; padding: 0 12px; font-size: 15px; font-weight: 600; }
+  p.sub { margin: 0 0 6px; padding: 0 12px; font-size: 12px; color: var(--muted); }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; background: var(--bg); }
+  text { fill: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .muted { fill: var(--muted); }
+  .fail { padding: 10px 12px; font-size: 13px; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Четыре VAD на одной таблице — при одинаковых 5% FPR</h2>
+  <p class="sub">Столбик — доля пойманной речи (TPR). Подпись справа — задержка.</p>
+  <div id="slot"></div>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    var DATA = [
+      { key: 'WebRTC VAD',  tpr: 50.0, lat: '30 мс',  lic: 'BSD',           c: 'var(--bar1)' },
+      { key: 'Silero VAD',  tpr: 87.7, lat: '~1 мс',  lic: 'MIT',           c: 'var(--bar2)' },
+      { key: 'Cobra VAD',   tpr: 98.9, lat: '~1 мс',  lic: 'коммерческая',  c: 'var(--bar3)' },
+      { key: 'pyannote',    tpr: 95.0, lat: '~10 мс', lic: 'почти MIT',     c: 'var(--bar4)' }
+    ];
+
+    var W = 760, H = 470;
+    var PAD = 6, LW = 1.5, FS = 13, FSS = 11;
+
+    // Единственный перевод координат: данные (x = TPR %, y = индекс строки) -> пиксели.
+    var origin = { x: 210, y: 92 };
+    var scale = { x: 3.9, y: 74 };
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y + y * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size) {
+      var t = el('text', { x: x, y: y, 'text-anchor': anchor, 'font-size': size || FS });
+      if (cls) t.setAttribute('class', cls);
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + W + ' ' + H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img',
+      'aria-label': 'Сравнение четырёх VAD по TPR при 5% FPR'
+    });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: H, fill: 'var(--bg)' }));
+
+    var yTop = sy(-0.62), yBot = sy(DATA.length - 1 + 0.62);
+
+    // Сетка и засечки шкалы TPR
+    [0, 25, 50, 75, 100].forEach(function (v) {
+      svg.appendChild(el('line', {
+        x1: sx(v), y1: yTop, x2: sx(v), y2: yBot,
+        stroke: 'var(--grid)', 'stroke-width': LW
+      }));
+      svg.appendChild(el('line', {
+        x1: sx(v), y1: yBot, x2: sx(v), y2: sy(DATA.length - 1 + 0.78),
+        stroke: 'var(--axis)', 'stroke-width': LW
+      }));
+      svg.appendChild(txt(sx(v), sy(DATA.length - 1 + 0.78) + PAD + FSS, v + '%', 'middle', 'muted', FSS));
+    });
+
+    // Ось: нулевая линия TPR
+    svg.appendChild(el('line', {
+      x1: sx(0), y1: yTop, x2: sx(0), y2: yBot,
+      stroke: 'var(--axis)', 'stroke-width': LW * 1.6
+    }));
+
+    // Полосы
+    DATA.forEach(function (d, i) {
+      var yc = sy(i), h = sy(0.3) - sy(-0.3);
+      svg.appendChild(el('rect', {
+        x: sx(0), y: sy(i - 0.3), width: sx(d.tpr) - sx(0), height: h,
+        fill: d.c, rx: 3
+      }));
+      // Название — слева от оси
+      svg.appendChild(txt(sx(0) - PAD * 1.6, yc - 1, d.key, 'end', null, FS));
+      // Лицензия — под названием, чтобы не спорить с ним за строку
+      svg.appendChild(txt(sx(0) - PAD * 1.6, yc + FSS + 3, d.lic, 'end', 'muted', FSS));
+      // TPR — внутри полосы у её конца
+      svg.appendChild(el('text', (function () { return {}; })()));
+      var v = txt(sx(d.tpr) - PAD, yc + 4, d.tpr.toFixed(1) + '%', 'end', null, FS);
+      v.setAttribute('fill', 'var(--bg)');
+      v.setAttribute('font-weight', '600');
+      svg.appendChild(v);
+      // Задержка — справа от полосы, у свободного края холста
+      svg.appendChild(txt(sx(100) + PAD * 2, yc + 4, 'задержка ' + d.lat, 'start', 'muted', FSS));
+    });
+
+    // Общее условие сравнения — над первой строкой, у хвоста шкалы
+    svg.appendChild(txt(sx(0), sy(-0.62) - PAD * 2, 'общее условие: 5% FPR у всех четырёх', 'start', 'muted', FSS));
+
+    // Подпись шкалы
+    svg.appendChild(txt(sx(50), sy(DATA.length - 1 + 0.78) + PAD + FSS * 2.4,
+      'TPR — доля пойманной речи', 'middle', 'muted', FSS));
+
+    slot.appendChild(svg);
+  } catch (e) {
+    var p = document.createElement('div');
+    p.className = 'fail';
+    p.textContent = 'Схема должна показывать: при одинаковых 5% FPR WebRTC VAD ловит 50.0% речи '
+      + '(задержка 30 мс, BSD), Silero VAD — 87.7% (~1 мс, MIT), Cobra VAD — 98.9% (~1 мс, коммерческая), '
+      + 'pyannote segmentation — 95% (~10 мс, почти MIT).';
+    slot.appendChild(p);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

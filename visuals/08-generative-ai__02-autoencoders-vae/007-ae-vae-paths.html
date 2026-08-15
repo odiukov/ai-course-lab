@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сравниваем маршруты данных в AE и VAE</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-alt: #f2f5ff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #667085;
+    --ae: #3167d5;
+    --ae-fill: #eaf1ff;
+    --vae: #7b4bc4;
+    --vae-fill: #f2eaff;
+    --noise: #b55b22;
+    --noise-fill: #fff0e5;
+    --cloud: #e9dcff;
+    --point: #6f3fba;
+    --border: #cbd3e1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111521;
+      --panel: #181e2c;
+      --panel-alt: #1c2333;
+      --ink: #eef2fb;
+      --muted: #b7c0d2;
+      --line: #9aa6bb;
+      --ae: #75a3ff;
+      --ae-fill: #202f4d;
+      --vae: #c49aff;
+      --vae-fill: #34264a;
+      --noise: #ffad76;
+      --noise-fill: #482d20;
+      --cloud: #493664;
+      --point: #d0adff;
+      --border: #48536a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  body {
+    display: flex;
+    justify-content: center;
+  }
+
+  figure {
+    width: min(100%, 1040px);
+    margin: 0;
+    background: var(--page);
+  }
+
+  h2 {
+    margin: 0;
+    padding: 16px 18px 10px;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 2;
+  }
+
+  .panel.vae-panel { fill: var(--panel-alt); }
+
+  .box {
+    stroke-width: 2;
+  }
+
+  .ae-box {
+    fill: var(--ae-fill);
+    stroke: var(--ae);
+  }
+
+  .vae-box {
+    fill: var(--vae-fill);
+    stroke: var(--vae);
+  }
+
+  .noise-box {
+    fill: var(--noise-fill);
+    stroke: var(--noise);
+  }
+
+  .arrow-ae {
+    fill: none;
+    stroke: var(--ae);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .arrow-vae {
+    fill: none;
+    stroke: var(--vae);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .arrow-noise {
+    fill: none;
+    stroke: var(--noise);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .head-ae { fill: var(--ae); }
+  .head-vae { fill: var(--vae); }
+  .head-noise { fill: var(--noise); }
+
+  .lane-title {
+    fill: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .lane-note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .main-label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .sub-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .arrow-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .formula {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .cloud {
+    fill: var(--cloud);
+    stroke: var(--vae);
+    stroke-width: 2;
+  }
+
+  .sample-point {
+    fill: var(--point);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Сравниваем маршруты данных в AE и VAE</h2>
+  <svg id="diagram" viewBox="0 0 1040 445"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="AE передаёт декодировщику фиксированный двумерный код. VAE выдаёт двумерные μ и log σ², добавляет случайный шум ε и получает двумерный код z.">
+  </svg>
+</figure>
+
+<script>
+const DATA = {
+  canvas: [1040, 445],
+  radius: 12,
+  panels: [
+    { rect: [20, 18, 1000, 150], className: "panel" },
+    { rect: [20, 185, 1000, 245], className: "panel vae-panel" }
+  ],
+  headings: [
+    { point: [44, 48], text: "AE", className: "lane-title", anchor: "start" },
+    { point: [44, 70], text: "один точный код", className: "lane-note", anchor: "start" },
+    { point: [44, 218], text: "VAE", className: "lane-title", anchor: "start" },
+    { point: [44, 240], text: "параметры облака и случайный код", className: "lane-note", anchor: "start" }
+  ],
+  boxes: [
+    {
+      rect: [150, 55, 145, 78], className: "box ae-box",
+      lines: [
+        { point: [222, 84], text: "x", className: "main-label" },
+        { point: [222, 110], text: "8 чисел", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [365, 55, 150, 78], className: "box ae-box",
+      lines: [
+        { point: [440, 89], text: "Кодировщик", className: "main-label" },
+        { point: [440, 112], text: "encoder", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [585, 55, 165, 78], className: "box ae-box",
+      lines: [
+        { point: [667, 84], text: "z = (z₁, z₂)", className: "formula" },
+        { point: [667, 110], text: "2 числа · одна точка", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [820, 55, 170, 78], className: "box ae-box",
+      lines: [
+        { point: [905, 89], text: "Декодировщик", className: "main-label" },
+        { point: [905, 112], text: "decoder", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [112, 280, 125, 76], className: "box vae-box",
+      lines: [
+        { point: [174, 308], text: "x", className: "main-label" },
+        { point: [174, 334], text: "8 чисел", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [282, 280, 135, 76], className: "box vae-box",
+      lines: [
+        { point: [349, 311], text: "Кодировщик", className: "main-label" },
+        { point: [349, 334], text: "encoder", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [470, 252, 160, 62], className: "box vae-box",
+      lines: [
+        { point: [550, 276], text: "μ = (μ₁, μ₂)", className: "formula" },
+        { point: [550, 298], text: "2 числа", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [470, 340, 160, 62], className: "box vae-box",
+      lines: [
+        { point: [550, 364], text: "log σ²", className: "formula" },
+        { point: [550, 386], text: "2 числа", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [683, 210, 145, 48], className: "box noise-box",
+      lines: [
+        { point: [755, 239], text: "ε ~ N(0, I)", className: "formula" }
+      ]
+    },
+    {
+      rect: [680, 285, 165, 86], className: "box vae-box",
+      lines: [
+        { point: [762, 313], text: "z = μ + σ·ε", className: "formula" },
+        { point: [762, 347], text: "z: 2 числа", className: "sub-label" }
+      ]
+    },
+    {
+      rect: [885, 285, 125, 86], className: "box vae-box",
+      lines: [
+        { point: [947, 318], text: "Декоди-", className: "main-label" },
+        { point: [947, 339], text: "ровщик", className: "main-label" },
+        { point: [947, 359], text: "decoder", className: "sub-label" }
+      ]
+    }
+  ],
+  arrows: [
+    {
+      points: [[295, 94], [365, 94]],
+      head: [[365, 94], [353, 87], [353, 101]],
+      lineClass: "arrow-ae", headClass: "head-ae"
+    },
+    {
+      points: [[515, 94], [585, 94]],
+      head: [[585, 94], [573, 87], [573, 101]],
+      lineClass: "arrow-ae", headClass: "head-ae"
+    },
+    {
+      points: [[750, 94], [820, 94]],
+      head: [[820, 94], [808, 87], [808, 101]],
+      lineClass: "arrow-ae", headClass: "head-ae"
+    },
+    {
+      points: [[237, 318], [282, 318]],
+      head: [[282, 318], [270, 311], [270, 325]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    },
+    {
+      points: [[417, 318], [444, 318], [444, 283], [470, 283]],
+      head: [[470, 283], [458, 276], [458, 290]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    },
+    {
+      points: [[417, 318], [444, 318], [444, 371], [470, 371]],
+      head: [[470, 371], [458, 364], [458, 378]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    },
+    {
+      points: [[630, 283], [654, 283], [654, 306], [680, 306]],
+      head: [[680, 306], [668, 299], [668, 313]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    },
+    {
+      points: [[630, 371], [654, 371], [654, 350], [680, 350]],
+      head: [[680, 350], [668, 343], [668, 357]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    },
+    {
+      points: [[755, 258], [755, 285]],
+      head: [[755, 285], [748, 273], [762, 273]],
+      lineClass: "arrow-noise", headClass: "head-noise"
+    },
+    {
+      points: [[845, 328], [885, 328]],
+      head: [[885, 328], [873, 321], [873, 335]],
+      lineClass: "arrow-vae", headClass: "head-vae"
+    }
+  ],
+  arrowLabels: [
+    {
+      point: [550, 142], text: "тот же x → тот же z",
+      className: "arrow-label", anchor: "middle", side: "below"
+    },
+    {
+      point: [755, 200], text: "случайный шум",
+      className: "arrow-label", anchor: "middle", side: "above"
+    }
+  ],
+  cloud: {
+    ellipse: [762, 328, 57, 26],
+    point: [780, 321, 7]
+  },
+  footer: {
+    point: [470, 417],
+    text: "μ и log σ² задают облако; ε выбирает в нём одну точку z",
+    className: "arrow-label",
+    anchor: "start"
+  },
+  fallback: [44, 90]
+};
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+const LABEL_PAD = 8;
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs, parent = svg) => {
+    const element = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    parent.appendChild(element);
+    return element;
+  };
+
+  const addText = item => {
+    const y = item.side === "above"
+      ? sy(item.point[1]) - LABEL_PAD
+      : item.side === "below"
+        ? sy(item.point[1]) + LABEL_PAD
+        : sy(item.point[1]);
+
+    const text = make("text", {
+      x: sx(item.point[0]),
+      y,
+      class: item.className,
+      "text-anchor": item.anchor || "middle",
+      "dominant-baseline": "middle"
+    });
+    text.textContent = item.text;
+    return text;
+  };
+
+  make("rect", {
+    x: sx(origin.x),
+    y: sy(origin.y),
+    width: sx(DATA.canvas[0]) - sx(origin.x),
+    height: sy(DATA.canvas[1]) - sy(origin.y),
+    fill: "var(--page)"
+  });
+
+  DATA.panels.forEach(item => {
+    make("rect", {
+      x: sx(item.rect[0]),
+      y: sy(item.rect[1]),
+      width: sx(item.rect[2]) - sx(origin.x),
+      height: sy(item.rect[3]) - sy(origin.y),
+      rx: sx(DATA.radius) - sx(origin.x),
+      ry: sy(DATA.radius) - sy(origin.y),
+      class: item.className
+    });
+  });
+
+  DATA.headings.forEach(addText);
+
+  DATA.boxes.forEach(item => {
+    make("rect", {
+      x: sx(item.rect[0]),
+      y: sy(item.rect[1]),
+      width: sx(item.rect[2]) - sx(origin.x),
+      height: sy(item.rect[3]) - sy(origin.y),
+      rx: sx(DATA.radius) - sx(origin.x),
+      ry: sy(DATA.radius) - sy(origin.y),
+      class: item.className
+    });
+    item.lines.forEach(addText);
+  });
+
+  DATA.arrows.forEach(item => {
+    make("polyline", {
+      points: item.points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: item.lineClass
+    });
+    make("polygon", {
+      points: item.head.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: item.headClass
+    });
+  });
+
+  make("ellipse", {
+    cx: sx(DATA.cloud.ellipse[0]),
+    cy: sy(DATA.cloud.ellipse[1]),
+    rx: sx(DATA.cloud.ellipse[2]) - sx(origin.x),
+    ry: sy(DATA.cloud.ellipse[3]) - sy(origin.y),
+    class: "cloud"
+  });
+
+  make("circle", {
+    cx: sx(DATA.cloud.point[0]),
+    cy: sy(DATA.cloud.point[1]),
+    r: sx(DATA.cloud.point[2]) - sx(origin.x),
+    class: "sample-point"
+  });
+
+  DATA.arrowLabels.forEach(addText);
+  addText(DATA.footer);
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  fallback.setAttribute("x", sx(DATA.fallback[0]));
+  fallback.setAttribute("y", sy(DATA.fallback[1]));
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = "Схема должна показать: AE передаёт один точный код z, а VAE получает μ и log σ², добавляет ε и формирует z.";
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

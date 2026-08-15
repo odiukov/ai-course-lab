@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прямой и обратный маршруты CycleGAN</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: ivory;
+  --panel: white;
+  --ink: midnightblue;
+  --muted: slategray;
+  --line: steelblue;
+  --soft-line: lightsteelblue;
+  --x-fill: aliceblue;
+  --x-accent: royalblue;
+  --y-fill: floralwhite;
+  --y-accent: darkorange;
+  --node: lavender;
+  --horse: sienna;
+  --zebra: whitesmoke;
+  --stripe: dimgray;
+  --success: seagreen;
+  --shadow: gainsboro;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111827;
+    --panel: #182235;
+    --ink: #eef4ff;
+    --muted: #b8c3d4;
+    --line: #80bfff;
+    --soft-line: #526681;
+    --x-fill: #172b4d;
+    --x-accent: #77aaff;
+    --y-fill: #3b2b18;
+    --y-accent: #ffb55e;
+    --node: #293653;
+    --horse: #d79a6b;
+    --zebra: #edf1f5;
+    --stripe: #394456;
+    --success: #78d6a4;
+    --shadow: #0b1020;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.figure {
+  width: 100%;
+  max-width: 1120px;
+  margin: auto;
+  background: var(--bg);
+  border: 1px solid var(--soft-line);
+}
+.figure-title {
+  padding: 14px 18px 8px;
+  font-size: 22px;
+  font-weight: bold;
+}
+.figure-subtitle {
+  padding: 0 18px 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 450px;
+  background: var(--bg);
+}
+.route-line {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cycle-line {
+  fill: none;
+  stroke: var(--soft-line);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.arrow-head { fill: var(--line); }
+.card {
+  fill: var(--panel);
+  stroke: var(--soft-line);
+  stroke-width: 2;
+}
+.card-x { fill: var(--x-fill); }
+.card-y { fill: var(--y-fill); }
+.header-x { fill: var(--x-accent); }
+.header-y { fill: var(--y-accent); }
+.node {
+  fill: var(--node);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.node-text {
+  fill: var(--ink);
+  font-size: 19px;
+  font-weight: bold;
+}
+.header-text {
+  fill: white;
+  font-size: 13px;
+  font-weight: bold;
+}
+.card-text {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: bold;
+}
+.note-text {
+  fill: var(--muted);
+  font-size: 13px;
+}
+.formula {
+  fill: var(--ink);
+  font-size: 17px;
+  font-weight: bold;
+}
+.formula-end { fill: var(--success); }
+.legend-box {
+  fill: var(--panel);
+  stroke: var(--soft-line);
+  stroke-width: 1;
+}
+.legend-main {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: bold;
+}
+.legend-note {
+  fill: var(--muted);
+  font-size: 13px;
+}
+.horse-fill { fill: var(--horse); }
+.zebra-fill {
+  fill: var(--zebra);
+  stroke: var(--stripe);
+  stroke-width: 1;
+}
+.animal-line {
+  fill: none;
+  stroke: var(--horse);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.zebra-line {
+  fill: none;
+  stroke: var(--stripe);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.error {
+  padding: 18px;
+  color: var(--ink);
+  font-size: 16px;
+}
+</style>
+</head>
+<body>
+<figure class="figure">
+  <figcaption>
+    <div class="figure-title">Прямой и обратный маршруты CycleGAN</div>
+    <div class="figure-subtitle">Выход одного генератора становится входом другого, и изображение возвращается в исходную область.</div>
+  </figcaption>
+  <svg id="diagram" viewBox="0 0 1000 430" width="1000" height="430"
+       role="img" aria-labelledby="svg-title svg-desc"
+       preserveAspectRatio="xMidYMid meet">
+    <title id="svg-title">Два замкнутых маршрута CycleGAN</title>
+    <desc id="svg-desc">Маршрут x проходит через G и F, а маршрут y — через F и G.</desc>
+  </svg>
+  <div id="error" class="error" hidden></div>
+</figure>
+
+<script>
+const data = {
+  zero: 0,
+  frame: { left: 3, right: 157, top: 2, bottom: 76 },
+  legend: { x: 20, y: 2, w: 120, h: 8, r: 2 },
+  legendG: { x: 48, y: 5.2 },
+  legendF: { x: 91, y: 5.2 },
+  legendNote: { x: 80, y: 8.2 },
+  card: { w: 34, h: 20, r: 2, header: 5 },
+  columns: { first: 4, second: 63, third: 122 },
+  rows: { top: 14, bottom: 46 },
+  centers: { first: 21, second: 80, third: 139 },
+  generators: { first: 50.5, second: 109.5, r: 4.4 },
+  routeY: { top: 24, bottom: 56 },
+  arrow: { gap: 1.1, back: 2.2, half: 1.25 },
+  cycle: {
+    topY: 39.5, bottomY: 71.5,
+    startX: 21, endX: 139,
+    lift: 2.5, labelTopY: 42.5, labelBottomY: 74.5
+  },
+  text: {
+    cardCenterOffset: 15.4,
+    noteOffset: 18.4,
+    headerOffset: 3.3
+  },
+  animal: {
+    body: { x: 15.8, y: 11.2, rx: 6.2, ry: 2.8 },
+    neck: [
+      { x: 19.2, y: 10.5 }, { x: 21.7, y: 6.6 },
+      { x: 23.1, y: 7.1 }, { x: 21.6, y: 12.1 }
+    ],
+    head: { x: 23.2, y: 6.8, rx: 2.2, ry: 1.5 },
+    ear: [
+      { x: 22.2, y: 5.8 }, { x: 22.5, y: 4.5 },
+      { x: 23.3, y: 5.8 }
+    ],
+    legs: [
+      { x1: 12.8, y1: 13, x2: 12.4, y2: 17 },
+      { x1: 15.1, y1: 13.2, x2: 15.4, y2: 17 },
+      { x1: 18.7, y1: 13.1, x2: 18.4, y2: 17 },
+      { x1: 20.6, y1: 12.8, x2: 21, y2: 17 }
+    ],
+    tail: { x1: 9.8, y1: 10.8, x2: 7.8, y2: 14.5 },
+    stripes: [
+      { x1: 11.8, y1: 9, x2: 13.4, y2: 13.1 },
+      { x1: 14.5, y1: 8.5, x2: 16.1, y2: 13.5 },
+      { x1: 17.2, y1: 8.5, x2: 18.7, y2: 13.1 },
+      { x1: 20.2, y1: 8.4, x2: 21.2, y2: 11.4 },
+      { x1: 21.2, y1: 7.8, x2: 23.2, y2: 9 }
+    ]
+  },
+  cards: [
+    { x: 4, y: 14, domain: "X", title: "Область X · x", kind: "horse", caption: "настоящая лошадь" },
+    { x: 63, y: 14, domain: "Y", title: "Область Y · G(x)", kind: "zebra", caption: "искусственная зебра" },
+    { x: 122, y: 14, domain: "X", title: "Область X · F(G(x))", kind: "horse", caption: "возвращение к x" },
+    { x: 4, y: 46, domain: "Y", title: "Область Y · y", kind: "zebra", caption: "настоящая зебра" },
+    { x: 63, y: 46, domain: "X", title: "Область X · F(y)", kind: "horse", caption: "искусственная лошадь" },
+    { x: 122, y: 46, domain: "Y", title: "Область Y · G(F(y))", kind: "zebra", caption: "возвращение к y" }
+  ],
+  nodes: [
+    { x: 50.5, y: 24, label: "G", note: "X → Y", noteY: 18 },
+    { x: 109.5, y: 24, label: "F", note: "Y → X", noteY: 18 },
+    { x: 50.5, y: 56, label: "F", note: "Y → X", noteY: 50 },
+    { x: 109.5, y: 56, label: "G", note: "X → Y", noteY: 50 }
+  ],
+  segments: [
+    { x1: 38, y1: 24, x2: 46.1, y2: 24 },
+    { x1: 54.9, y1: 24, x2: 63, y2: 24 },
+    { x1: 97, y1: 24, x2: 105.1, y2: 24 },
+    { x1: 113.9, y1: 24, x2: 122, y2: 24 },
+    { x1: 38, y1: 56, x2: 46.1, y2: 56 },
+    { x1: 54.9, y1: 56, x2: 63, y2: 56 },
+    { x1: 97, y1: 56, x2: 105.1, y2: 56 },
+    { x1: 113.9, y1: 56, x2: 122, y2: 56 }
+  ]
+};
+const origin = { x: 18, y: 9 };
+const scale = { x: 6.15, y: 5.45 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function el(name, attrs, parent = svg) {
+    const node = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    parent.appendChild(node);
+    return node;
+  }
+
+  function text(x, y, value, className, anchor = "middle", parent = svg) {
+    const node = el("text", {
+      x: sx(x), y: sy(y), class: className, "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, parent);
+    node.textContent = value;
+    return node;
+  }
+
+  function rect(x, y, w, h, r, className, parent = svg) {
+    return el("rect", {
+      x: sx(x), y: sy(y),
+      width: sx(x + w) - sx(x), height: sy(y + h) - sy(y),
+      rx: sx(x + r) - sx(x), ry: sy(y + r) - sy(y),
+      class: className
+    }, parent);
+  }
+
+  function line(x1, y1, x2, y2, className, parent = svg) {
+    return el("line", {
+      x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: className
+    }, parent);
+  }
+
+  function polygon(points, className, parent = svg) {
+    return el("polygon", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: className
+    }, parent);
+  }
+
+  function ellipse(cx, cy, rx, ry, className, parent = svg) {
+    return el("ellipse", {
+      cx: sx(cx), cy: sy(cy),
+      rx: sx(cx + rx) - sx(cx), ry: sy(cy + ry) - sy(cy),
+      class: className
+    }, parent);
+  }
+
+  function arrow(segment) {
+    line(segment.x1, segment.y1, segment.x2, segment.y2, "route-line");
+    polygon([
+      { x: segment.x2, y: segment.y2 },
+      { x: segment.x2 - data.arrow.back, y: segment.y2 - data.arrow.half },
+      { x: segment.x2 - data.arrow.back, y: segment.y2 + data.arrow.half }
+    ], "arrow-head");
+  }
+
+  function animal(card, kind, parent) {
+    const a = data.animal;
+    const ox = card.x;
+    const oy = card.y + data.card.header;
+    const fillClass = kind === "zebra" ? "zebra-fill" : "horse-fill";
+    const lineClass = kind === "zebra" ? "zebra-line" : "animal-line";
+
+    ellipse(ox + a.body.x, oy + a.body.y, a.body.rx, a.body.ry, fillClass, parent);
+    polygon(a.neck.map(p => ({ x: ox + p.x, y: oy + p.y })), fillClass, parent);
+    ellipse(ox + a.head.x, oy + a.head.y, a.head.rx, a.head.ry, fillClass, parent);
+    polygon(a.ear.map(p => ({ x: ox + p.x, y: oy + p.y })), fillClass, parent);
+
+    for (const leg of a.legs) {
+      line(ox + leg.x1, oy + leg.y1, ox + leg.x2, oy + leg.y2, lineClass, parent);
+    }
+    line(ox + a.tail.x1, oy + a.tail.y1, ox + a.tail.x2, oy + a.tail.y2, lineClass, parent);
+
+    if (kind === "zebra") {
+      for (const stripe of a.stripes) {
+        line(ox + stripe.x1, oy + stripe.y1, ox + stripe.x2, oy + stripe.y2, "zebra-line", parent);
+      }
+    }
+  }
+
+  rect(data.legend.x, data.legend.y, data.legend.w, data.legend.h,
+       data.legend.r, "legend-box");
+  text(data.legendG.x, data.legendG.y, "G: X → Y", "legend-main");
+  text(data.legendF.x, data.legendF.y, "F: Y → X", "legend-main");
+  text(data.legendNote.x, data.legendNote.y,
+       "два отдельных обучаемых генератора", "legend-note");
+
+  for (const card of data.cards) {
+    const group = el("g", {});
+    const domainClass = card.domain === "X" ? "card card-x" : "card card-y";
+    const headerClass = card.domain === "X" ? "header-x" : "header-y";
+    rect(card.x, card.y, data.card.w, data.card.h, data.card.r, domainClass, group);
+    rect(card.x, card.y, data.card.w, data.card.header, data.card.r, headerClass, group);
+    text(card.x + data.card.w / 2, card.y + data.text.headerOffset,
+         card.title, "header-text", "middle", group);
+    animal(card, card.kind, group);
+    text(card.x + data.card.w / 2, card.y + data.text.noteOffset,
+         card.caption, "note-text", "middle", group);
+  }
+
+  for (const segment of data.segments) arrow(segment);
+
+  for (const node of data.nodes) {
+    ellipse(node.x, node.y, data.generators.r, data.generators.r, "node");
+    text(node.x, node.y, node.label, "node-text");
+    text(node.x, node.noteY, node.note, "note-text");
+  }
+
+  const topPath = [
+    `M ${sx(data.cycle.endX)} ${sy(data.cycle.topY)}`,
+    `C ${sx(data.cycle.endX)} ${sy(data.cycle.topY + data.cycle.lift)}`,
+    `${sx(data.cycle.startX)} ${sy(data.cycle.topY + data.cycle.lift)}`,
+    `${sx(data.cycle.startX)} ${sy(data.cycle.topY)}`
+  ].join(" ");
+  el("path", { d: topPath, class: "cycle-line" });
+  polygon([
+    { x: data.cycle.startX, y: data.cycle.topY },
+    { x: data.cycle.startX - data.arrow.half, y: data.cycle.topY + data.arrow.back },
+    { x: data.cycle.startX + data.arrow.half, y: data.cycle.topY + data.arrow.back }
+  ], "arrow-head");
+  text(data.cycle.startX + (data.cycle.endX - data.cycle.startX) / 2,
+       data.cycle.labelTopY, "F(G(x)) ≈ x", "formula formula-end");
+
+  const bottomPath = [
+    `M ${sx(data.cycle.endX)} ${sy(data.cycle.bottomY)}`,
+    `C ${sx(data.cycle.endX)} ${sy(data.cycle.bottomY + data.cycle.lift)}`,
+    `${sx(data.cycle.startX)} ${sy(data.cycle.bottomY + data.cycle.lift)}`,
+    `${sx(data.cycle.startX)} ${sy(data.cycle.bottomY)}`
+  ].join(" ");
+  el("path", { d: bottomPath, class: "cycle-line" });
+  polygon([
+    { x: data.cycle.startX, y: data.cycle.bottomY },
+    { x: data.cycle.startX - data.arrow.half, y: data.cycle.bottomY + data.arrow.back },
+    { x: data.cycle.startX + data.arrow.half, y: data.cycle.bottomY + data.arrow.back }
+  ], "arrow-head");
+  text(data.cycle.startX + (data.cycle.endX - data.cycle.startX) / 2,
+       data.cycle.labelBottomY, "G(F(y)) ≈ y", "formula formula-end");
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("error");
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать два маршрута: x → G(x) → F(G(x)) ≈ x и y → F(y) → G(F(y)) ≈ y.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

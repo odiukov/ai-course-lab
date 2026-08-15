@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Маршрут z → w → изображение</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-strong: #eef0ff;
+    --text: #202434;
+    --muted: #5d6478;
+    --line: #687086;
+    --style: #6f57d9;
+    --style-soft: #e9e5ff;
+    --noise: #138896;
+    --noise-soft: #dff5f5;
+    --result: #f1d9b9;
+    --result-dark: #704d42;
+    --shadow: #c6cad7;
+    --error: #a53333;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151722;
+      --panel: #202330;
+      --panel-strong: #292642;
+      --text: #f1f2f7;
+      --muted: #b5bbca;
+      --line: #aab1c2;
+      --style: #b19cff;
+      --style-soft: #342e59;
+      --noise: #62d3d9;
+      --noise-soft: #183e43;
+      --result: #8a624e;
+      --result-dark: #f1cfb8;
+      --shadow: #343847;
+      --error: #ff9898;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  figcaption {
+    padding: 10px 16px 4px;
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 0.01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-width: 1200px;
+    height: auto;
+    max-height: 450px;
+    background: var(--bg);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+  }
+
+  .mapping {
+    fill: var(--style-soft);
+    stroke: var(--style);
+  }
+
+  .style-node {
+    fill: var(--style);
+    stroke: var(--style);
+  }
+
+  .constant,
+  .synthesis {
+    fill: var(--panel);
+    stroke: var(--line);
+  }
+
+  .noise-node {
+    fill: var(--noise-soft);
+    stroke: var(--noise);
+  }
+
+  .output {
+    fill: var(--result);
+    stroke: var(--line);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--line);
+  }
+
+  .style-line {
+    fill: none;
+    stroke: var(--style);
+  }
+
+  .noise-line {
+    fill: none;
+    stroke: var(--noise);
+  }
+
+  .separator {
+    fill: none;
+    stroke: var(--shadow);
+  }
+
+  .label {
+    fill: var(--text);
+    font-weight: bold;
+  }
+
+  .small-label {
+    fill: var(--muted);
+  }
+
+  .style-label {
+    fill: var(--style);
+    font-weight: bold;
+  }
+
+  .noise-label {
+    fill: var(--noise);
+    font-weight: bold;
+  }
+
+  .inverse-label {
+    fill: var(--bg);
+    font-weight: bold;
+  }
+
+  .face-line {
+    fill: none;
+    stroke: var(--result-dark);
+  }
+
+  .error-label {
+    fill: var(--error);
+    font-weight: bold;
+  }
+
+  line,
+  rect,
+  circle,
+  polygon {
+    vector-effect: non-scaling-stroke;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Маршрут z → w → изображение</figcaption>
+  <svg id="diagram" viewBox="0 0 1200 450"
+       width="1200" height="450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Случайный вектор z из 512 чисел проходит через сеть отображения из 8 слоёв и превращается в w. Сеть синтеза начинается с обучаемой константы 4 на 4 на 512, проходит девять разрешений до 1024 на 1024 и на каждом уровне получает w и отдельный шум.">
+    <desc>Схема архитектуры StyleGAN: основной маршрут z, сеть отображения, w, обучаемая константа, девять уровней синтеза, входы шума и итоговое изображение.</desc>
+    <g id="stage"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = Object.freeze({
+  canvas: [1200, 450],
+  origin: { x: 28, y: 24 },
+  scale: 70,
+  zero: 0,
+  half: 0.5,
+  metrics: {
+    line: 2,
+    thin: 1,
+    font: 15,
+    smallFont: 11,
+    tinyFont: 9,
+    labelGap: 6,
+    radius: 0.36,
+    corner: 0.1,
+    arrowLength: 0.15,
+    arrowWidth: 0.08
+  },
+  z: { x: 0.55, y: 1.55 },
+  mapping: {
+    left: 1.35,
+    right: 3.55,
+    top: 0.88,
+    bottom: 2.22,
+    layers: [1.58, 1.82, 2.06, 2.30, 2.54, 2.78, 3.02, 3.26],
+    layerTop: 1.38,
+    layerBottom: 1.66
+  },
+  w: { x: 4.38, y: 1.55 },
+  bus: {
+    riseY: 0.48,
+    endX: 13.49,
+    labelX: 5.05,
+    labelY: 0.27
+  },
+  constant: {
+    left: 3.65,
+    right: 4.88,
+    top: 3.02,
+    bottom: 4.10,
+    titleY: 3.37,
+    valueY: 3.78
+  },
+  block: {
+    width: 0.75,
+    top: 2.68,
+    bottom: 4.10,
+    separatorY: 3.18,
+    resolutionY: 2.98,
+    noiseY: 3.52,
+    adainY: 3.87,
+    chainY: 3.43,
+    noiseNodeY: 4.63,
+    noiseStartY: 4.51,
+    noiseRadius: 0.08
+  },
+  blocks: [
+    [5.10, "4×4"],
+    [6.10, "8×8"],
+    [7.10, "16×16"],
+    [8.10, "32×32"],
+    [9.10, "64×64"],
+    [10.10, "128×128"],
+    [11.10, "256×256"],
+    [12.10, "512×512"],
+    [13.10, "1024×1024"]
+  ],
+  output: {
+    left: 14.18,
+    right: 15.70,
+    top: 2.68,
+    bottom: 4.10,
+    titleX: 14.94,
+    titleY: 2.43,
+    headX: 14.94,
+    headY: 3.35,
+    headRadius: 0.43,
+    eyeY: 3.29,
+    eyeLeftX: 14.78,
+    eyeRightX: 15.10,
+    eyeRadius: 0.035,
+    mouthLeftX: 14.78,
+    mouthRightX: 15.10,
+    mouthY: 3.58,
+    hairLeftX: 14.55,
+    hairRightX: 15.33,
+    hairTopY: 2.93,
+    hairBottomY: 3.19
+  },
+  legend: {
+    y: 5.45,
+    noiseDotX: 0.55,
+    noiseTextX: 0.82,
+    styleLineLeft: 6.05,
+    styleLineRight: 6.55,
+    styleTextX: 6.72
+  },
+  fallback: { x: 0.55, y: 2.65 }
+});
+
+const origin = Object.freeze(DATA.origin);
+const scale = DATA.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const stage = document.getElementById("stage");
+  const m = DATA.metrics;
+
+  const node = (name, attrs, className, content) => {
+    const element = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      element.setAttribute(key, String(value));
+    }
+    if (className) element.setAttribute("class", className);
+    if (content !== undefined) element.textContent = content;
+    stage.appendChild(element);
+    return element;
+  };
+
+  const line = (x1, y1, x2, y2, className, width = m.line) =>
+    node("line", {
+      x1: sx(x1), y1: sy(y1),
+      x2: sx(x2), y2: sy(y2),
+      "stroke-width": width
+    }, className);
+
+  const rect = (x1, y1, x2, y2, className) =>
+    node("rect", {
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1),
+      rx: sx(m.corner) - sx(DATA.zero),
+      "stroke-width": m.line
+    }, className);
+
+  const circle = (x, y, r, className) =>
+    node("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(r) - sx(DATA.zero),
+      "stroke-width": m.line
+    }, className);
+
+  const text = (x, y, value, className, anchor = "middle", size = m.font) =>
+    node("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      "dominant-baseline": "middle",
+      "font-size": size
+    }, className, value);
+
+  const polygon = (points, className) =>
+    node("polygon", {
+      points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+      "stroke-width": m.line
+    }, className);
+
+  const arrow = (x1, y1, x2, y2, className) => {
+    line(x1, y1, x2, y2, className);
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const bx = x2 - ux * m.arrowLength;
+    const by = y2 - uy * m.arrowLength;
+    const px = -uy * m.arrowWidth;
+    const py = ux * m.arrowWidth;
+    polygon([
+      [x2, y2],
+      [bx + px, by + py],
+      [bx - px, by - py]
+    ], className);
+  };
+
+  circle(DATA.z.x, DATA.z.y, m.radius, "panel");
+  text(DATA.z.x, DATA.z.y, "z", "label");
+  text(DATA.z.x, DATA.z.y + 0.62, "512 чисел", "small-label");
+
+  arrow(
+    DATA.z.x + m.radius,
+    DATA.z.y,
+    DATA.mapping.left,
+    DATA.z.y,
+    "flow-line"
+  );
+
+  rect(
+    DATA.mapping.left,
+    DATA.mapping.top,
+    DATA.mapping.right,
+    DATA.mapping.bottom,
+    "mapping"
+  );
+  text(
+    (DATA.mapping.left + DATA.mapping.right) * DATA.half,
+    1.13,
+    "СЕТЬ ОТОБРАЖЕНИЯ",
+    "style-label",
+    "middle",
+    m.smallFont
+  );
+
+  for (const layerX of DATA.mapping.layers) {
+    line(
+      layerX,
+      DATA.mapping.layerTop,
+      layerX,
+      DATA.mapping.layerBottom,
+      "style-line",
+      m.line
+    );
+    circle(layerX, DATA.mapping.layerTop, 0.035, "style-node");
+    circle(layerX, DATA.mapping.layerBottom, 0.035, "style-node");
+  }
+
+  text(
+    (DATA.mapping.left + DATA.mapping.right) * DATA.half,
+    1.91,
+    "8 слоёв",
+    "small-label",
+    "middle",
+    m.smallFont
+  );
+
+  arrow(
+    DATA.mapping.right,
+    DATA.w.y,
+    DATA.w.x - m.radius,
+    DATA.w.y,
+    "flow-line"
+  );
+
+  circle(DATA.w.x, DATA.w.y, m.radius, "style-node");
+  text(DATA.w.x, DATA.w.y, "w", "inverse-label");
+  text(DATA.w.x, DATA.w.y + 0.62, "пространство стилей", "style-label", "middle", m.smallFont);
+
+  line(DATA.w.x, DATA.w.y - m.radius, DATA.w.x, DATA.bus.riseY, "style-line");
+  arrow(DATA.w.x, DATA.bus.riseY, DATA.bus.endX, DATA.bus.riseY, "style-line");
+  text(
+    DATA.bus.labelX,
+    DATA.bus.labelY,
+    "w → параметры масштаба и сдвига для AdaIN",
+    "style-label",
+    "start",
+    m.smallFont
+  );
+
+  rect(
+    DATA.constant.left,
+    DATA.constant.top,
+    DATA.constant.right,
+    DATA.constant.bottom,
+    "constant"
+  );
+  text(
+    (DATA.constant.left + DATA.constant.right) * DATA.half,
+    DATA.constant.titleY,
+    "ОБУЧАЕМАЯ",
+    "small-label",
+    "middle",
+    m.tinyFont
+  );
+  text(
+    (DATA.constant.left + DATA.constant.right) * DATA.half,
+    DATA.constant.valueY,
+    "4×4×512",
+    "label",
+    "middle",
+    m.smallFont
+  );
+
+  arrow(
+    DATA.constant.right,
+    DATA.block.chainY,
+    DATA.blocks[DATA.zero][DATA.zero],
+    DATA.block.chainY,
+    "flow-line"
+  );
+
+  let previousX = null;
+
+  for (const [blockX, resolution] of DATA.blocks) {
+    const right = blockX + DATA.block.width;
+    const center = (blockX + right) * DATA.half;
+
+    if (previousX !== null) {
+      arrow(
+        previousX + DATA.block.width,
+        DATA.block.chainY,
+        blockX,
+        DATA.block.chainY,
+        "flow-line"
+      );
+    }
+
+    rect(blockX, DATA.block.top, right, DATA.block.bottom, "synthesis");
+    line(
+      blockX,
+      DATA.block.separatorY,
+      right,
+      DATA.block.separatorY,
+      "separator",
+      m.thin
+    );
+
+    text(
+      center,
+      DATA.block.resolutionY,
+      resolution,
+      "label",
+      "middle",
+      m.tinyFont
+    );
+    text(
+      center,
+      DATA.block.noiseY,
+      "шум ↓",
+      "noise-label",
+      "middle",
+      m.tinyFont
+    );
+    text(
+      center,
+      DATA.block.adainY,
+      "AdaIN",
+      "style-label",
+      "middle",
+      m.tinyFont
+    );
+
+    arrow(center, DATA.bus.riseY, center, DATA.block.top, "style-line");
+
+    circle(
+      center,
+      DATA.block.noiseNodeY,
+      DATA.block.noiseRadius,
+      "noise-node"
+    );
+    arrow(
+      center,
+      DATA.block.noiseStartY,
+      center,
+      DATA.block.bottom,
+      "noise-line"
+    );
+
+    previousX = blockX;
+  }
+
+  text(
+    (DATA.blocks[DATA.zero][DATA.zero] + DATA.bus.endX) * DATA.half,
+    2.39,
+    "9 УРОВНЕЙ СИНТЕЗА",
+    "small-label",
+    "middle",
+    m.smallFont
+  );
+
+  arrow(
+    previousX + DATA.block.width,
+    DATA.block.chainY,
+    DATA.output.left,
+    DATA.block.chainY,
+    "flow-line"
+  );
+
+  text(
+    DATA.output.titleX,
+    DATA.output.titleY,
+    "ИЗОБРАЖЕНИЕ",
+    "label",
+    "middle",
+    m.smallFont
+  );
+  rect(
+    DATA.output.left,
+    DATA.output.top,
+    DATA.output.right,
+    DATA.output.bottom,
+    "output"
+  );
+
+  circle(
+    DATA.output.headX,
+    DATA.output.headY,
+    DATA.output.headRadius,
+    "output"
+  );
+  polygon([
+    [DATA.output.hairLeftX, DATA.output.hairBottomY],
+    [DATA.output.hairLeftX + 0.08, DATA.output.hairTopY],
+    [DATA.output.hairRightX - 0.10, DATA.output.hairTopY],
+    [DATA.output.hairRightX, DATA.output.hairBottomY],
+    [DATA.output.headX, DATA.output.hairTopY + 0.08]
+  ], "face-line");
+
+  circle(
+    DATA.output.eyeLeftX,
+    DATA.output.eyeY,
+    DATA.output.eyeRadius,
+    "style-node"
+  );
+  circle(
+    DATA.output.eyeRightX,
+    DATA.output.eyeY,
+    DATA.output.eyeRadius,
+    "style-node"
+  );
+  line(
+    DATA.output.mouthLeftX,
+    DATA.output.mouthY,
+    DATA.output.mouthRightX,
+    DATA.output.mouthY,
+    "face-line",
+    m.line
+  );
+
+  circle(
+    DATA.legend.noiseDotX,
+    DATA.legend.y,
+    DATA.block.noiseRadius,
+    "noise-node"
+  );
+  text(
+    DATA.legend.noiseTextX,
+    DATA.legend.y,
+    "шум приходит сбоку и добавляет случайные детали",
+    "noise-label",
+    "start",
+    m.smallFont
+  );
+
+  arrow(
+    DATA.legend.styleLineLeft,
+    DATA.legend.y,
+    DATA.legend.styleLineRight,
+    DATA.legend.y,
+    "style-line"
+  );
+  text(
+    DATA.legend.styleTextX,
+    DATA.legend.y,
+    "w управляет AdaIN на каждом масштабе",
+    "style-label",
+    "start",
+    m.smallFont
+  );
+} catch (error) {
+  const stage = document.getElementById("stage");
+  while (stage.firstChild) stage.removeChild(stage.firstChild);
+
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  fallback.setAttribute("x", String(sx(DATA.fallback.x)));
+  fallback.setAttribute("y", String(sy(DATA.fallback.y)));
+  fallback.setAttribute("font-size", String(DATA.metrics.font));
+  fallback.setAttribute("class", "error-label");
+  fallback.textContent = "Схема должна показать маршрут z → сеть отображения → w → девять уровней синтеза → изображение, с отдельными входами шума.";
+  stage.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

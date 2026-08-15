@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Два маршрута одного условия в conditional GAN</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #59657a;
+    --route-create: #2864dc;
+    --route-check: #a14cc3;
+    --real: #16805f;
+    --fake: #c46a18;
+    --junction: #25324a;
+    --soft-create: #eaf1ff;
+    --soft-check: #f6eafd;
+    --soft-real: #e6f5ef;
+    --soft-fake: #fff0df;
+    --soft-result: #eef1f6;
+    --line: #34415a;
+    --fallback: #9a2d35;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111621;
+      --panel: #1a2230;
+      --text: #edf2ff;
+      --muted: #aeb9cf;
+      --route-create: #75a7ff;
+      --route-check: #d294ec;
+      --real: #67d5ac;
+      --fake: #f1a45d;
+      --junction: #dce5f7;
+      --soft-create: #192c4d;
+      --soft-check: #34203e;
+      --soft-real: #17382f;
+      --soft-fake: #422d1d;
+      --soft-result: #262f3e;
+      --line: #aab6cc;
+      --fallback: #ff9ba3;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  body {
+    width: 100%;
+    padding: 12px;
+  }
+
+  figure {
+    width: 100%;
+    margin: 0;
+    background: var(--bg);
+  }
+
+  .heading {
+    margin: 0;
+    padding: 2px 8px 10px;
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+  }
+
+  .stage {
+    width: 100%;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    overflow: hidden;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  .node {
+    stroke-width: 2.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .generator {
+    fill: var(--soft-create);
+    stroke: var(--route-create);
+  }
+
+  .discriminator {
+    fill: var(--soft-check);
+    stroke: var(--route-check);
+  }
+
+  .input-node {
+    fill: var(--soft-result);
+    stroke: var(--line);
+  }
+
+  .fake-node {
+    fill: var(--soft-fake);
+    stroke: var(--fake);
+  }
+
+  .real-node {
+    fill: var(--soft-real);
+    stroke: var(--real);
+  }
+
+  .result-node {
+    fill: var(--soft-result);
+    stroke: var(--line);
+  }
+
+  .route {
+    fill: none;
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .create-route { stroke: var(--route-create); }
+  .check-route { stroke: var(--route-check); }
+  .fake-route { stroke: var(--fake); }
+  .real-route { stroke: var(--real); }
+  .neutral-route { stroke: var(--line); }
+
+  .arrow-create { fill: var(--route-create); }
+  .arrow-check { fill: var(--route-check); }
+  .arrow-fake { fill: var(--fake); }
+  .arrow-real { fill: var(--real); }
+  .arrow-neutral { fill: var(--line); }
+
+  .junction {
+    fill: var(--junction);
+    stroke: var(--panel);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 17px;
+    pointer-events: none;
+  }
+
+  .symbol {
+    font-size: 25px;
+    font-weight: 760;
+  }
+
+  .node-title {
+    font-size: 19px;
+    font-weight: 730;
+  }
+
+  .node-detail {
+    font-size: 15px;
+    fill: var(--muted);
+  }
+
+  .route-label {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .create-label { fill: var(--route-create); }
+  .check-label { fill: var(--route-check); }
+  .fake-label { fill: var(--fake); }
+  .real-label { fill: var(--real); }
+
+  .legend {
+    font-size: 16px;
+    font-weight: 650;
+  }
+
+  .fallback {
+    margin: 0;
+    padding: 18px;
+    color: var(--fallback);
+    font-size: 17px;
+    line-height: 1.45;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-heading">
+  <h1 class="heading" id="diagram-heading">Два маршрута одного условия</h1>
+  <div class="stage" id="stage">
+    <svg id="diagram" viewBox="0 0 1120 500"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Разветвление условия в conditional GAN</title>
+      <desc id="svg-description">Одно условие x поступает в генератор и одновременно напрямую передаётся дискриминатору, который оценивает настоящую и созданную пары.</desc>
+    </svg>
+  </div>
+</figure>
+
+<script>
+const data = {
+  zero: 0,
+  geometry: {
+    arrowBack: 0.18,
+    arrowWing: 0.11,
+    junctionRadius: 0.065
+  },
+  boxes: [
+    { kind: "input-node", x1: 0.18, y1: 2.25, x2: 1.32, y2: 3.28 },
+    { kind: "generator", x1: 2.92, y1: 0.52, x2: 4.78, y2: 1.72 },
+    { kind: "fake-node", x1: 6.18, y1: 0.92, x2: 7.72, y2: 2.02 },
+    { kind: "real-node", x1: 6.18, y1: 3.12, x2: 7.72, y2: 4.22 },
+    { kind: "input-node", x1: 4.12, y1: 4.32, x2: 4.92, y2: 5.18 },
+    { kind: "discriminator", x1: 8.22, y1: 1.18, x2: 9.62, y2: 3.92 },
+    { kind: "result-node", x1: 10.03, y1: 2.08, x2: 10.72, y2: 3.02 }
+  ],
+  junctions: [
+    { x: 1.98, y: 2.76 },
+    { x: 5.62, y: 2.76 }
+  ],
+  routes: [
+    {
+      kind: "neutral-route",
+      arrow: "arrow-neutral",
+      points: [{ x: 1.32, y: 2.76 }, { x: 1.98, y: 2.76 }]
+    },
+    {
+      kind: "create-route",
+      arrow: "arrow-create",
+      points: [
+        { x: 1.98, y: 2.76 },
+        { x: 2.42, y: 2.76 },
+        { x: 2.42, y: 1.12 },
+        { x: 2.92, y: 1.12 }
+      ]
+    },
+    {
+      kind: "check-route",
+      arrow: "",
+      points: [
+        { x: 1.98, y: 2.76 },
+        { x: 5.62, y: 2.76 }
+      ]
+    },
+    {
+      kind: "create-route",
+      arrow: "arrow-create",
+      points: [
+        { x: 4.78, y: 1.12 },
+        { x: 5.28, y: 1.12 },
+        { x: 5.28, y: 1.38 },
+        { x: 6.18, y: 1.38 }
+      ]
+    },
+    {
+      kind: "check-route",
+      arrow: "arrow-check",
+      points: [
+        { x: 5.62, y: 2.76 },
+        { x: 5.62, y: 1.78 },
+        { x: 6.18, y: 1.78 }
+      ]
+    },
+    {
+      kind: "check-route",
+      arrow: "arrow-check",
+      points: [
+        { x: 5.62, y: 2.76 },
+        { x: 5.62, y: 3.48 },
+        { x: 6.18, y: 3.48 }
+      ]
+    },
+    {
+      kind: "real-route",
+      arrow: "arrow-real",
+      points: [
+        { x: 4.92, y: 4.75 },
+        { x: 5.28, y: 4.75 },
+        { x: 5.28, y: 3.88 },
+        { x: 6.18, y: 3.88 }
+      ]
+    },
+    {
+      kind: "fake-route",
+      arrow: "arrow-fake",
+      points: [
+        { x: 7.72, y: 1.48 },
+        { x: 8.22, y: 1.48 }
+      ]
+    },
+    {
+      kind: "real-route",
+      arrow: "arrow-real",
+      points: [
+        { x: 7.72, y: 3.62 },
+        { x: 8.22, y: 3.62 }
+      ]
+    },
+    {
+      kind: "neutral-route",
+      arrow: "arrow-neutral",
+      points: [
+        { x: 9.62, y: 2.55 },
+        { x: 10.03, y: 2.55 }
+      ]
+    }
+  ],
+  labels: [
+    { text: "x", x: 0.75, y: 2.72, dx: 0, dy: 0, anchor: "middle", cls: "symbol" },
+    { text: "одно условие", x: 0.75, y: 3.02, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "маршрут создания", x: 2.28, y: 2.36, dx: 0, dy: -7, anchor: "start", cls: "route-label create-label" },
+    { text: "маршрут проверки: тот же x", x: 3.72, y: 2.76, dx: 0, dy: 22, anchor: "middle", cls: "route-label check-label" },
+
+    { text: "G(z, c)", x: 3.85, y: 1.02, dx: 0, dy: 0, anchor: "middle", cls: "symbol" },
+    { text: "c = x", x: 3.85, y: 1.39, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+    { text: "y_fake = G(x)", x: 5.02, y: 0.92, dx: 0, dy: -8, anchor: "start", cls: "route-label create-label" },
+
+    { text: "созданная пара", x: 6.95, y: 1.31, dx: 0, dy: 0, anchor: "middle", cls: "node-title fake-label" },
+    { text: "(x, G(x))", x: 6.95, y: 1.72, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "настоящая пара", x: 6.95, y: 3.51, dx: 0, dy: 0, anchor: "middle", cls: "node-title real-label" },
+    { text: "(x, y)", x: 6.95, y: 3.92, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "y", x: 4.52, y: 4.69, dx: 0, dy: 0, anchor: "middle", cls: "symbol" },
+    { text: "цель из данных", x: 4.52, y: 5.01, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "D(x, y)", x: 8.92, y: 2.31, dx: 0, dy: 0, anchor: "middle", cls: "symbol" },
+    { text: "проверяет", x: 8.92, y: 2.72, dx: 0, dy: 0, anchor: "middle", cls: "node-title" },
+    { text: "согласованность пары", x: 8.92, y: 3.08, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "оценка", x: 10.375, y: 2.48, dx: 0, dy: 0, anchor: "middle", cls: "node-title" },
+    { text: "пары", x: 10.375, y: 2.76, dx: 0, dy: 0, anchor: "middle", cls: "node-detail" },
+
+    { text: "Один x одновременно помогает создать результат и проверить, подходит ли результат этому условию.", x: 5.45, y: 5.82, dx: 0, dy: 0, anchor: "middle", cls: "legend" }
+  ]
+};
+
+const origin = { x: 38, y: 25 };
+const scale = { x: 98, y: 76 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const element = (name, attrs) => {
+    const node = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => {
+      if (value !== "") node.setAttribute(key, String(value));
+    });
+    return node;
+  };
+
+  const drawArrow = route => {
+    const reversed = [...route.points].reverse();
+    const [tip, previous] = reversed;
+    const vx = tip.x - previous.x;
+    const vy = tip.y - previous.y;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = tip.x - ux * data.geometry.arrowBack;
+    const by = tip.y - uy * data.geometry.arrowBack;
+    const left = {
+      x: bx - uy * data.geometry.arrowWing,
+      y: by + ux * data.geometry.arrowWing
+    };
+    const right = {
+      x: bx + uy * data.geometry.arrowWing,
+      y: by - ux * data.geometry.arrowWing
+    };
+    return element("polygon", {
+      points: `${sx(tip.x)},${sy(tip.y)} ${sx(left.x)},${sy(left.y)} ${sx(right.x)},${sy(right.y)}`,
+      class: route.arrow
+    });
+  };
+
+  data.routes.forEach(route => {
+    const pathData = route.points
+      .map((point, position) => `${position ? "L" : "M"} ${sx(point.x)} ${sy(point.y)}`)
+      .join(" ");
+    svg.appendChild(element("path", { d: pathData, class: `route ${route.kind}` }));
+    if (route.arrow) svg.appendChild(drawArrow(route));
+  });
+
+  data.boxes.forEach(box => {
+    svg.appendChild(element("rect", {
+      x: sx(box.x1),
+      y: sy(box.y1),
+      width: sx(box.x2) - sx(box.x1),
+      height: sy(box.y2) - sy(box.y1),
+      class: `node ${box.kind}`
+    }));
+  });
+
+  data.junctions.forEach(point => {
+    svg.appendChild(element("circle", {
+      cx: sx(point.x),
+      cy: sy(point.y),
+      r: sx(point.x + data.geometry.junctionRadius) - sx(point.x),
+      class: "junction"
+    }));
+  });
+
+  data.labels.forEach(label => {
+    const text = element("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      dx: label.dx,
+      dy: label.dy,
+      "text-anchor": label.anchor,
+      "dominant-baseline": "middle",
+      class: label.cls
+    });
+    text.textContent = label.text;
+    svg.appendChild(text);
+  });
+} catch (error) {
+  const stage = document.getElementById("stage");
+  stage.innerHTML = "";
+  const fallback = document.createElement("p");
+  fallback.className = "fallback";
+  fallback.textContent = "Схема должна была показать, как одно условие x разветвляется: один маршрут ведёт в генератор для создания G(x), а второй напрямую — в дискриминатор для проверки пар (x, y) и (x, G(x)).";
+  stage.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

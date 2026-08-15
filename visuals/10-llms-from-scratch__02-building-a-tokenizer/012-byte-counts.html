@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <title>Символы и начальные байтовые токены</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fc;
+      --panel: #ffffff;
+      --panel-alt: #eef1f7;
+      --ink: #182033;
+      --muted: #657086;
+      --rule: #cbd2df;
+      --arrow: #7a8497;
+      --latin: #167c6b;
+      --latin-soft: #d9f2ec;
+      --han: #6552c7;
+      --han-soft: #e8e3ff;
+      --emoji: #c55c18;
+      --emoji-soft: #ffe6d2;
+      --shadow: #dce1eb;
+      --error: #a33232;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111521;
+        --panel: #1a2030;
+        --panel-alt: #242b3d;
+        --ink: #f2f4fa;
+        --muted: #aab3c6;
+        --rule: #3a4358;
+        --arrow: #919bb0;
+        --latin: #62d4bd;
+        --latin-soft: #173e39;
+        --han: #b5a7ff;
+        --han-soft: #302b58;
+        --emoji: #ffac72;
+        --emoji-soft: #54321f;
+        --shadow: #0a0d14;
+        --error: #ff9696;
+      }
+    }
+
+    html,
+    body {
+      margin: initial;
+      background: var(--bg);
+    }
+
+    body {
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 448px;
+      background: var(--bg);
+    }
+
+    text {
+      fill: var(--ink);
+    }
+
+    .title {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .column-title {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .row-panel {
+      fill: var(--panel);
+      stroke: var(--shadow);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .row-string {
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: 21px;
+      font-weight: bold;
+    }
+
+    .count {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .cell {
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .char.latin {
+      fill: var(--latin-soft);
+      stroke: var(--latin);
+    }
+
+    .char.han {
+      fill: var(--han-soft);
+      stroke: var(--han);
+    }
+
+    .char.emoji {
+      fill: var(--emoji-soft);
+      stroke: var(--emoji);
+    }
+
+    .byte.latin {
+      fill: var(--latin);
+      stroke: var(--latin);
+    }
+
+    .byte.han {
+      fill: var(--han);
+      stroke: var(--han);
+    }
+
+    .byte.emoji {
+      fill: var(--emoji);
+      stroke: var(--emoji);
+    }
+
+    .char-text {
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .guide {
+      stroke: var(--rule);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--arrow);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arrow-head {
+      fill: var(--arrow);
+    }
+
+    .legend-heading,
+    .legend-text,
+    .note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend-heading {
+      font-weight: bold;
+    }
+
+    .legend-swatch {
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fallback {
+      fill: var(--error);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <svg
+    id="diagram"
+    viewBox="0 0 960 448"
+    width="960"
+    height="448"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="svg-title svg-desc"
+  >
+    <title id="svg-title">Символы и начальные байтовые токены</title>
+    <desc id="svg-desc">
+      Сравнение четырёх строк: hello содержит 5 символов и 5 байтов,
+      你好 — 2 символа и 6 байтов, огонь — 1 символ и 4 байта,
+      а hello你好🔥 — 8 символов и 15 байтов.
+    </desc>
+
+    <text id="heading" class="title">Символы и начальные байтовые токены</text>
+    <g id="plot"></g>
+    <g id="fallback" aria-live="polite"></g>
+  </svg>
+
+  <script>
+    "use strict";
+
+    const data = {
+      canvas: { width: 960, height: 448 },
+      typography: {
+        title: 22,
+        header: 13,
+        string: 21,
+        cell: 15,
+        count: 14,
+        legend: 13,
+        fallback: 16
+      },
+      strokes: { panel: 1, cell: 1.5, guide: 1, arrow: 1.5 },
+      labelOffset: 8,
+      layout: {
+        title: { x: 42, y: 31 },
+        headerY: 63,
+        stringX: 50,
+        charX: 246,
+        byteX: 544,
+        separatorX: 220,
+        guideTop: 48,
+        guideBottom: 360,
+        panelX: 26,
+        panelWidth: 908,
+        panelHeight: 62,
+        radius: 10,
+        cellY: 9,
+        cellHeight: 27,
+        charWidth: 24,
+        charGap: 4,
+        byteWidth: 16,
+        byteGap: 4,
+        countY: 52,
+        stringY: 29,
+        arrowStart: 486,
+        arrowEnd: 526,
+        arrowY: 23,
+        arrowHead: 5,
+        legendHeading: { x: 50, y: 385 },
+        legendY: 408,
+        legendRadius: 6,
+        legendTextGap: 13,
+        legendItems: [
+          { x: 56, kind: "latin", text: "латиница: 1 символ → 1 байт" },
+          { x: 323, kind: "han", text: "китайский знак: 1 символ → 3 байта" },
+          { x: 655, kind: "emoji", text: "эмодзи: 1 символ → 4 байта" }
+        ],
+        note: { x: 50, y: 433 }
+      },
+      rows: [
+        {
+          y: 76,
+          text: "hello",
+          charsLabel: "5 символов",
+          bytesLabel: "5 байтов",
+          groups: [
+            { glyph: "h", bytes: 1, kind: "latin" },
+            { glyph: "e", bytes: 1, kind: "latin" },
+            { glyph: "l", bytes: 1, kind: "latin" },
+            { glyph: "l", bytes: 1, kind: "latin" },
+            { glyph: "o", bytes: 1, kind: "latin" }
+          ]
+        },
+        {
+          y: 148,
+          text: "你好",
+          charsLabel: "2 символа",
+          bytesLabel: "6 байтов",
+          groups: [
+            { glyph: "你", bytes: 3, kind: "han" },
+            { glyph: "好", bytes: 3, kind: "han" }
+          ]
+        },
+        {
+          y: 220,
+          text: "🔥",
+          charsLabel: "1 символ",
+          bytesLabel: "4 байта",
+          groups: [
+            { glyph: "🔥", bytes: 4, kind: "emoji" }
+          ]
+        },
+        {
+          y: 292,
+          text: "hello你好🔥",
+          charsLabel: "8 символов",
+          bytesLabel: "15 байтов",
+          groups: [
+            { glyph: "h", bytes: 1, kind: "latin" },
+            { glyph: "e", bytes: 1, kind: "latin" },
+            { glyph: "l", bytes: 1, kind: "latin" },
+            { glyph: "l", bytes: 1, kind: "latin" },
+            { glyph: "o", bytes: 1, kind: "latin" },
+            { glyph: "你", bytes: 3, kind: "han" },
+            { glyph: "好", bytes: 3, kind: "han" },
+            { glyph: "🔥", bytes: 4, kind: "emoji" }
+          ]
+        }
+      ],
+      fallback: [
+        { y: 178, text: "Схема должна была показать:" },
+        { y: 208, text: "hello — 5 символов и 5 байтов; 你好 — 2 символа и 6 байтов;" },
+        { y: 238, text: "🔥 — 1 символ и 4 байта;" },
+        { y: 268, text: "hello你好🔥 — 8 символов и 15 байтов." }
+      ]
+    };
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const NS = "http://www.w3.org/2000/svg";
+
+    function node(name, attributes, text) {
+      const element = document.createElementNS(NS, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        element.setAttribute(key, value);
+      });
+
+      if (text !== undefined) {
+        element.textContent = text;
+      }
+
+      return element;
+    }
+
+    try {
+      const heading = document.getElementById("heading");
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const layout = data.layout;
+
+      heading.setAttribute("x", sx(layout.title.x));
+      heading.setAttribute("y", sy(layout.title.y));
+
+      plot.append(
+        node("text", {
+          x: sx(layout.stringX),
+          y: sy(layout.headerY),
+          class: "column-title",
+          "text-anchor": "start"
+        }, "СТРОКА"),
+
+        node("text", {
+          x: sx(layout.charX),
+          y: sy(layout.headerY),
+          class: "column-title",
+          "text-anchor": "start"
+        }, "СИМВОЛЫ"),
+
+        node("text", {
+          x: sx(layout.byteX),
+          y: sy(layout.headerY),
+          class: "column-title",
+          "text-anchor": "start"
+        }, "НАЧАЛЬНЫЕ БАЙТОВЫЕ ТОКЕНЫ"),
+
+        node("line", {
+          x1: sx(layout.separatorX),
+          y1: sy(layout.guideTop),
+          x2: sx(layout.separatorX),
+          y2: sy(layout.guideBottom),
+          class: "guide"
+        })
+      );
+
+      data.rows.forEach(row => {
+        const group = node("g", {
+          "aria-label": `${row.text}: ${row.charsLabel}, ${row.bytesLabel}`
+        });
+
+        group.append(
+          node("rect", {
+            x: sx(layout.panelX),
+            y: sy(row.y),
+            width: sx(layout.panelX + layout.panelWidth) - sx(layout.panelX),
+            height: sy(row.y + layout.panelHeight) - sy(row.y),
+            rx: sx(layout.radius) - sx(0),
+            ry: sy(layout.radius) - sy(0),
+            class: "row-panel"
+          }),
+
+          node("text", {
+            x: sx(layout.stringX),
+            y: sy(row.y + layout.stringY),
+            class: "row-string",
+            "text-anchor": "start"
+          }, row.text)
+        );
+
+        row.groups.forEach((token, charIndex) => {
+          const x = layout.charX +
+            charIndex * (layout.charWidth + layout.charGap);
+          const y = row.y + layout.cellY;
+
+          group.append(
+            node("rect", {
+              x: sx(x),
+              y: sy(y),
+              width: sx(x + layout.charWidth) - sx(x),
+              height: sy(y + layout.cellHeight) - sy(y),
+              rx: sx(layout.radius) - sx(layout.labelOffset),
+              ry: sy(layout.radius) - sy(layout.labelOffset),
+              class: `cell char ${token.kind}`
+            }),
+
+            node("text", {
+              x: sx(x + layout.charWidth / scale.x / layout.labelOffset),
+              y: sy(y + layout.cellHeight - layout.labelOffset),
+              class: `char-text ${token.kind}`,
+              "text-anchor": "middle"
+            }, token.glyph)
+          );
+        });
+
+        const byteKinds = row.groups.flatMap(token =>
+          Array.from({ length: token.bytes }, () => token.kind)
+        );
+
+        byteKinds.forEach((kind, byteIndex) => {
+          const x = layout.byteX +
+            byteIndex * (layout.byteWidth + layout.byteGap);
+          const y = row.y + layout.cellY;
+
+          group.append(
+            node("rect", {
+              x: sx(x),
+              y: sy(y),
+              width: sx(x + layout.byteWidth) - sx(x),
+              height: sy(y + layout.cellHeight) - sy(y),
+              rx: sx(layout.radius) - sx(layout.labelOffset),
+              ry: sy(layout.radius) - sy(layout.labelOffset),
+              class: `cell byte ${kind}`
+            })
+          );
+        });
+
+        const arrowY = row.y + layout.arrowY;
+        const arrowTip = layout.arrowEnd;
+        const arrowBase = layout.arrowEnd - layout.arrowHead;
+
+        group.append(
+          node("line", {
+            x1: sx(layout.arrowStart),
+            y1: sy(arrowY),
+            x2: sx(arrowTip),
+            y2: sy(arrowY),
+            class: "arrow"
+          }),
+
+          node("polygon", {
+            points: [
+              `${sx(arrowTip)},${sy(arrowY)}`,
+              `${sx(arrowBase)},${sy(arrowY - layout.arrowHead)}`,
+              `${sx(arrowBase)},${sy(arrowY + layout.arrowHead)}`
+            ].join(" "),
+            class: "arrow-head"
+          }),
+
+          node("text", {
+            x: sx(layout.charX),
+            y: sy(row.y + layout.countY),
+            class: "count",
+            "text-anchor": "start"
+          }, row.charsLabel),
+
+          node("text", {
+            x: sx(layout.byteX),
+            y: sy(row.y + layout.countY),
+            class: "count",
+            "text-anchor": "start"
+          }, row.bytesLabel)
+        );
+
+        plot.append(group);
+      });
+
+      plot.append(
+        node("text", {
+          x: sx(layout.legendHeading.x),
+          y: sy(layout.legendHeading.y),
+          class: "legend-heading",
+          "text-anchor": "start"
+        }, "Цвет связывает видимый символ с байтами UTF-8:")
+      );
+
+      layout.legendItems.forEach(item => {
+        plot.append(
+          node("circle", {
+            cx: sx(item.x),
+            cy: sy(layout.legendY),
+            r: sx(layout.legendRadius) - sx(0),
+            class: `legend-swatch byte ${item.kind}`
+          }),
+
+          node("text", {
+            x: sx(item.x + layout.legendTextGap),
+            y: sy(layout.legendY + layout.legendRadius / scale.y),
+            class: "legend-text",
+            "text-anchor": "start"
+          }, item.text)
+        );
+      });
+
+      plot.append(
+        node("text", {
+          x: sx(layout.note.x),
+          y: sy(layout.note.y),
+          class: "note",
+          "text-anchor": "start"
+        }, "Счёт справа показан до BPE-merges: позже соседние токены могут объединиться.")
+      );
+
+      fallback.replaceChildren();
+    } catch (error) {
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const heading = document.getElementById("heading");
+
+      plot.replaceChildren();
+      fallback.replaceChildren();
+
+      heading.setAttribute("x", sx(data.layout.title.x));
+      heading.setAttribute("y", sy(data.layout.title.y));
+
+      data.fallback.forEach(line => {
+        fallback.append(
+          node("text", {
+            x: sx(data.layout.stringX),
+            y: sy(line.y),
+            class: "fallback",
+            "text-anchor": "start"
+          }, line.text)
+        );
+      });
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

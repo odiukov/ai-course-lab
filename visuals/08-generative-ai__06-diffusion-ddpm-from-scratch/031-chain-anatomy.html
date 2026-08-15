@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Анатомия одного полного прогона DDPM</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --surface: #ffffff;
+      --panel: #eef3fa;
+      --ink: #172033;
+      --muted: #59677e;
+      --line: #596b87;
+      --accent: #315ed1;
+      --accent-fill: #dfe8ff;
+      --noise: #b64949;
+      --noise-fill: #ffe3df;
+      --quiet: #d2dbea;
+      --tone-0: #edf1f7;
+      --tone-1: #bec9da;
+      --tone-2: #7788a4;
+      --tone-3: #263752;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111827;
+        --surface: #182132;
+        --panel: #202c40;
+        --ink: #edf3ff;
+        --muted: #b7c3d8;
+        --line: #91a2bd;
+        --accent: #8dabff;
+        --accent-fill: #263d70;
+        --noise: #ff9b91;
+        --noise-fill: #593432;
+        --quiet: #3a4961;
+        --tone-0: #243044;
+        --tone-1: #4b5c77;
+        --tone-2: #8292aa;
+        --tone-3: #e1e9f6;
+      }
+    }
+
+    html, body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      background: var(--surface);
+    }
+
+    h1 {
+      font-size: 22px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--surface);
+    }
+
+    #fallback {
+      font-size: 16px;
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    [hidden] {
+      display: none;
+    }
+
+    .surface {
+      fill: var(--surface);
+      stroke: var(--quiet);
+      stroke-width: 2px;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .guide-final {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .step-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .step-line.condensed {
+      stroke-dasharray: var(--dash);
+    }
+
+    .arrowhead {
+      fill: var(--line);
+    }
+
+    .card {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .card.final {
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .cell {
+      stroke: var(--surface);
+      stroke-width: 1px;
+    }
+
+    .tone0 { fill: var(--tone-0); }
+    .tone1 { fill: var(--tone-1); }
+    .tone2 { fill: var(--tone-2); }
+    .tone3 { fill: var(--tone-3); }
+
+    .badge {
+      fill: var(--noise-fill);
+      stroke: var(--noise);
+      stroke-width: 2px;
+    }
+
+    .badge-final {
+      fill: var(--accent-fill);
+      stroke: var(--accent);
+      stroke-width: 2px;
+    }
+
+    .noise-link {
+      fill: none;
+      stroke: var(--noise);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-dasharray: var(--noise-dash);
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .step-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .badge-text {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .band-label {
+      fill: var(--accent);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .legend-box {
+      fill: var(--panel);
+      stroke: var(--quiet);
+      stroke-width: 2px;
+    }
+
+    .legend-title {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .legend-text {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .ellipsis {
+      fill: var(--line);
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1>Анатомия одного полного прогона DDPM</h1>
+    <p id="fallback">
+      Схема должна была показать полный путь: от x₄₀ ∼ N(0,1) через шаги
+      t = 39 … 0 к x₀, с добавлением z при t &gt; 0 и без шума на финальном шаге.
+    </p>
+    <svg id="chart"
+         viewBox="0 0 1200 430"
+         width="1200"
+         height="430"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Обратная цепочка генерации DDPM</title>
+      <desc id="svg-desc">
+        Один запуск начинается со случайного x₄₀, проходит все обратные шаги
+        и заканчивается в x₀. Шум z добавляется на шагах больше нуля, но не
+        добавляется при t равно нулю.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = [{
+      n: { zero: 0, one: 1 },
+      canvas: { w: 100, h: 43 },
+      frame: { x: 1, y: 1, w: 98, h: 41 },
+      card: { w: 9, h: 10, y: 17, radius: 0.7, insetX: 0.7, insetY: 0.7, cellW: 1.9, cellH: 1.9, gapX: 0.1, gapY: 0.1 },
+      states: [
+        { x: 7, label: "x₄₀ ∼ N(0,1)", final: false, matrix: [[3,0,2,1],[0,3,1,2],[2,1,3,0],[1,2,0,3]] },
+        { x: 25, label: "x₃₉", final: false, matrix: [[3,0,2,1],[0,2,1,2],[2,1,3,0],[1,2,1,3]] },
+        { x: 43, label: "x₃₈", final: false, matrix: [[2,0,2,1],[0,2,2,1],[1,2,3,1],[0,1,1,2]] },
+        { x: 79, label: "x₁", final: false, matrix: [[0,0,1,0],[0,2,3,1],[1,3,3,1],[0,1,2,0]] },
+        { x: 94, label: "x₀", final: true, matrix: [[0,0,1,0],[0,2,3,1],[1,3,3,1],[0,1,1,0]] }
+      ],
+      segments: [
+        { a: 11.5, b: 20.5, y: 22, tag: "t = 39", tagX: 16, badge: "+ z", badgeX: 16, condensed: false },
+        { a: 29.5, b: 38.5, y: 22, tag: "t = 38", tagX: 34, badge: "+ z", badgeX: 34, condensed: false },
+        { a: 47.5, b: 58.3, y: 22, tag: "…", tagX: 53, badge: "+ z", badgeX: 53, condensed: true },
+        { a: 63.3, b: 74.5, y: 22, tag: "t = 1", tagX: 69, badge: "+ z", badgeX: 69, condensed: true },
+        { a: 83.5, b: 89.5, y: 22, tag: "t = 0", tagX: 86.5, badge: "без z", badgeX: 86.5, condensed: false, final: true }
+      ],
+      arrow: { headX: 0.9, headY: 0.65 },
+      badge: { y: 12, rx: 2.7, ry: 1.55, finalRx: 3.7, finalRy: 1.55, linkA: 13.55, linkB: 19.6 },
+      band: { a: 11, b: 75.5, y: 7, tick: 1.1, textX: 43, textY: 4.1 },
+      finalBand: { a: 82.5, b: 98, y: 7, tick: 1.1, textX: 90.25, textY: 4.1 },
+      ellipsis: { xs: [59.3, 60.8, 62.3], y: 22, rx: 0.28, ry: 0.34 },
+      stateLabelY: 30.4,
+      tagY: 25.2,
+      legend: { x: 2.5, y: 34, w: 95, h: 7.1, radius: 0.8, titleX: 50, titleY: 36.3, rowY: 39.3, badge1X: 7, text1X: 10.3, badge2X: 54, text2X: 58.2, badgeRx: 1.7, badgeRy: 1.05 },
+      dash: { line: 0.7, gap: 0.55, noiseLine: 0.3, noiseGap: 0.35 }
+    }];
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 12, y: 10 };
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const [D] = DATA;
+    const svg = document.getElementById("chart");
+    const fallback = document.getElementById("fallback");
+    const NS = "http://www.w3.org/2000/svg";
+
+    try {
+      const make = (name, attrs, text) => {
+        const el = document.createElementNS(NS, name);
+        Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
+        if (text !== undefined) el.textContent = text;
+        return el;
+      };
+
+      const add = el => svg.appendChild(el);
+
+      const textAt = (x, y, value, cls, anchor) => add(make("text", {
+        x: sx(x),
+        y: sy(y),
+        class: cls,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, value));
+
+      const rectAt = (x, y, w, h, rx, cls) => add(make("rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(w) - sx(D.n.zero),
+        height: sy(h) - sy(D.n.zero),
+        rx: sx(rx) - sx(D.n.zero),
+        ry: sy(rx) - sy(D.n.zero),
+        class: cls
+      }));
+
+      const lineAt = (x1, y1, x2, y2, cls) => add(make("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: cls
+      }));
+
+      const ellipseAt = (cx, cy, rx, ry, cls) => add(make("ellipse", {
+        cx: sx(cx),
+        cy: sy(cy),
+        rx: sx(rx) - sx(D.n.zero),
+        ry: sy(ry) - sy(D.n.zero),
+        class: cls
+      }));
+
+      document.documentElement.style.setProperty("--dash",
+        `${sx(D.dash.line) - sx(D.n.zero)}px ${sx(D.dash.gap) - sx(D.n.zero)}px`);
+      document.documentElement.style.setProperty("--noise-dash",
+        `${sx(D.dash.noiseLine) - sx(D.n.zero)}px ${sx(D.dash.noiseGap) - sx(D.n.zero)}px`);
+
+      rectAt(D.frame.x, D.frame.y, D.frame.w, D.frame.h, D.card.radius, "surface");
+
+      lineAt(D.band.a, D.band.y, D.band.b, D.band.y, "guide");
+      lineAt(D.band.a, D.band.y, D.band.a, D.band.y + D.band.tick, "guide");
+      lineAt(D.band.b, D.band.y, D.band.b, D.band.y + D.band.tick, "guide");
+      textAt(D.band.textX, D.band.textY, "При каждом t > 0 добавляется свежий z", "band-label", "middle");
+
+      lineAt(D.finalBand.a, D.finalBand.y, D.finalBand.b, D.finalBand.y, "guide-final");
+      lineAt(D.finalBand.a, D.finalBand.y, D.finalBand.a, D.finalBand.y + D.finalBand.tick, "guide-final");
+      lineAt(D.finalBand.b, D.finalBand.y, D.finalBand.b, D.finalBand.y + D.finalBand.tick, "guide-final");
+      textAt(D.finalBand.textX, D.finalBand.textY, "Финальный t = 0", "small", "middle");
+
+      D.segments.forEach(segment => {
+        lineAt(segment.a, segment.y, segment.b - D.arrow.headX, segment.y,
+          segment.condensed ? "step-line condensed" : "step-line");
+
+        add(make("polygon", {
+          points: [
+            `${sx(segment.b)},${sy(segment.y)}`,
+            `${sx(segment.b - D.arrow.headX)},${sy(segment.y - D.arrow.headY)}`,
+            `${sx(segment.b - D.arrow.headX)},${sy(segment.y + D.arrow.headY)}`
+          ].join(" "),
+          class: "arrowhead"
+        }));
+
+        const badgeRx = segment.final ? D.badge.finalRx : D.badge.rx;
+        ellipseAt(segment.badgeX, D.badge.y, badgeRx, D.badge.ry,
+          segment.final ? "badge-final" : "badge");
+        textAt(segment.badgeX, D.badge.y, segment.badge, "badge-text", "middle");
+
+        if (!segment.final) {
+          lineAt(segment.badgeX, D.badge.linkA, segment.badgeX, D.badge.linkB, "noise-link");
+        }
+
+        textAt(segment.tagX, D.tagY, segment.tag, "step-label", "middle");
+      });
+
+      D.ellipsis.xs.forEach(x => ellipseAt(
+        x, D.ellipsis.y, D.ellipsis.rx, D.ellipsis.ry, "ellipsis"
+      ));
+
+      D.states.forEach(state => {
+        const left = state.x - D.card.w / scale.y;
+        rectAt(left, D.card.y, D.card.w, D.card.h, D.card.radius,
+          state.final ? "card final" : "card");
+
+        state.matrix.forEach((row, rowIndex) => {
+          row.forEach((tone, columnIndex) => {
+            const cellX = left + D.card.insetX +
+              columnIndex * (D.card.cellW + D.card.gapX);
+            const cellY = D.card.y + D.card.insetY +
+              rowIndex * (D.card.cellH + D.card.gapY);
+            rectAt(cellX, cellY, D.card.cellW, D.card.cellH,
+              D.card.radius - D.card.radius, `cell tone${tone}`);
+          });
+        });
+
+        textAt(state.x, D.stateLabelY, state.label, "label", "middle");
+      });
+
+      rectAt(D.legend.x, D.legend.y, D.legend.w, D.legend.h,
+        D.legend.radius, "legend-box");
+      textAt(D.legend.titleX, D.legend.titleY,
+        "Один запуск проходит все промежуточные состояния по порядку",
+        "legend-title", "middle");
+
+      ellipseAt(D.legend.badge1X, D.legend.rowY,
+        D.legend.badgeRx, D.legend.badgeRy, "badge");
+      textAt(D.legend.badge1X, D.legend.rowY, "+ z", "badge-text", "middle");
+      textAt(D.legend.text1X, D.legend.rowY,
+        "свежая случайность на шагах t > 0", "legend-text", "start");
+
+      ellipseAt(D.legend.badge2X, D.legend.rowY,
+        D.legend.badgeRx, D.legend.badgeRy, "badge-final");
+      textAt(D.legend.badge2X, D.legend.rowY, "без z", "badge-text", "middle");
+      textAt(D.legend.text2X, D.legend.rowY,
+        "на t = 0 готовый x₀ больше не портим", "legend-text", "start");
+
+      fallback.hidden = true;
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Наивный sampler и специализированная inpainting-модель</title>
+<style>
+  :root{
+    --page:#f7f8fc;
+    --panel:#ffffff;
+    --panel-alt:#f1f4fa;
+    --ink:#172033;
+    --muted:#59657a;
+    --line:#8d98aa;
+    --blue:#3977d4;
+    --blue-soft:#dceaff;
+    --violet:#7657c8;
+    --violet-soft:#e9e1ff;
+    --green:#26846b;
+    --green-soft:#d9f2e8;
+    --orange:#c5652d;
+    --orange-soft:#ffe5d5;
+    --red:#b84d52;
+    --red-soft:#ffe0e2;
+    --mask:#293247;
+    --road:#d7dbe2;
+    --road-line:#ffffff;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --page:#111521;
+      --panel:#181e2c;
+      --panel-alt:#202839;
+      --ink:#eef2fa;
+      --muted:#adb8ca;
+      --line:#6f7b90;
+      --blue:#77aaff;
+      --blue-soft:#243c63;
+      --violet:#b39aff;
+      --violet-soft:#3d315f;
+      --green:#65c9a9;
+      --green-soft:#1e4b40;
+      --orange:#f0a06e;
+      --orange-soft:#573425;
+      --red:#ef858b;
+      --red-soft:#552d35;
+      --mask:#d7deed;
+      --road:#4e5664;
+      --road-line:#e9edf5;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--page);color:var(--ink)}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  figure{margin:0;background:var(--page)}
+  .heading{
+    padding:14px 22px 8px;
+    font-size:20px;
+    font-weight:bold;
+    color:var(--ink);
+  }
+  svg{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:480px;
+    background:var(--page);
+  }
+  .panel{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+  .divider{stroke:var(--line);stroke-width:1.5}
+  .title{fill:var(--ink);font-size:18px;font-weight:bold}
+  .subtitle{fill:var(--muted);font-size:13px}
+  .label{fill:var(--ink);font-size:14px;font-weight:bold}
+  .small{fill:var(--muted);font-size:12px}
+  .tiny{fill:var(--muted);font-size:11px}
+  .latent{fill:var(--blue-soft);stroke:var(--blue);stroke-width:1.5}
+  .source{fill:var(--green-soft);stroke:var(--green);stroke-width:1.5}
+  .mask{fill:var(--violet-soft);stroke:var(--violet);stroke-width:1.5}
+  .unet{fill:var(--orange-soft);stroke:var(--orange);stroke-width:2}
+  .context{fill:var(--panel-alt);stroke:var(--line);stroke-width:1.5}
+  .warning{fill:var(--red-soft);stroke:var(--red);stroke-width:1.5}
+  .success{fill:var(--green-soft);stroke:var(--green);stroke-width:1.5}
+  .arrow{fill:none;stroke:var(--ink);stroke-width:1.8}
+  .context-arrow{fill:none;stroke:var(--blue);stroke-width:1.8}
+  .train-arrow{fill:none;stroke:var(--green);stroke-width:1.8}
+  .arrow-head{fill:var(--ink)}
+  .blue-head{fill:var(--blue)}
+  .green-head{fill:var(--green)}
+  .road{fill:var(--road);stroke:var(--line);stroke-width:1.5}
+  .road-mark{fill:none;stroke:var(--road-line);stroke-width:3}
+  .seam{fill:none;stroke:var(--red);stroke-width:2}
+  .good-seam{fill:none;stroke:var(--green);stroke-width:2}
+  .channel-line{stroke:var(--line);stroke-width:1}
+  .bracket{fill:none;stroke:var(--violet);stroke-width:2}
+  .fallback{padding:22px;color:var(--ink);font-size:15px}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-heading">
+  <figcaption id="diagram-heading" class="heading">Два способа удержать контекст при inpainting</figcaption>
+  <svg id="diagram" viewBox="0 0 1180 445" width="1180" height="445"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Слева обратная диффузия с возвратом зашумлённого контекста, справа девятиканальный вход специализированной inpainting-модели">
+  </svg>
+</figure>
+<script>
+const [D]=[{
+  panelY:8,panelH:426,leftX:16,leftW:556,rightX:588,rightW:576,radius:12,
+  leftTitle:{x:40,y:40},leftSub:{x:40,y:63},
+  rightTitle:{x:612,y:40},rightSub:{x:612,y:63},
+  latentY:100,latentW:104,latentH:66,
+  latentXs:[48,194,340,456],
+  flowY:133,
+  contextX:48,contextY:208,contextW:408,contextH:70,
+  contextLabel:{x:68,y:230},contextSub:{x:68,y:252},
+  injectXs:[246,392,508],injectTop:174,injectBottom:208,
+  roadX:48,roadY:306,roadW:212,roadH:90,
+  road2X:306,road2Y:306,road2W:212,road2H:90,
+  roadLineA:[62,382,120,322,178,382],
+  roadLineBad:[178,382,202,354,246,326],
+  roadLineGood:[320,382,378,322,436,382,494,322],
+  seamBad:[170,380,198,352,228,332],
+  seamGood:[428,380,456,350,486,328],
+  noteLeft:{x:154,y:415},noteRight:{x:412,y:415},
+  inputX:616,inputW:238,inputTop:95,inputH:62,inputGap:16,
+  noisyY:95,sourceY:173,maskY:251,
+  stackOffset:7,stackCount:[1,1,1],
+  channelTextX:636,channelTextY:[121,199,277],
+  channelSubY:[142,220,298],
+  bracketX:871,bracketTop:95,bracketBottom:313,bracketArm:15,
+  totalText:{x:892,y:207},
+  unetX:982,unetY:154,unetW:142,unetH:102,
+  unetLabel:{x:1053,y:190},unetSub:{x:1053,y:214},unetFoot:{x:1053,y:237},
+  feedStartX:854,feedEndX:974,feedYs:[126,204,282],feedTargetYs:[175,205,235],
+  trainingX:616,trainingY:338,trainingW:508,trainingH:58,
+  trainingLabel:{x:638,y:361},trainingSub:{x:638,y:382},
+  trainingArrowStart:{x:1053,y:330},trainingArrowEnd:{x:1053,y:264},
+  arrowHead:8,arrowWing:5,
+  patchX:136,patchY:334,patchW:55,patchH:42,
+  patch2X:394,patch2Y:334,patch2W:55,patch2H:42,
+  labelOffset:8,
+  latentLabels:["zₜ","zₜ₋₁","zₜ₋₁","результат"],
+  latentSubs:["обычная модель","шаг шумоподавления","контекст возвращён","вне маски — оригинал"],
+  channelLabels:["Шумный латент — 4 канала","Encoded source — 4 канала","Маска — 1 канал"],
+  channelSubs:["что модель шумоподавляет","чистая подсказка из оригинала","где нужно достраивать"],
+  fallback:"Схема должна была показать обратную диффузию с подстановкой зашумлённого контекста и вход U-Net из 4 каналов шумного латента, 4 каналов encoded source и 1 канала маски."
+}];
+
+const origin={x:0,y:0};
+const scale={x:1,y:1};
+Object.freeze(origin);
+Object.freeze(scale);
+
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const NS="http://www.w3.org/2000/svg";
+
+  const add=(name,attrs={},parent=svg)=>{
+    const node=document.createElementNS(NS,name);
+    for(const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+    parent.appendChild(node);
+    return node;
+  };
+
+  const rect=(x,y,w,h,cls)=>{
+    return add("rect",{
+      x:sx(x),y:sy(y),
+      width:sx(w)-sx(0),height:sy(h)-sy(0),
+      rx:sx(D.radius)-sx(0),class:cls
+    });
+  };
+
+  const line=(x1,y1,x2,y2,cls)=>{
+    return add("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls});
+  };
+
+  const path=(points,cls)=>{
+    const commands=points.map((p,i)=>
+      `${i?"L":"M"} ${sx(p[0])} ${sy(p[1])}`
+    ).join(" ");
+    return add("path",{d:commands,class:cls});
+  };
+
+  const text=(x,y,value,cls,anchor="start",dx=0,dy=0)=>{
+    const node=add("text",{
+      x:sx(x),y:sy(y),class:cls,
+      "text-anchor":anchor,dx,dy
+    });
+    node.textContent=value;
+    return node;
+  };
+
+  const arrowHead=(x,y,direction,cls)=>{
+    const a=D.arrowHead,w=D.arrowWing;
+    const pts=direction==="right"
+      ?[[x,y],[x-a,y-w],[x-a,y+w]]
+      :direction==="up"
+      ?[[x,y],[x-w,y+a],[x+w,y+a]]
+      :[[x,y],[x-w,y-a],[x+w,y-a]];
+    return add("polygon",{
+      points:pts.map(p=>`${sx(p[0])},${sy(p[1])}`).join(" "),
+      class:cls
+    });
+  };
+
+  rect(D.leftX,D.panelY,D.leftW,D.panelH,"panel");
+  rect(D.rightX,D.panelY,D.rightW,D.panelH,"panel");
+
+  text(D.leftTitle.x,D.leftTitle.y,"Наивный sampler","title");
+  text(D.leftSub.x,D.leftSub.y,"Обычная модель + технический возврат контекста","subtitle");
+  text(D.rightTitle.x,D.rightTitle.y,"Специализированная inpainting-модель","title");
+  text(D.rightSub.x,D.rightSub.y,"Контекст входит в само условие задачи","subtitle");
+
+  D.latentXs.forEach((x,i)=>{
+    rect(x,D.latentY,D.latentW,D.latentH,i===D.latentXs.length-1?"context":"latent");
+    text(x+D.latentW/2,D.latentY+27,D.latentLabels[i],"label","middle");
+    text(x+D.latentW/2,D.latentY+49,D.latentSubs[i],"tiny","middle");
+    if(i<D.latentXs.length-1){
+      const start=x+D.latentW;
+      const end=D.latentXs[i+1]-D.arrowHead;
+      line(start,D.flowY,end,D.flowY,"arrow");
+      arrowHead(D.latentXs[i+1],D.flowY,"right","arrow-head");
+    }
+  });
+
+  rect(D.contextX,D.contextY,D.contextW,D.contextH,"context");
+  text(D.contextLabel.x,D.contextLabel.y,"Известный контекст из оригинала","label");
+  text(D.contextSub.x,D.contextSub.y,"На каждом шаге: тот же контекст + нужный уровень шума","small");
+
+  D.injectXs.forEach(x=>{
+    line(x,D.injectBottom,x,D.injectTop+D.arrowHead,"context-arrow");
+    arrowHead(x,D.injectTop,"up","blue-head");
+  });
+
+  rect(D.roadX,D.roadY,D.roadW,D.roadH,"road");
+  rect(D.patchX,D.patchY,D.patchW,D.patchH,"warning");
+  path([
+    [D.roadLineA[0],D.roadLineA[1]],
+    [D.roadLineA[2],D.roadLineA[3]],
+    [D.roadLineA[4],D.roadLineA[5]],
+    [D.roadLineBad[2],D.roadLineBad[3]],
+    [D.roadLineBad[4],D.roadLineBad[5]]
+  ],"road-mark");
+  path([
+    [D.seamBad[0],D.seamBad[1]],
+    [D.seamBad[2],D.seamBad[3]],
+    [D.seamBad[4],D.seamBad[5]]
+  ],"seam");
+  text(D.noteLeft.x,D.noteLeft.y,"точный фон, возможен заметный стык","small","middle");
+
+  rect(D.road2X,D.road2Y,D.road2W,D.road2H,"road");
+  rect(D.patch2X,D.patch2Y,D.patch2W,D.patch2H,"success");
+  path([
+    [D.roadLineGood[0],D.roadLineGood[1]],
+    [D.roadLineGood[2],D.roadLineGood[3]],
+    [D.roadLineGood[4],D.roadLineGood[5]],
+    [D.roadLineGood[6],D.roadLineGood[7]]
+  ],"road-mark");
+  path([
+    [D.seamGood[0],D.seamGood[1]],
+    [D.seamGood[2],D.seamGood[3]],
+    [D.seamGood[4],D.seamGood[5]]
+  ],"good-seam");
+  text(D.noteRight.x,D.noteRight.y,"текстура и освещение продолжаются связно","small","middle");
+
+  const channelRows=[
+    {y:D.noisyY,cls:"latent"},
+    {y:D.sourceY,cls:"source"},
+    {y:D.maskY,cls:"mask"}
+  ];
+
+  channelRows.forEach((row,i)=>{
+    rect(D.inputX+D.stackOffset,row.y-D.stackOffset,D.inputW,D.inputH,row.cls);
+    rect(D.inputX,row.y,D.inputW,D.inputH,row.cls);
+    text(D.channelTextX,D.channelTextY[i],D.channelLabels[i],"label");
+    text(D.channelTextX,D.channelSubY[i],D.channelSubs[i],"small");
+    line(D.inputX+D.inputW-D.stackOffset,row.y,
+         D.inputX+D.inputW-D.stackOffset,row.y+D.inputH,"channel-line");
+  });
+
+  path([
+    [D.bracketX+D.bracketArm,D.bracketTop],
+    [D.bracketX,D.bracketTop],
+    [D.bracketX,D.bracketBottom],
+    [D.bracketX+D.bracketArm,D.bracketBottom]
+  ],"bracket");
+  text(D.totalText.x,D.totalText.y,"всего 9 каналов","label","start");
+
+  D.feedYs.forEach((y,i)=>{
+    line(D.feedStartX,y,D.feedEndX-D.arrowHead,D.feedTargetYs[i],"arrow");
+    arrowHead(D.feedEndX,D.feedTargetYs[i],"right","arrow-head");
+  });
+
+  rect(D.unetX,D.unetY,D.unetW,D.unetH,"unet");
+  text(D.unetLabel.x,D.unetLabel.y,"U-Net","title","middle");
+  text(D.unetSub.x,D.unetSub.y,"вход: 9 каналов","label","middle");
+  text(D.unetFoot.x,D.unetFoot.y,"первая свёртка","small","middle");
+
+  rect(D.trainingX,D.trainingY,D.trainingW,D.trainingH,"success");
+  text(D.trainingLabel.x,D.trainingLabel.y,"Обучение на случайно скрытых областях","label");
+  text(D.trainingSub.x,D.trainingSub.y,
+       "Модель заранее учится продолжать текстуру, геометрию и освещение","small");
+
+  line(D.trainingArrowStart.x,D.trainingArrowStart.y,
+       D.trainingArrowEnd.x,D.trainingArrowEnd.y+D.arrowHead,"train-arrow");
+  arrowHead(D.trainingArrowEnd.x,D.trainingArrowEnd.y,"up","green-head");
+
+}catch(error){
+  const figure=document.querySelector("figure");
+  const old=document.getElementById("diagram");
+  const fallback=document.createElement("p");
+  fallback.className="fallback";
+  fallback.textContent=D.fallback;
+  old.replaceWith(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как детали обходят узкое место U-Net</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59657a;
+    --border: #b9c2d0;
+    --guide: #d8dee8;
+    --level-a: #e3f2ff;
+    --level-b: #d8e9ff;
+    --level-c: #cbdcff;
+    --bottle: #f4ddff;
+    --bottle-border: #8c43b7;
+    --detail: #087f75;
+    --detail-soft: #d7f3ef;
+    --meaning: #7440b7;
+    --meaning-soft: #eee3fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10141d;
+      --panel: #171d28;
+      --ink: #eef3fb;
+      --muted: #b3bdcd;
+      --border: #526077;
+      --guide: #364155;
+      --level-a: #19364b;
+      --level-b: #203b5b;
+      --level-c: #293d68;
+      --bottle: #482557;
+      --bottle-border: #d59af2;
+      --detail: #55d8c9;
+      --detail-soft: #173d3a;
+      --meaning: #d2a8ff;
+      --meaning-soft: #38274c;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1200px;
+    padding: 8px 12px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+
+  h1 {
+    margin: unset;
+    padding: 4px 6px 8px;
+    font-size: 21px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 448px;
+    background: var(--panel);
+  }
+
+  .block {
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .level-a {
+    fill: var(--level-a);
+  }
+
+  .level-b {
+    fill: var(--level-b);
+  }
+
+  .level-c {
+    fill: var(--level-c);
+  }
+
+  .bottleneck {
+    fill: var(--bottle);
+    stroke: var(--bottle-border);
+    stroke-width: 3px;
+  }
+
+  .image-panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .core {
+    fill: none;
+    stroke: var(--meaning);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .skip {
+    fill: none;
+    stroke: var(--detail);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .guide {
+    fill: none;
+    stroke: var(--guide);
+    stroke-width: 1px;
+  }
+
+  .bike {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bike-detail {
+    fill: none;
+    stroke: var(--detail);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .hub {
+    fill: var(--ink);
+    stroke: none;
+  }
+
+  .hub-detail {
+    fill: var(--detail);
+    stroke: none;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .section {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .bottle-label {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .detail-label {
+    fill: var(--detail);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .meaning-label {
+    fill: var(--meaning);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend-detail {
+    fill: var(--detail-soft);
+    stroke: var(--detail);
+    stroke-width: 1px;
+  }
+
+  .legend-meaning {
+    fill: var(--meaning-soft);
+    stroke: var(--meaning);
+    stroke-width: 1px;
+  }
+
+  #fallback {
+    padding: 18px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <h1>Как детали обходят узкое место U-Net</h1>
+  <svg id="diagram"
+       viewBox="0 0 1200 448"
+       width="1200"
+       height="448"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Симметричный энкодер-декодер U-Net</title>
+    <desc id="svg-desc">Карты признаков обходят узкое место по трём skip-связям и попадают на уровни декодера того же разрешения.</desc>
+  </svg>
+  <div id="fallback" hidden>
+    Схема должна была показать симметричный энкодер-декодер: смысл проходит
+    через узкое место, а точные детали передаются по skip-связям между
+    уровнями одинакового разрешения.
+  </div>
+</figure>
+
+<script>
+const data = Object.freeze([{
+  zero: 0,
+  one: 1,
+  half: 2,
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  arrow: 9,
+  arrowHalf: 5,
+  hubRadius: 2,
+  blocks: [
+    { x: 165, y: 110, w: 80, h: 200, kind: "block level-a" },
+    { x: 290, y: 135, w: 75, h: 150, kind: "block level-b" },
+    { x: 410, y: 160, w: 70, h: 100, kind: "block level-c" },
+    { x: 530, y: 175, w: 140, h: 70, kind: "bottleneck" },
+    { x: 720, y: 160, w: 70, h: 100, kind: "block level-c" },
+    { x: 840, y: 135, w: 75, h: 150, kind: "block level-b" },
+    { x: 960, y: 110, w: 80, h: 200, kind: "block level-a" }
+  ],
+  panels: [
+    { x: 20, y: 155, w: 110, h: 110 },
+    { x: 1070, y: 155, w: 110, h: 110 }
+  ],
+  core: [
+    [{ x: 130, y: 210 }, { x: 165, y: 210 }],
+    [{ x: 245, y: 210 }, { x: 290, y: 210 }],
+    [{ x: 365, y: 210 }, { x: 410, y: 210 }],
+    [{ x: 480, y: 210 }, { x: 530, y: 210 }],
+    [{ x: 670, y: 210 }, { x: 720, y: 210 }],
+    [{ x: 790, y: 210 }, { x: 840, y: 210 }],
+    [{ x: 915, y: 210 }, { x: 960, y: 210 }],
+    [{ x: 1040, y: 210 }, { x: 1070, y: 210 }]
+  ],
+  skips: [
+    [
+      { x: 205, y: 110 },
+      { x: 205, y: 48 },
+      { x: 1000, y: 48 },
+      { x: 1000, y: 110 }
+    ],
+    [
+      { x: 327.5, y: 135 },
+      { x: 327.5, y: 73 },
+      { x: 877.5, y: 73 },
+      { x: 877.5, y: 135 }
+    ],
+    [
+      { x: 445, y: 160 },
+      { x: 445, y: 98 },
+      { x: 755, y: 98 },
+      { x: 755, y: 160 }
+    ]
+  ],
+  guides: [
+    [{ x: 165, y: 310 }, { x: 1040, y: 310 }]
+  ],
+  labels: [
+    { x: 75, y: 137, text: "вход 256×256", cls: "section", anchor: "middle" },
+    { x: 1125, y: 137, text: "выход 256×256", cls: "section", anchor: "middle" },
+
+    { x: 205, y: 203, text: "края", cls: "label", anchor: "middle" },
+    { x: 205, y: 222, text: "точные места", cls: "small", anchor: "middle" },
+    { x: 327.5, y: 214, text: "формы", cls: "label", anchor: "middle" },
+    { x: 445, y: 214, text: "части", cls: "label", anchor: "middle" },
+
+    { x: 600, y: 204, text: "УЗКОЕ МЕСТО", cls: "bottle-label", anchor: "middle" },
+    { x: 600, y: 225, text: "смысл сцены", cls: "small", anchor: "middle" },
+
+    { x: 755, y: 214, text: "части", cls: "label", anchor: "middle" },
+    { x: 877.5, y: 214, text: "формы", cls: "label", anchor: "middle" },
+    { x: 1000, y: 203, text: "детали", cls: "label", anchor: "middle" },
+    { x: 1000, y: 222, text: "на местах", cls: "small", anchor: "middle" },
+
+    { x: 322, y: 337, text: "Энкодер: сжимает", cls: "section", anchor: "middle" },
+    { x: 878, y: 337, text: "Декодер: восстанавливает", cls: "section", anchor: "middle" },
+    { x: 600, y: 25, text: "skip-связи: детали обходят узкое место", cls: "detail-label", anchor: "middle" }
+  ],
+  legendBoxes: [
+    { x: 70, y: 354, w: 500, h: 38, cls: "legend-detail" },
+    { x: 630, y: 354, w: 500, h: 38, cls: "legend-meaning" }
+  ],
+  legendLines: [
+    [{ x: 90, y: 373 }, { x: 135, y: 373 }, "skip"],
+    [{ x: 650, y: 373 }, { x: 695, y: 373 }, "core"]
+  ],
+  legendLabels: [
+    { x: 150, y: 378, text: "«где»: координаты краёв идут почти напрямую", cls: "detail-label", anchor: "start" },
+    { x: 710, y: 378, text: "«что»: смысл проходит через узкое место", cls: "meaning-label", anchor: "start" },
+    { x: 600, y: 426, text: "Попарно соединены уровни одинакового разрешения", cls: "section", anchor: "middle" }
+  ],
+  bike: {
+    origins: [
+      { x: 20, y: 155, cls: "bike", hub: "hub" },
+      { x: 1070, y: 155, cls: "bike-detail", hub: "hub-detail" }
+    ],
+    wheels: [
+      { x: 28, y: 70 },
+      { x: 82, y: 70 }
+    ],
+    wheelRadius: 22,
+    spokes: [
+      { x: 0, y: -22 },
+      { x: 22, y: 0 },
+      { x: 0, y: 22 },
+      { x: -22, y: 0 },
+      { x: 16, y: -16 },
+      { x: 16, y: 16 },
+      { x: -16, y: 16 },
+      { x: -16, y: -16 }
+    ],
+    frame: [
+      [{ x: 28, y: 70 }, { x: 50, y: 70 }],
+      [{ x: 50, y: 70 }, { x: 43, y: 43 }],
+      [{ x: 43, y: 43 }, { x: 28, y: 70 }],
+      [{ x: 43, y: 43 }, { x: 72, y: 43 }],
+      [{ x: 72, y: 43 }, { x: 82, y: 70 }],
+      [{ x: 50, y: 70 }, { x: 72, y: 43 }],
+      [{ x: 43, y: 43 }, { x: 39, y: 34 }],
+      [{ x: 35, y: 34 }, { x: 47, y: 34 }],
+      [{ x: 72, y: 43 }, { x: 76, y: 31 }],
+      [{ x: 76, y: 31 }, { x: 84, y: 28 }]
+    ]
+  }
+}]);
+
+const [D] = data;
+const origin = Object.freeze(D.origin);
+const scale = Object.freeze(D.scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function make(tag, attrs, content) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => node.setAttribute(name, value));
+    if (content !== undefined) node.textContent = content;
+    svg.appendChild(node);
+    return node;
+  }
+
+  function rect(item, cls) {
+    return make("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.w) - sx(0),
+      height: sy(item.h) - sy(0),
+      class: cls
+    });
+  }
+
+  function line(a, b, cls) {
+    return make("line", {
+      x1: sx(a.x),
+      y1: sy(a.y),
+      x2: sx(b.x),
+      y2: sy(b.y),
+      class: cls
+    });
+  }
+
+  function arrowHead(a, b, cls) {
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    const ux = (b.x - a.x) / length;
+    const uy = (b.y - a.y) / length;
+    const baseX = b.x - ux * D.arrow;
+    const baseY = b.y - uy * D.arrow;
+    const px = -uy * D.arrowHalf;
+    const py = ux * D.arrowHalf;
+    return make("polygon", {
+      points: [
+        `${sx(b.x)},${sy(b.y)}`,
+        `${sx(baseX + px)},${sy(baseY + py)}`,
+        `${sx(baseX - px)},${sy(baseY - py)}`
+      ].join(" "),
+      class: cls
+    });
+  }
+
+  function arrow(a, b, cls) {
+    line(a, b, cls);
+    arrowHead(a, b, cls);
+  }
+
+  function polyArrow(points, cls) {
+    make("polyline", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: cls
+    });
+    const tip = points[points.length - D.one];
+    const before = points[points.length - D.half];
+    arrowHead(before, tip, cls);
+  }
+
+  function label(item) {
+    return make("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      class: item.cls,
+      "text-anchor": item.anchor
+    }, item.text);
+  }
+
+  function circle(point, radius, cls) {
+    return make("circle", {
+      cx: sx(point.x),
+      cy: sy(point.y),
+      r: sx(radius) - sx(0),
+      class: cls
+    });
+  }
+
+  function drawBike(spec) {
+    const bike = D.bike;
+    bike.wheels.forEach(wheel => {
+      const center = { x: spec.x + wheel.x, y: spec.y + wheel.y };
+      circle(center, bike.wheelRadius, spec.cls);
+      circle(center, D.hubRadius, spec.hub);
+      bike.spokes.forEach(spoke => {
+        line(center, {
+          x: center.x + spoke.x,
+          y: center.y + spoke.y
+        }, spec.cls);
+      });
+    });
+    bike.frame.forEach(segment => {
+      line({
+        x: spec.x + segment[0].x,
+        y: spec.y + segment[0].y
+      }, {
+        x: spec.x + segment[D.one].x,
+        y: spec.y + segment[D.one].y
+      }, spec.cls);
+    });
+  }
+
+  D.guides.forEach(segment => line(segment[0], segment[D.one], "guide"));
+  D.core.forEach(segment => arrow(segment[0], segment[D.one], "core"));
+  D.skips.forEach(points => polyArrow(points, "skip"));
+
+  D.panels.forEach(panel => rect(panel, "image-panel"));
+  D.blocks.forEach(block => rect(block, block.kind));
+  D.bike.origins.forEach(drawBike);
+
+  D.labels.forEach(label);
+  D.legendBoxes.forEach(box => rect(box, box.cls));
+  D.legendLines.forEach(item => arrow(item[0], item[D.one], item[D.half]));
+  D.legendLabels.forEach(label);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

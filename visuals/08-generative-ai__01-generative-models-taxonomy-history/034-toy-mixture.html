@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Явные и неявные методы на смеси двух гауссиан</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #182033;
+    --muted: #667085;
+    --axis: #344054;
+    --grid: #d8deea;
+    --hist: #5b7cfa;
+    --hist-fill: #5b7cfa70;
+    --kde: #e04f87;
+    --band: #f5c45142;
+    --band-edge: #b57a08;
+    --generator: #24a37a;
+    --generator-fill: #24a37a24;
+    --warning: #d05d39;
+    --warning-fill: #d05d3920;
+    --card: #f1f4fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111624;
+      --panel: #171d2d;
+      --ink: #f2f4f8;
+      --muted: #aeb7c8;
+      --axis: #c7cfdd;
+      --grid: #394257;
+      --hist: #8da4ff;
+      --hist-fill: #8da4ff58;
+      --kde: #ff7cac;
+      --band: #f5c45132;
+      --band-edge: #ffd36c;
+      --generator: #59d5ad;
+      --generator-fill: #59d5ad20;
+      --warning: #ff906f;
+      --warning-fill: #ff906f1d;
+      --card: #20283a;
+    }
+  }
+
+  html, body {
+    margin: initial;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .diagram {
+    margin: initial;
+    background: var(--panel);
+  }
+
+  .heading {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+
+  .axis, .tick {
+    stroke: var(--axis);
+    stroke-width: 1.5;
+  }
+
+  .guide {
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .hist-bar {
+    fill: var(--hist-fill);
+    stroke: var(--hist);
+    stroke-width: 1.5;
+  }
+
+  .kde-line {
+    fill: none;
+    stroke: var(--kde);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .band {
+    fill: var(--band);
+  }
+
+  .band-edge, .bracket {
+    stroke: var(--band-edge);
+    stroke-width: 2;
+  }
+
+  .hist-leader {
+    stroke: var(--hist);
+    stroke-width: 2;
+    fill: var(--hist);
+  }
+
+  .kde-leader {
+    stroke: var(--kde);
+    stroke-width: 2;
+    fill: var(--kde);
+  }
+
+  .generator-line {
+    stroke: var(--generator);
+    stroke-width: 2.5;
+    fill: var(--generator);
+  }
+
+  .generator-box {
+    fill: var(--generator-fill);
+    stroke: var(--generator);
+    stroke-width: 2;
+  }
+
+  .generator-dot {
+    fill: var(--generator);
+    stroke: var(--panel);
+    stroke-width: 1.5;
+  }
+
+  .warning-box {
+    fill: var(--warning-fill);
+    stroke: var(--warning);
+    stroke-width: 2;
+  }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--grid);
+    stroke-width: 1.5;
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .hist-text {
+    fill: var(--hist);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .kde-text {
+    fill: var(--kde);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .warning-text {
+    fill: var(--warning);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--warning);
+    font-size: 17px;
+  }
+</style>
+</head>
+<body>
+<figure class="diagram">
+  <div class="heading" id="diagram-title">Явные и неявные методы на смеси двух гауссиан</div>
+  <svg id="scene" viewBox="0 0 1200 470" width="1200" height="470"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">Сравнение гистограммы, KDE и неявного генератора на смеси двух гауссиан.</desc>
+  </svg>
+</figure>
+
+<script>
+const data = [{
+  zero: 0,
+  one: 1,
+  two: 2,
+  half: 0.5,
+  canvas: [1200, 470],
+  origin: [360, 350],
+  scale: [70, 100],
+  plot: { min: -4.2, max: 4.2, base: 0, top: 2.55, step: 0.06 },
+  mixture: [
+    { mean: -2, sigma: 0.6, weight: 0.5 },
+    { mean: 2, sigma: 0.9, weight: 0.5 }
+  ],
+  bandwidth: 0.3,
+  histogram: { bin: 0.5, inset: 0.035, amplitude: 4.55 },
+  kde: { amplitude: 4.8 },
+  interval: [-0.5, 0.5],
+  bandTop: 2.28,
+  bracketY: -0.28,
+  bracketCap: 0.09,
+  ticks: [
+    { value: -2, text: "−2" },
+    { value: 2, text: "+2" },
+    { value: -0.5, text: "−0.5" },
+    { value: 0.5, text: "0.5" }
+  ],
+  tickSize: 0.07,
+  labelOffset: 7,
+  radius: 0.065,
+  arrowHead: 0.11,
+  arrowWing: 0.07,
+  chartTitle: [-4.05, 2.92],
+  sampleLabel: [4.05, 2.92],
+  modeLabels: [
+    { point: [-2, 1.88], text: "мода −2 · σ 0.6", offset: -7 },
+    { point: [2, 1.43], text: "мода +2 · σ 0.9", offset: -7 }
+  ],
+  estimateLabels: [
+    {
+      point: [-2.55, -0.72],
+      text: "Гистограмма: 0.025",
+      className: "hist-text",
+      leaderClass: "hist-leader",
+      from: [-2.05, -0.55],
+      to: [-0.36, 0.08]
+    },
+    {
+      point: [2.55, -0.72],
+      text: "KDE: 0.033",
+      className: "kde-text",
+      leaderClass: "kde-leader",
+      from: [2.05, -0.55],
+      to: [0.36, 0.24]
+    }
+  ],
+  generator: {
+    bounds: [5.05, -0.72, 11.68, 3.15],
+    title: [5.42, 2.82],
+    source: [6.62, 2.08, 10.12, 2.57],
+    sourceText: [8.37, 2.31],
+    arrowFrom: [8.37, 2.08],
+    arrowTo: [8.37, 1.63],
+    leftLabel: [6.72, 0.72],
+    rightLabel: [10.18, 0.72],
+    warning: [6.18, -0.44, 10.55, 0.14],
+    warningText: [8.365, -0.16],
+    dots: [
+      [6.25, 1.43], [6.58, 1.23], [6.88, 1.49], [7.18, 1.18],
+      [7.47, 1.42], [9.28, 1.25], [9.58, 1.49], [9.91, 1.19],
+      [10.23, 1.44], [10.58, 1.22]
+    ]
+  }
+}];
+
+const [diagram] = data;
+const origin = diagram.origin;
+const scale = diagram.scale;
+const [originX, originY] = origin;
+const [scaleX, scaleY] = scale;
+const sx = x => originX + x * scaleX;
+const sy = y => originY - y * scaleY;
+
+try {
+  const svg = document.getElementById("scene");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const add = (tag, attributes, content) => {
+    const node = document.createElementNS(namespace, tag);
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+    if (content !== undefined) node.textContent = content;
+    svg.appendChild(node);
+    return node;
+  };
+
+  const line = (a, b, className) => add("line", {
+    x1: sx(a[diagram.zero]),
+    y1: sy(a[diagram.one]),
+    x2: sx(b[diagram.zero]),
+    y2: sy(b[diagram.one]),
+    class: className
+  });
+
+  const rect = (left, bottom, right, top, className) => add("rect", {
+    x: sx(left),
+    y: sy(top),
+    width: sx(right) - sx(left),
+    height: sy(bottom) - sy(top),
+    class: className
+  });
+
+  const text = (point, content, className, anchor, dx, dy) => add("text", {
+    x: sx(point[diagram.zero]),
+    y: sy(point[diagram.one]),
+    class: className,
+    "text-anchor": anchor,
+    dx: dx,
+    dy: dy,
+    "dominant-baseline": "middle"
+  }, content);
+
+  const arrow = (from, to, className) => {
+    line(from, to, className);
+    const deltaX = to[diagram.zero] - from[diagram.zero];
+    const deltaY = to[diagram.one] - from[diagram.one];
+    const length = Math.hypot(deltaX, deltaY);
+    const unitX = deltaX / length;
+    const unitY = deltaY / length;
+    const baseX = to[diagram.zero] - unitX * diagram.arrowHead;
+    const baseY = to[diagram.one] - unitY * diagram.arrowHead;
+    const wingX = -unitY * diagram.arrowWing;
+    const wingY = unitX * diagram.arrowWing;
+    add("polygon", {
+      points: [
+        [sx(to[diagram.zero]), sy(to[diagram.one])],
+        [sx(baseX + wingX), sy(baseY + wingY)],
+        [sx(baseX - wingX), sy(baseY - wingY)]
+      ].map(point => point.join(",")).join(" "),
+      class: className
+    });
+  };
+
+  const gaussian = (x, mean, sigma) => {
+    const z = (x - mean) / sigma;
+    return Math.exp(-(z * z) / diagram.two) /
+      (sigma * Math.sqrt(diagram.two * Math.PI));
+  };
+
+  const density = (x, smoothing) => diagram.mixture.reduce((sum, mode) => {
+    const sigma = Math.sqrt(
+      mode.sigma * mode.sigma + smoothing * smoothing
+    );
+    return sum + mode.weight * gaussian(x, mode.mean, sigma);
+  }, diagram.zero);
+
+  const [intervalStart, intervalEnd] = diagram.interval;
+
+  rect(
+    intervalStart,
+    diagram.plot.base,
+    intervalEnd,
+    diagram.bandTop,
+    "band"
+  );
+  line(
+    [intervalStart, diagram.plot.base],
+    [intervalStart, diagram.bandTop],
+    "band-edge"
+  );
+  line(
+    [intervalEnd, diagram.plot.base],
+    [intervalEnd, diagram.bandTop],
+    "band-edge"
+  );
+
+  line(
+    [diagram.plot.min, diagram.plot.base],
+    [diagram.plot.max, diagram.plot.base],
+    "axis"
+  );
+
+  diagram.ticks.forEach(tick => {
+    line(
+      [tick.value, -diagram.tickSize],
+      [tick.value, diagram.tickSize],
+      "tick"
+    );
+    text(
+      [tick.value, -diagram.tickSize],
+      tick.text,
+      tick.value === diagram.plot.min ? "small" : "small",
+      "middle",
+      diagram.zero,
+      diagram.labelOffset
+    );
+  });
+
+  for (
+    let left = diagram.plot.min;
+    left < diagram.plot.max;
+    left += diagram.histogram.bin
+  ) {
+    const right = Math.min(left + diagram.histogram.bin, diagram.plot.max);
+    const middle = (left + right) / diagram.two;
+    const height = density(middle, diagram.zero) * diagram.histogram.amplitude;
+    rect(
+      left + diagram.histogram.inset,
+      diagram.plot.base,
+      right - diagram.histogram.inset,
+      height,
+      "hist-bar"
+    );
+  }
+
+  const kdePoints = [];
+  for (
+    let x = diagram.plot.min;
+    x <= diagram.plot.max;
+    x += diagram.plot.step
+  ) {
+    kdePoints.push([
+      sx(x),
+      sy(density(x, diagram.bandwidth) * diagram.kde.amplitude)
+    ]);
+  }
+
+  add("path", {
+    d: kdePoints.map((point, index) =>
+      `${index ? "L" : "M"} ${point[diagram.zero]} ${point[diagram.one]}`
+    ).join(" "),
+    class: "kde-line"
+  });
+
+  text(
+    diagram.chartTitle,
+    "Явные оценки плотности",
+    "section-title",
+    "start",
+    diagram.zero,
+    diagram.zero
+  );
+  text(
+    diagram.sampleLabel,
+    "2000 точек",
+    "small",
+    "end",
+    diagram.zero,
+    diagram.zero
+  );
+
+  diagram.modeLabels.forEach(label => {
+    text(
+      label.point,
+      label.text,
+      "label",
+      "middle",
+      diagram.zero,
+      label.offset
+    );
+  });
+
+  line(
+    [intervalStart, diagram.bracketY],
+    [intervalEnd, diagram.bracketY],
+    "bracket"
+  );
+  line(
+    [intervalStart, diagram.bracketY - diagram.bracketCap],
+    [intervalStart, diagram.bracketY + diagram.bracketCap],
+    "bracket"
+  );
+  line(
+    [intervalEnd, diagram.bracketY - diagram.bracketCap],
+    [intervalEnd, diagram.bracketY + diagram.bracketCap],
+    "bracket"
+  );
+  text(
+    [diagram.zero, diagram.bracketY],
+    "[−0.5, 0.5]",
+    "label",
+    "middle",
+    diagram.zero,
+    diagram.labelOffset
+  );
+
+  diagram.estimateLabels.forEach(label => {
+    arrow(label.from, label.to, label.leaderClass);
+    text(
+      label.point,
+      label.text,
+      label.className,
+      "middle",
+      diagram.zero,
+      diagram.zero
+    );
+  });
+
+  const generator = diagram.generator;
+  const [boxLeft, boxBottom, boxRight, boxTop] = generator.bounds;
+  rect(boxLeft, boxBottom, boxRight, boxTop, "card");
+
+  text(
+    generator.title,
+    "Неявный генератор",
+    "section-title",
+    "start",
+    diagram.zero,
+    diagram.zero
+  );
+
+  const [sourceLeft, sourceBottom, sourceRight, sourceTop] = generator.source;
+  rect(sourceLeft, sourceBottom, sourceRight, sourceTop, "generator-box");
+  text(
+    generator.sourceText,
+    "GAN-подобный генератор",
+    "label",
+    "middle",
+    diagram.zero,
+    diagram.zero
+  );
+
+  arrow(generator.arrowFrom, generator.arrowTo, "generator-line");
+
+  generator.dots.forEach(point => add("circle", {
+    cx: sx(point[diagram.zero]),
+    cy: sy(point[diagram.one]),
+    r: Math.abs(sx(diagram.radius) - sx(diagram.zero)),
+    class: "generator-dot"
+  }));
+
+  text(
+    generator.leftLabel,
+    "новые точки около −2",
+    "small",
+    "middle",
+    diagram.zero,
+    diagram.zero
+  );
+  text(
+    generator.rightLabel,
+    "новые точки около +2",
+    "small",
+    "middle",
+    diagram.zero,
+    diagram.zero
+  );
+
+  const [warningLeft, warningBottom, warningRight, warningTop] = generator.warning;
+  rect(
+    warningLeft,
+    warningBottom,
+    warningRight,
+    warningTop,
+    "warning-box"
+  );
+  text(
+    generator.warningText,
+    "p(x) недоступна",
+    "warning-text",
+    "middle",
+    diagram.zero,
+    diagram.zero
+  );
+} catch (error) {
+  const svg = document.getElementById("scene");
+  const namespace = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+
+  const first = document.createElementNS(namespace, "text");
+  first.setAttribute("x", sx(-3.8));
+  first.setAttribute("y", sy(1.35));
+  first.setAttribute("class", "fallback");
+  first.textContent = "Схема должна была показать две моды и центральный интервал [−0.5, 0.5].";
+  svg.appendChild(first);
+
+  const second = document.createElementNS(namespace, "text");
+  second.setAttribute("x", sx(-3.8));
+  second.setAttribute("y", sy(0.95));
+  second.setAttribute("class", "fallback");
+  second.textContent = "Гистограмма: 0.025; KDE: 0.033; у генератора p(x) недоступна.";
+  svg.appendChild(second);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Сравнение задержек стеков</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b6b6b; --grid:#dcdcdc;
+    --bar:#4a7fb5; --bar2:#2f5d8a; --mark:#c1462f; --budget:#8a6d1f;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15181c; --fg:#e8e8e8; --muted:#9aa0a6; --grid:#343a40;
+      --bar:#5b9bd5; --bar2:#8fc0ea; --mark:#e8735a; --budget:#d9b64a;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 4px;}
+  h2{font-size:15px;margin:0 0 4px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .err{font-size:13px;color:var(--mark);padding:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Задержка ответа: полосы стеков на одной шкале</h2>
+  <div id="host">
+    <svg id="fig" viewBox="0 0 720 360" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Полосы задержки пяти стеков на шкале миллисекунд"></svg>
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var svg = document.getElementById('fig');
+    var NS = 'http://www.w3.org/2000/svg';
+
+    /* ---- данные схемы ---- */
+    var rows = [
+      {id:'Moshi (full-duplex)',      lo:200, hi:300},
+      {id:'LiveKit + Deepgram + Cartesia', lo:350, hi:500},
+      {id:'Vapi / Retell (managed)',  lo:300, hi:500},
+      {id:'Pipecat + Whisper + Kokoro', lo:500, hi:800}
+    ];
+    var ticks = [200, 300, 400, 500, 600, 700, 800];
+    var LIVE = 200, BUDGET = 800;
+
+    /* ---- одна система координат ---- */
+    var origin = {x:270, y:70};      /* пиксели точки (0 мс, ряд 0) */
+    var scale  = {x:0.52, y:52};     /* px на 1 мс ; px на 1 ряд */
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y + y * scale.y; }
+
+    /* ---- литералы оформления ---- */
+    var LW = 1, LW_BAR = 16, FS = 12, FS_S = 11, PAD = 8;
+
+    function el(n, a){
+      var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size){
+      var t = el('text',{x:x, y:y, 'text-anchor':anchor,
+        'font-size':(size||FS), fill:'var('+(cls||'--fg')+')',
+        'dominant-baseline':'middle'});
+      t.textContent = s;
+      svg.appendChild(t);
+      return t;
+    }
+
+    /* ---- сетка засечек и подписи шкалы ---- */
+    var yTop = sy(-0.6), yBot = sy(rows.length - 0.4);
+    ticks.forEach(function(v){
+      svg.appendChild(el('line',{x1:sx(v), y1:yTop, x2:sx(v), y2:yBot,
+        stroke:'var(--grid)', 'stroke-width':LW}));
+      txt(sx(v), yBot + PAD*2, String(v), 'middle', '--muted', FS_S);
+    });
+    txt(sx(ticks[ticks.length-1]) + PAD, yBot + PAD*2, 'мс', 'start', '--muted', FS_S);
+
+    /* ---- ось стеков (слева) ---- */
+    svg.appendChild(el('line',{x1:sx(ticks[0]), y1:yTop, x2:sx(ticks[0]), y2:yBot,
+      stroke:'var(--muted)', 'stroke-width':LW}));
+
+    /* ---- полосы ---- */
+    rows.forEach(function(r, i){
+      var y = sy(i);
+      svg.appendChild(el('line',{x1:sx(r.lo), y1:y, x2:sx(r.hi), y2:y,
+        stroke:'var(--bar)', 'stroke-width':LW_BAR, 'stroke-linecap':'butt'}));
+      /* правый край — жирная засечка: по нему и планировать */
+      svg.appendChild(el('line',{x1:sx(r.hi), y1:sy(i-0.22), x2:sx(r.hi), y2:sy(i+0.22),
+        stroke:'var(--bar2)', 'stroke-width':LW*3}));
+      /* название слева от начала полосы */
+      txt(sx(ticks[0]) - PAD*1.5, y, r.id, 'end', '--fg', FS);
+      /* диапазон справа от полосы */
+      txt(sx(r.hi) + PAD*1.5, y, r.lo + '–' + r.hi + ' мс', 'start', '--muted', FS_S);
+    });
+
+    /* ---- отметка живого разговора: подпись СВЕРХУ ---- */
+    svg.appendChild(el('line',{x1:sx(LIVE), y1:sy(-0.85), x2:sx(LIVE), y2:yBot,
+      stroke:'var(--mark)', 'stroke-width':LW*2, 'stroke-dasharray':'5 4'}));
+    txt(sx(LIVE), sy(-1.15), 'живой разговор 200 мс', 'middle', '--mark', FS_S);
+
+    /* ---- потолок бюджета: подпись СНИЗУ, у хвоста линии ---- */
+    svg.appendChild(el('line',{x1:sx(BUDGET), y1:yTop, x2:sx(BUDGET), y2:sy(rows.length-0.05),
+      stroke:'var(--budget)', 'stroke-width':LW*2, 'stroke-dasharray':'5 4'}));
+    txt(sx(BUDGET) + PAD, sy(rows.length-0.05) + PAD, 'бюджет 800 мс', 'end', '--budget', FS_S);
+
+    /* ---- запас до потолка у LiveKit: стрелка, подпись у хвоста ---- */
+    var iLK = 1, yLK = sy(iLK + 0.45);
+    svg.appendChild(el('line',{x1:sx(500), y1:yLK, x2:sx(BUDGET), y2:yLK,
+      stroke:'var(--budget)', 'stroke-width':LW}));
+    [[500, 1], [BUDGET, -1]].forEach(function(p){
+      var a = el('polygon',{points:
+        sx(p[0]) + ',' + yLK + ' ' +
+        sx(p[0] + p[1]*22) + ',' + sy(iLK + 0.36) + ' ' +
+        sx(p[0] + p[1]*22) + ',' + sy(iLK + 0.54),
+        fill:'var(--budget)'});
+      svg.appendChild(a);
+    });
+    txt(sx(500) - PAD, yLK, 'запас 300 мс', 'end', '--budget', FS_S);
+
+    /* ---- у Pipecat запаса нет ---- */
+    txt(sx(BUDGET) + PAD, sy(3.42), 'запаса нет', 'end', '--mark', FS_S);
+
+    /* ---- легенда ---- */
+    txt(sx(ticks[0]), sy(rows.length + 0.55),
+        'Полоса — разброс: левый край из анонса, правый — в плохую минуту.',
+        'start', '--muted', FS_S);
+    txt(sx(ticks[0]), sy(rows.length + 0.95),
+        'Планировать по правому краю: важен не сам край, а зазор до 800 мс.',
+        'start', '--muted', FS_S);
+
+    /* ---- viewBox по содержимому ---- */
+    var b = svg.getBBox();
+    svg.setAttribute('viewBox',
+      (b.x - PAD*2) + ' ' + (b.y - PAD*2) + ' ' +
+      (b.width + PAD*4) + ' ' + (b.height + PAD*4));
+  }catch(e){
+    host.innerHTML = '<div class="err">Схема должна показывать полосы задержки на одной шкале: ' +
+      'Moshi 200–300 мс, Vapi/Retell 300–500 мс, LiveKit + Deepgram + Cartesia 350–500 мс, ' +
+      'Pipecat + Whisper + Kokoro 500–800 мс. Отметка «живой разговор 200 мс» совпадает ' +
+      'с левым краем Moshi; потолок бюджета 800 мс совпадает с правым краем Pipecat. ' +
+      'У LiveKit до потолка остаётся запас 300 мс, у Pipecat запаса нет.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

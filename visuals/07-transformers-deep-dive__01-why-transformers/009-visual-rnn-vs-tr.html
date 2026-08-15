@@ -1,0 +1,153 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Цепочка против веера</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --ink:#22201d; --muted:#6b6560; --line:#cfc9c2;
+    --chain:#c2410c; --chain-soft:#f3d6c6; --fan:#1d4ed8; --fan-soft:#cfdcfb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15171c; --ink:#e8e5e1; --muted:#9aa0a8; --line:#3a4049;
+      --chain:#fb923c; --chain-soft:#4a2c19; --fan:#7dd3fc; --fan-soft:#1c3350;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:10px 8px 12px;background:var(--bg)}
+  h2{font-size:16px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;background:var(--bg)}
+  .fail{color:var(--muted);font-size:14px;padding:8px 0}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--ink)}
+  .ttl{font-size:16px;font-weight:600}
+  .depth{font-size:15px;font-weight:700}
+  .cap{font-size:13px;fill:var(--muted)}
+  .lg{font-size:13px;fill:var(--muted)}
+</style>
+<div class="wrap">
+  <h2>Цепочка против веера: глубина ожидания на 512 словах</h2>
+  <svg id="fig" viewBox="0 0 1100 348" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Слева RNN: 512 квадратов цепочкой, стрелка из каждого в следующий, глубина 512. Справа attention: те же 512 квадратов, все связаны со всеми, глубина 1."></svg>
+  <div id="fb" class="fail" hidden></div>
+</div>
+<script>
+(function(){
+  var NS="http://www.w3.org/2000/svg";
+  try{
+    // ---- данные схемы ----
+    var D={ n:512, cols:32, gapCols:8, cell:0.62, head:0.17, sources:[0,261,511] };
+    // ---- одна система координат ----
+    var origin={x:52,y:74}, scale=14;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    var rows=D.n/D.cols, RX=D.cols+D.gapCols;      // сдвиг правой панели в клетках
+    var svg=document.getElementById("fig");
+    function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function add(n,a){ var e=el(n,a); svg.appendChild(e); return e; }
+    function txt(x,y,s,cls,anchor,fill){
+      var t=add("text",{x:sx(x),y:sy(y),"text-anchor":anchor,"class":cls});
+      if(fill) t.setAttribute("fill",fill);
+      t.textContent=s; return t;
+    }
+    // змейка для цепочки, прямые ряды для веера
+    function snake(i,ox){ var r=Math.floor(i/D.cols), m=i%D.cols;
+      return { x: ox + (r%2 ? D.cols-1-m : m), y: r }; }
+    function grid(i,ox){ return { x: ox + i%D.cols, y: Math.floor(i/D.cols) }; }
+    function sq(p,fill,stroke){
+      var h=D.cell/2;
+      add("rect",{x:sx(p.x-h),y:sy(p.y-h),
+        width:sx(p.x+h)-sx(p.x-h),height:sy(p.y+h)-sy(p.y-h),
+        fill:fill,stroke:stroke,"stroke-width":0.6});
+    }
+    function arrow(a,b,color){
+      var dx=b.x-a.x, dy=b.y-a.y, L=Math.sqrt(dx*dx+dy*dy), ux=dx/L, uy=dy/L;
+      var off=D.cell/2+0.04;
+      var s={x:a.x+ux*off, y:a.y+uy*off}, t={x:b.x-ux*off, y:b.y-uy*off};
+      add("line",{x1:sx(s.x),y1:sy(s.y),x2:sx(t.x),y2:sy(t.y),stroke:color,"stroke-width":0.9});
+      var bx=t.x-ux*D.head, by=t.y-uy*D.head, px=-uy*D.head*0.55, py=ux*D.head*0.55;
+      add("polygon",{points:[sx(t.x)+","+sy(t.y),sx(bx+px)+","+sy(by+py),sx(bx-px)+","+sy(by-py)].join(" "),
+        fill:color});
+    }
+
+    // ---- правая панель: веер (сначала связи, потом квадраты) ----
+    for(var s=0;s<D.sources.length;s++){
+      var a=grid(D.sources[s],RX);
+      for(var j=0;j<D.n;j++){
+        if(j===D.sources[s]) continue;
+        var b=grid(j,RX);
+        add("line",{x1:sx(a.x),y1:sy(a.y),x2:sx(b.x),y2:sy(b.y),
+          stroke:"var(--fan)","stroke-width":0.4,opacity:0.075});
+      }
+    }
+    for(var i=0;i<D.n;i++){
+      var p=grid(i,RX), isSrc=D.sources.indexOf(i)>=0;
+      sq(p, isSrc?"var(--fan)":"var(--fan-soft)","var(--fan)");
+    }
+
+    // ---- левая панель: цепочка ----
+    for(var i2=0;i2<D.n;i2++) sq(snake(i2,0),"var(--chain-soft)","var(--chain)");
+    for(var k=0;k<D.n-1;k++) arrow(snake(k,0),snake(k+1,0),"var(--chain)");
+
+    // ---- подписи: у каждой свой якорь и своя сторона ----
+    var lc=(D.cols-1)/2, rc=RX+(D.cols-1)/2;
+    txt(lc,-3.2,"RNN — цепочка","ttl","middle");
+    txt(lc,-1.7,"глубина 512","depth","middle","var(--chain)");
+    txt(rc,-3.2,"Attention — веер","ttl","middle");
+    txt(rc,-1.7,"глубина 1","depth","middle","var(--fan)");
+
+    txt(lc,rows+0.9,"512 шагов подряд: пятый не начнётся, пока не досчитан четвёртый","cap","middle");
+    txt(rc,rows+0.9,"512 × 512 ≈ 262 тысячи связей — и все за один такт","cap","middle");
+
+    add("line",{x1:sx(D.cols+D.gapCols/2),y1:sy(-2.6),
+                x2:sx(D.cols+D.gapCols/2),y2:sy(rows+0.2),
+                stroke:"var(--line)","stroke-width":1,"stroke-dasharray":"4 4"});
+
+    txt(0,rows+2.4,"Квадрат — одно из 512 слов. Слева стрелка — ожидание своей очереди; "+
+        "справа линия — взгляд слова на слово, и все взгляды случаются одновременно.","lg","start");
+  }catch(e){
+    var f=document.getElementById("fb");
+    f.hidden=false;
+    f.textContent="Схема не построилась. Она показывает: слева RNN — 512 квадратов, "+
+      "выстроенных в цепочку, стрелка из каждого в следующий, глубина ожидания 512; "+
+      "справа attention — те же 512 квадратов, каждый связан с каждым (512 × 512 ≈ 262 тысячи связей), "+
+      "глубина ожидания 1.";
+    var svg2=document.getElementById("fig"); if(svg2) svg2.remove();
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

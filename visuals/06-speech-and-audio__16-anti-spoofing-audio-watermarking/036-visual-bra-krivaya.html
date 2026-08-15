@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Кривая BRA от уровня шума</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --axis: #4b5563;
+    --curve: #1d4ed8;
+    --coin: #b45309;
+    --proof: #047857;
+    --grid: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a;
+      --fg: #e8eaed;
+      --muted: #9aa3af;
+      --axis: #9aa3af;
+      --curve: #7aa2ff;
+      --coin: #f0b429;
+      --proof: #34d399;
+      --grid: #2a2f38;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 8px 4px 12px; }
+  h2 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 520px; background: var(--bg); }
+  .fallback { font-size: 13px; line-height: 1.5; color: var(--fg); padding: 8px; }
+  text { font-family: inherit; fill: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Кривая BRA от уровня шума: плато, колено, обрыв</h2>
+  <div id="slot"></div>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    // ---- данные схемы (числа из текста шага) ----
+    var CURVE = [
+      { snr: 40, bra: 1.00 },
+      { snr: 20, bra: 0.99 },
+      { snr: 10, bra: 0.97 },
+      { snr:  0, bra: 0.85 },
+      { snr: -5, bra: 0.70 },
+      { snr: -8, bra: 0.60 },
+      { snr: -12, bra: 0.50 }
+    ];
+    var COIN = 0.5, PROOF = 0.6;
+    var KNEE = { snr: 0, bra: 0.85 };
+    var CROSS = { snr: -8, bra: 0.60 };
+    var PROMISE = { snr: 10, bra: 0.97 };
+    var XTICKS = [40, 20, 10, 0, -12];
+    var YTICKS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+    var X_LO = -12, X_HI = 40, Y_LO = 0.5, Y_HI = 1.0;
+
+    // ---- холст ----
+    var W = 900, H = 470;
+
+    // ---- один origin, один scale ----
+    var ORIGIN = { x: 250, y: 400 };          // пиксели точки (snr=0, bra=0.5)
+    var SCALE  = { x: 12.5, y: 620 };          // px на 1 dB / px на 1.0 BRA
+
+    function sx(x) { return ORIGIN.x - x * SCALE.x; }   // SNR падает вправо
+    function sy(y) { return ORIGIN.y - (y - Y_LO) * SCALE.y; }
+
+    var PAD = 8, PAD2 = 14, FS = 13, FS_SM = 12, LW = 2;
+
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('role', 'img');
+
+    function el(n, a) {
+      var e = document.createElementNS('http://www.w3.org/2000/svg', n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      svg.appendChild(e);
+      return e;
+    }
+    function txt(x, y, s, anchor, fill, size, weight) {
+      var t = el('text', {
+        x: x, y: y, 'text-anchor': anchor || 'middle',
+        'font-size': size || FS, fill: fill || 'var(--fg)',
+        'font-weight': weight || '400'
+      });
+      t.textContent = s;
+      return t;
+    }
+
+    el('rect', { x: 0, y: 0, width: W, height: H, fill: 'var(--bg)' });
+
+    // ---- сетка по Y ----
+    YTICKS.forEach(function (v) {
+      el('line', {
+        x1: sx(X_HI), y1: sy(v), x2: sx(X_LO), y2: sy(v),
+        stroke: 'var(--grid)', 'stroke-width': 1
+      });
+      txt(sx(X_HI) - PAD, sy(v) + 4, v.toFixed(1), 'end', 'var(--muted)', FS_SM);
+    });
+
+    // ---- оси ----
+    el('line', {
+      x1: sx(X_HI), y1: sy(Y_LO), x2: sx(X_LO), y2: sy(Y_LO),
+      stroke: 'var(--axis)', 'stroke-width': LW
+    });
+    el('line', {
+      x1: sx(X_HI), y1: sy(Y_LO), x2: sx(X_HI), y2: sy(Y_HI),
+      stroke: 'var(--axis)', 'stroke-width': LW
+    });
+
+    XTICKS.forEach(function (v) {
+      el('line', {
+        x1: sx(v), y1: sy(Y_LO), x2: sx(v), y2: sy(Y_LO - 0.015),
+        stroke: 'var(--axis)', 'stroke-width': 1
+      });
+      txt(sx(v), sy(Y_LO - 0.055), (v > 0 ? '+' : '') + v, 'middle', 'var(--muted)', FS_SM);
+    });
+
+    txt(sx(X_HI), sy(Y_HI) - PAD2, 'BRA', 'start', 'var(--muted)', FS_SM);
+    txt(sx(X_HI), sy(Y_LO - 0.115), 'чистое аудио', 'start', 'var(--muted)', FS_SM);
+    txt(sx(X_LO), sy(Y_LO - 0.115), 'шум сильнее', 'end', 'var(--muted)', FS_SM);
+    txt((sx(X_HI) + sx(X_LO)) / 2, sy(Y_LO - 0.175), 'SNR, dB', 'middle', 'var(--fg)', FS);
+
+    // ---- опорные горизонтали ----
+    el('line', {
+      x1: sx(X_HI), y1: sy(PROOF), x2: sx(X_LO), y2: sy(PROOF),
+      stroke: 'var(--proof)', 'stroke-width': LW, 'stroke-dasharray': '7 5'
+    });
+    txt(sx(X_HI) + PAD, sy(PROOF) - PAD, '0.6 — граница доказуемости', 'start', 'var(--proof)', FS_SM);
+
+    el('line', {
+      x1: sx(X_HI), y1: sy(COIN), x2: sx(X_LO), y2: sy(COIN),
+      stroke: 'var(--coin)', 'stroke-width': LW, 'stroke-dasharray': '7 5'
+    });
+    txt(sx(X_HI) + PAD, sy(COIN) - PAD, '0.5 — монетка, знака нет', 'start', 'var(--coin)', FS_SM);
+
+    // ---- кривая ----
+    var d = CURVE.map(function (p, i) {
+      return (i ? 'L' : 'M') + sx(p.snr).toFixed(2) + ' ' + sy(p.bra).toFixed(2);
+    }).join(' ');
+    el('path', { d: d, fill: 'none', stroke: 'var(--curve)', 'stroke-width': LW + 1,
+      'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+
+    CURVE.forEach(function (p) {
+      el('circle', { cx: sx(p.snr), cy: sy(p.bra), r: 4, fill: 'var(--curve)' });
+    });
+
+    // подписи значений плато (выше кривой)
+    [{ snr: 20, bra: 0.99 }, { snr: 10, bra: 0.97 }].forEach(function (p) {
+      txt(sx(p.snr), sy(p.bra) - PAD2, p.bra.toFixed(2), 'middle', 'var(--curve)', FS_SM);
+    });
+    txt(sx(40), sy(1.00) - PAD2, '1.0', 'start', 'var(--curve)', FS_SM);
+    txt((sx(40) + sx(10)) / 2, sy(1.00) - PAD2 * 2.6, 'плато: шума не замечает', 'middle', 'var(--muted)', FS_SM);
+
+    // ---- колено (подпись ниже кривой, слева от точки) ----
+    el('circle', { cx: sx(KNEE.snr), cy: sy(KNEE.bra), r: 6, fill: 'none',
+      stroke: 'var(--fg)', 'stroke-width': LW });
+    txt(sx(KNEE.snr) - PAD, sy(KNEE.bra) - PAD2, 'колено ≈ 0 dB', 'end', 'var(--fg)', FS, '600');
+    txt(sx(KNEE.snr) - PAD, sy(KNEE.bra) - PAD, 'стойкость = эта точка', 'end', 'var(--muted)', FS_SM);
+
+    // ---- пересечение с 0.6: подпись ниже линии, хвост вертикального указателя ----
+    el('line', {
+      x1: sx(CROSS.snr), y1: sy(CROSS.bra), x2: sx(CROSS.snr), y2: sy(Y_LO),
+      stroke: 'var(--proof)', 'stroke-width': 1, 'stroke-dasharray': '3 4'
+    });
+    el('circle', { cx: sx(CROSS.snr), cy: sy(CROSS.bra), r: 5,
+      fill: 'var(--bg)', stroke: 'var(--proof)', 'stroke-width': LW });
+    txt(sx(CROSS.snr) - PAD, sy(0.68), 'BRA = 0.6', 'end', 'var(--proof)', FS_SM, '600');
+    txt(sx(CROSS.snr) - PAD, sy(0.68) + PAD2, 'ниже — снос знака', 'end', 'var(--proof)', FS_SM);
+
+    // ---- обещание AudioSeal: +10 dB, стрелка от хвоста слева ----
+    el('line', {
+      x1: sx(PROMISE.snr), y1: sy(Y_LO), x2: sx(PROMISE.snr), y2: sy(PROMISE.bra),
+      stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '3 4'
+    });
+    txt(sx(PROMISE.snr), sy(0.60) + PAD2 + PAD, 'AudioSeal:', 'middle', 'var(--muted)', FS_SM);
+    txt(sx(PROMISE.snr), sy(0.60) + PAD2 * 2 + PAD, 'держит +10 dB', 'middle', 'var(--muted)', FS_SM);
+
+    // ---- pitch-shift: колена нет, сразу низ ----
+    el('line', {
+      x1: sx(X_HI), y1: sy(0.55), x2: sx(X_LO), y2: sy(0.55),
+      stroke: 'var(--coin)', 'stroke-width': LW, 'stroke-dasharray': '2 6', opacity: 0.85
+    });
+    txt(sx(20), sy(0.55) + PAD2 + 4, 'pitch-shift: колена нет вовсе', 'middle', 'var(--coin)', FS_SM);
+
+    slot.appendChild(svg);
+  } catch (e) {
+    var p = document.createElement('div');
+    p.className = 'fallback';
+    p.textContent = 'Схема должна была показать: по горизонтали SNR в dB (слева +40, ' +
+      'вправо шум сильнее), по вертикали BRA от 0.5 до 1.0. Кривая: плато 1.0 / 0.99 / 0.97 ' +
+      'на +40 / +20 / +10 dB, колено около 0 dB, затем обрыв 0.7, 0.6 и упор в 0.5. ' +
+      'Горизонталь 0.5 — уровень монетки, знака нет; горизонталь 0.6 — граница ' +
+      'доказуемости, кривая пересекает её на отрицательном SNR. Pitch-shift идёт ниже 0.6 ' +
+      'сразу, без колена.';
+    slot.appendChild(p);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

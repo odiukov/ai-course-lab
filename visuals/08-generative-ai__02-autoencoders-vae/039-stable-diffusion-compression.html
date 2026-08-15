@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сжатие изображения в латент Stable Diffusion</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #ffffff;
+      --surface: #f7f8fc;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #a8b2c6;
+      --grid: #d6dce8;
+      --input-fill: #e8f0ff;
+      --input-back: #cbdcff;
+      --latent-fill: #eee8ff;
+      --latent-back: #d8ccff;
+      --blue: #2867d7;
+      --violet: #7653d6;
+      --blue-soft: #dceaff;
+      --violet-soft: #e8e0ff;
+      --divider: #d9deea;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11141b;
+        --surface: #171c26;
+        --ink: #eef2ff;
+        --muted: #abb6ca;
+        --line: #77839a;
+        --grid: #465168;
+        --input-fill: #23395f;
+        --input-back: #1d2f50;
+        --latent-fill: #3c3063;
+        --latent-back: #302650;
+        --blue: #75a7ff;
+        --violet: #b59aff;
+        --blue-soft: #203a62;
+        --violet-soft: #3a2e61;
+        --divider: #354055;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 22px;
+      line-height: 1.25;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--surface);
+    }
+
+    #fallback {
+      font-size: 16px;
+      line-height: 1.45;
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    [hidden] {
+      display: none;
+    }
+
+    .frame {
+      stroke-width: 2;
+    }
+
+    .input-frame {
+      fill: var(--input-back);
+      stroke: var(--blue);
+    }
+
+    .input-front {
+      fill: var(--input-fill);
+      stroke: var(--blue);
+    }
+
+    .latent-frame {
+      fill: var(--latent-back);
+      stroke: var(--violet);
+    }
+
+    .latent-front {
+      fill: var(--latent-fill);
+      stroke: var(--violet);
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 2;
+    }
+
+    .main-arrow {
+      stroke: var(--ink);
+      stroke-width: 3;
+    }
+
+    .row-arrow {
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .main-arrowhead {
+      fill: var(--ink);
+    }
+
+    .row-arrowhead {
+      fill: var(--line);
+    }
+
+    .separator {
+      stroke: var(--divider);
+      stroke-width: 2;
+    }
+
+    text {
+      fill: var(--ink);
+    }
+
+    .tensor-title {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .shape-label {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .count-label,
+    .arrow-label {
+      font-size: 14px;
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .row-label {
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .row-value {
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .row-detail {
+      font-size: 13px;
+      fill: var(--muted);
+    }
+
+    .result-box-numbers {
+      fill: var(--blue-soft);
+      stroke: var(--blue);
+      stroke-width: 2;
+    }
+
+    .result-box-positions {
+      fill: var(--violet-soft);
+      stroke: var(--violet);
+      stroke-width: 2;
+    }
+
+    .result-text {
+      font-size: 16px;
+      font-weight: 800;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Считаем сжатие изображения в латент Stable Diffusion</h1>
+
+    <svg id="diagram"
+         viewBox="0 0 960 430"
+         width="960"
+         height="430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Переход от изображения к латенту Stable Diffusion</title>
+      <desc id="svg-description">
+        Изображение 512 на 512 с тремя каналами преобразуется в латент
+        64 на 64 с четырьмя каналами. Чисел становится в 48 раз меньше,
+        а пространственных позиций — в 64 раза меньше.
+      </desc>
+    </svg>
+
+    <div id="fallback">
+      Схема должна была показать: 512 × 512 × 3 = 786 432 чисел →
+      64 × 64 × 4 = 16 384 чисел; в 48 раз меньше чисел и в 64 раза
+      меньше пространственных позиций.
+    </div>
+  </main>
+
+  <script>
+    const DATA = Object.freeze([
+      {
+        title: {
+          text: "Исходное изображение",
+          point: [38, 28],
+          offset: [0, 0],
+          anchor: "start",
+          className: "tensor-title"
+        },
+        frames: [
+          { x: 48, y: 48, size: 150, className: "frame input-frame" },
+          { x: 56, y: 56, size: 150, className: "frame input-frame" },
+          { x: 64, y: 64, size: 150, className: "frame input-front" }
+        ],
+        grid: [
+          [102, 64, 102, 214],
+          [139, 64, 139, 214],
+          [176, 64, 176, 214],
+          [64, 102, 214, 102],
+          [64, 139, 214, 139],
+          [64, 176, 214, 176]
+        ],
+        labels: [
+          {
+            text: "512 × 512 × 3",
+            point: [139, 226],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "shape-label"
+          },
+          {
+            text: "= 786 432 чисел · 3 канала",
+            point: [139, 249],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "count-label muted"
+          }
+        ]
+      },
+      {
+        title: {
+          text: "Латент после кодировщика",
+          point: [650, 28],
+          offset: [0, 0],
+          anchor: "start",
+          className: "tensor-title"
+        },
+        frames: [
+          { x: 670, y: 80, size: 100, className: "frame latent-frame" },
+          { x: 678, y: 88, size: 100, className: "frame latent-frame" },
+          { x: 686, y: 96, size: 100, className: "frame latent-frame" },
+          { x: 694, y: 104, size: 100, className: "frame latent-front" }
+        ],
+        grid: [
+          [719, 104, 719, 204],
+          [744, 104, 744, 204],
+          [769, 104, 769, 204],
+          [694, 129, 794, 129],
+          [694, 154, 794, 154],
+          [694, 179, 794, 179]
+        ],
+        labels: [
+          {
+            text: "64 × 64 × 4",
+            point: [744, 226],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "shape-label"
+          },
+          {
+            text: "= 16 384 числа · 4 канала",
+            point: [744, 249],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "count-label muted"
+          }
+        ]
+      },
+      {
+        encoder: {
+          line: [310, 135, 615, 135],
+          head: [[615, 135], [597, 125], [597, 145]],
+          labels: [
+            {
+              text: "кодировщик",
+              point: [462, 104],
+              offset: [0, 0],
+              anchor: "middle",
+              className: "arrow-label"
+            },
+            {
+              text: "в 8 раз по ширине и высоте",
+              point: [462, 165],
+              offset: [0, 0],
+              anchor: "middle",
+              className: "arrow-label muted"
+            }
+          ]
+        },
+        separators: [
+          [36, 263, 924, 263],
+          [36, 336, 924, 336]
+        ],
+        rows: [
+          {
+            label: {
+              text: "Все числа с каналами",
+              point: [40, 291],
+              offset: [0, 0],
+              anchor: "start",
+              className: "row-label"
+            },
+            source: {
+              value: "786 432",
+              detail: "512 × 512 × 3",
+              valuePoint: [315, 291],
+              detailPoint: [315, 314]
+            },
+            arrow: {
+              line: [396, 294, 511, 294],
+              head: [[511, 294], [497, 286], [497, 302]]
+            },
+            target: {
+              value: "16 384",
+              detail: "64 × 64 × 4",
+              valuePoint: [590, 291],
+              detailPoint: [590, 314]
+            },
+            result: {
+              box: [688, 273, 232, 45],
+              text: "в 48 раз меньше чисел",
+              point: [804, 296],
+              className: "result-box-numbers"
+            }
+          },
+          {
+            label: {
+              text: "Пространственные позиции",
+              point: [40, 370],
+              offset: [0, 0],
+              anchor: "start",
+              className: "row-label"
+            },
+            source: {
+              value: "262 144",
+              detail: "512 × 512",
+              valuePoint: [315, 370],
+              detailPoint: [315, 397]
+            },
+            arrow: {
+              line: [396, 373, 511, 373],
+              head: [[511, 373], [497, 365], [497, 381]]
+            },
+            target: {
+              value: "4 096",
+              detail: "64 × 64",
+              valuePoint: [590, 370],
+              detailPoint: [590, 397]
+            },
+            result: {
+              box: [688, 352, 232, 49],
+              text: "в 64 раза меньше позиций",
+              point: [804, 377],
+              className: "result-box-positions"
+            }
+          }
+        ]
+      },
+      {
+        canvas: [960, 430],
+        origin: [0, 0],
+        scale: [1, 1],
+        labelPadding: 8,
+        namespace: "http://www.w3.org/2000/svg"
+      }
+    ]);
+
+    const [inputTensor, latentTensor, comparison, layout] = DATA;
+    const {
+      origin: [originX, originY],
+      scale: [scaleX, scaleY],
+      namespace
+    } = layout;
+
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+
+    function element(name, className) {
+      const item = document.createElementNS(namespace, name);
+      if (className) item.setAttribute("class", className);
+      return item;
+    }
+
+    function drawRect(parent, frame) {
+      const item = element("rect", frame.className);
+      item.setAttribute("x", sx(frame.x));
+      item.setAttribute("y", sy(frame.y));
+      item.setAttribute("width", sx(frame.size) - sx(origin.x));
+      item.setAttribute("height", sy(frame.size) - sy(origin.y));
+      parent.append(item);
+    }
+
+    function drawBox(parent, box, className) {
+      const [x, y, width, height] = box;
+      const item = element("rect", className);
+      item.setAttribute("x", sx(x));
+      item.setAttribute("y", sy(y));
+      item.setAttribute("width", sx(width) - sx(origin.x));
+      item.setAttribute("height", sy(height) - sy(origin.y));
+      parent.append(item);
+    }
+
+    function drawLine(parent, coordinates, className) {
+      const [xStart, yStart, xEnd, yEnd] = coordinates;
+      const item = element("line", className);
+      item.setAttribute("x1", sx(xStart));
+      item.setAttribute("y1", sy(yStart));
+      item.setAttribute("x2", sx(xEnd));
+      item.setAttribute("y2", sy(yEnd));
+      parent.append(item);
+    }
+
+    function drawPolygon(parent, points, className) {
+      const item = element("polygon", className);
+      item.setAttribute(
+        "points",
+        points.map(point => {
+          const [x, y] = point;
+          return `${sx(x)},${sy(y)}`;
+        }).join(" ")
+      );
+      parent.append(item);
+    }
+
+    function drawText(parent, label) {
+      const {
+        text,
+        point: [pointX, pointY],
+        offset: [offsetX, offsetY],
+        anchor,
+        className
+      } = label;
+      const item = element("text", className);
+      item.setAttribute("x", sx(pointX + offsetX));
+      item.setAttribute("y", sy(pointY + offsetY));
+      item.setAttribute("text-anchor", anchor);
+      item.textContent = text;
+      parent.append(item);
+    }
+
+    function drawValue(parent, value, valuePoint, detail, detailPoint) {
+      const [valueX, valueY] = valuePoint;
+      const [detailX, detailY] = detailPoint;
+
+      drawText(parent, {
+        text: value,
+        point: [valueX, valueY],
+        offset: [0, 0],
+        anchor: "middle",
+        className: "row-value"
+      });
+
+      drawText(parent, {
+        text: detail,
+        point: [detailX, detailY],
+        offset: [0, 0],
+        anchor: "middle",
+        className: "row-detail"
+      });
+    }
+
+    function drawTensor(parent, tensor) {
+      drawText(parent, tensor.title);
+      tensor.frames.forEach(frame => drawRect(parent, frame));
+      tensor.grid.forEach(coordinates => drawLine(parent, coordinates, "grid"));
+      tensor.labels.forEach(label => drawText(parent, label));
+    }
+
+    try {
+      const layer = element("g");
+
+      drawTensor(layer, inputTensor);
+      drawTensor(layer, latentTensor);
+
+      drawLine(layer, comparison.encoder.line, "main-arrow");
+      drawPolygon(layer, comparison.encoder.head, "main-arrowhead");
+      comparison.encoder.labels.forEach(label => drawText(layer, label));
+
+      comparison.separators.forEach(coordinates =>
+        drawLine(layer, coordinates, "separator")
+      );
+
+      comparison.rows.forEach(row => {
+        drawText(layer, row.label);
+
+        drawValue(
+          layer,
+          row.source.value,
+          row.source.valuePoint,
+          row.source.detail,
+          row.source.detailPoint
+        );
+
+        drawLine(layer, row.arrow.line, "row-arrow");
+        drawPolygon(layer, row.arrow.head, "row-arrowhead");
+
+        drawValue(
+          layer,
+          row.target.value,
+          row.target.valuePoint,
+          row.target.detail,
+          row.target.detailPoint
+        );
+
+        drawBox(layer, row.result.box, row.result.className);
+        drawText(layer, {
+          text: row.result.text,
+          point: row.result.point,
+          offset: [0, 0],
+          anchor: "middle",
+          className: "result-text"
+        });
+      });
+
+      svg.append(layer);
+      fallback.hidden = true;
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

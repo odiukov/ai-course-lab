@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Каскад из трёх уровней</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6672;
+    --line:#3a4653; --t1:#7a8794; --t2:#2f7d8f; --t3:#8a5cc4; --flush:#c2603a;
+    --fill1:#eef1f4; --fill2:#e2f2f5; --fill3:#f0e9fa; --fillstt:#fbeee8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8edf2; --muted:#9aa7b4;
+      --line:#93a3b3; --t1:#8e9dab; --t2:#59c3d6; --t3:#b591ec; --flush:#f0906a;
+      --fill1:#20262d; --fill2:#17313a; --fill3:#28203a; --fillstt:#33231c;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font:600 15px/1.3 inherit;margin:0 0 6px;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font:13px/1.5 inherit;color:var(--muted);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Каскад из трёх уровней: гейт → Silero VAD → семантика → flush в STT</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var NS='http://www.w3.org/2000/svg';
+    var W=980, H=470;                 // холст
+    var PAD=6, FS=13, FSS=11.5, LW=1.6;
+
+    // ---- данные схемы (координатная сетка 0..100 по X, 0..40 по Y) ----
+    var TIERS=[
+      {id:'t1', x:6,  y:26, w:22, h:9, color:'var(--t1)', fill:'var(--fill1)',
+       head:'1. Energy gate', sub:'RMS −40 dBFS', note:'два действия над отсчётами'},
+      {id:'t2', x:36, y:26, w:22, h:9, color:'var(--t2)', fill:'var(--fill2)',
+       head:'2. Silero VAD', sub:'1M параметров, ~1 мс', note:'речь или тишина'},
+      {id:'t3', x:66, y:26, w:22, h:9, color:'var(--t3)', fill:'var(--fill3)',
+       head:'3. Semantic turn detector', sub:'смотрит на слова', note:'договорил или набрал воздуха'}
+    ];
+    var STT={x:66, y:9, w:22, h:7};
+    var BUDGET={x:36, y:16, w:22, h:5};
+
+    // ---- один origin, один scale; дальше не меняются ----
+    var ORIGIN={x:34, y:H-24};
+    var SCALE={x:(W-34-22)/100, y:-(H-24-22)/40};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+    function txt(x,y,s,anchor,color,size,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle',fill:color||'var(--fg)',
+        'font-size':(size||FS),'font-family':'inherit','font-weight':weight||'400'});
+      t.textContent=s; return t;
+    }
+    function box(b,color,fill){
+      el('rect',{x:sx(b.x),y:sy(b.y+b.h),width:sx(b.x+b.w)-sx(b.x),height:sy(b.y)-sy(b.y+b.h),
+        rx:sx(1)-sx(0),fill:fill,stroke:color,'stroke-width':LW});
+    }
+    function arrow(x1,y1,x2,y2,color){
+      el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),stroke:color,'stroke-width':LW,'stroke-linecap':'round'});
+      var ax=sx(x2), ay=sy(y2), bx=sx(x1), by=sy(y1);
+      var dx=ax-bx, dy=ay-by, L=Math.sqrt(dx*dx+dy*dy)||1; dx/=L; dy/=L;
+      var hl=sx(1.6)-sx(0), hw=sx(0.9)-sx(0);
+      el('polygon',{points:[ax,ay,ax-hl*dx-hw*dy,ay-hl*dy+hw*dx,ax-hl*dx+hw*dy,ay-hl*dy-hw*dx].join(' '),fill:color});
+    }
+
+    // фон
+    el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'});
+
+    // ось потока: вход слева
+    txt(sx(0),sy(30.5),'аудио, чанк 30 мс','start','var(--muted)',FSS,'600');
+    arrow(0,28.5,5.4,28.5,'var(--line)');
+
+    // ступени
+    TIERS.forEach(function(t){
+      box(t,t.color,t.fill);
+      var cx=sx(t.x+t.w/2);
+      txt(cx,sy(t.y+t.h)+PAD+FS,t.head,'middle',t.color,FS,'600');
+      txt(cx,sy(t.y+t.h)+PAD+FS+16,t.sub,'middle','var(--fg)',FSS,'400');
+      // пояснение снизу от блока — своя сторона, не пересекается с заголовком
+      txt(cx,sy(t.y)+PAD+FSS+4,t.note,'middle','var(--muted)',FSS,'400');
+    });
+
+    // стрелки между ступенями + подписи у хвоста
+    arrow(28.6,30.5,35.4,30.5,'var(--line)');
+    txt(sx(29.4),sy(31.4),'есть звук','start','var(--muted)',FSS,'400');
+    arrow(58.6,30.5,65.4,30.5,'var(--line)');
+    txt(sx(59.4),sy(31.4),'здесь речь','start','var(--muted)',FSS,'400');
+
+    // отсев вниз с первого уровня
+    arrow(17,25.4,17,21.5,'var(--t1)');
+    txt(sx(18),sy(22.6),'тишина отброшена','start','var(--muted)',FSS,'400');
+
+    // бюджет времени 30 мс = 1 мс модель + 29 мс свободно
+    box(BUDGET,'var(--t2)','none');
+    var bw=BUDGET.w*(1/30);
+    el('rect',{x:sx(BUDGET.x),y:sy(BUDGET.y+BUDGET.h),width:sx(BUDGET.x+bw)-sx(BUDGET.x),
+      height:sy(BUDGET.y)-sy(BUDGET.y+BUDGET.h),fill:'var(--t2)'});
+    txt(sx(BUDGET.x),sy(BUDGET.y)-PAD,'бюджет чанка 30 мс','start','var(--muted)',FSS,'600');
+    txt(sx(BUDGET.x+bw)+PAD,sy(BUDGET.y+BUDGET.h/2)+4,'1 мс — Silero, 29 мс свободно','start','var(--fg)',FSS,'400');
+    el('line',{x1:sx(BUDGET.x+BUDGET.w/2),y1:sy(BUDGET.y),x2:sx(47),y2:sy(25.6),
+      stroke:'var(--t2)','stroke-width':LW,'stroke-dasharray':'4 4'});
+
+    // STT + flush справа сверху
+    box(STT,'var(--flush)','var(--fillstt)');
+    txt(sx(STT.x+STT.w/2),sy(STT.y+STT.h)+PAD+FS,'STT','middle','var(--flush)',FS,'600');
+    txt(sx(STT.x+STT.w/2),sy(STT.y+STT.h)+PAD+FS+15,'выдаёт транскрипт','middle','var(--fg)',FSS,'400');
+    arrow(77,25.4,77,16.6,'var(--flush)');
+    txt(sx(76),sy(24),'flush','end','var(--flush)',FS,'600');
+    txt(sx(76),sy(21.4),'человек договорил','end','var(--muted)',FSS,'400');
+
+    // вопросы уровней снизу — легенда одной строкой
+    txt(sx(0),sy(3.2),'Уровни не дублируют друг друга: каждый следующий берёт то, что предыдущий не может решить в принципе.',
+        'start','var(--muted)',FSS,'400');
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна была показать каскад: '
+      +'1) energy gate с порогом RMS −40 dBFS отсекает явную тишину; '
+      +'2) Silero VAD, 1M параметров, ~1 мс на чанк из бюджета в 30 мс, отвечает «речь или тишина»; '
+      +'3) semantic turn detector смотрит на слова и отличает паузу посреди фразы от конца реплики; '
+      +'справа — стрелка flush в STT в момент, когда человек договорил.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Архитектура, латент и текстовый энкодер</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: snow;
+    --panel: white;
+    --card: ghostwhite;
+    --ink: midnightblue;
+    --muted: slategray;
+    --line: lightsteelblue;
+    --unet: royalblue;
+    --unet-fill: aliceblue;
+    --mmdit: mediumvioletred;
+    --mmdit-fill: lavenderblush;
+    --latent: darkorange;
+    --latent-fill: oldlace;
+    --text: seagreen;
+    --text-fill: honeydew;
+    --summary: whitesmoke;
+    --shadow: gainsboro;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --panel: #172033;
+      --card: #1f293d;
+      --ink: #f3f6ff;
+      --muted: #aebbd0;
+      --line: #53647f;
+      --unet: #7ca7ff;
+      --unet-fill: #203456;
+      --mmdit: #ff8ac2;
+      --mmdit-fill: #4b2440;
+      --latent: #ffc266;
+      --latent-fill: #49351d;
+      --text: #72d7a2;
+      --text-fill: #193e31;
+      --summary: #202b40;
+      --shadow: #0b1020;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+    margin: auto;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-sizing: border-box;
+    max-width: 1200px;
+    margin: auto;
+  }
+
+  h2 {
+    font-size: 19px;
+    font-weight: bold;
+    margin: auto;
+    padding: 12px 18px;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 1200px;
+    max-width: 100%;
+    height: auto;
+    background: var(--panel);
+  }
+
+  .timeline {
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .connector {
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .arrowhead {
+    fill: var(--line);
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke-width: 3px;
+  }
+
+  .node-unet {
+    stroke: var(--unet);
+  }
+
+  .node-mmdit {
+    stroke: var(--mmdit);
+  }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .card-accent-unet {
+    fill: var(--unet-fill);
+  }
+
+  .card-accent-mmdit {
+    fill: var(--mmdit-fill);
+  }
+
+  .latent-band {
+    fill: var(--latent-fill);
+  }
+
+  .text-band {
+    fill: var(--text-fill);
+  }
+
+  .separator {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  text {
+    fill: var(--ink);
+  }
+
+  .year {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .model {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .section-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: .04em;
+  }
+
+  .backbone-unet {
+    fill: var(--unet);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .backbone-mmdit {
+    fill: var(--mmdit);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .latent-value {
+    fill: var(--latent);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .encoder-value {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .summary-box {
+    fill: var(--summary);
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .summary-divider {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .summary-head {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .summary-text {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .summary-backbone {
+    fill: var(--unet);
+  }
+
+  .summary-latent {
+    fill: var(--latent);
+  }
+
+  .summary-encoder {
+    fill: var(--text);
+  }
+
+  .fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 15px;
+    padding: 18px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h2>Сопоставляем архитектуру, латент и текстовый энкодер</h2>
+  <svg id="diagram"
+       viewBox="0 32 1200 414"
+       width="1200"
+       height="414"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <title id="diagram-title">Временная шкала SD 1.5, SDXL, SD3 и Flux.1-dev</title>
+    <desc id="diagram-desc">Четыре согласованные конфигурации моделей: backbone, форма латента и текстовые энкодеры.</desc>
+    <g id="drawing"></g>
+  </svg>
+  <p id="fallback" class="fallback" hidden>
+    Схема должна была показать временную шкалу SD 1.5, SDXL, SD3 и
+    Flux.1-dev и сопоставить для каждой модели backbone, латент и текстовые
+    энкодеры.
+  </p>
+</main>
+
+<script>
+const diagramData = [
+  {
+    kind: "layout",
+    zero: 0,
+    timelineStart: 70,
+    timelineEnd: 1130,
+    timelineY: 54,
+    arrowTip: [1130, 54],
+    arrowUpper: [1113, 45],
+    arrowLower: [1113, 63],
+    nodeRadius: 7,
+    connectorEndY: 78,
+    cardY: 78,
+    cardWidth: 250,
+    cardHeight: 266,
+    corner: 12,
+    headerEnd: 132,
+    backboneEnd: 200,
+    latentEnd: 262,
+    modelY: 108,
+    sectionX: 18,
+    backboneLabelY: 151,
+    backboneValueY: 177,
+    latentLabelY: 219,
+    latentValueY: 244,
+    encoderLabelY: 281,
+    encoderFirstY: 305,
+    encoderSecondY: 327,
+    summaryX: 70,
+    summaryY: 365,
+    summaryWidth: 1060,
+    summaryHeight: 66,
+    summaryCorner: 10,
+    summaryColumn: 353.333,
+    summaryHeadY: 389,
+    summaryTextY: 414,
+    summaryPadX: 18,
+    labelPad: 4,
+    noPad: 0
+  },
+  {
+    kind: "model",
+    model: "SD 1.5",
+    year: "2022",
+    family: "unet",
+    nodeX: 195,
+    cardX: 70,
+    backbone: "U-Net · 860M",
+    latent: "64×64×4",
+    encoders: ["CLIP-L", "77 токенов"]
+  },
+  {
+    kind: "model",
+    model: "SDXL",
+    year: "2023",
+    family: "unet",
+    nodeX: 465,
+    cardX: 340,
+    backbone: "U-Net · 2.6B",
+    latent: "128×128×4",
+    encoders: ["CLIP-L +", "OpenCLIP-G"]
+  },
+  {
+    kind: "model",
+    model: "SD3",
+    year: "2024",
+    family: "mmdit",
+    nodeX: 735,
+    cardX: 610,
+    backbone: "MMDiT · 2B–8B",
+    latent: "128×128×16",
+    encoders: ["T5-XXL + CLIP-L +", "CLIP-G"]
+  },
+  {
+    kind: "model",
+    model: "Flux.1-dev",
+    year: "2024",
+    family: "mmdit",
+    nodeX: 1005,
+    cardX: 880,
+    backbone: "MMDiT · 12B",
+    latent: "128×128×16",
+    encoders: ["T5-XXL +", "CLIP-L"]
+  },
+  {
+    kind: "summary",
+    columns: [
+      {
+        title: "BACKBONE",
+        text: "U-Net 860M / 2.6B → MMDiT 2B–12B",
+        className: "summary-backbone"
+      },
+      {
+        title: "ЛАТЕНТ",
+        text: "64×64×4 → 128×128×4 → 128×128×16",
+        className: "summary-latent"
+      },
+      {
+        title: "ТЕКСТОВЫЙ ЭНКОДЕР",
+        text: "CLIP → два CLIP → T5-XXL + CLIP",
+        className: "summary-encoder"
+      }
+    ]
+  }
+];
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const namespace = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+  const layout = diagramData.find(item => item.kind === "layout");
+  const models = diagramData.filter(item => item.kind === "model");
+  const summary = diagramData.find(item => item.kind === "summary");
+
+  function make(tag, className, parent) {
+    const element = document.createElementNS(namespace, tag);
+    if (className) element.setAttribute("class", className);
+    parent.appendChild(element);
+    return element;
+  }
+
+  function line(parent, x1, y1, x2, y2, className) {
+    const element = make("line", className, parent);
+    element.setAttribute("x1", sx(x1));
+    element.setAttribute("y1", sy(y1));
+    element.setAttribute("x2", sx(x2));
+    element.setAttribute("y2", sy(y2));
+    return element;
+  }
+
+  function rect(parent, x, y, width, height, corner, className) {
+    const element = make("rect", className, parent);
+    element.setAttribute("x", sx(x));
+    element.setAttribute("y", sy(y));
+    element.setAttribute("width", sx(x + width) - sx(x));
+    element.setAttribute("height", sy(y + height) - sy(y));
+    element.setAttribute("rx", sx(x + corner) - sx(x));
+    element.setAttribute("ry", sy(y + corner) - sy(y));
+    return element;
+  }
+
+  function text(parent, value, x, y, className, anchor, dx, dy) {
+    const element = make("text", className, parent);
+    element.setAttribute("x", sx(x));
+    element.setAttribute("y", sy(y));
+    element.setAttribute("text-anchor", anchor);
+    element.setAttribute("dx", dx);
+    element.setAttribute("dy", dy);
+    element.textContent = value;
+    return element;
+  }
+
+  function polygon(parent, points, className) {
+    const element = make("polygon", className, parent);
+    element.setAttribute(
+      "points",
+      points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" ")
+    );
+    return element;
+  }
+
+  line(
+    drawing,
+    layout.timelineStart,
+    layout.timelineY,
+    layout.timelineEnd,
+    layout.timelineY,
+    "timeline"
+  );
+
+  polygon(
+    drawing,
+    [layout.arrowTip, layout.arrowUpper, layout.arrowLower],
+    "arrowhead"
+  );
+
+  models.forEach(model => {
+    const group = make("g", `model-group model-${model.family}`, drawing);
+    const cardCenter = model.cardX + layout.cardWidth / scale.x / (scale.x + scale.x);
+
+    line(
+      group,
+      model.nodeX,
+      layout.timelineY,
+      model.nodeX,
+      layout.connectorEndY,
+      "connector"
+    );
+
+    const node = make("circle", `node node-${model.family}`, group);
+    node.setAttribute("cx", sx(model.nodeX));
+    node.setAttribute("cy", sy(layout.timelineY));
+    node.setAttribute(
+      "r",
+      sx(model.nodeX + layout.nodeRadius) - sx(model.nodeX)
+    );
+
+    text(
+      group,
+      model.year,
+      model.nodeX,
+      layout.timelineY,
+      "year",
+      "middle",
+      layout.noPad,
+      -layout.labelPad * scale.y
+    );
+
+    rect(
+      group,
+      model.cardX,
+      layout.cardY,
+      layout.cardWidth,
+      layout.cardHeight,
+      layout.corner,
+      "card"
+    );
+
+    rect(
+      group,
+      model.cardX,
+      layout.cardY,
+      layout.cardWidth,
+      layout.headerEnd - layout.cardY,
+      layout.corner,
+      `card-accent-${model.family}`
+    );
+
+    rect(
+      group,
+      model.cardX,
+      layout.backboneEnd,
+      layout.cardWidth,
+      layout.latentEnd - layout.backboneEnd,
+      layout.zero,
+      "latent-band"
+    );
+
+    rect(
+      group,
+      model.cardX,
+      layout.latentEnd,
+      layout.cardWidth,
+      layout.cardY + layout.cardHeight - layout.latentEnd,
+      layout.corner,
+      "text-band"
+    );
+
+    line(
+      group,
+      model.cardX,
+      layout.headerEnd,
+      model.cardX + layout.cardWidth,
+      layout.headerEnd,
+      "separator"
+    );
+
+    line(
+      group,
+      model.cardX,
+      layout.backboneEnd,
+      model.cardX + layout.cardWidth,
+      layout.backboneEnd,
+      "separator"
+    );
+
+    line(
+      group,
+      model.cardX,
+      layout.latentEnd,
+      model.cardX + layout.cardWidth,
+      layout.latentEnd,
+      "separator"
+    );
+
+    text(
+      group,
+      model.model,
+      cardCenter,
+      layout.modelY,
+      "model",
+      "middle",
+      layout.noPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      "BACKBONE",
+      model.cardX + layout.sectionX,
+      layout.backboneLabelY,
+      "section-label",
+      "start",
+      layout.labelPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      model.backbone,
+      cardCenter,
+      layout.backboneValueY,
+      `backbone-${model.family}`,
+      "middle",
+      layout.noPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      "ЛАТЕНТ",
+      model.cardX + layout.sectionX,
+      layout.latentLabelY,
+      "section-label",
+      "start",
+      layout.labelPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      model.latent,
+      cardCenter,
+      layout.latentValueY,
+      "latent-value",
+      "middle",
+      layout.noPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      "ТЕКСТОВЫЙ ЭНКОДЕР",
+      model.cardX + layout.sectionX,
+      layout.encoderLabelY,
+      "section-label",
+      "start",
+      layout.labelPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      model.encoders.shift(),
+      cardCenter,
+      layout.encoderFirstY,
+      "encoder-value",
+      "middle",
+      layout.noPad,
+      layout.noPad
+    );
+
+    text(
+      group,
+      model.encoders.shift(),
+      cardCenter,
+      layout.encoderSecondY,
+      "encoder-value",
+      "middle",
+      layout.noPad,
+      layout.noPad
+    );
+  });
+
+  rect(
+    drawing,
+    layout.summaryX,
+    layout.summaryY,
+    layout.summaryWidth,
+    layout.summaryHeight,
+    layout.summaryCorner,
+    "summary-box"
+  );
+
+  summary.columns.forEach((column, columnIndex) => {
+    const columnX = layout.summaryX + layout.summaryColumn * columnIndex;
+    const textX = columnX + layout.summaryPadX;
+
+    if (columnIndex) {
+      line(
+        drawing,
+        columnX,
+        layout.summaryY,
+        columnX,
+        layout.summaryY + layout.summaryHeight,
+        "summary-divider"
+      );
+    }
+
+    text(
+      drawing,
+      column.title,
+      textX,
+      layout.summaryHeadY,
+      `summary-head ${column.className}`,
+      "start",
+      layout.labelPad,
+      layout.noPad
+    );
+
+    text(
+      drawing,
+      column.text,
+      textX,
+      layout.summaryTextY,
+      "summary-text",
+      "start",
+      layout.labelPad,
+      layout.noPad
+    );
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

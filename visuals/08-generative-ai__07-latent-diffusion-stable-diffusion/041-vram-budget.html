@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Бюджет памяти Flux на GPU с 8 ГБ VRAM</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --panel-soft: #eef2f7;
+      --ink: #172033;
+      --muted: #5d687b;
+      --grid: #aab4c4;
+      --blue: #3973d6;
+      --blue-soft: #dbe8ff;
+      --violet: #7656c8;
+      --violet-soft: #e9e1ff;
+      --green: #258567;
+      --green-soft: #d9f2e8;
+      --amber: #b36b00;
+      --amber-soft: #fff0c7;
+      --danger: #c83c4d;
+      --danger-soft: #ffe0e4;
+      --shadow: #d8dde7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --panel: #1a202b;
+        --panel-soft: #242c39;
+        --ink: #edf2fa;
+        --muted: #aeb9ca;
+        --grid: #68758a;
+        --blue: #76a7ff;
+        --blue-soft: #233d68;
+        --violet: #b59bff;
+        --violet-soft: #3a315c;
+        --green: #69d1ad;
+        --green-soft: #1d4b3f;
+        --amber: #ffc35b;
+        --amber-soft: #56421e;
+        --danger: #ff7f8d;
+        --danger-soft: #5b2931;
+        --shadow: #0b0e13;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1000px;
+      margin: auto;
+      padding: 14px 18px;
+      background: var(--page);
+    }
+
+    .heading {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 750;
+      text-align: center;
+    }
+
+    .lead {
+      margin: 6px 0 10px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      overflow: visible;
+      background: var(--page);
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--shadow);
+      stroke-width: 2px;
+    }
+
+    .memory {
+      fill: var(--panel-soft);
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .t5 {
+      fill: var(--blue-soft);
+      stroke: var(--blue);
+      stroke-width: 2px;
+    }
+
+    .dit {
+      fill: var(--violet-soft);
+      stroke: var(--violet);
+      stroke-width: 2px;
+    }
+
+    .vae {
+      fill: var(--green-soft);
+      stroke: var(--green);
+      stroke-width: 2px;
+    }
+
+    .temporary {
+      fill: var(--amber-soft);
+      stroke: var(--amber);
+      stroke-width: 2px;
+    }
+
+    .danger-box {
+      fill: var(--danger-soft);
+      stroke: var(--danger);
+      stroke-width: 2px;
+    }
+
+    .axis,
+    .connector {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .limit {
+      fill: none;
+      stroke: var(--danger);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--ink);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--ink);
+    }
+
+    .cross {
+      fill: none;
+      stroke: var(--danger);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .label {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .stage {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .warning {
+      fill: var(--danger);
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .value {
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .conclusion {
+      font-size: 17px;
+      font-weight: 750;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1 class="heading">8 ГБ VRAM — жёсткий потолок</h1>
+    <p class="lead">В памяти живёт одна стадия Flux, затем уступает место следующей.</p>
+
+    <svg id="diagram"
+         viewBox="0 0 1000 440"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Последовательная загрузка компонентов Flux в восемь гигабайт VRAM</title>
+      <desc id="svg-desc">Совместная загрузка T5 и DiT не оставляет памяти для активаций. При последовательной загрузке сначала работает T5, затем DiT с активациями, затем VAE.</desc>
+    </svg>
+  </main>
+
+  <script>
+    const data = [
+      {
+        id: "mapping",
+        origin: { x: 20, y: 0 },
+        scale: { x: 10, y: 10 }
+      },
+      {
+        id: "combined",
+        panel: { x1: 3, y1: 1, x2: 97, y2: 12.5 },
+        title: { x: 5, y: 3.2, text: "Если держать T5 и DiT одновременно" },
+        formula: {
+          x: 5,
+          y: 10.8,
+          text: "≈1,25 ГБ + ≈6 ГБ = ≈7,25 ГБ весов"
+        },
+        bar: { x1: 15, y1: 5, x2: 81, y2: 8.1 },
+        t5: { x1: 15, y1: 5, x2: 25.3125, y2: 8.1 },
+        dit: { x1: 25.3125, y1: 5, x2: 74.8125, y2: 8.1 },
+        temporary: { x1: 74.8125, y1: 5, x2: 84, y2: 8.1 },
+        memoryLabel: { x: 13.5, y: 7, text: "VRAM", anchor: "end" },
+        t5Label: { x: 20.1, y: 7, text: "T5", anchor: "middle" },
+        ditLabel: { x: 50, y: 7, text: "DiT", anchor: "middle" },
+        tempLabel: {
+          x: 76.7,
+          y: 4.2,
+          text: "активации",
+          anchor: "middle"
+        },
+        limit: { x: 81, y1: 4.3, y2: 9 },
+        limitLabel: { x: 81, y: 3.1, text: "8 ГБ", anchor: "middle" },
+        cross: { x1: 86.4, y1: 5.2, x2: 90.4, y2: 8.4 },
+        crossBack: { x1: 90.4, y1: 5.2, x2: 86.4, y2: 8.4 },
+        oom: { x: 94.5, y: 7.2, text: "не хватает", anchor: "end" }
+      },
+      {
+        id: "t5-stage",
+        panel: { x1: 3, y1: 14.5, x2: 32, y2: 33.5 },
+        title: { x: 17.5, y: 17.3, text: "T5 → условие" },
+        note: { x: 17.5, y: 19.5, text: "квантованный T5 • ≈1,25 ГБ" },
+        bar: { x1: 6, y1: 22, x2: 29, y2: 26.3 },
+        fill: { x1: 6, y1: 22, x2: 9.59375, y2: 26.3 },
+        fillLabel: { x: 7.8, y: 24.7, text: "T5" },
+        cap: { x: 29, y: 21.1, text: "8 ГБ", anchor: "end" },
+        footer: { x: 17.5, y: 30, text: "промпт закодирован" },
+        release: { x: 17.5, y: 32, text: "энкодеры выгружаются" }
+      },
+      {
+        id: "dit-stage",
+        panel: { x1: 35.5, y1: 14.5, x2: 64.5, y2: 33.5 },
+        title: { x: 50, y: 17.3, text: "DiT → расшумление" },
+        note: { x: 50, y: 19.5, text: "квантованный DiT • ≈6 ГБ" },
+        bar: { x1: 38.5, y1: 22, x2: 61.5, y2: 26.3 },
+        fill: { x1: 38.5, y1: 22, x2: 55.75, y2: 26.3 },
+        temporary: { x1: 55.75, y1: 22, x2: 60.6, y2: 26.3 },
+        fillLabel: { x: 47.1, y: 24.7, text: "DiT" },
+        tempLabel: { x: 58.2, y: 28.3, text: "активации" },
+        cap: { x: 61.5, y: 21.1, text: "8 ГБ", anchor: "end" },
+        footer: { x: 50, y: 31.2, text: "веса + временные данные" }
+      },
+      {
+        id: "vae-stage",
+        panel: { x1: 68, y1: 14.5, x2: 97, y2: 33.5 },
+        title: { x: 82.5, y: 17.3, text: "VAE → декодирование" },
+        note: { x: 82.5, y: 19.5, text: "DiT уже выгружен" },
+        bar: { x1: 71, y1: 22, x2: 94, y2: 26.3 },
+        fill: { x1: 74, y1: 22, x2: 88, y2: 26.3 },
+        fillLabel: { x: 81, y: 24.7, text: "VAE" },
+        cap: { x: 94, y: 21.1, text: "8 ГБ", anchor: "end" },
+        footer: { x: 82.5, y: 30, text: "латент становится изображением" },
+        release: { x: 82.5, y: 32, text: "стадия снова помещается" }
+      },
+      {
+        id: "arrows",
+        first: {
+          x1: 29,
+          y1: 36,
+          x2: 39.5,
+          y2: 36,
+          head: [
+            { x: 39.5, y: 36 },
+            { x: 38.2, y: 35.2 },
+            { x: 38.2, y: 36.8 }
+          ],
+          label: { x: 29, y: 35.2, text: "выгрузить", anchor: "start" }
+        },
+        second: {
+          x1: 61.5,
+          y1: 36,
+          x2: 72,
+          y2: 36,
+          head: [
+            { x: 72, y: 36 },
+            { x: 70.7, y: 35.2 },
+            { x: 70.7, y: 36.8 }
+          ],
+          label: { x: 61.5, y: 35.2, text: "выгрузить", anchor: "start" }
+        }
+      },
+      {
+        id: "conclusion",
+        box: { x1: 15, y1: 38.2, x2: 85, y2: 43 },
+        main: {
+          x: 50,
+          y: 40.4,
+          text: "Считать нужно пик одной стадии, а не сумму всех сетей"
+        },
+        sub: {
+          x: 50,
+          y: 42,
+          text: "CPU offload освобождает VRAM между стадиями"
+        }
+      },
+      {
+        id: "fallback",
+        x: 50,
+        y: 22,
+        text: "Схема должна показать: T5, DiT с активациями и VAE загружаются в 8 ГБ VRAM по очереди."
+      }
+    ];
+
+    const mapping = data.find(item => item.id === "mapping");
+    const origin = mapping.origin;
+    const scale = mapping.scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+      const combined = data.find(item => item.id === "combined");
+      const t5Stage = data.find(item => item.id === "t5-stage");
+      const ditStage = data.find(item => item.id === "dit-stage");
+      const vaeStage = data.find(item => item.id === "vae-stage");
+      const arrows = data.find(item => item.id === "arrows");
+      const conclusion = data.find(item => item.id === "conclusion");
+
+      const make = (tag, attributes, content) => {
+        const element = document.createElementNS(namespace, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, value);
+        });
+        if (content) element.textContent = content;
+        svg.appendChild(element);
+        return element;
+      };
+
+      const rect = (box, className) => make("rect", {
+        x: sx(box.x1),
+        y: sy(box.y1),
+        width: sx(box.x2) - sx(box.x1),
+        height: sy(box.y2) - sy(box.y1),
+        class: className
+      });
+
+      const line = (segment, className) => make("line", {
+        x1: sx(segment.x1),
+        y1: sy(segment.y1),
+        x2: sx(segment.x2),
+        y2: sy(segment.y2),
+        class: className
+      });
+
+      const label = (item, className) => make("text", {
+        x: sx(item.x),
+        y: sy(item.y),
+        class: className,
+        "text-anchor": item.anchor || "middle"
+      }, item.text);
+
+      const polygon = (points, className) => make("polygon", {
+        points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+        class: className
+      });
+
+      rect(combined.panel, "panel");
+      label(combined.title, "stage");
+      label(combined.formula, "label");
+      rect(combined.bar, "memory");
+      rect(combined.t5, "t5");
+      rect(combined.dit, "dit");
+      rect(combined.temporary, "temporary");
+      label(combined.memoryLabel, "small");
+      label(combined.t5Label, "value");
+      label(combined.ditLabel, "value");
+      label(combined.tempLabel, "small");
+      line({
+        x1: combined.limit.x,
+        y1: combined.limit.y1,
+        x2: combined.limit.x,
+        y2: combined.limit.y2
+      }, "limit");
+      label(combined.limitLabel, "warning");
+      line(combined.cross, "cross");
+      line(combined.crossBack, "cross");
+      label(combined.oom, "warning");
+
+      const drawStage = (stage, fillClass) => {
+        rect(stage.panel, "panel");
+        label(stage.title, "stage");
+        label(stage.note, "small");
+        rect(stage.bar, "memory");
+        rect(stage.fill, fillClass);
+        label(stage.fillLabel, "value");
+        label(stage.cap, "small");
+        label(stage.footer, "label");
+        if (stage.release) label(stage.release, "small");
+      };
+
+      drawStage(t5Stage, "t5");
+      drawStage(ditStage, "dit");
+      rect(ditStage.temporary, "temporary");
+      label(ditStage.tempLabel, "small");
+      drawStage(vaeStage, "vae");
+
+      line(arrows.first, "arrow");
+      polygon(arrows.first.head, "arrow-head");
+      label(arrows.first.label, "small");
+      line(arrows.second, "arrow");
+      polygon(arrows.second.head, "arrow-head");
+      label(arrows.second.label, "small");
+
+      rect(conclusion.box, "danger-box");
+      label(conclusion.main, "conclusion");
+      label(conclusion.sub, "small");
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+      const fallback = data.find(item => item.id === "fallback");
+      while (svg.lastChild) svg.removeChild(svg.lastChild);
+      const message = document.createElementNS(namespace, "text");
+      message.setAttribute("x", sx(fallback.x));
+      message.setAttribute("y", sy(fallback.y));
+      message.setAttribute("text-anchor", "middle");
+      message.setAttribute("class", "label");
+      message.textContent = fallback.text;
+      svg.appendChild(message);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
