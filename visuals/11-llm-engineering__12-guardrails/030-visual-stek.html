@@ -1,0 +1,188 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<meta charset="utf-8">
+<title>Стек фильтрации по цене</title>
+<style>
+:root{
+  --bg:#fbfbf9; --fg:#1c1c1c; --muted:#5d6470; --line:#3a4250;
+  --boxin:#e8eef7; --boxmodel:#f6e6cf; --boxout:#e6f1e8; --bar:#c2452f; --btn:#eceff3;
+}
+@media (prefers-color-scheme: dark){
+:root{
+  --bg:#15171b; --fg:#eceef2; --muted:#a4adbb; --line:#93a0b2;
+  --boxin:#22303f; --boxmodel:#3c3122; --boxout:#22332a; --bar:#e8705a; --btn:#252a31;
+}
+}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:10px 12px 14px}
+h2{font-size:15px;margin:0 0 6px}
+button{font:12px inherit;color:var(--fg);background:var(--btn);
+  border:1px solid var(--line);border-radius:5px;padding:4px 9px;cursor:pointer;margin-bottom:6px}
+svg{display:block;width:100%;height:auto;max-height:520px}
+text{fill:var(--fg)}
+.t-name{font-size:12.5px}
+.t-cost{font-size:12px;fill:var(--muted)}
+.t-cap{font-size:11.5px;fill:var(--muted);letter-spacing:.02em}
+.t-note{font-size:12px;fill:var(--muted)}
+#fb{font-size:13px;color:var(--fg);white-space:pre-line}
+</style>
+<div class="wrap">
+<h2>Стек фильтрации: дешёвые проверки сверху, дорогие снизу</h2>
+<button id="swap">Переставить классификатор наверх</button>
+<svg id="s" viewBox="0 0 720 500" preserveAspectRatio="xMidYMid meet" role="img"
+     aria-label="Вертикальный стек проверок с ценой каждого прогона"></svg>
+<div id="fb"></div>
+</div>
+<script>
+(function(){
+var svg=document.getElementById("s"),fb=document.getElementById("fb");
+try{
+/* ---- данные схемы ---- */
+var D={
+  origin:{x:8,y:14}, scale:10,
+  box:{x0:4,x1:42,h:3},
+  lay:{capY:1.2,stackTop:2.6,gap:1.4,bigGap:3.2,barX:44,barH:1,
+       costX:57,rejectX:2.2,head:.5,noteY:45.4,legY:47},
+  input:[
+    {n:"лимит длины: < 5000 символов", c:"доли мс",    b:1.2},
+    {n:"счётчик запросов: 10 req/min", c:"≈ 0,5 мс",   b:2},
+    {n:"регулярки на инъекцию",        c:"единицы мс", b:4},
+    {n:"регулярки на PII",             c:"чуть больше",b:6},
+    {n:"классификатор темы",           c:"десятки мс", b:12}
+  ],
+  model:{n:"LLM — 200–2000 мс"},
+  output:[{n:"детектор токсичности"},{n:"чистка PII в ответе"},{n:"проверка релевантности"}],
+  notes:{
+    ok:"весь входной стек ≈ 40 мс: до нижнего слоя доживают немногие",
+    bad:"классификатор первым перемалывает все 40 000 символов — отказ по длине приходит после"
+  }
+};
+/* ---- единственный перевод координат ---- */
+var sx=function(x){return D.origin.x+x*D.scale;};
+var sy=function(y){return D.origin.y+y*D.scale;};
+
+var NS="http://www.w3.org/2000/svg";
+function el(t,a){var e=document.createElementNS(NS,t);for(var k in a)e.setAttribute(k,a[k]);return e;}
+function txt(x,y,s,cls,anch){
+  var e=el("text",{x:sx(x),y:sy(y),"text-anchor":anch,"class":cls});e.textContent=s;return e;}
+var B=D.box,L=D.lay;
+
+function box(y0,label,fill){
+  var g=el("g",{});
+  g.appendChild(el("rect",{x:sx(B.x0),y:sy(y0),
+    width:sx(B.x1)-sx(B.x0),height:sy(y0+B.h)-sy(y0),
+    rx:sx(B.x0+.4)-sx(B.x0),fill:fill,stroke:"var(--line)","stroke-width":1.2}));
+  var t=txt((B.x0+B.x1)/2,y0+B.h/2+.35,label,"t-name","middle");
+  g.appendChild(t);return g;
+}
+function arrowDown(x,y0,y1){
+  var g=el("g",{}),h=L.head;
+  g.appendChild(el("line",{x1:sx(x),y1:sy(y0),x2:sx(x),y2:sy(y1-h),
+    stroke:"var(--line)","stroke-width":1.4}));
+  g.appendChild(el("polygon",{points:
+    sx(x)+","+sy(y1)+" "+sx(x-h*.7)+","+sy(y1-h)+" "+sx(x+h*.7)+","+sy(y1-h),
+    fill:"var(--line)"}));
+  return g;
+}
+function arrowLeft(y,x0,x1){
+  var g=el("g",{}),h=L.head;
+  g.appendChild(el("line",{x1:sx(x0),y1:sy(y),x2:sx(x1+h),y2:sy(y),
+    stroke:"var(--line)","stroke-width":1.2}));
+  g.appendChild(el("polygon",{points:
+    sx(x1)+","+sy(y)+" "+sx(x1+h)+","+sy(y-h*.7)+" "+sx(x1+h)+","+sy(y+h*.7),
+    fill:"var(--line)"}));
+  return g;
+}
+function bar(y0,v){
+  return el("rect",{x:sx(L.barX),y:sy(y0+B.h/2-L.barH/2),
+    width:sx(L.barX+v)-sx(L.barX),height:sy(L.barH)-sy(0),
+    fill:"var(--bar)"});
+}
+
+function render(order){
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  svg.appendChild(txt(B.x0,L.capY,"проверка","t-cap","start"));
+  svg.appendChild(txt(L.barX,L.capY,"цена одного прогона","t-cap","start"));
+
+  var y=L.stackTop,i,cx=(B.x0+B.x1)/2,prev=null;
+  for(i=0;i<order.length;i++){
+    var d=order[i];
+    if(prev!==null)svg.appendChild(arrowDown(cx,prev,y));
+    svg.appendChild(box(y,d.n,"var(--boxin)"));
+    svg.appendChild(bar(y,d.b));
+    svg.appendChild(txt(L.costX,y+B.h/2+.35,d.c,"t-cost","start"));
+    svg.appendChild(arrowLeft(y+B.h/2,B.x0,L.rejectX));
+    prev=y+B.h;
+    y=prev+L.gap;
+  }
+  y=prev+L.bigGap;
+  svg.appendChild(arrowDown(cx,prev,y));
+  svg.appendChild(box(y,D.model.n,"var(--boxmodel)"));
+  prev=y+B.h;
+  for(i=0;i<D.output.length;i++){
+    y=prev+(i===0?L.bigGap:L.gap);
+    svg.appendChild(arrowDown(cx,prev,y));
+    svg.appendChild(box(y,D.output[i].n,"var(--boxout)"));
+    prev=y+B.h;
+  }
+  svg.appendChild(txt(B.x0,L.noteY,
+    order[0]===D.input[0]?D.notes.ok:D.notes.bad,"t-note","start"));
+  svg.appendChild(arrowLeft(L.legY-.35,L.rejectX+1.6,L.rejectX));
+  svg.appendChild(txt(L.rejectX+2,L.legY,
+    "отказ на слое: трафик уходит и до следующих проверок не доходит","t-cap","start"));
+}
+
+var cheapFirst=D.input.slice(),
+    heavyFirst=D.input.slice().reverse(),
+    flipped=false;
+render(cheapFirst);
+document.getElementById("swap").addEventListener("click",function(){
+  flipped=!flipped;
+  render(flipped?heavyFirst:cheapFirst);
+  this.textContent=flipped?"Вернуть дешёвые проверки наверх":"Переставить классификатор наверх";
+});
+}catch(e){
+  svg.style.display="none";
+  fb.textContent=
+    "Схема должна показывать вертикальный стек:\n"+
+    "лимит длины < 5000 символов (доли мс) → счётчик запросов 10 req/min (≈ 0,5 мс) → "+
+    "регулярки на инъекцию (единицы мс) → регулярки на PII (чуть больше) → "+
+    "классификатор темы (десятки мс) → LLM 200–2000 мс → детектор токсичности → "+
+    "чистка PII в ответе → проверка релевантности.\n"+
+    "Цена прогона растёт книзу; каждый слой отсекает часть трафика, весь входной стек ≈ 40 мс.";
+}
+})();
+</script>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

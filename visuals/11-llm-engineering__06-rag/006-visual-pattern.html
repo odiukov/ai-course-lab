@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Query → Retrieve → Augment → Generate</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1d21;
+    --muted: #5b6672;
+    --line: #43505e;
+    --box: #eef3f8;
+    --box-stroke: #2f6f9f;
+    --inner: #fdf6e8;
+    --inner-stroke: #b8860b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16191d;
+      --fg: #e8ecef;
+      --muted: #9aa7b4;
+      --line: #b3c0cd;
+      --box: #1f2a35;
+      --box-stroke: #5fa8dc;
+      --inner: #2b2517;
+      --inner-stroke: #d8ac48;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { background: var(--bg); max-width: 100%; padding: 8px 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 6px 10px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 520px; }
+  .t { fill: var(--fg); }
+  .m { fill: var(--muted); }
+  .fail { padding: 10px; color: var(--fg); font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Query → Retrieve → Augment → Generate</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById("host");
+  try {
+    // ---------- данные схемы (единицы схемы, не пиксели) ----------
+    var TOP = [
+      { id: "Q", label: "Query",    sub: "вопрос пользователя", x: 3,  w: 15 },
+      { id: "R", label: "Retrieve", sub: "поиск",               x: 22, w: 15 },
+      { id: "A", label: "Augment",  sub: "сборка промпта",      x: 41, w: 15 },
+      { id: "G", label: "Generate", sub: "ответ",               x: 60, w: 15 }
+    ];
+    var TOP_Y = 4, TOP_H = 7;
+
+    var PANELS = [
+      { over: "R", y: 17, h: 20, title: "внутри Retrieve — 3 действия",
+        steps: ["embed query", "search vector store", "top-k чанков, k = 3–5"] },
+      { over: "A", y: 17, h: 20, title: "внутри Augment — 2 действия",
+        steps: ["форматируем чанки", "+ вопрос пользователя"] },
+      { over: "G", y: 17, h: 20, title: "внутри Generate — 1 действие",
+        steps: ["модель пишет ответ", "по 4 найденным кускам"] }
+    ];
+
+    var NOTE = { x: 3, y: 41, text: "800 чанков из 200 страниц вики → наружу выходят 4" };
+
+    // ---------- одна пара функций перевода ----------
+    var origin = { x: 14, y: 10 }, scale = 9.6;
+    function sx(x) { return origin.x + x * scale; }
+    function sy(y) { return origin.y + y * scale; }
+
+    var W = 760, H = 470;
+    var SVGNS = "http://www.w3.org/2000/svg";
+    var PAD = 4, FS = 12, FS_SM = 11, LW = 1.4;
+
+    var svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.setAttribute("role", "img");
+
+    function add(name, attrs, parent) {
+      var e = document.createElementNS(SVGNS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      (parent || svg).appendChild(e);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size) {
+      var e = add("text", { x: x, y: y, "text-anchor": anchor, "font-size": size || FS,
+                            class: cls || "t" });
+      e.textContent = s;
+      return e;
+    }
+    add("rect", { x: 0, y: 0, width: W, height: H, fill: "var(--bg)" });
+
+    var defs = add("defs", {});
+    var mk = add("marker", { id: "ah", markerWidth: 9, markerHeight: 9, refX: 8, refY: 3,
+                             orient: "auto", markerUnits: "strokeWidth" }, defs);
+    add("path", { d: "M0,0 L8,3 L0,6 Z", fill: "var(--line)" }, mk);
+
+    function boxOf(b) {
+      return { x1: sx(b.x), x2: sx(b.x + b.w), y1: sy(TOP_Y), y2: sy(TOP_Y + TOP_H),
+               cx: sx(b.x + b.w / 2), cy: sy(TOP_Y + TOP_H / 2) };
+    }
+    var byId = {};
+
+    // ---------- верхний ряд ----------
+    TOP.forEach(function (b, i) {
+      var g = boxOf(b);
+      byId[b.id] = g;
+      add("rect", { x: g.x1, y: g.y1, width: g.x2 - g.x1, height: g.y2 - g.y1, rx: sx(1) - sx(0),
+                    fill: "var(--box)", stroke: "var(--box-stroke)", "stroke-width": LW });
+      txt(g.cx, sy(TOP_Y + 3), (i + 1) + ". " + b.label, "middle", "t", FS).setAttribute("font-weight", "600");
+      txt(g.cx, sy(TOP_Y + 5.4), b.sub, "middle", "m", FS_SM);
+    });
+
+    // стрелки верхнего ряда
+    for (var i = 0; i < TOP.length - 1; i++) {
+      var a = boxOf(TOP[i]), c = boxOf(TOP[i + 1]);
+      add("line", { x1: a.x2 + PAD, y1: a.cy, x2: c.x1 - PAD, y2: c.cy,
+                    stroke: "var(--line)", "stroke-width": LW, "marker-end": "url(#ah)" });
+    }
+    // подпись маршрута — у хвоста первой стрелки, над линией
+    txt(boxOf(TOP[0]).x2 + PAD, sy(TOP_Y) - PAD, "один маршрут у всех RAG-систем", "start", "m", FS_SM);
+
+    // ---------- пунктирные панели ----------
+    PANELS.forEach(function (p) {
+      var top = byId[p.over];
+      var x1 = top.x1, x2 = top.x2;
+      var y1 = sy(p.y), y2 = sy(p.y + p.h);
+
+      // связь коробка → панель
+      add("line", { x1: top.cx, y1: top.y2 + PAD, x2: top.cx, y2: y1 - PAD,
+                    stroke: "var(--inner-stroke)", "stroke-width": LW,
+                    "stroke-dasharray": "3 3", "marker-end": "url(#ah)" });
+
+      add("rect", { x: x1, y: y1, width: x2 - x1, height: y2 - y1, rx: sx(1) - sx(0),
+                    fill: "none", stroke: "var(--inner-stroke)", "stroke-width": LW,
+                    "stroke-dasharray": "5 4" });
+
+      txt(sx(p.over === "R" ? TOP[1].x : p.over === "A" ? TOP[2].x : TOP[3].x) + PAD,
+          y1 + sy(2.6) - sy(0), p.title, "start", "m", FS_SM);
+
+      p.steps.forEach(function (s, k) {
+        var sy1 = sy(p.y + 4.6 + k * 4.6), sy2 = sy(p.y + 8.2 + k * 4.6);
+        var bx1 = x1 + PAD, bx2 = x2 - PAD;
+        add("rect", { x: bx1, y: sy1, width: bx2 - bx1, height: sy2 - sy1, rx: sx(0.6) - sx(0),
+                      fill: "var(--inner)", stroke: "var(--inner-stroke)", "stroke-width": LW });
+        txt((bx1 + bx2) / 2, (sy1 + sy2) / 2 + PAD, s, "middle", "t", FS_SM);
+        if (k > 0) {
+          var prev = sy(p.y + 8.2 + (k - 1) * 4.6);
+          add("line", { x1: (bx1 + bx2) / 2, y1: prev, x2: (bx1 + bx2) / 2, y2: sy1,
+                        stroke: "var(--line)", "stroke-width": LW, "marker-end": "url(#ah)" });
+        }
+      });
+    });
+
+    // ---------- нижняя заметка ----------
+    txt(sx(NOTE.x), sy(NOTE.y), NOTE.text, "start", "m", FS_SM);
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<div class="fail">Схема должна была показать: линейную цепочку ' +
+      '1. Query, 2. Retrieve, 3. Augment, 4. Generate. Под Retrieve пунктирная рамка с тремя ' +
+      'действиями: embed query, search vector store, top-k чанков (k = 3–5). Под Augment — два ' +
+      'действия: форматируем чанки + вопрос пользователя. Под Generate — одно: модель пишет ' +
+      'ответ по 4 найденным кускам. Из 800 чанков (200 страниц вики) наружу выходят 4.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

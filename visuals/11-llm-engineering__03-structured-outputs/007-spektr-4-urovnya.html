@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Спектр контроля структуры вывода</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a2e; --muted:#5a5a72; --line:#8a8aa0;
+    --c1:#ff6b6b; --c2:#ffa500; --c3:#51cf66; --c4:#3b6ea5;
+    --fill:#f2f2f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12121c; --fg:#eef0f6; --muted:#a8aabb; --line:#666880;
+      --c1:#ff6b6b; --c2:#ffa500; --c3:#51cf66; --c4:#6ea8e0;
+      --fill:#1a1a2e;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 4px;max-width:980px;}
+  h2{font-size:15px;margin:0 0 2px 6px;font-weight:600;}
+  p.sub{font-size:12px;margin:0 0 4px 6px;color:var(--muted);}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{font-size:13px;line-height:1.5;padding:8px;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Спектр контроля: четыре уровня</h2>
+  <p class="sub">Слева направо гарантия переезжает из промпта в API, затем в декодер.</p>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы ----
+    var STEPS = [
+      {x:1, y:0.9, key:"Prompt-based",        note:"«Верни JSON»",         val:"~90 %",  where:"гарантия в словах", c:"var(--c1)"},
+      {x:3, y:2.0, key:"JSON mode",           note:"валидный JSON",        val:"",       where:"гарантия в API",    c:"var(--c2)"},
+      {x:5, y:3.1, key:"Schema mode",         note:"соответствие схеме",   val:"",       where:"гарантия в API",    c:"var(--c3)"},
+      {x:7, y:4.2, key:"Constrained decoding",note:"маска на токенах",     val:"100 %",  where:"гарантия в декодере", c:"var(--c4)"}
+    ];
+    var W = 4.2;              // высота лесенки в единицах данных
+    var STEP_W = 1.6;         // ширина проступи в единицах данных
+
+    // ---- холст (литералы: только размеры) ----
+    var VB_W = 900, VB_H = 470;
+    var PAD_L = 92, PAD_R = 62, PAD_T = 74, PAD_B = 96;
+    var LABEL_GAP = 10, TICK = 6, FS = 13, LW = 2;
+
+    // ---- одна пара переводчиков ----
+    var origin = {x: PAD_L, y: VB_H - PAD_B};
+    var scale  = {x: (VB_W - PAD_L - PAD_R) / 8.6,
+                  y: (VB_H - PAD_T - PAD_B) / (W + 1.1)};
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a){
+      var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size, weight){
+      var t = el("text",{x:x, y:y, "text-anchor":anchor,
+        "font-size":(size||FS), "font-family":"inherit",
+        fill:(cls||"var(--fg)"), "font-weight":(weight||"400")});
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Лесенка из четырёх уровней контроля структуры вывода"});
+    svg.appendChild(el("rect",{x:0,y:0,width:VB_W,height:VB_H,fill:"var(--bg)"}));
+
+    var defs = el("defs",{});
+    var m = el("marker",{id:"ar", viewBox:"0 0 10 10", refX:"9", refY:"5",
+      markerWidth:"7", markerHeight:"7", orient:"auto-start-reverse"});
+    m.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z", fill:"var(--line)"}));
+    defs.appendChild(m);
+    svg.appendChild(defs);
+
+    // ---- оси ----
+    svg.appendChild(el("line",{x1:sx(0), y1:sy(0), x2:sx(8.4), y2:sy(0),
+      stroke:"var(--line)", "stroke-width":LW, "marker-end":"url(#ar)"}));
+    svg.appendChild(el("line",{x1:sx(0), y1:sy(0), x2:sx(0), y2:sy(W + 0.9),
+      stroke:"var(--line)", "stroke-width":LW, "marker-end":"url(#ar)"}));
+
+    // подпись оси X — у хвоста стрелки, ниже линии
+    svg.appendChild(txt(sx(0.15), sy(0) + LABEL_GAP * 2.2,
+      "жёстче принуждение", "start", "var(--muted)", FS));
+    // подпись оси Y — вертикально, слева, у хвоста
+    var yl = txt(sx(0) - LABEL_GAP * 2.6, sy(W * 0.5),
+      "где живёт гарантия", "middle", "var(--muted)", FS);
+    yl.setAttribute("transform","rotate(-90 "+(sx(0)-LABEL_GAP*2.6)+" "+sy(W*0.5)+")");
+    svg.appendChild(yl);
+
+    // ---- ступени ----
+    STEPS.forEach(function(s, i){
+      var x0 = s.x - STEP_W/2, x1 = s.x + STEP_W/2;
+
+      // подступенок от предыдущего уровня
+      var yPrev = i === 0 ? 0 : STEPS[i-1].y;
+      svg.appendChild(el("line",{x1:sx(x0), y1:sy(yPrev), x2:sx(x0), y2:sy(s.y),
+        stroke:s.c, "stroke-width":LW, "stroke-linecap":"round"}));
+      // проступь
+      svg.appendChild(el("line",{x1:sx(x0), y1:sy(s.y), x2:sx(x1), y2:sy(s.y),
+        stroke:s.c, "stroke-width":LW + 2, "stroke-linecap":"round"}));
+      // связка до подступенка следующего
+      if(i < STEPS.length - 1){
+        svg.appendChild(el("line",{x1:sx(x1), y1:sy(s.y),
+          x2:sx(STEPS[i+1].x - STEP_W/2), y2:sy(s.y),
+          stroke:s.c, "stroke-width":LW, "stroke-dasharray":"4 4"}));
+      }
+
+      // засечка на оси X под центром ступени
+      svg.appendChild(el("line",{x1:sx(s.x), y1:sy(0),
+        x2:sx(s.x), y2:sy(0) + TICK,
+        stroke:"var(--line)", "stroke-width":LW}));
+      // короткая метка уровня — под осью, middle
+      svg.appendChild(txt(sx(s.x), sy(0) + TICK + LABEL_GAP + FS,
+        "L" + (i+1), "middle", "var(--muted)", FS));
+
+      // название — над проступью, middle
+      svg.appendChild(txt(sx(s.x), sy(s.y) - LABEL_GAP - FS,
+        s.key, "middle", s.c, FS, "600"));
+      // уточнение — над проступью, строкой ниже названия
+      svg.appendChild(txt(sx(s.x), sy(s.y) - LABEL_GAP,
+        s.note, "middle", "var(--muted)", FS - 1));
+      // процент — под проступью, чтобы не столкнуться с названием
+      if(s.val){
+        svg.appendChild(txt(sx(s.x), sy(s.y) + LABEL_GAP + FS - 3,
+          s.val, "middle", "var(--fg)", FS, "600"));
+      }
+    });
+
+    // ---- цена разницы: у хвоста стрелки между L1 и L4 ----
+    var yArr = W + 0.62;
+    svg.appendChild(el("line",{x1:sx(STEPS[0].x), y1:sy(yArr),
+      x2:sx(STEPS[3].x), y2:sy(yArr),
+      stroke:"var(--line)", "stroke-width":LW, "marker-end":"url(#ar)"}));
+    svg.appendChild(txt(sx(STEPS[0].x) + LABEL_GAP, sy(yArr) - LABEL_GAP,
+      "100 000 запросов в сутки: 10 000 упавших разборов → 0",
+      "start", "var(--fg)", FS));
+
+    // ---- легенда строкой под схемой ----
+    var legend = [
+      "L1 — гарантия в промпте (нигде)",
+      "L2 · L3 — гарантию держит API",
+      "L4 — гарантия в декодере"
+    ];
+    legend.forEach(function(s, i){
+      svg.appendChild(txt(sx(0), sy(0) - (TICK + LABEL_GAP * 3.4 + FS * 1.6) + (i * (FS + 5))
+        + (sy(0) - sy(0)), s, "start", "var(--muted)", FS - 1));
+    });
+    // легенда рисуется ниже оси: сдвигаем группой через одну пару функций
+    var lg = svg.querySelectorAll("text");
+    for(var i = lg.length - legend.length; i < lg.length; i++){
+      lg[i].setAttribute("y", sy(0) + TICK + LABEL_GAP * 2 + FS * 2
+        + (i - (lg.length - legend.length)) * (FS + 5));
+      lg[i].setAttribute("x", sx(0.15));
+    }
+
+    host.appendChild(svg);
+  } catch(e){
+    host.innerHTML = '<div class="fail"><b>Схема не отрисовалась.</b> Она показывает '
+      + 'лесенку из четырёх уровней контроля структуры вывода, слева направо и снизу вверх: '
+      + '<b>L1 Prompt-based</b> («Верни JSON», ~90 % валидных ответов, гарантия живёт в словах промпта) → '
+      + '<b>L2 JSON mode</b> (API гарантирует валидный JSON, но не схему) → '
+      + '<b>L3 Schema mode</b> (API гарантирует соответствие схеме: ключи и типы) → '
+      + '<b>L4 Constrained decoding</b> (маска на токенах в декодере, 100 %). '
+      + 'На 100 000 запросов в сутки разница между L1 и L4 — 10 000 упавших разборов против нуля.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

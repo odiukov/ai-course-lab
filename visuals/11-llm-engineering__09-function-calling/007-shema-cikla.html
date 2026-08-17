@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Цикл вызова инструмента</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b6b6b;
+    --lane:#c9c9c9; --arrow:#2b5fb8; --arrow2:#b8622b; --box:#eef2fa; --box2:#faf1e9;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141619; --fg:#e8e8e8; --muted:#9a9a9a;
+      --lane:#4a4f57; --arrow:#7fa8ef; --arrow2:#e0a06a; --box:#1e2836; --box2:#33261b;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:8px 4px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);padding:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Цикл вызова инструмента: два захода к модели</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var lanes = [
+      {x:0,  label:"Пользователь"},
+      {x:1,  label:"Приложение"},
+      {x:2,  label:"Модель"},
+      {x:3,  label:"Инструмент"}
+    ];
+    var steps = [
+      {y:0, from:0, to:1, label:"«Какая погода в Токио?»",            kind:"a"},
+      {y:1, from:1, to:2, label:"сообщение + описания инструментов",  kind:"a"},
+      {y:2, from:2, to:1, label:"tool_call: get_weather(city=\"Tokyo\")", kind:"b"},
+      {y:3, from:1, to:3, label:"выполнить get_weather(\"Tokyo\")",   kind:"a"},
+      {y:4, from:3, to:1, label:"{\"temp\": 18, \"condition\": \"cloudy\"}", kind:"b"},
+      {y:5, from:1, to:2, label:"tool_result + весь разговор",        kind:"a"},
+      {y:6, from:2, to:1, label:"«It's 18C and cloudy in Tokyo.»",    kind:"b"},
+      {y:7, from:1, to:0, label:"финальный ответ",                    kind:"b"}
+    ];
+    var notes = [
+      {y:1.5, label:"заход 1: данных ещё нет"},
+      {y:5.5, label:"заход 2: в разговоре есть 18"}
+    ];
+
+    // ---- один origin, один scale ----
+    var origin = {x:150, y:78};
+    var scale  = {x:200, y:46};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    // ---- пиксельные литералы: холст, отступы подписей, толщины, шрифт ----
+    var W = 820, H = 500;
+    var PAD_LABEL = 8, HEAD = 7, STROKE = 1.6, LANE_W = 1.4, FS = 12.5, FS_S = 11.5;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||FS,fill:cls});
+      t.textContent=s; return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet",
+      role:"img","aria-label":"Sequence-диаграмма цикла вызова инструмента"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    // ---- заголовки участников + линии жизни ----
+    var topY = sy(-1), botY = sy(steps.length - 0.4);
+    lanes.forEach(function(L){
+      var x = sx(L.x);
+      svg.appendChild(el("line",{x1:x,y1:sy(-0.6),x2:x,y2:botY,
+        stroke:"var(--lane)","stroke-width":LANE_W,"stroke-dasharray":"5 5"}));
+      var bw = scale.x*0.72, bh = scale.y*0.62;
+      svg.appendChild(el("rect",{x:x-bw/2,y:topY-bh/2,width:bw,height:bh,rx:5,
+        fill:(L.x===2?"var(--box2)":"var(--box)"),stroke:"var(--lane)","stroke-width":LANE_W}));
+      svg.appendChild(txt(x, topY+PAD_LABEL*0.5, L.label, "middle", "var(--fg)"));
+    });
+
+    // ---- стрелки шагов ----
+    steps.forEach(function(s){
+      var y = sy(s.y), x1 = sx(s.from), x2 = sx(s.to);
+      var dir = (x2>x1)?1:-1, tip = x2 - dir*(HEAD*0.2);
+      var color = (s.kind==="a")?"var(--arrow)":"var(--arrow2)";
+      svg.appendChild(el("line",{x1:x1,y1:y,x2:tip,y2:y,
+        stroke:color,"stroke-width":STROKE}));
+      svg.appendChild(el("polygon",{
+        points:[tip,y,tip-dir*HEAD*1.5,y-HEAD*0.7,tip-dir*HEAD*1.5,y+HEAD*0.7].join(" "),
+        fill:color}));
+      // подпись у ХВОСТА: вправо -> start от x1; влево -> end от x1
+      var anchor = (dir>0)?"start":"end";
+      var lx = x1 + dir*PAD_LABEL;
+      svg.appendChild(txt(lx, y - PAD_LABEL*0.6, s.label, anchor, "var(--fg)"));
+    });
+
+    // ---- заметки о двух заходах: справа от линии модели ----
+    notes.forEach(function(n){
+      var y = sy(n.y), x = sx(3) + PAD_LABEL*2;
+      svg.appendChild(txt(x, y + PAD_LABEL*0.4, n.label, "start", "var(--muted)", FS_S));
+    });
+
+    // ---- явное указание: прямой связи User<->Model и Model<->Tool нет ----
+    var noteY = sy(steps.length + 0.3);
+    svg.appendChild(txt(sx(0) - PAD_LABEL*2, noteY,
+      "Пользователь не говорит с моделью, модель не трогает инструмент — всё через приложение.",
+      "start", "var(--muted)", FS_S));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fallback">Схема должна была показать четыре линии — '+
+      'Пользователь, Приложение, Модель, Инструмент — и восемь стрелок между ними: '+
+      'вопрос про Токио уходит в приложение, приложение шлёт модели сообщение с описаниями '+
+      'инструментов, модель возвращает tool_call get_weather(city="Tokyo"), приложение вызывает '+
+      'инструмент и получает {"temp": 18, "condition": "cloudy"}, отправляет результат модели '+
+      'вторым заходом, модель отвечает «It\'s 18C and cloudy in Tokyo.», приложение отдаёт '+
+      'ответ пользователю. Прямых стрелок Пользователь↔Модель и Модель↔Инструмент нет.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

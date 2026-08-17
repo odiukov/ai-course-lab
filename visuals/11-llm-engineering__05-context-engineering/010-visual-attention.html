@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Внимание по позициям контекста</title>
+<style>
+  :root {
+    --bg: #f7f7fb;
+    --fg: #1a1a2e;
+    --muted: #55556e;
+    --axis: #55556e;
+    --high: #e94560;
+    --mod: #ffa500;
+    --low: #0f3460;
+    --grid: #d3d3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12121c;
+      --fg: #eeeef6;
+      --muted: #a8a8c0;
+      --axis: #a8a8c0;
+      --high: #ff6b81;
+      --mod: #ffb52e;
+      --low: #6fa8ff;
+      --grid: #2c2c40;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { background: var(--bg); padding: 8px 4px 12px; }
+  h2 { margin: 0 0 4px; font-size: 15px; text-align: center; font-weight: 600; }
+  svg { display: block; width: 100%; max-height: 470px; height: auto; }
+  .fail { padding: 10px 14px; font-size: 13px; line-height: 1.5; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Внимание по позициям контекста: кривая-ванна</h2>
+  <svg id="chart" viewBox="0 0 720 470" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Полоса контекста, поделённая на зоны внимания"></svg>
+  <div id="fail" class="fail" hidden></div>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById("chart");
+  try {
+    // ---- данные схемы (проценты позиции в контексте; уровень внимания 0..100) ----
+    var BANDS = [
+      { from: 0,  to: 20,  level: 95, tag: "HIGH",     ru: "0-20% — HIGH",     cls: "high" },
+      { from: 20, to: 40,  level: 60, tag: "MODERATE", ru: "20-40% — MODERATE", cls: "mod" },
+      { from: 40, to: 70,  level: 25, tag: "LOW",      ru: "40-70% — LOW",      cls: "low" },
+      { from: 70, to: 90,  level: 60, tag: "MODERATE", ru: "70-90% — MODERATE", cls: "mod" },
+      { from: 90, to: 100, level: 95, tag: "HIGH",     ru: "90-100% — HIGH",    cls: "high" }
+    ];
+    var YTICKS = [0, 25, 50, 75, 100];
+
+    // ---- одна пара origin/scale, дальше не меняется ----
+    var ORIGIN = { x: 96, y: 330 };
+    var SCALE  = { x: 5.5, y: 2.4 };
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y - y * SCALE.y; }
+
+    var COL = { high: "var(--high)", mod: "var(--mod)", low: "var(--low)" };
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function label(x, y, t, anchor, dx, dy, size, fill, weight) {
+      var e = el("text", { x: sx(x) + dx, y: sy(y) + dy, "text-anchor": anchor,
+        "font-size": size, fill: fill, "font-weight": weight || "400" });
+      e.textContent = t;
+      svg.appendChild(e);
+      return e;
+    }
+
+    // ---- сетка и ось Y ----
+    YTICKS.forEach(function (v) {
+      svg.appendChild(el("line", { x1: sx(0), y1: sy(v), x2: sx(100), y2: sy(v),
+        stroke: "var(--grid)", "stroke-width": 1 }));
+      label(0, v, String(v), "end", -10, 4, 11, "var(--muted)");
+    });
+    svg.appendChild(el("line", { x1: sx(0), y1: sy(0), x2: sx(0), y2: sy(100),
+      stroke: "var(--axis)", "stroke-width": 1.5 }));
+    svg.appendChild(el("line", { x1: sx(0), y1: sy(0), x2: sx(100), y2: sy(0),
+      stroke: "var(--axis)", "stroke-width": 1.5 }));
+
+    // ---- столбцы зон ----
+    BANDS.forEach(function (b) {
+      var mid = (b.from + b.to) / 2;
+      svg.appendChild(el("rect", { x: sx(b.from) + 2, y: sy(b.level),
+        width: sx(b.to) - sx(b.from) - 4, height: sy(0) - sy(b.level),
+        fill: COL[b.cls], "fill-opacity": 0.22, stroke: COL[b.cls], "stroke-width": 1.5 }));
+      label(mid, b.level, b.tag, "middle", 0, -8, 11, COL[b.cls], "600");
+      // границы зон по оси X
+      svg.appendChild(el("line", { x1: sx(b.to), y1: sy(0), x2: sx(b.to), y2: sy(0) - 0 + 6,
+        stroke: "var(--axis)", "stroke-width": 1 }));
+      label(b.to, 0, b.to + "%", "middle", 0, 20, 11, "var(--muted)");
+    });
+    label(0, 0, "0%", "middle", 0, 20, 11, "var(--muted)");
+
+    // ---- линия-ванна по серединам зон ----
+    var pts = BANDS.map(function (b) {
+      return sx((b.from + b.to) / 2) + "," + sy(b.level);
+    }).join(" ");
+    svg.appendChild(el("polyline", { points: pts, fill: "none",
+      stroke: "var(--fg)", "stroke-width": 2.5, "stroke-linejoin": "round",
+      "stroke-dasharray": "1 0" }));
+    BANDS.forEach(function (b) {
+      svg.appendChild(el("circle", { cx: sx((b.from + b.to) / 2), cy: sy(b.level),
+        r: 4, fill: "var(--fg)" }));
+    });
+
+    // ---- стрелка «lost in the middle»: хвост слева, подпись у хвоста ----
+    svg.appendChild(el("path", {
+      d: "M " + sx(30) + " " + sy(14) + " L " + sx(53) + " " + sy(21),
+      stroke: COL.low, "stroke-width": 2, fill: "none" }));
+    svg.appendChild(el("polygon", {
+      points: sx(55) + "," + sy(21.5) + " " + sx(51) + "," + sy(24) + " " + sx(51) + "," + sy(18),
+      fill: COL.low }));
+    label(29, 14, "lost in the middle", "end", -4, 4, 12, COL.low, "600");
+
+    // ---- подписи осей ----
+    label(50, 0, "позиция в контексте, % от начала окна", "middle", 0, 40, 12, "var(--fg)");
+    var yl = label(0, 50, "доля внимания", "middle", 0, 0, 12, "var(--fg)");
+    yl.setAttribute("transform", "rotate(-90 " + (sx(0) - 44) + " " + sy(50) + ")");
+    yl.setAttribute("x", sx(0) - 44);
+
+    // ---- легенда строкой под схемой ----
+    BANDS.forEach(function (b, i) {
+      var row = i < 3 ? 0 : 1;
+      var col = i < 3 ? i : i - 3;
+      var lx = 6 + col * 32;
+      var ly = -22 - row * 9;
+      svg.appendChild(el("rect", { x: sx(lx), y: sy(ly) - 8, width: 11, height: 11,
+        fill: COL[b.cls], "fill-opacity": 0.22, stroke: COL[b.cls], "stroke-width": 1.5 }));
+      label(lx, ly, b.ru, "start", 16, 1, 12, "var(--fg)");
+    });
+  } catch (e) {
+    svg.setAttribute("hidden", "hidden");
+    var f = document.getElementById("fail");
+    f.hidden = false;
+    f.textContent = "Схема не построилась. Она показывает полосу контекста, " +
+      "поделённую по позиции: 0-20% — HIGH, 20-40% — MODERATE, " +
+      "40-70% — LOW (lost in the middle), 70-90% — MODERATE, 90-100% — HIGH. " +
+      "Форма кривой — ванна: высоко у начала, провал в середине, подъём к концу.";
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

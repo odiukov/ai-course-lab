@@ -1,0 +1,191 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Раскат 90 на 10 по хешу пользователя</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5d6773;
+    --box:#f2f4f7; --boxline:#98a2ae;
+    --gray:#d8dde3; --grayline:#98a2ae;
+    --yel:#ffd75e; --yelline:#c08f05;
+    --edge:#6b7480;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e6e9ee; --muted:#9aa5b1;
+      --box:#1e232b; --boxline:#5c6672;
+      --gray:#333a44; --grayline:#6d7784;
+      --yel:#d8a72a; --yelline:#f0c14b;
+      --edge:#8b95a1;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{background:var(--bg);padding:10px 12px 14px}
+  .cap{font-weight:600;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .ctl{display:flex;align-items:center;gap:10px;margin-top:8px;color:var(--muted)}
+  .ctl input{flex:1;max-width:520px}
+  .fb{white-space:pre-wrap;color:var(--muted)}
+  text{fill:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .sub{fill:var(--muted);font-size:11px}
+  .tick{fill:var(--muted);font-size:11px}
+  .ttl{fill:var(--muted);font-size:12px}
+  .read{font-size:13px}
+  .box{fill:var(--box);stroke:var(--boxline)}
+  .g{fill:var(--gray);stroke:var(--grayline)}
+  .y{fill:var(--yel);stroke:var(--yelline)}
+  .ln{fill:none;stroke:var(--edge)}
+  .hd{fill:var(--edge);stroke:none}
+  .bd{stroke:var(--fg);fill:none}
+</style>
+<div class="wrap">
+  <p class="cap">Раскат 90 на 10: клетку выбирает hash(user_id) mod 100</p>
+  <svg id="d" viewBox="0 0 890 330" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Схема раската по хешу пользователя"></svg>
+  <div class="ctl"><label for="s">Позиция границы</label>
+    <input id="s" type="range" min="0" max="99" step="1" value="90"></div>
+  <div id="fb" class="fb" hidden></div>
+</div>
+<script>
+(function(){
+  var D = {
+    nodes: {
+      req:  {x0:2,  y0:4,  x1:16, y1:12},
+      hash: {x0:23, y0:4,  x1:48, y1:12},
+      v2:   {x0:58, y0:0,  x1:81, y1:7},
+      v1:   {x0:58, y0:9,  x1:81, y1:16},
+      log:  {x0:87, y0:4,  x1:99, y1:12}
+    },
+    strip:{x0:8, x1:88, y0:24, y1:30, cells:100},
+    lineY:8, up:3.5, dn:12.5, split:53, join:84, inUp:6.5, inDn:9.5,
+    titleY:20.5, markY:23.3, tickY:32.3, readY:35.4,
+    head:{len:0.9, half:0.5}, radius:0.6,
+    ticks:[0,50,90,99], total:12000, boundary:90
+  };
+  var origin = {x:25, y:20};
+  var scale  = 8.4;
+  var sx = function(x){ return origin.x + x * scale; };
+  var sy = function(y){ return origin.y + y * scale; };
+
+  var NS='http://www.w3.org/2000/svg';
+  var svg=document.getElementById('d'), fb=document.getElementById('fb'), sl=document.getElementById('s');
+
+  function el(t,a){var n=document.createElementNS(NS,t);for(var k in a)n.setAttribute(k,a[k]);return n;}
+  function add(n){svg.appendChild(n);return n;}
+  function box(b,cls){
+    return add(el('rect',{x:sx(b.x0),y:sy(b.y0),width:sx(b.x1)-sx(b.x0),
+      height:sy(b.y1)-sy(b.y0),rx:sx(D.radius)-sx(0),class:cls,'stroke-width':1.4}));
+  }
+  function label(x,y,s,anchor,cls,dy){
+    var n=el('text',{x:sx(x),y:sy(y)+(dy||0),'text-anchor':anchor});
+    if(cls)n.setAttribute('class',cls); n.textContent=s; return add(n);
+  }
+  function arrow(pts){
+    var last=pts[pts.length-1], stop={x:last.x-D.head.len,y:last.y};
+    var d=pts.slice(0,-1).concat([stop]).map(function(p,i){
+      return (i?'L':'M')+sx(p.x)+' '+sy(p.y);
+    }).join(' ');
+    add(el('path',{d:d,class:'ln','stroke-width':1.6}));
+    add(el('polygon',{class:'hd',points:
+      sx(last.x)+','+sy(last.y)+' '+
+      sx(last.x-D.head.len)+','+sy(last.y-D.head.half)+' '+
+      sx(last.x-D.head.len)+','+sy(last.y+D.head.half)}));
+  }
+  function mid(b){return (b.x0+b.x1)/2;}
+  function fmt(n){return n.toLocaleString('ru-RU');}
+
+  function draw(b){
+    svg.textContent='';
+    var n=D.nodes, cw=(D.strip.x1-D.strip.x0)/D.strip.cells;
+
+    box(n.req,'box');  label(mid(n.req),  D.lineY, 'Запрос', 'middle', null, 5);
+    box(n.hash,'box'); label(mid(n.hash), D.lineY, 'hash(user_id) mod 100', 'middle', null, 5);
+    box(n.v2,'y');     box(n.v1,'g');     box(n.log,'box');
+
+    label(mid(n.v2), n.v2.y0+2.6, 'Prompt v2', 'middle', null, 0);
+    label(mid(n.v2), n.v2.y0+5.0, 'клетки '+b+'\u201399 \u00b7 '+(100-b)+'%', 'middle', 'sub', 0);
+    label(mid(n.v1), n.v1.y0+2.6, 'Prompt v1', 'middle', null, 0);
+    label(mid(n.v1), n.v1.y0+5.0,
+      b>0 ? 'клетки 0\u2013'+(b-1)+' \u00b7 '+b+'%' : 'клеток нет \u00b7 0%', 'middle', 'sub', 0);
+    label(mid(n.log), D.lineY, 'Общий лог', 'middle', null, 5);
+
+    arrow([{x:n.req.x1,y:D.lineY},{x:n.hash.x0,y:D.lineY}]);
+    arrow([{x:n.hash.x1,y:D.lineY},{x:D.split,y:D.lineY},{x:D.split,y:D.up},{x:n.v2.x0,y:D.up}]);
+    arrow([{x:n.hash.x1,y:D.lineY},{x:D.split,y:D.lineY},{x:D.split,y:D.dn},{x:n.v1.x0,y:D.dn}]);
+    arrow([{x:n.v2.x1,y:D.up},{x:D.join,y:D.up},{x:D.join,y:D.inUp},{x:n.log.x0,y:D.inUp}]);
+    arrow([{x:n.v1.x1,y:D.dn},{x:D.join,y:D.dn},{x:D.join,y:D.inDn},{x:n.log.x0,y:D.inDn}]);
+
+    label(D.strip.x0, D.titleY, '100 клеток по хешу \u00b7 '+fmt(D.total)+' пользователей', 'start', 'ttl', 0);
+
+    for(var i=0;i<D.strip.cells;i++){
+      var x=D.strip.x0+i*cw;
+      add(el('rect',{x:sx(x),y:sy(D.strip.y0),width:sx(x+cw)-sx(x),
+        height:sy(D.strip.y1)-sy(D.strip.y0),class:(i<b?'g':'y'),'stroke-width':0.4}));
+    }
+    D.ticks.forEach(function(t){
+      var cx=D.strip.x0+(t+0.5)*cw;
+      add(el('path',{d:'M'+sx(cx)+' '+sy(D.strip.y1)+' L'+sx(cx)+' '+sy(D.strip.y1+0.8),
+        class:'ln','stroke-width':1}));
+      label(cx, D.tickY, String(t), 'middle', 'tick', 0);
+    });
+
+    var bx=D.strip.x0+b*cw;
+    add(el('path',{d:'M'+sx(bx)+' '+sy(D.strip.y0-0.8)+' L'+sx(bx)+' '+sy(D.strip.y1+0.8),
+      class:'bd','stroke-width':2.4}));
+    label(bx, D.markY, 'граница '+b, 'middle', 'ttl', 0);
+
+    var v2n=Math.round((100-b)/100*D.total);
+    label((D.strip.x0+D.strip.x1)/2, D.readY,
+      'v2 \u2014 '+fmt(v2n)+' человек, v1 \u2014 '+fmt(D.total-v2n)+'; обе ветки пишут в общий лог',
+      'middle','read',0);
+  }
+
+  function run(){
+    try{ draw(parseInt(sl.value,10)); }
+    catch(e){
+      svg.hidden=true; fb.hidden=false;
+      fb.textContent='Схема должна показывать: запрос \u2192 hash(user_id) mod 100 \u2192 '+
+        'клетки 0\u201389 (90%, Prompt v1, серые) и 90\u201399 (10%, Prompt v2, жёлтые); '+
+        'обе ветки пишут в общий лог. При 12 000 пользователей это 10 800 против 1 200. '+
+        'Граница сдвигается: 50 \u2014 пополам, 99 \u2014 около 120 человек, 0 \u2014 v2 у всех.';
+    }
+  }
+  sl.addEventListener('input',run);
+  run();
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

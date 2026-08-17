@@ -1,0 +1,170 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Путь запроса через сервис</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5b6470; --line:#3c4characters;
+    --line:#39424e; --box:#f2f5f9; --acc:#1f6feb; --hit:#0f8a5f; --warn:#b3541e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14181d; --fg:#e8edf3; --muted:#9aa7b5; --line:#8b98a8;
+           --box:#1e242c; --acc:#6aa8ff; --hit:#4ecb96; --warn:#e0925a; }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 12px;
+        font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+  h3{margin:0 0 6px;font-size:15px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fail{color:var(--warn);font-size:13px;white-space:pre-wrap}
+</style>
+<div class="wrap">
+  <h3>Путь запроса: от дешёвого к дорогому</h3>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var NODES=[
+      {id:'client', x:0,  y:0, w:9, h:4, t:'Клиент',            s:''},
+      {id:'gw',     x:11, y:0, w:9, h:4, t:'Шлюз',              s:'рейт-лимит, мкс'},
+      {id:'gin',    x:22, y:0, w:9, h:4, t:'Guardrail вход',    s:'регулярки, мс'},
+      {id:'pr',     x:33, y:0, w:9, h:4, t:'Prompt Router',     s:'выбор шаблона'},
+      {id:'cache',  x:44, y:0, w:9, h:4, t:'Семантический кеш', s:'эмбеддинг, десятки мс'},
+      {id:'llm',    x:44, y:8, w:9, h:4, t:'LLM',               s:'секунды, деньги'},
+      {id:'gout',   x:33, y:8, w:9, h:4, t:'Guardrail выход',   s:'проверка ответа'},
+      {id:'eval',   x:22, y:8, w:9, h:4, t:'Eval Logger',       s:'качество'},
+      {id:'cost',   x:11, y:8, w:9, h:4, t:'Cost Tracker',      s:'токены, $12 000/мес'},
+      {id:'resp',   x:0,  y:8, w:9, h:4, t:'Ответ',             s:'SSE-поток'}
+    ];
+    var EDGES=[
+      {a:'client',b:'gw',   side:'r', lab:''},
+      {a:'gw',    b:'gin',  side:'r', lab:''},
+      {a:'gin',   b:'pr',   side:'r', lab:'пропущен'},
+      {a:'pr',    b:'cache',side:'r', lab:''},
+      {a:'cache', b:'llm',  side:'d', lab:'промах', kind:'miss'},
+      {a:'llm',   b:'gout', side:'l', lab:''},
+      {a:'gout',  b:'eval', side:'l', lab:''},
+      {a:'eval',  b:'cost', side:'l', lab:''},
+      {a:'cost',  b:'resp', side:'l', lab:''}
+    ];
+    var ORIGIN={x:26,y:22}, SCALE=9.4;          // одна пара origin/scale
+    function sx(x){ return ORIGIN.x + x*SCALE; }
+    function sy(y){ return ORIGIN.y + y*SCALE; }
+
+    var W=1080,H=300, PAD=5, FS=12.5, FS2=10.5, LW=1.6;   // холст/типографика
+    var byId={}; NODES.forEach(function(n){byId[n.id]=n;});
+    function cx(n){return n.x+n.w/2;} function cy(n){return n.y+n.h/2;}
+
+    var ns='http://www.w3.org/2000/svg';
+    function el(t,a){var e=document.createElementNS(ns,t);
+      for(var k in a) e.setAttribute(k,a[k]); return e;}
+
+    var svg=el('svg',{viewBox:'0 0 '+W+' '+H,preserveAspectRatio:'xMidYMid meet',
+                      role:'img','aria-label':'Конвейер обработки запроса'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+    var defs=el('defs',{});
+    [['ah','var(--line)'],['ah-hit','var(--hit)'],['ah-miss','var(--warn)']]
+    .forEach(function(p){
+      var m=el('marker',{id:p[0],viewBox:'0 0 10 10',refX:'9',refY:'5',
+        markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+      m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:p[1]}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+
+    function txt(x,y,s,anchor,size,fill,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,'font-size':size,
+        fill:fill,'font-family':'inherit','font-weight':weight||'400',
+        'dominant-baseline':'middle'});
+      t.textContent=s; return t;
+    }
+
+    // блоки
+    NODES.forEach(function(n){
+      var accent = (n.id==='gin'||n.id==='gout') ? 'var(--acc)' : 'var(--line)';
+      svg.appendChild(el('rect',{x:sx(n.x),y:sy(n.y),
+        width:sx(n.x+n.w)-sx(n.x), height:sy(n.y+n.h)-sy(n.y),
+        rx:sx(0.9)-sx(0), fill:'var(--box)',stroke:accent,'stroke-width':LW}));
+      svg.appendChild(txt(sx(cx(n)), sy(n.y+1.6), n.t,'middle',FS,'var(--fg)','600'));
+      if(n.s) svg.appendChild(txt(sx(cx(n)), sy(n.y+2.9), n.s,'middle',FS2,'var(--muted)'));
+    });
+
+    // рёбра
+    EDGES.forEach(function(e){
+      var a=byId[e.a], b=byId[e.b], p, col='var(--line)', mk='url(#ah)';
+      if(e.kind==='miss'){col='var(--warn)'; mk='url(#ah-miss)';}
+      if(e.side==='r') p=[sx(a.x+a.w),sy(cy(a)),sx(b.x),sy(cy(b))];
+      else if(e.side==='l') p=[sx(a.x),sy(cy(a)),sx(b.x+b.w),sy(cy(b))];
+      else p=[sx(cx(a)),sy(a.y+a.h),sx(cx(b)),sy(b.y)];
+      svg.appendChild(el('line',{x1:p[0],y1:p[1],x2:p[2],y2:p[3],
+        stroke:col,'stroke-width':LW,'marker-end':mk}));
+      if(e.lab){
+        if(e.side==='d') svg.appendChild(txt(p[0]+PAD*2,(p[1]+p[3])/2,e.lab,'start',FS2,col));
+        else svg.appendChild(txt(p[0]+PAD,p[1]-PAD*2,e.lab,'start',FS2,col));
+      }
+    });
+
+    // попадание в кеш: кеш -> ответ, мимо LLM и выходных проверок
+    var c=byId['cache'], r=byId['resp'];
+    var yHit=sy(c.y-2.6);
+    svg.appendChild(el('path',{d:'M '+sx(cx(c))+' '+sy(c.y)+' V '+yHit+
+      ' H '+sx(cx(r))+' V '+sy(r.y),
+      fill:'none',stroke:'var(--hit)','stroke-width':LW,
+      'stroke-dasharray':'6 4','marker-end':'url(#ah-hit)'}));
+    svg.appendChild(txt(sx(cx(c))-PAD*2, yHit-PAD*2,
+      'попадание — LLM не вызывается','end',FS2,'var(--hit)'));
+
+    // стоимость шага растёт слева направо
+    var yc=sy(13.6);
+    svg.appendChild(el('line',{x1:sx(0),y1:yc,x2:sx(53),y2:yc,
+      stroke:'var(--muted)','stroke-width':LW,'marker-end':'url(#ah)'}));
+    svg.appendChild(txt(sx(0),yc+PAD*3,'дешевле','start',FS2,'var(--muted)'));
+    svg.appendChild(txt(sx(53),yc+PAD*3,'дороже: секунды и реальные деньги','end',FS2,'var(--muted)'));
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна показывать конвейер: '+
+      'Клиент → Шлюз (рейт-лимит) → входной Guardrail → Prompt Router → Семантический кеш; '+
+      'попадание в кеш уходит сразу в Ответ мимо LLM, промах — в LLM, дальше выходной Guardrail → '+
+      'Eval Logger → Cost Tracker → Ответ. Guardrail стоит дважды: на входе и на выходе. '+
+      'Порядок — от дешёвого к дорогому.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

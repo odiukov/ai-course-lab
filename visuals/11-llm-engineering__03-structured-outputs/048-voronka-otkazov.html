@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Воронка: где отсеивается вывод</title>
+<style>
+  :root{
+    --bg:#f6f8fc; --fg:#1a1d29; --muted:#5b6172;
+    --bar:#dce7fb; --edge:#4a7ddb; --pipe:#e9eff9;
+    --drop:#c8503f; --leak:#b3352a; --sieve:#8a93a8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#11131a; --fg:#e9ebf3; --muted:#98a0b4;
+      --bar:#1b2740; --edge:#5b8def; --pipe:#161d2c;
+      --drop:#ff8a76; --leak:#ff7a66; --sieve:#6b7488;
+    }
+  }
+  html,body{margin:0}
+  .chart{margin:0;padding:10px 12px 12px;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .chart figcaption{font-size:14px;font-weight:600;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fb{font-size:13px;line-height:1.45;color:var(--muted)}
+  text{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+</style>
+</head>
+<body>
+<figure class="chart">
+  <figcaption>Воронка: где отсеивается вывод</figcaption>
+  <div id="host"><svg id="svg" viewBox="0 0 768 481" role="img"
+    aria-label="Воронка из 100 000 запросов через три сита: непохожее на JSON, парсер, схема; четвёртое сито — выдуманные значения — не ловит никто"></svg></div>
+</figure>
+<script>
+(function(){
+  var host=document.getElementById('host'), svg=document.getElementById('svg');
+  try{
+    /* ---- данные схемы ---- */
+    var CX=88;
+    var BARS=[
+      {y0:2,  y1:14, hw:30, label:'100 000 запросов'},
+      {y0:24, y1:36, hw:26, label:'90 000 дошли до парсера'},
+      {y0:46, y1:58, hw:22, label:'валидный словарь'},
+      {y0:68, y1:80, hw:19, label:'верная форма'},
+      {y0:90, y1:104,hw:19, label:'в базе', sub:'часть значений выдумана', warn:true}
+    ];
+    var SIEVES=[
+      {y:19,name:'Не похоже на JSON',note:'промпт · шаг 3',drop:'−10 000',
+       out:'заборчик, преамбула, обрезанная скобка',fix:'закрывает JSON mode'},
+      {y:41,name:'Парсер',note:'шаг 18',
+       out:'висящая запятая, одинарные кавычки',fix:'закрывает JSON mode'},
+      {y:63,name:'Валидатор схемы',note:'шаг 20',
+       out:'нет price, True вместо 1, не тот ключ',fix:'закрывает Schema mode'},
+      {y:85,name:'Сита нет',note:'форма верна, правда — нет',leak:true,
+       out:'in_stock: true, а склад пуст',fix:'не закрывает ни один уровень'}
+    ];
+    var LEGEND=[
+      {y:112,t:'~10 % — единственная доля из текста шага: столько ответов на промпте (шаг 3) даже не похожи на JSON.'},
+      {y:118.5,t:'Ширина ступеней ниже — иллюстративная, а не измеренная доля.'},
+      {y:125,t:'Constrained decoding (шаг 10) снимает сита 1–3: токен, ломающий форму, просто не выдаётся. Сито 4 не закрывает никто.'}
+    ];
+
+    /* ---- единственный перевод координат ---- */
+    var ORIGIN={x:24,y:14}, SCALE=3.6;
+    function sx(u){ return ORIGIN.x + u*SCALE; }
+    function sy(u){ return ORIGIN.y + u*SCALE; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function add(tag,attrs){
+      var n=document.createElementNS(NS,tag);
+      for(var k in attrs) n.setAttribute(k,attrs[k]);
+      svg.appendChild(n); return n;
+    }
+    function label(x,y,s,anchor,size,fill,dy){
+      var n=add('text',{x:sx(x),y:sy(y),'text-anchor':anchor,'font-size':size,fill:fill,dy:dy||0});
+      n.textContent=s; return n;
+    }
+
+    add('rect',{x:0,y:0,width:768,height:481,fill:'var(--bg)'});
+
+    /* стенки воронки между ступенями */
+    for(var i=0;i<BARS.length-1;i++){
+      var a=BARS[i], b=BARS[i+1];
+      add('polygon',{points:
+        sx(CX-a.hw)+','+sy(a.y1)+' '+sx(CX+a.hw)+','+sy(a.y1)+' '+
+        sx(CX+b.hw)+','+sy(b.y0)+' '+sx(CX-b.hw)+','+sy(b.y0),
+        fill:'var(--pipe)'});
+    }
+
+    /* ступени */
+    BARS.forEach(function(b){
+      add('rect',{x:sx(CX-b.hw),y:sy(b.y0),
+        width:sx(CX+b.hw)-sx(CX-b.hw),height:sy(b.y1)-sy(b.y0),rx:6,
+        fill:'var(--bar)',stroke:b.warn?'var(--leak)':'var(--edge)','stroke-width':1.5,
+        'stroke-dasharray':b.warn?'5 3':'none'});
+      var my=(b.y0+b.y1)/2;
+      label(CX,my,b.label,'middle',13,'var(--fg)',b.sub?-2:5);
+      if(b.sub) label(CX,my,b.sub,'middle',10.5,'var(--leak)',13);
+    });
+
+    /* сита, подписи слева, отвал справа */
+    SIEVES.forEach(function(s){
+      add('line',{x1:sx(56),y1:sy(s.y),x2:sx(124),y2:sy(s.y),
+        stroke:s.leak?'var(--leak)':'var(--sieve)','stroke-width':1.6,
+        'stroke-dasharray':s.leak?'2 4':'7 4'});
+
+      label(50,s.y,s.name,'end',13,s.leak?'var(--leak)':'var(--fg)',-1);
+      label(50,s.y,s.note,'end',10.5,'var(--muted)',12);
+
+      if(!s.leak){
+        add('line',{x1:sx(124),y1:sy(s.y),x2:sx(138),y2:sy(s.y),
+          stroke:'var(--drop)','stroke-width':1.6});
+        add('polygon',{points:
+          sx(142)+','+sy(s.y)+' '+sx(137)+','+sy(s.y-1.5)+' '+sx(137)+','+sy(s.y+1.5),
+          fill:'var(--drop)'});
+        if(s.drop) label(133,s.y,s.drop,'middle',11,'var(--drop)',-6);
+      }
+      label(145,s.y,s.out,'start',10.5,s.leak?'var(--leak)':'var(--drop)',-3);
+      label(145,s.y,s.fix,'start',10.5,'var(--muted)',10);
+    });
+
+    LEGEND.forEach(function(l){ label(0,l.y,l.t,'start',10.5,'var(--muted)',0); });
+  }catch(e){
+    host.innerHTML='<p class="fb">Схема (не отрисовалась): воронка из 100 000 запросов. '+
+      'Сито 1 — «не похоже на JSON» (заборчик, преамбула, обрезанная скобка): на промпте (шаг 3) отсеивает ~10 %, остаётся 90 000; закрывает JSON mode. '+
+      'Сито 2 — парсер (шаг 18): висящая запятая, одинарные кавычки; закрывает JSON mode. '+
+      'Сито 3 — валидатор схемы (шаг 20): нет price, True вместо 1, не тот ключ; закрывает Schema mode. '+
+      'Сита 4 нет: форма верна, значение выдумано (in_stock: true при пустом складе) — не ловит никто. '+
+      'Constrained decoding (шаг 10) снимает сита 1–3 целиком.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

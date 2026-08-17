@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Схема сэндвича guardrails</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1d21;
+    --muted: #5b6570;
+    --box: #f1f4f8;
+    --stroke: #33414f;
+    --pass: #1f7a4d;
+    --block: #b03030;
+    --llm: #e8eefb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --fg: #e6ebf0;
+      --muted: #9aa6b2;
+      --box: #1f242b;
+      --stroke: #7d8b99;
+      --pass: #4fbf85;
+      --block: #e2696b;
+      --llm: #232f45;
+    }
+  }
+  html, body { margin: 0; }
+  .wrap {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 10px 12px 12px;
+    box-sizing: border-box;
+  }
+  h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  .fallback { font-size: 13px; line-height: 1.5; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Сэндвич guardrails: два отказа в двух разных точках</h2>
+  <div id="chart"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById("chart");
+  try {
+    // ---- данные схемы (координаты в условных единицах) ----
+    var NODES = [
+      { id: "u",   x: 0,  y: 0,  w: 5, h: 2, label: "Вход",        sub: "пользователя", kind: "plain" },
+      { id: "iv",  x: 7,  y: 0,  w: 5, h: 2, label: "Проверка",    sub: "входа",        kind: "check" },
+      { id: "llm", x: 14, y: 0,  w: 5, h: 2, label: "Модель",      sub: "LLM",          kind: "llm"   },
+      { id: "ov",  x: 21, y: 0,  w: 5, h: 2, label: "Проверка",    sub: "выхода",       kind: "check" },
+      { id: "ok",  x: 28, y: 0,  w: 5, h: 2, label: "Безопасный",  sub: "ответ",        kind: "pass"  },
+      { id: "b1",  x: 7,  y: -5, w: 5, h: 2, label: "Отказ",       sub: "на входе",     kind: "block" },
+      { id: "b2",  x: 21, y: -5, w: 5, h: 2, label: "Отказ",       sub: "на выходе",    kind: "block" }
+    ];
+    var EDGES = [
+      { from: "u",  to: "iv",  dir: "h", kind: "flow"  },
+      { from: "iv", to: "llm", dir: "h", kind: "pass", label: "прошло" },
+      { from: "llm", to: "ov", dir: "h", kind: "flow"  },
+      { from: "ov", to: "ok",  dir: "h", kind: "pass", label: "прошло" },
+      { from: "iv", to: "b1",  dir: "v", kind: "block", label: "блок" },
+      { from: "ov", to: "b2",  dir: "v", kind: "block", label: "блок" }
+    ];
+    var NOTES = [
+      { at: "b1", text: "читает текст пользователя" },
+      { at: "b2", text: "читает текст модели" }
+    ];
+
+    // ---- холст (литералы: только размеры, отступы, толщины, кегль) ----
+    var VB_W = 900, VB_H = 380;
+    var SCALE = 24;
+    var ORIGIN = { x: 40, y: 120 };
+    var PAD_LABEL = 8;
+    var STROKE_W = 1.6;
+    var FONT = 13, FONT_SM = 11.5;
+    var HEAD = 0.4; // длина наконечника в условных единицах
+
+    // ---- ЕДИНСТВЕННАЯ пара функций перевода ----
+    function sx(x) { return ORIGIN.x + x * SCALE; }
+    function sy(y) { return ORIGIN.y - y * SCALE; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(name, attrs) {
+      var n = document.createElementNS(NS, name);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      return n;
+    }
+    function text(px, py, s, anchor, cls, size) {
+      var t = el("text", {
+        x: px, y: py, "text-anchor": anchor,
+        "font-size": size || FONT, fill: cls
+      });
+      t.textContent = s;
+      return t;
+    }
+    function node(id) {
+      for (var i = 0; i < NODES.length; i++) if (NODES[i].id === id) return NODES[i];
+      throw new Error("no node " + id);
+    }
+
+    var svg = el("svg", {
+      viewBox: "0 0 " + VB_W + " " + VB_H,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": "Поток: вход пользователя, проверка входа, модель, проверка выхода, безопасный ответ; две ветки отказа"
+    });
+    svg.appendChild(el("rect", { x: 0, y: 0, width: VB_W, height: VB_H, fill: "var(--bg)" }));
+
+    var fillOf = { plain: "var(--box)", check: "var(--box)", llm: "var(--llm)",
+                   pass: "var(--box)", block: "var(--box)" };
+    var edgeOf = { plain: "var(--stroke)", check: "var(--stroke)", llm: "var(--stroke)",
+                   pass: "var(--pass)", block: "var(--block)" };
+
+    // ---- рёбра (под коробками) ----
+    EDGES.forEach(function (e) {
+      var a = node(e.from), b = node(e.to);
+      var color = e.kind === "block" ? "var(--block)"
+                : e.kind === "pass"  ? "var(--pass)" : "var(--stroke)";
+      var x1, y1, x2, y2;
+      if (e.dir === "h") {
+        x1 = a.x + a.w; y1 = a.y + a.h / 2;
+        x2 = b.x;       y2 = b.y + b.h / 2;
+      } else {
+        x1 = a.x + a.w / 2; y1 = a.y;
+        x2 = b.x + b.w / 2; y2 = b.y + b.h;
+      }
+      svg.appendChild(el("line", {
+        x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+        stroke: color, "stroke-width": STROKE_W
+      }));
+      // наконечник
+      var pts;
+      if (e.dir === "h") {
+        pts = [[x2, y2], [x2 - HEAD, y2 + HEAD * 0.7], [x2 - HEAD, y2 - HEAD * 0.7]];
+      } else {
+        pts = [[x2, y2], [x2 - HEAD * 0.7, y2 + HEAD], [x2 + HEAD * 0.7, y2 + HEAD]];
+      }
+      svg.appendChild(el("polygon", {
+        points: pts.map(function (p) { return sx(p[0]) + "," + sy(p[1]); }).join(" "),
+        fill: color
+      }));
+      // подпись у хвоста ребра
+      if (e.label) {
+        if (e.dir === "h") {
+          svg.appendChild(text(sx(x1) + PAD_LABEL, sy(y1) - PAD_LABEL, e.label,
+                               "start", color, FONT_SM));
+        } else {
+          svg.appendChild(text(sx(x1) - PAD_LABEL, sy(y1) - PAD_LABEL, e.label,
+                               "end", color, FONT_SM));
+        }
+      }
+    });
+
+    // ---- коробки ----
+    NODES.forEach(function (n) {
+      svg.appendChild(el("rect", {
+        x: sx(n.x), y: sy(n.y + n.h),
+        width: sx(n.x + n.w) - sx(n.x),
+        height: sy(n.y) - sy(n.y + n.h),
+        rx: PAD_LABEL, fill: fillOf[n.kind],
+        stroke: edgeOf[n.kind], "stroke-width": STROKE_W
+      }));
+      var cx = sx(n.x + n.w / 2);
+      svg.appendChild(text(cx, sy(n.y + n.h / 2) - 2, n.label, "middle", "var(--fg)", FONT));
+      svg.appendChild(text(cx, sy(n.y + n.h / 2) + FONT + 1, n.sub, "middle", "var(--muted)", FONT_SM));
+    });
+
+    // ---- пояснения под ветками отказа (в разные стороны от линии) ----
+    NOTES.forEach(function (nt) {
+      var n = node(nt.at);
+      svg.appendChild(text(sx(n.x + n.w / 2), sy(n.y) - PAD_LABEL - 2,
+                           nt.text, "middle", "var(--muted)", FONT_SM));
+    });
+
+    // ---- легенда строкой под схемой ----
+    var legendY = -8;
+    svg.appendChild(text(sx(0), sy(legendY),
+      "Один вход, четыре исхода: два прохода и два отказа — на входе и на выходе.",
+      "start", "var(--muted)", FONT_SM));
+
+    host.appendChild(svg);
+  } catch (err) {
+    var p = document.createElement("p");
+    p.className = "fallback";
+    p.textContent = "Схема должна показывать поток: Вход пользователя → Проверка входа → Модель (LLM) "
+      + "→ Проверка выхода → Безопасный ответ. Из проверки входа вниз уходит ветка «блок» в «Отказ на входе» "
+      + "(проверка читает текст пользователя), из проверки выхода вниз — ветка «блок» в «Отказ на выходе» "
+      + "(проверка читает текст модели). Всего четыре исхода, два из них — отказы.";
+    host.appendChild(p);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,168 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Таблица провайдеров: вызов инструментов</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --fg:#1c2024; --muted:#5b6570; --line:#c3ccd6;
+    --head:#e8edf3; --zebra:#f0f3f7; --accent:#0b6fd1; --accentbg:#e3f0ff;
+    --warn:#b4470a; --warnbg:#fdeede;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171b; --fg:#e8ecf1; --muted:#9aa6b2; --line:#3a434e;
+      --head:#1f252c; --zebra:#191e24; --accent:#69b0ff; --accentbg:#152435;
+      --warn:#ffab6b; --warnbg:#33220f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:820px;margin:0 auto;padding:10px 8px 14px}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fb{color:var(--warn);font-size:13px;white-space:pre-wrap}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .hd{font-weight:600;fill:var(--fg)}
+  .cell{fill:var(--fg)}
+  .prov{font-weight:600;fill:var(--fg)}
+  .note{fill:var(--muted);font-size:12px}
+  .em{fill:var(--warn);font-weight:600}
+  .ax{stroke:var(--line);fill:none}
+</style>
+<div class="wrap">
+  <h2>Три провайдера: где лежит вызов инструмента</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    /* ---------- данные схемы ---------- */
+    var COLS=[0,2.3,5.7,8.7,11.8];            // границы столбцов, дата-единицы
+    var ROWS=[0,0.75,1.70,2.65,3.60];         // границы строк
+    var NOTE_Y=4.30, ARR_TOP=3.72, ARR_BOT=4.02;
+    var HEAD=['Провайдер','Параметр запроса','Где лежит вызов','Аргументы'];
+    var DATA=[
+      ['OpenAI (GPT-5)','tools','message.tool_calls[]','JSON-строка + json.loads',true],
+      ['Anthropic (Claude)','tools','content[] type: tool_use','готовый словарь в input',false],
+      ['Google (Gemini)','tools \u2192 function_declarations','functionCall','готовый словарь в args',false]
+    ];
+
+    /* ---------- одна пара функций перевода ---------- */
+    var ORIGIN={x:16,y:14}, SCALE=60;
+    function sx(x){return ORIGIN.x+x*SCALE;}
+    function sy(y){return ORIGIN.y+y*SCALE;}
+
+    /* ---------- литералы: холст, отступы подписей, толщина, кегль ---------- */
+    var VW=740, VH=290, PAD=10, LW=1, BASE=4.5, FS=13, FSM=11.5;
+
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+VW+' '+VH);
+    svg.setAttribute('width',VW); svg.setAttribute('height',VH);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label','Сравнение OpenAI, Anthropic и Google: параметр запроса, место вызова, формат аргументов');
+
+    function el(t,a){var n=document.createElementNS(NS,t);for(var k in a)n.setAttribute(k,a[k]);return n;}
+    function rect(x0,y0,x1,y1,fill,cls){
+      var r=el('rect',{x:sx(x0),y:sy(y0),width:sx(x1)-sx(x0),height:sy(y1)-sy(y0),fill:fill});
+      if(cls)r.setAttribute('class',cls); svg.appendChild(r); return r;
+    }
+    function line(x0,y0,x1,y1){
+      svg.appendChild(el('line',{x1:sx(x0),y1:sy(y0),x2:sx(x1),y2:sy(y1),
+        stroke:'var(--line)','stroke-width':LW}));
+    }
+    function label(str,x,y,cls,anchor,dx,dy,size){
+      var t=el('text',{x:sx(x)+dx,y:sy(y)+dy,'text-anchor':anchor,'font-size':size||FS});
+      t.setAttribute('class',cls); t.textContent=str; svg.appendChild(t); return t;
+    }
+
+    /* фон таблицы */
+    rect(COLS[0],ROWS[0],COLS[4],ROWS[4],'var(--bg)');
+    /* шапка */
+    rect(COLS[0],ROWS[0],COLS[4],ROWS[1],'var(--head)');
+    /* зебра */
+    rect(COLS[0],ROWS[2],COLS[4],ROWS[3],'var(--zebra)');
+    /* колонка «Аргументы» — единственное реальное расхождение */
+    rect(COLS[3],ROWS[0],COLS[4],ROWS[4],'var(--accentbg)');
+    /* ячейка OpenAI с распаковкой */
+    rect(COLS[3],ROWS[1],COLS[4],ROWS[2],'var(--warnbg)');
+
+    /* сетка */
+    var i;
+    for(i=0;i<ROWS.length;i++) line(COLS[0],ROWS[i],COLS[4],ROWS[i]);
+    for(i=0;i<COLS.length;i++) line(COLS[i],ROWS[0],COLS[i],ROWS[3+1-1]);
+
+    /* подписи шапки: слева-направо, якорь start, отступ PAD от границы столбца */
+    var hMid=(ROWS[0]+ROWS[1])/2;
+    for(i=0;i<HEAD.length;i++) label(HEAD[i],COLS[i],hMid,'hd','start',PAD,BASE);
+
+    /* строки */
+    for(var r=0;r<DATA.length;r++){
+      var row=DATA[r], yMid=(ROWS[r+1]+ROWS[r+2])/2;
+      label(row[0],COLS[0],yMid,'prov','start',PAD,BASE);
+      label(row[1],COLS[1],yMid,'cell code','start',PAD,BASE,FSM);
+      label(row[2],COLS[2],yMid,'cell code','start',PAD,BASE,FSM);
+      label(row[3],COLS[3],yMid,row[4]?'em code':'cell code','start',PAD,BASE,FSM);
+    }
+
+    /* стрелка от хвоста-примечания вверх, к колонке аргументов */
+    var ax=(COLS[3]+COLS[4])/2, hw=0.09, hh=0.14;
+    svg.appendChild(el('line',{x1:sx(ax),y1:sy(ARR_BOT),x2:sx(ax),y2:sy(ARR_TOP+hh),
+      stroke:'var(--warn)','stroke-width':LW+0.4}));
+    svg.appendChild(el('polygon',{points:
+      sx(ax)+','+sy(ARR_TOP)+' '+
+      (sx(ax-hw))+','+sy(ARR_TOP+hh)+' '+
+      (sx(ax+hw))+','+sy(ARR_TOP+hh),
+      fill:'var(--warn)'}));
+
+    /* легенда: подпись у хвоста стрелки, слева, чтобы не наезжать */
+    label('Три левых колонки — переименование ключей.','COLS' in {}?0:COLS[0],NOTE_Y,'note','start',0,BASE);
+    label('Распаковка аргументов — единственная разная логика',ax,NOTE_Y,'em','end',-PAD*2,BASE,12);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fb">Схема не построилась. Она должна показывать таблицу трёх провайдеров:\n'+
+      'OpenAI (GPT-5): параметр tools, вызов в message.tool_calls[], аргументы — JSON-строка, нужен json.loads.\n'+
+      'Anthropic (Claude): параметр tools, вызов в блоке контента type: tool_use, аргументы — готовый словарь в input.\n'+
+      'Google (Gemini): параметр tools \u2192 function_declarations, вызов в functionCall, аргументы — готовый словарь в args.\n'+
+      'Разная логика только в колонке аргументов.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

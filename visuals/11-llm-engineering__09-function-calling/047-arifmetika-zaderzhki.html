@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>300 мс против 600 мс</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666666;
+    --seq: #c0562e;
+    --par: #2f7d54;
+    --axis: #999999;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --fg: #e8e8e8;
+      --muted: #9aa0a6;
+      --seq: #e8875a;
+      --par: #6ecf98;
+      --axis: #5a5f66;
+    }
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  .wrap { background: var(--bg); color: var(--fg); padding: 8px 10px 10px; box-sizing: border-box; }
+  h2 { font: 600 15px/1.3 system-ui, sans-serif; margin: 0 0 6px; color: var(--fg); }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  text { font-family: system-ui, sans-serif; fill: var(--fg); }
+  .muted { fill: var(--muted); }
+  .fallback { font: 14px/1.5 system-ui, sans-serif; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Последовательно 600 мс — параллельно 300 мс</h2>
+  <svg id="d" viewBox="0 0 640 420" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Сравнение последовательного и параллельного выполнения вызовов инструментов"></svg>
+  <div id="fb" class="fallback" hidden>
+    Два вызова по 300 мс подряд дают 600 мс, те же два параллельно — 300 мс.
+    На десяти вызовах: 3 с последовательно против 0,3 с параллельно.
+  </div>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById("d");
+  try {
+    // ---- данные схемы (мс по оси времени, номер дорожки по оси вниз) ----
+    var BARS = [
+      { row: 0, t0:   0, t1: 300, city: "Токио",  kind: "seq" },
+      { row: 1, t0: 300, t1: 600, city: "Париж",  kind: "seq" },
+      { row: 3, t0:   0, t1: 300, city: "Токио",  kind: "par" },
+      { row: 4, t0:   0, t1: 300, city: "Париж",  kind: "par" }
+    ];
+    var TICKS = [0, 300, 600];
+    var SCALE10 = [
+      { row: 6, t0: 0, t1: 3000, kind: "seq", label: "10 вызовов подряд: 3 с" },
+      { row: 7, t0: 0, t1:  300, kind: "par", label: "10 вызовов параллельно: 0,3 с" }
+    ];
+
+    // ---- один origin, один scale ----
+    var origin = { x: 150, y: 40 };
+    var scale  = { x: 0.15, y: 42 };   // px за 1 мс по X, px за дорожку по Y
+
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y + y * scale.y; }
+
+    // ---- литеральные пиксели: только толщина, шрифт, отступ подписи ----
+    var BAR_H = 20, LW = 1.4, FS = 13, FS_SM = 12, PAD = 8, ARROW = 6;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      svg.appendChild(e);
+      return e;
+    }
+    function txt(x, y, s, anchor, size, cls) {
+      var e = el("text", { x: x, y: y, "text-anchor": anchor, "font-size": size || FS,
+                           "dominant-baseline": "middle" });
+      if (cls) e.setAttribute("class", cls);
+      e.textContent = s;
+      return e;
+    }
+    function color(kind) { return kind === "seq" ? "var(--seq)" : "var(--par)"; }
+
+    function bar(d) {
+      var yc = sy(d.row + 0.5);
+      el("rect", { x: sx(d.t0), y: yc - BAR_H / 2, width: sx(d.t1) - sx(d.t0), height: BAR_H,
+                   rx: 3, fill: color(d.kind), "fill-opacity": 0.85 });
+      return yc;
+    }
+
+    // ---- ось времени сверху ----
+    var yAxis = sy(-0.35);
+    el("line", { x1: sx(0), y1: yAxis, x2: sx(660) - ARROW, y2: yAxis,
+                 stroke: "var(--axis)", "stroke-width": LW });
+    el("polygon", { points: [sx(660) - ARROW, yAxis - ARROW / 2,
+                             sx(660), yAxis,
+                             sx(660) - ARROW, yAxis + ARROW / 2].join(" "),
+                    fill: "var(--axis)" });
+    txt(sx(0) - PAD, yAxis, "время", "end", FS_SM, "muted");
+
+    TICKS.forEach(function (t) {
+      el("line", { x1: sx(t), y1: yAxis, x2: sx(t), y2: sy(5.1),
+                   stroke: "var(--axis)", "stroke-width": LW,
+                   "stroke-dasharray": t === 0 ? "" : "3 4" });
+      txt(sx(t), yAxis - PAD, t + " мс", "middle", FS_SM, "muted");
+    });
+
+    // ---- две полосы времени ----
+    BARS.forEach(function (d) {
+      var yc = bar(d);
+      txt(sx(d.t0) - PAD, yc, d.city, "end", FS);                       // подпись слева
+      txt((sx(d.t0) + sx(d.t1)) / 2, yc, "300 мс", "middle", FS_SM)
+        .setAttribute("fill", "var(--bg)");                             // внутри полосы
+    });
+
+    txt(sx(0) - PAD, sy(-0.05) - PAD, "по очереди", "end", FS, "muted");
+    txt(sx(0) - PAD, sy(2.95) - PAD, "одновременно", "end", FS, "muted");
+
+    // итог справа от каждого блока — у хвоста, не у наконечника
+    txt(sx(620) + PAD, sy(1), "итого 600 мс", "start", FS)
+      .setAttribute("fill", color("seq"));
+    txt(sx(620) + PAD, sy(4), "итого 300 мс", "start", FS)
+      .setAttribute("fill", color("par"));
+
+    // разделитель между блоком двух вызовов и блоком десяти
+    el("line", { x1: sx(-40), y1: sy(5.5), x2: sx(1000), y2: sy(5.5),
+                 stroke: "var(--axis)", "stroke-width": LW, "stroke-dasharray": "2 5" });
+
+    // ---- 10 вызовов: свой масштаб не нужен, те же sx/sy ----
+    SCALE10.forEach(function (d) {
+      var yc = sy(d.row + 0.5);
+      var w = (sx(d.t1) - sx(d.t0)) / 10;   // сжатие по X через ту же функцию
+      el("rect", { x: sx(d.t0), y: yc - BAR_H / 2, width: w, height: BAR_H,
+                   rx: 3, fill: color(d.kind), "fill-opacity": 0.85 });
+      txt(sx(d.t0) + w + PAD, yc, d.label, "start", FS_SM)
+        .setAttribute("fill", color(d.kind));
+    });
+    txt(sx(0) - PAD, sy(7), "10 городов", "end", FS, "muted");
+  } catch (e) {
+    svg.setAttribute("hidden", "hidden");
+    document.getElementById("fb").hidden = false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

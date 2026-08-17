@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дерево решений по цене</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --ink:#1b2230; --muted:#56617a; --line:#8b96ab;
+    --a:#1f7a4d; --ab:#e6f4ec; --b:#1d5fa8; --bb:#e5eefa;
+    --c:#9a6205; --cb:#fbf0dc; --d:#a8322b; --db:#fae7e5; --box:#ffffff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161d; --ink:#eef2f8; --muted:#a7b1c4; --line:#6f7b91;
+      --a:#5fd39a; --ab:#172a22; --b:#79b4f2; --bb:#152435;
+      --c:#e5b45c; --cb:#2a2216; --d:#f0857c; --db:#2c1a19; --box:#1b1f28;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .chart{margin:0;padding:10px 12px 6px;background:var(--bg)}
+  figcaption{font-size:13px;font-weight:600;letter-spacing:.01em;margin:0 0 4px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fb{font-size:13px;color:var(--muted);line-height:1.45}
+  text{font-family:inherit;fill:var(--ink)}
+  .t1{font-size:14px;font-weight:600}
+  .t2{font-size:12px;fill:var(--muted)}
+  .lb{font-size:12.5px;fill:var(--muted)}
+  .q{font-size:12.5px;font-weight:600;fill:var(--ink)}
+  .foot{font-size:12.5px;fill:var(--muted)}
+  .ed{fill:none;stroke:var(--line);stroke-width:1.6}
+  .eh{fill:var(--line);stroke:none}
+  .dash{stroke-dasharray:5 4}
+  .fork{fill:var(--box);stroke:var(--line);stroke-width:1.6}
+  .bx{stroke-width:1.6}
+  .n-a{fill:var(--ab);stroke:var(--a)} .n-a .t1{fill:var(--a)}
+  .n-b{fill:var(--bb);stroke:var(--b)}
+  .n-c{fill:var(--cb);stroke:var(--c)}
+  .n-d{fill:var(--db);stroke:var(--d)}
+</style>
+</head>
+<body>
+<figure class="chart">
+  <figcaption>Дерево решений: спускайся по ценнику сверху вниз</figcaption>
+  <div id="host"></div>
+  <p class="fb" id="fb" hidden></p>
+</figure>
+<script>
+(function(){
+  var host=document.getElementById('host'), fb=document.getElementById('fb');
+  try{
+    var D={
+      origin:{x:34,y:430}, scale:52, lg:0.4, head:{len:0.26,w:0.17},
+      nodes:[
+        {t:'a',x:5.0,y:7.35,w:5.4,h:1.15,lines:['Промпт','0 руб · 10 минут']},
+        {t:'b',x:2.9,y:4.50,w:5.0,h:1.15,lines:['RAG','часы работы + индекс']},
+        {t:'c',x:11.5,y:4.40,w:6.0,h:1.55,lines:['QLoRA','≈ 2 доллара за эксперимент','адаптер — десятки МБ']},
+        {t:'d',x:11.5,y:1.85,w:6.4,h:1.55,lines:['Полное дообучение','32 доллара за прогон','400 за 10 попыток']}
+      ],
+      fork:{x:5.0,y:6.0,r:0.30},
+      edges:[
+        {p:[[5.0,6.775],[5.0,6.30]]},
+        {p:[[5.0,5.70],[5.0,5.55],[2.9,5.55],[2.9,5.335]],head:['down',2.9,5.075]},
+        {p:[[5.0,5.70],[5.0,5.55],[11.5,5.55],[11.5,5.435]],head:['down',11.5,5.175]},
+        {p:[[5.45,4.45],[8.24,4.45]],dash:1,head:['right',8.50,4.45]},
+        {p:[[11.5,3.625],[11.5,2.885]],head:['down',11.5,2.625]}
+      ],
+      labels:[
+        {x:4.55,y:6.02,a:'end',c:'q',t:'чего не хватает?'},
+        {x:3.95,y:5.68,a:'middle',c:'lb',t:'нужны знания'},
+        {x:8.25,y:5.68,a:'middle',c:'lb',t:'нужен стиль / формат'},
+        {x:6.97,y:4.72,a:'middle',c:'lb',t:'голос всё ещё чужой'},
+        {x:11.85,y:3.06,a:'start',c:'lb',t:'QLoRA не хватило'},
+        {x:8.00,y:0.62,a:'middle',c:'foot',t:'Ветка ниже — только когда верхняя исчерпана'}
+      ]
+    };
+
+    function sx(x){ return D.origin.x + x*D.scale; }
+    function sy(y){ return D.origin.y - y*D.scale; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,at){ var e=document.createElementNS(NS,n);
+      for(var k in at) e.setAttribute(k,at[k]); return e; }
+    function pts(list){ return list.map(function(p){ return sx(p[0])+','+sy(p[1]); }).join(' '); }
+
+    var svg=el('svg',{viewBox:'0 0 880 420',preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Дерево решений по цене: промпт, RAG, QLoRA, полное дообучение'});
+    svg.appendChild(el('rect',{x:0,y:0,width:880,height:420,fill:'var(--bg)'}));
+
+    D.edges.forEach(function(e){
+      svg.appendChild(el('polyline',{points:pts(e.p),'class':'ed'+(e.dash?' dash':'')}));
+      if(e.head){
+        var dir=e.head[0], hx=e.head[1], hy=e.head[2], L=D.head.len, W=D.head.w, tri;
+        if(dir==='down') tri=[[hx,hy],[hx-W,hy+L],[hx+W,hy+L]];
+        else tri=[[hx,hy],[hx-L,hy+W],[hx-L,hy-W]];
+        svg.appendChild(el('polygon',{points:pts(tri),'class':'eh'}));
+      }
+    });
+
+    var f=D.fork;
+    svg.appendChild(el('polygon',{'class':'fork',points:pts([
+      [f.x,f.y+f.r],[f.x+f.r,f.y],[f.x,f.y-f.r],[f.x-f.r,f.y]])}));
+
+    var rx=sx(0.14)-sx(0);
+    D.nodes.forEach(function(n){
+      var g=el('g',{'class':'n-'+n.t});
+      g.appendChild(el('rect',{'class':'bx',rx:rx,ry:rx,
+        x:sx(n.x-n.w/2), y:sy(n.y+n.h/2),
+        width:sx(n.x+n.w/2)-sx(n.x-n.w/2),
+        height:sy(n.y-n.h/2)-sy(n.y+n.h/2)}));
+      var top=n.y + (n.lines.length-1)*D.lg/2 + 0.1;
+      n.lines.forEach(function(s,i){
+        var t=el('text',{x:sx(n.x), y:sy(top-i*D.lg),
+          'text-anchor':'middle','class':i?'t2':'t1'});
+        t.textContent=s; g.appendChild(t);
+      });
+      svg.appendChild(g);
+    });
+
+    D.labels.forEach(function(l){
+      var t=el('text',{x:sx(l.x), y:sy(l.y),'text-anchor':l.a,'class':l.c});
+      t.textContent=l.t; svg.appendChild(t);
+    });
+
+    host.appendChild(svg);
+  }catch(err){
+    fb.hidden=false;
+    fb.textContent='Схема должна была показать дерево решений по цене: промпт — 0 руб и 10 минут; '+
+      'ветка «нужны знания» уходит в RAG — часы работы плюс место под индекс; ветка «нужен стиль или формат» — '+
+      'в дообучение: QLoRA ≈ 2 доллара за эксперимент, адаптер в десятки мегабайт, и только затем полное '+
+      'дообучение — 32 доллара за прогон, 400 за десять попыток. Ветка ниже берётся лишь тогда, когда верхняя исчерпана.';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

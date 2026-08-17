@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Индексация офлайн, запрос онлайн</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --off: #1f6f4a;
+    --offbg: #e6f4ec;
+    --on: #1d4ed8;
+    --onbg: #e6ecfb;
+    --store: #92400e;
+    --storebg: #fdf1dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #9aa0a6;
+      --off: #5fd39c;
+      --offbg: #163024;
+      --on: #7ea6ff;
+      --onbg: #1a2440;
+      --store: #f0b657;
+      --storebg: #33260f;
+    }
+  }
+  html, body { margin: 0; background: var(--bg); }
+  .wrap { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 8px 0; }
+  h2 { font-size: 15px; margin: 0 0 4px; text-align: center; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 500px; margin: 0 auto; }
+  .fallback { display: none; padding: 10px 14px; font-size: 13px; line-height: 1.5; color: var(--fg); }
+  text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Индексация — офлайн, запрос — онлайн</h2>
+  <svg id="d" viewBox="0 0 880 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Две дорожки RAG: офлайновая индексация и онлайновый запрос, встречающиеся в векторном хранилище"></svg>
+  <div class="fallback" id="fb">
+    Схема: сверху офлайн-дорожка «документы → чанки → embedding → векторное хранилище» (один раз на документ,
+    200 страниц → 2000 чанков, минуты). Снизу онлайн-дорожка «запрос → embedding → поиск top-k → промпт → LLM»
+    (на каждый запрос, 1 вектор, миллисекунды). Обе дорожки сходятся в хранилище, между ними — одно векторное пространство.
+  </div>
+</div>
+<script>
+(function () {
+  try {
+    var FS = 12, FSM = 11, LW = 2, PAD = 9;
+
+    var boxW = 116, boxH = 42;
+
+    var data = {
+      offline: {
+        y: 1,
+        label: "ОФЛАЙН · один раз на документ",
+        note: "200 страниц → 2000 чанков · минуты, центы",
+        nodes: [
+          { x: 0, t: "документы" },
+          { x: 1, t: "чанки" },
+          { x: 2, t: "embedding" },
+          { x: 3, t: "хранилище" }
+        ]
+      },
+      online: {
+        y: 4,
+        label: "ОНЛАЙН · на каждый запрос",
+        note: "1 вектор запроса против 2000 · миллисекунды",
+        nodes: [
+          { x: 0, t: "запрос" },
+          { x: 1, t: "embedding" },
+          { x: 2, t: "поиск top-k" },
+          { x: 3, t: "промпт" },
+          { x: 4, t: "LLM" }
+        ]
+      },
+      store: { x: 3, y: 1 },
+      search: { x: 2, y: 4 },
+      bandY: 2.5
+    };
+
+    var origin = { x: 96, y: 62 };
+    var scale = { x: 158, y: 62 };
+
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y + y * scale.y; }
+
+    var svg = document.getElementById("d");
+    var NS = "http://www.w3.org/2000/svg";
+
+    function el(name, attrs, text) {
+      var n = document.createElementNS(NS, name);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (text !== undefined) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    }
+
+    el("rect", { x: 0, y: 0, width: sx(5), height: sy(5), fill: "var(--bg)" });
+
+    var defs = document.createElementNS(NS, "defs");
+    svg.appendChild(defs);
+    ["off", "on"].forEach(function (id) {
+      var m = document.createElementNS(NS, "marker");
+      m.setAttribute("id", "a-" + id);
+      m.setAttribute("viewBox", "0 0 10 10");
+      m.setAttribute("refX", "9"); m.setAttribute("refY", "5");
+      m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7");
+      m.setAttribute("orient", "auto-start-reverse");
+      var p = document.createElementNS(NS, "path");
+      p.setAttribute("d", "M0,1 L10,5 L0,9 z");
+      p.setAttribute("fill", "var(--" + id + ")");
+      m.appendChild(p);
+      defs.appendChild(m);
+    });
+
+    function track(cfg, color, bgVar) {
+      var y = sy(cfg.y);
+      var first = cfg.nodes[0], last = cfg.nodes[cfg.nodes.length - 1];
+
+      el("text", {
+        x: sx(first.x) - boxW / 2, y: y - boxH / 2 - PAD - FS,
+        "text-anchor": "start", "font-size": FSM,
+        "font-weight": "700", "letter-spacing": "0.6",
+        fill: "var(--" + color + ")"
+      }, cfg.label);
+
+      el("text", {
+        x: sx(first.x) - boxW / 2, y: y + boxH / 2 + PAD + FSM,
+        "text-anchor": "start", "font-size": FSM, fill: "var(--muted)"
+      }, cfg.note);
+
+      cfg.nodes.forEach(function (n, i) {
+        if (i > 0) {
+          el("line", {
+            x1: sx(cfg.nodes[i - 1].x) + boxW / 2 + 3, y1: y,
+            x2: sx(n.x) - boxW / 2 - 3, y2: y,
+            stroke: "var(--" + color + ")", "stroke-width": LW,
+            "marker-end": "url(#a-" + color + ")"
+          });
+        }
+        var isStore = (n.x === data.store.x && cfg.y === data.store.y);
+        el("rect", {
+          x: sx(n.x) - boxW / 2, y: y - boxH / 2,
+          width: boxW, height: boxH, rx: 8,
+          fill: isStore ? "var(--storebg)" : "var(--" + bgVar + ")",
+          stroke: isStore ? "var(--store)" : "var(--" + color + ")",
+          "stroke-width": LW
+        });
+        el("text", {
+          x: sx(n.x), y: y + FS / 3,
+          "text-anchor": "middle", "font-size": FS,
+          fill: isStore ? "var(--store)" : "var(--fg)"
+        }, n.t);
+      });
+      return last;
+    }
+
+    track(data.offline, "off", "offbg");
+    track(data.online, "on", "onbg");
+
+    var bx = sx(data.store.x), by = sy(data.store.y);
+    var qx = sx(data.search.x), qy = sy(data.search.y);
+
+    el("line", {
+      x1: bx, y1: by + boxH / 2 + 3,
+      x2: qx, y2: qy - boxH / 2 - 3,
+      stroke: "var(--store)", "stroke-width": LW,
+      "marker-end": "url(#a-off)", "stroke-dasharray": "1 0"
+    });
+
+    el("text", {
+      x: bx + PAD, y: sy(data.bandY) + FSM / 3,
+      "text-anchor": "start", "font-size": FSM, fill: "var(--store)"
+    }, "векторы");
+
+    el("line", {
+      x1: sx(0) - boxW / 2, y1: sy(data.bandY),
+      x2: bx - boxW / 2 - PAD, y2: sy(data.bandY),
+      stroke: "var(--muted)", "stroke-width": LW, "stroke-dasharray": "7 6"
+    });
+
+    el("text", {
+      x: sx(0) - boxW / 2, y: sy(data.bandY) - PAD,
+      "text-anchor": "start", "font-size": FSM, fill: "var(--muted)"
+    }, "одно векторное пространство — общая embedding-модель");
+
+    el("text", {
+      x: sx(4), y: sy(data.online.y) + boxH / 2 + PAD + FSM,
+      "text-anchor": "middle", "font-size": FSM, fill: "var(--muted)"
+    }, "ответ");
+  } catch (e) {
+    document.getElementById("d").style.display = "none";
+    document.getElementById("fb").style.display = "block";
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

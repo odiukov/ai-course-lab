@@ -1,0 +1,190 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Цена, скорость, согласие с человеком</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c1c1c; --muted:#5a5a5a; --grid:#dcdcdc;
+    --metric:#b0b4b8; --judge:#4a6fa5; --human:#2f2f2f; --band:#f2f4f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8eaed; --muted:#9aa0a8; --grid:#2c3138;
+      --metric:#585f66; --judge:#6f9fd8; --human:#e0e2e5; --band:#1a1d22;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:14px 16px 10px;
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;box-sizing:border-box}
+  .title{font-size:15px;font-weight:600;margin:0 0 6px}
+  .sub{font-size:12.5px;color:var(--muted);margin:0 0 8px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fb{font-size:13px;color:var(--fg);white-space:pre-wrap}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .t-name{font-size:15px;fill:var(--fg)}
+  .t-val{font-size:13.5px;fill:var(--fg)}
+  .t-mut{font-size:12.5px;fill:var(--muted)}
+  .t-hd{font-size:12px;fill:var(--muted);letter-spacing:.04em}
+  .t-tick{font-size:12px;fill:var(--muted)}
+  .g{stroke:var(--grid);fill:none}
+  .b-metric{fill:var(--metric)}
+  .b-judge{fill:var(--judge)}
+  .b-human{fill:var(--human)}
+</style>
+<div class="wrap">
+  <p class="title">Цена, скорость, согласие с человеком: чем платишь за каждый пункт</p>
+  <p class="sub">Полоса — диапазон согласия вердикта с вердиктом человека; справа — цена за 1000 оценок.</p>
+  <svg id="chart" viewBox="0 0 900 380" role="img"
+       aria-label="Сравнение методов оценки по цене и согласию с человеком"></svg>
+  <div id="fb" class="fb" hidden></div>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById('chart');
+  var NS = 'http://www.w3.org/2000/svg';
+
+  var DATA = [
+    { name: 'BLEU / ROUGE',    cost: '$0',    lo: 40,  hi: 60,  cls: 'b-metric' },
+    { name: 'GPT-5-mini',      cost: '~$8',   lo: 82,  hi: 86,  cls: 'b-judge'  },
+    { name: 'Gemini 3 Flash',  cost: '~$3',   lo: 80,  hi: 84,  cls: 'b-judge'  },
+    { name: 'Claude Opus 4.7', cost: '~$25',  lo: 85,  hi: 88,  cls: 'b-judge'  },
+    { name: 'Человек-эксперт', cost: '~$500', lo: 100, hi: 100, cls: 'b-human'  }
+  ];
+  var TICKS = [40, 60, 80, 100];
+
+  var ORIGIN = { x: -20, y: 56 };
+  var SCALE  = { x: 8,   y: 52 };
+  function sx(x) { return ORIGIN.x + x * SCALE.x; }
+  function sy(y) { return ORIGIN.y + y * SCALE.y; }
+
+  var PAD = 8;          // отступ подписи от точки привязки, px
+  var HAIR = 1;         // толщина линий, px
+
+  function el(tag, at, txt) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in at) n.setAttribute(k, at[k]);
+    if (txt != null) n.textContent = txt;
+    svg.appendChild(n);
+    return n;
+  }
+
+  try {
+    // фон схемы
+    el('rect', { x: 0, y: 0, width: 900, height: 380, fill: 'var(--bg)' });
+
+    // полоса-подложка строки человека
+    el('rect', {
+      x: sx(40), y: sy(4 - 0.42),
+      width: sx(100) - sx(40), height: sy(4 + 0.42) - sy(4 - 0.42),
+      fill: 'var(--band)'
+    });
+
+    // вертикальная сетка + засечки
+    TICKS.forEach(function (t) {
+      el('line', {
+        x1: sx(t), y1: sy(-0.32), x2: sx(t), y2: sy(4.52),
+        class: 'g', 'stroke-width': HAIR, 'stroke-dasharray': '3 4'
+      });
+      el('text', { x: sx(t), y: sy(4.52) + PAD * 2, class: 't-tick', 'text-anchor': 'middle' }, t + '%');
+    });
+
+    // ось согласия
+    el('line', {
+      x1: sx(40), y1: sy(4.52), x2: sx(100), y2: sy(4.52),
+      class: 'g', 'stroke-width': HAIR * 1.5
+    });
+
+    // шапка колонок
+    el('text', { x: sx(38.5), y: sy(-0.55), class: 't-hd', 'text-anchor': 'end' }, 'метод');
+    el('text', { x: sx(103),  y: sy(-0.55), class: 't-hd', 'text-anchor': 'start' }, 'цена / 1000');
+
+    DATA.forEach(function (d, i) {
+      // название слева от полосы
+      el('text', { x: sx(38.5), y: sy(i) + 5, class: 't-name', 'text-anchor': 'end' }, d.name);
+
+      if (d.hi > d.lo) {
+        el('rect', {
+          x: sx(d.lo), y: sy(i - 0.19),
+          width: sx(d.hi) - sx(d.lo), height: sy(i + 0.19) - sy(i - 0.19),
+          rx: 3, class: d.cls
+        });
+        // диапазон — справа от полосы
+        el('text', {
+          x: sx(d.hi) + PAD, y: sy(i) + 4, class: 't-mut', 'text-anchor': 'start'
+        }, d.lo + '\u2013' + d.hi + '%');
+      } else {
+        // точка 100%: ромб, подпись слева от него
+        el('polygon', {
+          points: [
+            sx(d.lo) + ',' + sy(i - 0.22),
+            sx(d.lo + 1.2) + ',' + sy(i),
+            sx(d.lo) + ',' + sy(i + 0.22),
+            sx(d.lo - 1.2) + ',' + sy(i)
+          ].join(' '),
+          class: d.cls
+        });
+        el('text', {
+          x: sx(d.lo - 1.2) - PAD, y: sy(i) + 4, class: 't-mut', 'text-anchor': 'end'
+        }, d.lo + '%');
+      }
+
+      // цена справа
+      el('text', { x: sx(103), y: sy(i) + 5, class: 't-val', 'text-anchor': 'start' }, d.cost);
+    });
+
+    // подпись оси и сноски
+    el('text', { x: sx(70), y: sy(5.02), class: 't-hd', 'text-anchor': 'middle' },
+      'согласие с человеком');
+    el('text', { x: sx(70), y: sy(5.5), class: 't-mut', 'text-anchor': 'middle' },
+      'От $8 к $500 \u2014 в 60 раз дороже ради +15 пунктов согласия.');
+    el('text', { x: sx(70), y: sy(5.9), class: 't-mut', 'text-anchor': 'middle' },
+      '100% у человека \u2014 не «без ошибок», а сама шкала, по которой меряют остальных.');
+
+  } catch (e) {
+    svg.setAttribute('hidden', '');
+    var fb = document.getElementById('fb');
+    fb.hidden = false;
+    fb.textContent =
+      'Схема не построилась. Числа шага:\n' +
+      DATA.map(function (d) {
+        return '\u2022 ' + d.name + ' \u2014 ' + d.cost + ' за 1000 оценок, согласие с человеком ' +
+          (d.hi > d.lo ? d.lo + '\u2013' + d.hi + '%' : d.lo + '%');
+      }).join('\n') +
+      '\nОт $8 к $500 — в 60 раз дороже ради +15 пунктов согласия.';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

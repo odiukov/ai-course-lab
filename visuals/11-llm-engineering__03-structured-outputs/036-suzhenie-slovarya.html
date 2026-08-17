@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Сколько вариантов остаётся на каждом шаге</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a2e;
+    --muted: #5a6472;
+    --grid: #d5dae2;
+    --bar: #0f3460;
+    --bar-narrow: #ff6b6b;
+    --axis: #8a94a3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141c;
+      --fg: #e8ecf3;
+      --muted: #98a2b3;
+      --grid: #2b3040;
+      --bar: #62a8ff;
+      --bar-narrow: #ff8f8f;
+      --axis: #566078;
+    }
+  }
+  html, body { margin: 0; }
+  .wrap {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 10px 12px 12px;
+    box-sizing: border-box;
+  }
+  h2 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  .fallback { font-size: 13px; color: var(--muted); line-height: 1.5; }
+  text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .lbl { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Сколько вариантов остаётся на каждом шаге</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById('host');
+  try {
+    // ---- данные схемы -------------------------------------------------
+    var DATA = [
+      { json: "''",                             n: 1 },
+      { json: '{"product": "Sony"',             n: 2 },
+      { json: '{"product": "Sony", "price"',    n: 8 },
+      { json: '{"product": "Sony", "price": 348}', n: 5 }
+    ];
+
+    var W = 900, H = 400;              // холст
+    var FS = 15, FS_SMALL = 13;        // размер шрифта
+    var LW = 2;                        // толщина линий
+    var PAD = 8;                       // отступ подписи от точки привязки
+
+    // ---- одна пара перевода координат ---------------------------------
+    var ORIGIN = { x: 430, y: 350 };   // положение sx(0), sy(0) в пикселях
+    var SCALE  = { x: 46, y: 36 };     // пикселей на единицу
+
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y - y * SCALE.y; }
+
+    // ---- модель в единицах --------------------------------------------
+    // x: 0 — базовая линия столбиков; влево — колонка JSON.
+    // y: 0 — низ шкалы; 1 единица строки = 2 единицы y.
+    var ROW = 2;                       // высота строки в единицах y
+    var MAXN = 8;                      // максимум допустимых продолжений
+    var BARW = 5;                      // длина столбика при n = MAXN
+    var rowY = function (i) { return (DATA.length - i) * ROW; };
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(name, attrs) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size, fill) {
+      var t = el('text', {
+        x: x, y: y,
+        'text-anchor': anchor,
+        'dominant-baseline': 'middle',
+        'font-size': size || FS,
+        fill: fill || 'var(--fg)'
+      });
+      if (cls) t.setAttribute('class', cls);
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + W + ' ' + H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img'
+    });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: H, fill: 'var(--bg)' }));
+
+    // ---- шапка ---------------------------------------------------------
+    var headY = sy(rowY(-1) + ROW * 0.15);
+    svg.appendChild(txt(sx(-0.4), headY, 'частичный вывод', 'end', 'lbl', FS_SMALL, 'var(--muted)'));
+    svg.appendChild(txt(sx(0.4), headY, 'допустимые продолжения', 'start', 'lbl', FS_SMALL, 'var(--muted)'));
+
+    // ---- ось: вертикаль структурного шва -------------------------------
+    svg.appendChild(el('line', {
+      x1: sx(0), y1: sy(rowY(-1) - ROW * 0.35),
+      x2: sx(0), y2: sy(rowY(DATA.length - 1) - ROW * 0.6),
+      stroke: 'var(--axis)', 'stroke-width': LW
+    }));
+
+    // ---- строки --------------------------------------------------------
+    DATA.forEach(function (d, i) {
+      var y = rowY(i);
+      var yPx = sy(y);
+
+      // разделитель строки
+      svg.appendChild(el('line', {
+        x1: sx(-8.6), y1: sy(y - ROW * 0.6),
+        x2: sx(BARW + 1.6), y2: sy(y - ROW * 0.6),
+        stroke: 'var(--grid)', 'stroke-width': 1
+      }));
+
+      // засечка на оси
+      svg.appendChild(el('line', {
+        x1: sx(-0.18), y1: yPx,
+        x2: sx(0.18), y2: yPx,
+        stroke: 'var(--axis)', 'stroke-width': LW
+      }));
+
+      // подпись слева от точки на оси -> text-anchor="end"
+      svg.appendChild(txt(sx(0) - PAD * 2, yPx, d.json, 'end', null, FS_SMALL));
+
+      // столбик вправо от оси
+      var len = BARW * d.n / MAXN;
+      var narrow = d.n <= 2;
+      svg.appendChild(el('rect', {
+        x: sx(0), y: sy(y + ROW * 0.28),
+        width: sx(len) - sx(0),
+        height: sy(y - ROW * 0.28) - sy(y + ROW * 0.28),
+        fill: narrow ? 'var(--bar-narrow)' : 'var(--bar)',
+        rx: 3
+      }));
+
+      // число справа от столбика -> text-anchor="start"
+      svg.appendChild(txt(sx(len) + PAD, yPx, String(d.n), 'start', 'lbl', FS));
+    });
+
+    // ---- легенда отдельной строкой под схемой --------------------------
+    var legY = sy(rowY(DATA.length - 1) - ROW * 1.25);
+    var box = SCALE.y * 0.3;
+    svg.appendChild(el('rect', {
+      x: sx(-8.6), y: legY - box / 2, width: box, height: box,
+      fill: 'var(--bar-narrow)', rx: 2
+    }));
+    svg.appendChild(txt(sx(-8.6) + box + PAD, legY,
+      '1–2 варианта: структурный шов, решает разбор',
+      'start', 'lbl', FS_SMALL, 'var(--muted)'));
+
+    var legY2 = sy(rowY(DATA.length - 1) - ROW * 1.85);
+    svg.appendChild(el('rect', {
+      x: sx(-8.6), y: legY2 - box / 2, width: box, height: box,
+      fill: 'var(--bar)', rx: 2
+    }));
+    svg.appendChild(txt(sx(-8.6) + box + PAD, legY2,
+      '5–8 вариантов: содержимое, решает модель',
+      'start', 'lbl', FS_SMALL, 'var(--muted)'));
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<p class="fallback">Схема: ширина «забора» пульсирует. ' +
+      "Пустой вывод — 1 допустимое продолжение; " +
+      '{"product": "Sony" — 2; ' +
+      '{"product": "Sony", "price" — 8; ' +
+      '{"product": "Sony", "price": 348} — 5. ' +
+      'На структурных швах вариант один, на содержимом их больше.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,173 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Стек компонентов окна контекста</title>
+<style>
+  :root{
+    --bg:#f7f7fb; --fg:#1a1a2e; --muted:#5b5b78; --frame:#8a8aa8;
+    --b0:#e94560; --b1:#0f3460; --b2:#c07800; --b3:#2f9e44;
+    --b4:#8e44ad; --b5:#e94560; --b6:#0f3460; --fill:#ffffff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#101018; --fg:#f2f2f7; --muted:#a9a9c2; --frame:#6b6b90;
+      --b0:#e94560; --b1:#4d8fd6; --b2:#ffa500; --b3:#51cf66;
+      --b4:#b06bd8; --b5:#e94560; --b6:#4d8fd6; --fill:#1a1a2e;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{padding:8px 10px 4px}
+  h1{font-size:15px;margin:0 0 4px}
+  svg{display:block;width:100%;height:auto;max-height:504px}
+  .err{color:var(--muted);font-size:13px;white-space:pre-wrap}
+</style>
+<div class="wrap">
+  <h1>Стек компонентов: всё уезжает в модель одним куском</h1>
+  <svg id="d" viewBox="0 0 700 510" role="img"
+       aria-label="Вертикальный стек семи блоков контекста внутри окна 128K"></svg>
+  <p id="fallback" class="err" hidden></p>
+</div>
+<script>
+(function(){
+try{
+  /* ---- данные схемы ---- */
+  var BLOCKS = [
+    {name:"Системный промпт",          tok:"500",      c:"var(--b0)", dash:0},
+    {name:"Определения инструментов",  tok:"2K–8K",    c:"var(--b1)", dash:0},
+    {name:"Найденные документы",       tok:"2K–10K",   c:"var(--b2)", dash:0},
+    {name:"История диалога",           tok:"2K–20K",   c:"var(--b3)", dash:0},
+    {name:"Few-shot примеры",          tok:"1K–3K",    c:"var(--b4)", dash:0},
+    {name:"Запрос пользователя",       tok:"100–500",  c:"var(--b5)", dash:0},
+    {name:"Запас на генерацию",        tok:"2K–8K",    c:"var(--b6)", dash:1}
+  ];
+  var BOX = {left:0, right:76, top:8, bottom:76, h:8, step:10};
+  var FRAME = {top:0, bottom:78};
+  var BRACE = {x:78, tick:76.5, textX:79.5};
+
+  /* ---- единственный перевод координат ---- */
+  var ORIGIN = {x:40, y:30}, SCALE = 6;
+  function sx(x){ return ORIGIN.x + x * SCALE; }
+  function sy(y){ return ORIGIN.y + y * SCALE; }
+
+  var NS = "http://www.w3.org/2000/svg";
+  var svg = document.getElementById("d");
+  function el(t, a){ var n = document.createElementNS(NS, t);
+    for (var k in a) n.setAttribute(k, a[k]); svg.appendChild(n); return n; }
+  function txt(x, y, dx, dy, anchor, s, fill, size, weight){
+    var n = el("text", {x:sx(x)+dx, y:sy(y)+dy, "text-anchor":anchor,
+      fill:fill, "font-size":size, "font-weight":weight||"400",
+      "font-family":"system-ui,-apple-system,Segoe UI,sans-serif"});
+    n.textContent = s; return n;
+  }
+
+  /* ---- фон ---- */
+  el("rect", {x:0, y:0, width:700, height:510, fill:"var(--bg)"});
+
+  /* ---- рамка окна ---- */
+  el("rect", {x:sx(BOX.left) - SCALE, y:sy(FRAME.top),
+    width:sx(BOX.right) - sx(BOX.left) + 2*SCALE,
+    height:sy(FRAME.bottom) - sy(FRAME.top),
+    rx:6, fill:"none", stroke:"var(--frame)", "stroke-width":2});
+  /* крышка окна — верхнее ребро жирнее */
+  el("line", {x1:sx(BOX.left) - SCALE, y1:sy(FRAME.top),
+    x2:sx(BOX.right) + SCALE, y2:sy(FRAME.top),
+    stroke:"var(--frame)", "stroke-width":5});
+  txt(BOX.left, FRAME.top, 0, -10, "start",
+      "Окно контекста — 128K токенов (крышка стека)", "var(--fg)", 14, "600");
+
+  /* ---- блоки ---- */
+  BLOCKS.forEach(function(b, i){
+    var top = BOX.top + i * BOX.step, bot = top + BOX.h;
+    var r = el("rect", {x:sx(BOX.left), y:sy(top),
+      width:sx(BOX.right) - sx(BOX.left), height:sy(bot) - sy(top),
+      rx:4, fill:"var(--fill)", stroke:b.c, "stroke-width":2});
+    if (b.dash) r.setAttribute("stroke-dasharray", "7 5");
+    txt(BOX.left, top, 12, (sy(bot) - sy(top)) / 2 + 5, "start",
+        b.name, "var(--fg)", 14, "500");
+    txt(BOX.right, top, -12, (sy(bot) - sy(top)) / 2 + 5, "end",
+        b.tok, b.c, 14, "700");
+    /* стрелка «вниз одним куском» между блоками */
+    if (i < BLOCKS.length - 1){
+      var g1 = bot, g2 = bot + (BOX.step - BOX.h);
+      el("line", {x1:sx(BOX.right / 2), y1:sy(g1), x2:sx(BOX.right / 2),
+        y2:sy(g2), stroke:"var(--frame)", "stroke-width":1.5});
+    }
+  });
+
+  /* ---- скоба справа: диапазон суммы ---- */
+  el("line", {x1:sx(BRACE.x), y1:sy(BOX.top), x2:sx(BRACE.x),
+    y2:sy(BOX.bottom), stroke:"var(--muted)", "stroke-width":1.5});
+  [BOX.top, BOX.bottom].forEach(function(y){
+    el("line", {x1:sx(BRACE.tick), y1:sy(y), x2:sx(BRACE.x), y2:sy(y),
+      stroke:"var(--muted)", "stroke-width":1.5});
+  });
+  var mid = (BOX.top + BOX.bottom) / 2;
+  txt(BRACE.textX, mid, 0, -14, "start", "Σ минимумов ≈ 7 700",
+      "var(--fg)", 14, "600");
+  txt(BRACE.textX, mid, 0, 4, "start", "Σ максимумов ≈ 50 000",
+      "var(--fg)", 14, "600");
+  txt(BRACE.textX, mid, 0, 24, "start", "те же 7 блоков,",
+      "var(--muted)", 13);
+  txt(BRACE.textX, mid, 0, 40, "start", "разница в 7 раз",
+      "var(--muted)", 13);
+
+  /* ---- пояснение к нижнему блоку (у хвоста, сбоку) ---- */
+  txt(BRACE.textX, BOX.bottom, 0, -2, "start", "пунктир — места",
+      "var(--muted)", 13);
+  txt(BRACE.textX, BOX.bottom, 0, 14, "start", "под ответ ещё нет",
+      "var(--muted)", 13);
+
+  /* ---- сноска: сумма конкурирует за одну крышку ---- */
+  txt(BOX.left, FRAME.bottom, 0, 12, "start",
+      "Раздул один блок — отнял у соседнего, обычно у истории.",
+      "var(--muted)", 13);
+
+} catch (e) {
+  var f = document.getElementById("fallback");
+  f.hidden = false;
+  f.textContent = "Схема не построилась. Она должна показывать вертикальный "
+    + "стек семи блоков внутри рамки окна 128K, сверху вниз: системный промпт "
+    + "500; определения инструментов 2K–8K; найденные документы 2K–10K; "
+    + "история диалога 2K–20K; few-shot примеры 1K–3K; запрос пользователя "
+    + "100–500; запас на генерацию 2K–8K. Сумма минимумов ≈ 7 700 токенов, "
+    + "сумма максимумов ≈ 50 000. У стека есть крышка: рост одного блока "
+    + "отнимает место у соседнего.";
+  var s = document.getElementById("d"); if (s) s.remove();
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>
