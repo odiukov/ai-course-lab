@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пишем mlm_loss — Bert Masked Language Modeling</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/">← Bert Masked Language Modeling</a>
+<span class="counter" data-counter>23 / 42</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-problem" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/001-problem/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">2018: каждая задача учит модель с нуля</span></a></li>
+<li><a class="toc-link" data-step="002-bert-idea" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/002-bert-idea/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Ход BERT: предобучить encoder один раз</span></a></li>
+<li><a class="toc-link" data-step="003-encoder-2026" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/003-encoder-2026/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Почему encoder-only жив в 2026</span></a></li>
+<li><a class="toc-link" data-step="004-check-problem" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/004-check-problem/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Проверка: что именно переиспользуют</span></a></li>
+<li><a class="toc-link" data-step="005-mlm-signal" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/005-mlm-signal/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Сигнал обучения: спрятать 15% и угадать</span></a></li>
+<li><a class="toc-link" data-step="006-visual-mask" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/006-visual-mask/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Диктант с пропусками</span></a></li>
+<li><a class="toc-link" data-step="007-bidirectional" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/007-bidirectional/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Двунаправленность: причинной маски нет</span></a></li>
+<li><a class="toc-link" data-step="008-check-bidir" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/008-check-bidir/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Проверка: что видит позиция 1</span></a></li>
+<li><a class="toc-link" data-step="009-special-tokens" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/009-special-tokens/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">[CLS], [SEP], [MASK]: три служебных токена</span></a></li>
+<li><a class="toc-link" data-step="010-code-build-input" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/010-code-build-input/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Пишем build_bert_input</span></a></li>
+<li><a class="toc-link" data-step="011-mask-rules" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/011-mask-rules/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Правило 80/10/10</span></a></li>
+<li><a class="toc-link" data-step="012-shift" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/012-shift/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Почему не всегда [MASK]: сдвиг распределения</span></a></li>
+<li><a class="toc-link" data-step="013-check-rules" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/013-check-rules/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Проверка: посчитайте на 1000 токенов</span></a></li>
+<li><a class="toc-link" data-step="014-labels-ignore" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/014-labels-ignore/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Метки и -100: где считают loss</span></a></li>
+<li><a class="toc-link" data-step="015-code-mlm-batch" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/015-code-mlm-batch/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Пишем create_mlm_batch</span></a></li>
+<li><a class="toc-link" data-step="016-decisions" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/016-decisions/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Считать решения, а не результат</span></a></li>
+<li><a class="toc-link" data-step="017-nsp" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/017-nsp/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">NSP и ablation, который её похоронил</span></a></li>
+<li><a class="toc-link" data-step="018-check-nsp" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/018-check-nsp/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Проверка: что такое ablation</span></a></li>
+<li><a class="toc-link" data-step="019-mlm-head" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/019-mlm-head/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">MLM-голова: вектор обратно в словарь</span></a></li>
+<li><a class="toc-link" data-step="020-softmax-theory" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/020-softmax-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Логиты в вероятности по словарю</span></a></li>
+<li><a class="toc-link" data-step="021-code-softmax" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/021-code-softmax/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Пишем softmax</span></a></li>
+<li><a class="toc-link" data-step="022-cross-entropy" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/022-cross-entropy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Loss: -log вероятности правильного токена</span></a></li>
+<li><a class="toc-link is-current" data-step="023-code-mlm-loss" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/023-code-mlm-loss/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Пишем mlm_loss</span></a></li>
+<li><a class="toc-link" data-step="024-grad" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/024-grad/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Градиент softmax+CE: просто p минус y</span></a></li>
+<li><a class="toc-link" data-step="025-code-grad" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/025-code-grad/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Пишем mlm_loss_grad</span></a></li>
+<li><a class="toc-link" data-step="026-check-loss" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/026-check-loss/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Проверка: какие позиции попадают в loss</span></a></li>
+<li><a class="toc-link" data-step="027-accuracy" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/027-accuracy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Точность против loss: что читает человек</span></a></li>
+<li><a class="toc-link" data-step="028-code-accuracy" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/028-code-accuracy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Пишем mlm_accuracy</span></a></li>
+<li><a class="toc-link" data-step="029-no-mask-inference" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/029-no-mask-inference/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Инференс без [MASK]: проверка на чистом тексте</span></a></li>
+<li><a class="toc-link" data-step="030-swap-head" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/030-swap-head/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Замена головы: мотор тот же, насадка другая</span></a></li>
+<li><a class="toc-link" data-step="031-cls-pooling" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/031-cls-pooling/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Пулинг: [CLS] или среднее по токенам</span></a></li>
+<li><a class="toc-link" data-step="032-code-classify" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/032-code-classify/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Пишем classify_from_cls</span></a></li>
+<li><a class="toc-link" data-step="033-check-head" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/033-check-head/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Проверка: сколько чисел на выходе каждой головы</span></a></li>
+<li><a class="toc-link" data-step="034-modernbert" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/034-modernbert/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">ModernBERT: тот же скелет, детали 2026</span></a></li>
+<li><a class="toc-link" data-step="035-check-modern" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/035-check-modern/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Проверка: во сколько раз вырос контекст</span></a></li>
+<li><a class="toc-link" data-step="036-use-cases" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/036-use-cases/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Где encoder бьёт decoder</span></a></li>
+<li><a class="toc-link" data-step="037-use-it" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/037-use-it/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">ModernBERT из transformers: форма (1, N, 768)</span></a></li>
+<li><a class="toc-link" data-step="038-embedders-rerankers" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/038-embedders-rerankers/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Эмбеддеры и реранкеры — это дообученная BERT</span></a></li>
+<li><a class="toc-link" data-step="039-bi-vs-cross" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/039-bi-vs-cross/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Биэнкодер против cross-encoder: точность против цены</span></a></li>
+<li><a class="toc-link" data-step="040-when-not" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/040-when-not/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Когда BERT не брать</span></a></li>
+<li><a class="toc-link" data-step="041-ship-it" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/041-ship-it/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">План дообучения и критерий остановки</span></a></li>
+<li><a class="toc-link" data-step="042-quiz" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/042-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Итоговая проверка урока</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Пишем mlm_loss</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>У тебя на руках матрица логитов: 12 строк — по одной на каждую позицию батча — и 20 столбцов по числу слов в словаре. Рядом вектор меток такой же длины: в десяти местах там −100 из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/014-labels-ignore/">шага 14</a>, а в двух — настоящие id токенов. А обучению нужно ровно одно число.</p>
+<p>Первая половина пути уже пройдена: прогоняешь строку через softmax из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/021-code-softmax/">шага 21</a>, берёшь вероятность в позиции правильного id, применяешь <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mo>=</mo><mo>−</mo><mi>log</mi><mo>⁡</mo><msub><mi>p</mi><mtext>true</mtext></msub></mrow><annotation encoding="application/x-tex">L = -\log p_{\text{true}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">L</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mop">lo<span style="margin-right:0.0139em">g</span></span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord"><span class="mord mathnormal">p</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.2806em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord text mtight"><span class="mord mtight">true</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span> из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/022-cross-entropy/">шага 22</a>. Получаются два числа. Дальше — сумма. А делить на что?</p>
+<p>Соблазн разделить на 12: столько строк на входе. Но тогда loss начнёт зависеть от того, сколько токенов замаскировали. Замаскируешь 5% вместо 15% — сумма упадёт втрое, а модель не стала умнее. Знаменатель — количество позиций, где метка не −100. Именно они, и никакие другие.</p>
+<p>Отсюда и что проверять. Возьми необученную голову со случайной матрицей: 20 слов получат примерно равные вероятности, каждая около 0.05, и <code>mlm_loss</code> обязана вернуть примерно 3.0 — это <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>−</mo><mi>log</mi><mo>⁡</mo><mo stretchy="false">(</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>20</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">-\log(1/20)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord">−</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mop">lo<span style="margin-right:0.0139em">g</span></span><span class="mopen">(</span><span class="mord">1/20</span><span class="mclose">)</span></span></span></span>. Увидел 0.2 — ты почти наверняка берёшь максимум по строке, а не вероятность именно правильного токена.</p>
+<p>Второй тест злее: возьми любую позицию с меткой −100 и впиши туда произвольный мусор. Число на выходе не должно шевельнуться ни на разряд. Шевельнулось — фильтр протекает.</p>
+<p>И крайний случай: если в батче не оказалось ни одной размеченной позиции, делить не на что — верни 0.0, а не деление на ноль.</p>
+<p>Три — это цена полного незнания при словаре в 20 слов. Всё, что ниже, модель заработала сама.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> В ресторане 50 столиков, отзывы оставили трое: пять звёзд, четыре, пять. Разделишь 14 на 50 — получишь 0.28 звезды и «худший ресторан города». Разделишь на 3 — получишь 4.7. Молчавшие сорок семь столиков не голосовали ни за, ни против, их просто нет в подсчёте. Позиции с −100 — те самые молчавшие: не в числителе и не в знаменателе.</p>
+</blockquote></div>
+
+
+<section class="practice-panel">
+<h2 class="practice-title">Практика: <code>mlm_loss</code></h2>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
+<div class="practice-actions">
+<button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
+<button type="button" class="nav-button" data-reset>Сбросить</button>
+<button type="button" class="nav-button" data-show-solution>Показать решение</button>
+</div>
+<p class="run-status" data-run-status></p>
+<div data-results></div>
+<pre class="solution" data-solution hidden></pre>
+<script type="application/json" data-exercise>{"slug":"p07-l06-bert-masked-language-modeling","fn":"mlm_loss","functions":["softmax","build_bert_input","create_mlm_batch","mlm_loss","mlm_loss_grad","mlm_accuracy","classify_from_cls"],"urls":{"template":"/ai-course-lab/exercise/p07-l06-bert-masked-language-modeling/template.py","test":"/ai-course-lab/exercise/p07-l06-bert-masked-language-modeling/test.py","solution":"/ai-course-lab/exercise/p07-l06-bert-masked-language-modeling/solution.py"},"assets":{"pyodide":"/ai-course-lab/assets/pyodide/","harness":"/ai-course-lab/assets/harness.py"}}</script>
+</section>
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/022-cross-entropy/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/07-transformers-deep-dive__06-bert-masked-language-modeling/024-grad/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"07-transformers-deep-dive__06-bert-masked-language-modeling","stepId":"023-code-mlm-loss","number":23,"plannedCount":42}</script>
+<script src="/ai-course-lab/assets/editor.js"></script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+<script>
+(function () {
+  var node = document.querySelector("[data-exercise]");
+  if (!node) return;
+  var data = JSON.parse(node.textContent || "{}");
+
+  var area = document.querySelector("[data-code]");
+  var runButton = document.querySelector("[data-run]");
+  var resetButton = document.querySelector("[data-reset]");
+  var solutionButton = document.querySelector("[data-show-solution]");
+  var solutionBox = document.querySelector("[data-solution]");
+  var status = document.querySelector("[data-run-status]");
+  var results = document.querySelector("[data-results]");
+  if (!area || !runButton) return;
+
+  var storageKey = "course-exercise:" + data.slug;
+  var template = "";
+  // Полный файл упражнения. В редакторе видна только функция шага, но на
+  // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
+  // сразу, и файл с одной функцией не загрузился бы вовсе.
+  var full = "";
+
+  /**
+   * Делит файл на «до функции», саму функцию и «после».
+   *
+   * Границы ищутся по тексту, а не по номерам строк из сборки: файл живёт в
+   * браузере и уже мог измениться — человек дописал функцию выше, и любые
+   * заранее посчитанные номера уехали бы.
+   */
+  function split(source, fn) {
+    var lines = source.split("\n");
+    var head = new RegExp("^(async\\s+)?def\\s+" + fn + "\\s*\\(");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (head.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    // Конец блока — только НАСТОЯЩЕЕ следующее определение, а не любая строка
+    // с левого края.
+    //
+    // Раньше границей считался левый край как таковой, и обломок вроде
+    // «for x in v))», случайно оставшийся без отступа, оказывался снаружи
+    // блока: замена функции его не трогала, файл навсегда переставал
+    // разбираться, а в редакторе этой строки не видно. Теперь такой мусор
+    // остаётся внутри блока и уходит вместе с ним.
+    var boundary = /^(async\s+def\s|def\s|class\s|@|import\s|from\s|if\s+__name__)/;
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      if (boundary.test(lines[j])) { end = j; break; }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+
+    return {
+      before: lines.slice(0, start).join("\n"),
+      code: lines.slice(start, end).join("\n"),
+      after: lines.slice(end).join("\n"),
+    };
+  }
+
+  function join(source, fn, code) {
+    var parts = split(source, fn);
+    if (!parts) return source;
+    return [parts.before, code, parts.after].join("\n");
+  }
+
+  function save() {
+    full = join(full, data.fn, area.value);
+    try {
+      localStorage.setItem(storageKey, full);
+    } catch (error) {
+      // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
+    }
+  }
+
+  function setCode(text) {
+    area.value = text;
+    // Редактор, если он поднялся, слушает это событие и подхватывает текст.
+    area.dispatchEvent(new Event("course-editor-reset"));
+  }
+
+  function text(url) {
+    return fetch(url).then(function (response) {
+      if (!response.ok) throw new Error("не удалось загрузить " + url);
+      return response.text();
+    });
+  }
+
+  // Заготовка нужна всегда: по ней работает «Сбросить».
+  text(data.urls.template).then(function (source) {
+    template = source;
+    var saved = null;
+    try {
+      saved = localStorage.getItem(storageKey);
+    } catch (error) {
+      saved = null;
+    }
+    full = saved === null ? source : saved;
+
+    var parts = split(full, data.fn);
+    // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
+    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
+    // или чужим кодом.
+    if (!parts) {
+      full = source;
+      parts = split(full, data.fn);
+    }
+    setCode(parts ? parts.code : full);
+    if (window.CourseEditor) window.CourseEditor.mount(area);
+  });
+
+  area.addEventListener("input", save);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (!template) return;
+      if (!window.confirm("Вернуть заготовку этой функции? Написанный код пропадёт.")) return;
+      // Сбрасывается только функция шага: остальное в файле человек писал на
+      // других шагах, и терять это из-за одной кнопки он не подписывался.
+      var fresh = split(template, data.fn);
+      setCode(fresh ? fresh.code : template);
+      save();
+    });
+  }
+
+  if (solutionButton && solutionBox && data.urls.solution) {
+    solutionButton.addEventListener("click", function () {
+      if (!solutionBox.hidden) {
+        solutionBox.hidden = true;
+        solutionButton.textContent = "Показать решение";
+        return;
+      }
+      text(data.urls.solution).then(function (source) {
+        solutionBox.textContent = source;
+        solutionBox.hidden = false;
+        solutionButton.textContent = "Скрыть решение";
+      });
+    });
+  } else if (solutionButton) {
+    solutionButton.hidden = true;
+  }
+
+  var pyodidePromise = null;
+
+  function loadPyodideOnce() {
+    if (pyodidePromise) return pyodidePromise;
+
+    pyodidePromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = data.assets.pyodide + "pyodide.js";
+      script.onload = resolve;
+      script.onerror = function () {
+        reject(new Error("не удалось загрузить Python"));
+      };
+      document.head.appendChild(script);
+    })
+      .then(function () {
+        return window.loadPyodide({ indexURL: data.assets.pyodide });
+      })
+      .then(function (pyodide) {
+        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+          pyodide.FS.mkdirTree("/exercise");
+          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          pyodide.runPython(files[0]);
+          return pyodide;
+        });
+      })
+      .catch(function (error) {
+        // Неудачную загрузку нельзя оставлять в памяти: иначе каждая
+        // следующая попытка мгновенно спотыкается о тот же отказ, и кнопка
+        // «Запустить тесты» перестаёт работать до перезагрузки страницы.
+        pyodidePromise = null;
+        throw error;
+      });
+
+    return pyodidePromise;
+  }
+
+  function render(report) {
+    results.innerHTML = "";
+    if (report.loadError) {
+      // Статус обязан смениться: без этого на экране остаётся «Гоняю тесты…»,
+      // и прогон выглядит зависшим, хотя он давно закончился ошибкой.
+      status.className = "run-status";
+      status.textContent = "Файл упражнения не разобрался — Python остановился на этом месте:";
+
+      var problem = document.createElement("p");
+      problem.className = "run-error";
+      problem.textContent = report.loadError;
+      results.appendChild(problem);
+
+      // Файл не разобрался, а видно в редакторе только одну функцию: ошибка
+      // вполне может сидеть в другой части файла — например, осталась от
+      // прежних правок. Дать выход, а не оставлять человека гадать.
+      var rescue = document.createElement("button");
+      rescue.type = "button";
+      rescue.className = "nav-button";
+      rescue.textContent = "Сбросить весь файл упражнения";
+      rescue.addEventListener("click", function () {
+        if (!template) return;
+        if (!window.confirm("Вернуть всё упражнение к заготовке? Пропадёт код и других шагов.")) {
+          return;
+        }
+        full = template;
+        var fresh = split(full, data.fn);
+        setCode(fresh ? fresh.code : full);
+        save();
+        results.innerHTML = "";
+        status.textContent = "Упражнение сброшено к заготовке.";
+      });
+      results.appendChild(rescue);
+      return;
+    }
+
+    var passed = 0;
+    var list = document.createElement("ul");
+    list.className = "test-list";
+    for (var i = 0; i < report.results.length; i += 1) {
+      var item = report.results[i];
+      if (item.passed) passed += 1;
+      var row = document.createElement("li");
+      row.className = item.passed ? "test is-passed" : "test is-failed";
+      row.textContent = (item.passed ? "✓ " : "✗ ") + item.name + (item.message ? " — " + item.message : "");
+      list.appendChild(row);
+    }
+
+    var total = report.results.length;
+    status.textContent =
+      passed + " из " + total + " зелёные" +
+      (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
+    status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    results.appendChild(list);
+  }
+
+  runButton.addEventListener("click", function () {
+    runButton.disabled = true;
+    status.className = "run-status";
+    status.textContent = "Готовлю Python…";
+
+    loadPyodideOnce()
+      .then(function (pyodide) {
+        status.textContent = "Гоняю тесты…";
+        // В Python уезжает файл целиком, а не то, что в редакторе: тесты
+        // импортируют из него все имена упражнения разом.
+        pyodide.globals.set(
+          "PAYLOAD",
+          JSON.stringify({
+            code: join(full, data.fn, area.value),
+            fn: data.fn,
+            functions: data.functions,
+          })
+        );
+        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+      })
+      .then(render)
+      .catch(function (error) {
+        status.className = "run-status";
+        status.textContent = String(error && error.message ? error.message : error);
+      })
+      .then(function () {
+        runButton.disabled = false;
+      });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Диктант с пропусками</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280;
+    --keep:#e5e7eb; --keep-fg:#374151;
+    --mask:#f59e0b; --mask-fg:#3b2a05;
+    --gold:#2563eb; --line:#9ca3af;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#111418; --fg:#e8eaed; --muted:#9aa3ad;
+      --keep:#2a2f36; --keep-fg:#c3c9d1;
+      --mask:#b45309; --mask-fg:#ffe9c2;
+      --gold:#60a5fa; --line:#5b636d;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Диктант с пропусками: 9 слов, 2 закрыты маской</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var WORDS = [
+      {i:0, w:'the',   masked:false},
+      {i:1, w:'quick', masked:true },
+      {i:2, w:'brown', masked:false},
+      {i:3, w:'fox',   masked:false},
+      {i:4, w:'jumps', masked:false},
+      {i:5, w:'over',  masked:true },
+      {i:6, w:'the',   masked:false},
+      {i:7, w:'lazy',  masked:false},
+      {i:8, w:'dog',   masked:false}
+    ];
+    var N = WORDS.length;          // 9
+    var MASKED = 2;                // 2
+
+    // ---- единственные origin и scale ----
+    var ORIGIN = {x:120, y:56};
+    var SCALE  = {x:88, y:52};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    // ---- литералы: холст, отступы подписей, толщины, кегль ----
+    var VB_W = 940, VB_H = 300;
+    var PAD = 8, LINE = 2, FS = 14, FSM = 12.5;
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls,size){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle','class':cls||'',
+        'font-size':size||FS,'dominant-baseline':'middle'});
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet',role:'img',
+      'aria-label':'Вход с двумя [MASK] и строка target с исходными словами'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    var defs=el('defs',{});
+    var mk=el('marker',{id:'ah',viewBox:'0 0 10 10',refX:'9',refY:'5',
+      markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+    mk.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:'var(--gold)'}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    // ряды: y=0 вход, y=1 target
+    var HALF_W = (SCALE.x - sx(0) + sx(0)) ; // ширина шага = SCALE.x
+    var boxW = sx(0.82) - sx(0);
+    var boxH = sy(0.62) - sy(0);
+
+    function cell(i, y, label, kind){
+      var cx = sx(i), cy = sy(y);
+      var g = el('g',{});
+      g.appendChild(el('rect',{
+        x: cx - boxW/2, y: cy - boxH/2, width: boxW, height: boxH, rx: 6,
+        fill: kind==='mask' ? 'var(--mask)' : 'var(--keep)',
+        stroke: kind==='mask' ? 'var(--mask)' : 'var(--line)',
+        'stroke-width': LINE
+      }));
+      g.appendChild(txt(cx, cy, label, 'middle',
+        kind==='mask' ? 'm' : 'k', kind==='mask' ? FSM : FS));
+      g.lastChild.setAttribute('fill', kind==='mask' ? 'var(--mask-fg)' : 'var(--keep-fg)');
+      g.lastChild.setAttribute('font-family','ui-monospace,Menlo,Consolas,monospace');
+      svg.appendChild(g);
+      return {cx:cx, cy:cy};
+    }
+
+    // индексы позиций (над входом)
+    for(var i=0;i<N;i++){
+      var t = txt(sx(i), sy(-0.55), String(i), 'middle', 'idx', FSM);
+      t.setAttribute('fill','var(--muted)');
+      svg.appendChild(t);
+    }
+
+    // строка input
+    for(var i=0;i<N;i++){
+      cell(i, 0, WORDS[i].masked ? '[MASK]' : WORDS[i].w,
+           WORDS[i].masked ? 'mask' : 'keep');
+    }
+    // строка target
+    for(var i=0;i<N;i++){
+      cell(i, 1, WORDS[i].w, 'keep');
+    }
+
+    // подписи строк слева (text-anchor=end, точка слева от ряда)
+    var li = txt(sx(0) - boxW/2 - PAD, sy(0), 'вход', 'end', 'lab', FS);
+    li.setAttribute('fill','var(--fg)'); svg.appendChild(li);
+    var lt = txt(sx(0) - boxW/2 - PAD, sy(1), 'target', 'end', 'lab', FS);
+    lt.setAttribute('fill','var(--fg)'); svg.appendChild(lt);
+
+    // стрелки ответа: только по замаскированным позициям, target -> вход
+    var masked = WORDS.filter(function(w){return w.masked;});
+    masked.forEach(function(w){
+      var x = sx(w.i);
+      svg.appendChild(el('path',{
+        d:'M'+x+','+(sy(1)-boxH/2-PAD/2)+' L'+x+','+(sy(0)+boxH/2+PAD/2),
+        stroke:'var(--gold)','stroke-width':LINE,fill:'none','marker-end':'url(#ah)'
+      }));
+    });
+
+    // подпись у ХВОСТА первой стрелки (сбоку, справа), вторая — слева
+    var a1 = txt(sx(masked[0].i) + PAD, sy(0.72), 'ключ уже в тексте', 'start', 'note', FSM);
+    a1.setAttribute('fill','var(--gold)'); svg.appendChild(a1);
+    var a2 = txt(sx(masked[1].i) - PAD, sy(0.72), 'ошибка только здесь', 'end', 'note', FSM);
+    a2.setAttribute('fill','var(--gold)'); svg.appendChild(a2);
+
+    // легенда под схемой
+    var ly = sy(1.75);
+    var lx = sx(0) - boxW/2;
+    var sw = boxH*0.42;
+    svg.appendChild(el('rect',{x:lx, y:ly-sw/2, width:sw*1.6, height:sw, rx:3,
+      fill:'var(--mask)', stroke:'var(--mask)','stroke-width':LINE}));
+    var l1 = txt(lx + sw*1.6 + PAD, ly, '2 из 9 позиций закрыты — в них считается ошибка',
+      'start','leg',FSM);
+    l1.setAttribute('fill','var(--fg)'); svg.appendChild(l1);
+
+    var lx2 = sx(4.6);
+    svg.appendChild(el('rect',{x:lx2, y:ly-sw/2, width:sw*1.6, height:sw, rx:3,
+      fill:'var(--keep)', stroke:'var(--line)','stroke-width':LINE}));
+    var l2 = txt(lx2 + sw*1.6 + PAD, ly, '7 слов — условие задачи, их не оценивают',
+      'start','leg',FSM);
+    l2.setAttribute('fill','var(--muted)'); svg.appendChild(l2);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fallback">Схема не построилась. Она должна показывать:\n'+
+      'вход:   the [MASK] brown fox jumps [MASK] the lazy dog\n'+
+      'target: the  quick brown fox jumps  over  the lazy dog\n'+
+      'Из 9 слов закрыты 2 (позиции 1 и 5). Стрелки идут от target к этим двум позициям: '+
+      'ключ берётся из самого предложения, ошибка считается только на них, '+
+      'остальные 7 слов — подсказки, их не оценивают.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

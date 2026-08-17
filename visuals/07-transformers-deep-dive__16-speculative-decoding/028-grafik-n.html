@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Токены за проход как функция N</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --grid: #e0e0e0;
+    --c1: #c2410c;
+    --c2: #1d4ed8;
+    --c3: #047857;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #9aa0a6;
+      --grid: #2c3038;
+      --c1: #fb923c;
+      --c2: #7dabff;
+      --c3: #4ade80;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 8px 10px 12px; }
+  h2 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 460px; background: var(--bg); }
+  .fallback { font-size: 14px; line-height: 1.5; color: var(--fg); }
+  .legend { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .legend b { color: var(--fg); font-weight: 600; }
+  .sw { display: inline-block; width: 22px; height: 3px; vertical-align: middle; margin-right: 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Токены за один forward verifier как функция N</h2>
+  <div id="slot"></div>
+  <div class="legend" id="legend"></div>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById("slot");
+  var legend = document.getElementById("legend");
+  try {
+    // ---- данные схемы ----
+    var SERIES = [
+      { a: 0.85, color: "var(--c3)", label: "α = 0.85", cap: 6.67 },
+      { a: 0.7,  color: "var(--c2)", label: "α = 0.7",  cap: 3.33 },
+      { a: 0.5,  color: "var(--c1)", label: "α = 0.5",  cap: 2 }
+    ];
+    var NS = [1,2,3,4,5,6,7,8,9,10,11,12];
+    var XT = [1,2,4,6,8,10,12];
+    var YT = [0,2,4,6,8];
+
+    // ---- холст (литералы) ----
+    var W = 900, H = 440;
+    var PAD = 6;          // отступ подписи от точки привязки
+    var LW = 2.2;         // толщина линии
+    var FS = 13;          // размер шрифта
+
+    // ---- единственная пара перевода ----
+    var ORIGIN = { x: 96, y: 372 };
+    var SCALE  = { x: 58, y: 40 };
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y - y * SCALE.y; }
+
+    function tok(a, n) { return (1 - Math.pow(a, n + 1)) / (1 - a); }
+
+    var NS_MIN = NS[0], NS_MAX = NS[NS.length - 1];
+    var Y_MAX = YT[YT.length - 1];
+
+    var out = [];
+    function el(tag, attrs, text) {
+      var s = "<" + tag;
+      for (var k in attrs) s += " " + k + '="' + attrs[k] + '"';
+      s += ">" + (text == null ? "" : text) + "</" + tag + ">";
+      out.push(s);
+    }
+    function esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+    // ---- сетка по X ----
+    for (var i = 0; i < XT.length; i++) {
+      var gx = sx(XT[i]);
+      el("line", { x1: gx, y1: sy(0), x2: gx, y2: sy(Y_MAX),
+                   stroke: "var(--grid)", "stroke-width": 1 });
+      el("text", { x: gx, y: sy(0) + PAD + FS, "text-anchor": "middle",
+                   "font-size": FS, fill: "var(--muted)" }, XT[i]);
+    }
+    // ---- сетка по Y ----
+    for (var j = 0; j < YT.length; j++) {
+      var gy = sy(YT[j]);
+      el("line", { x1: sx(0), y1: gy, x2: sx(NS_MAX), y2: gy,
+                   stroke: "var(--grid)", "stroke-width": 1 });
+      el("text", { x: sx(0) - PAD, y: gy + FS / 3, "text-anchor": "end",
+                   "font-size": FS, fill: "var(--muted)" }, YT[j]);
+    }
+
+    // ---- оси ----
+    el("line", { x1: sx(0), y1: sy(0), x2: sx(NS_MAX), y2: sy(0),
+                 stroke: "var(--fg)", "stroke-width": 1.4 });
+    el("line", { x1: sx(0), y1: sy(0), x2: sx(0), y2: sy(Y_MAX),
+                 stroke: "var(--fg)", "stroke-width": 1.4 });
+    el("text", { x: sx(NS_MAX), y: sy(0) + PAD + FS * 2.3, "text-anchor": "end",
+                 "font-size": FS, fill: "var(--fg)" }, "N — длина черновика");
+    el("text", { x: sx(0) - PAD, y: sy(Y_MAX) - PAD, "text-anchor": "end",
+                 "font-size": FS, fill: "var(--fg)" }, "токенов за проход");
+
+    // ---- потолки и кривые ----
+    for (var s = 0; s < SERIES.length; s++) {
+      var S = SERIES[s];
+      var capY = Math.min(S.cap, Y_MAX);
+
+      el("line", { x1: sx(0), y1: sy(capY), x2: sx(NS_MAX), y2: sy(capY),
+                   stroke: S.color, "stroke-width": 1, "stroke-dasharray": "5 4",
+                   opacity: 0.75 });
+
+      var d = "";
+      for (var k = 0; k < NS.length; k++) {
+        d += (k ? "L" : "M") + sx(NS[k]) + " " + sy(tok(S.a, NS[k])) + " ";
+      }
+      el("path", { d: d, fill: "none", stroke: S.color, "stroke-width": LW,
+                   "stroke-linejoin": "round", "stroke-linecap": "round" });
+
+      for (var k2 = 0; k2 < NS.length; k2++) {
+        el("circle", { cx: sx(NS[k2]), cy: sy(tok(S.a, NS[k2])), r: 2.6, fill: S.color });
+      }
+
+      // подпись кривой — у правого конца, над линией
+      el("text", { x: sx(NS_MAX) - PAD, y: sy(tok(S.a, NS_MAX)) - PAD * 1.6,
+                   "text-anchor": "end", "font-size": FS, fill: S.color,
+                   "font-weight": "600" }, esc(S.label));
+      // подпись потолка — у левого края, над пунктиром
+      el("text", { x: sx(NS_MIN) - PAD / 2, y: sy(capY) - PAD, "text-anchor": "start",
+                   "font-size": FS, fill: S.color },
+                 "потолок 1/(1−α) = " + S.cap);
+    }
+
+    // ---- маркеры насыщения ----
+    var SAT = [
+      { a: 0.5,  n: 4,  color: "var(--c1)", txt: "N ≈ 4 — уже у потолка", up: false },
+      { a: 0.85, n: 9,  color: "var(--c3)", txt: "N ≈ 8–10 — только выходит на потолок", up: true }
+    ];
+    for (var m = 0; m < SAT.length; m++) {
+      var P = SAT[m], py = tok(P.a, P.n);
+      el("circle", { cx: sx(P.n), cy: sy(py), r: 5.2, fill: "none",
+                     stroke: P.color, "stroke-width": LW });
+      if (P.up) {
+        el("text", { x: sx(P.n), y: sy(py) - PAD * 2.4, "text-anchor": "middle",
+                     "font-size": FS, fill: P.color }, esc(P.txt));
+      } else {
+        el("text", { x: sx(P.n), y: sy(py) + PAD + FS * 1.4, "text-anchor": "middle",
+                     "font-size": FS, fill: P.color }, esc(P.txt));
+      }
+    }
+
+    slot.innerHTML =
+      '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet" ' +
+      'role="img" aria-label="Три кривые токенов за проход при альфа 0.5, 0.7 и 0.85">' +
+      '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--bg)"/>' +
+      out.join("") + "</svg>";
+
+    legend.innerHTML =
+      "Кривая: <b>(1 − α<sup>N+1</sup>) / (1 − α)</b>. " +
+      SERIES.map(function (S) {
+        return '<span class="sw" style="background:' + S.color + '"></span>' +
+               esc(S.label) + " → потолок " + S.cap;
+      }).join(" &nbsp; ");
+  } catch (e) {
+    slot.innerHTML =
+      '<p class="fallback">Схема должна показывать три кривые «токенов за один forward ' +
+      "verifier» по N от 1 до 12 при α = 0.5, 0.7 и 0.85. Каждая кривая растёт всё " +
+      "медленнее и упирается в свой потолок 1/(1−α): 2 при α = 0.5, 3.33 при α = 0.7, " +
+      "6.67 при α = 0.85. Кривая α = 0.5 садится на потолок уже к N ≈ 4, кривая " +
+      "α = 0.85 подбирается к своему только к N ≈ 8–10. Высоту потолка задаёт α, " +
+      "а N решает лишь, насколько близко к нему подойти.</p>";
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

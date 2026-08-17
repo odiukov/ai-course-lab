@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A2C и A3C</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#f7f8fc;
+  --surface:#ffffff;
+  --surface-soft:#f1f4fa;
+  --ink:#172033;
+  --muted:#59657a;
+  --line:#b8c1d1;
+  --a2c:#176b87;
+  --a2c-soft:#d9f1f6;
+  --a3c:#7a4cc2;
+  --a3c-soft:#eee5ff;
+  --accent:#d97706;
+  --accent-soft:#fff0cf;
+  --divider:#d5dbe6;
+  --error:#a12b2b;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#10141d;
+    --surface:#171d28;
+    --surface-soft:#202838;
+    --ink:#eef2fa;
+    --muted:#aeb8ca;
+    --line:#667188;
+    --a2c:#65c9e8;
+    --a2c-soft:#173d49;
+    --a3c:#c09aff;
+    --a3c-soft:#352653;
+    --accent:#f2b84b;
+    --accent-soft:#493817;
+    --divider:#3b4558;
+    --error:#ff9f9f;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:unset;padding:unset;background:var(--page);color:var(--ink)}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{background:var(--page)}
+h1{
+  margin:unset;
+  padding:12px 20px 8px;
+  font-size:22px;
+  font-weight:bold;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  background:var(--surface);
+}
+text{fill:var(--ink);font-size:14px}
+.panel-title{font-size:20px;font-weight:bold}
+.subtitle{fill:var(--muted);font-size:13px}
+.small{font-size:12px}
+.strong{font-weight:bold}
+.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.base-line{stroke:var(--line);stroke-width:2px;fill:none;stroke-linecap:round}
+.a2c-line{stroke:var(--a2c);stroke-width:2px;fill:none;stroke-linecap:round}
+.a3c-line{stroke:var(--a3c);stroke-width:2px;fill:none;stroke-linecap:round}
+.accent-line{stroke:var(--accent);stroke-width:2px;fill:none;stroke-linecap:round}
+.sync-line{stroke:var(--accent);stroke-width:2px;fill:none}
+.divider{stroke:var(--divider);stroke-width:2px}
+.a2c-fill{fill:var(--a2c-soft);stroke:var(--a2c);stroke-width:2px}
+.a3c-fill{fill:var(--a3c-soft);stroke:var(--a3c);stroke-width:2px}
+.accent-fill{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2px}
+.soft-fill{fill:var(--surface-soft);stroke:var(--line);stroke-width:2px}
+.a2c-dot{fill:var(--a2c)}
+.a3c-dot{fill:var(--a3c)}
+.accent-dot{fill:var(--accent)}
+.arrow-a2c{fill:var(--a2c)}
+.arrow-a3c{fill:var(--a3c)}
+.arrow-muted{fill:var(--muted)}
+.funnel{fill:var(--a2c-soft);stroke:var(--a2c);stroke-width:2px}
+.note-a2c{fill:var(--a2c)}
+.note-a3c{fill:var(--a3c)}
+.fallback{
+  margin:unset;
+  padding:20px;
+  color:var(--error);
+  background:var(--surface);
+  font-size:16px;
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Синхронный батч A2C и асинхронные обновления A3C</h1>
+  <svg id="diagram" viewBox="0 0 1120 470" width="1120" height="470"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Слева шестнадцать сред A2C синхронно собирают батч из 2048 переходов. Справа воркеры A3C независимо отправляют градиенты общим параметрам."></svg>
+  <p id="fallback" class="fallback" hidden>Схема должна была показать: A2C ждёт 16 сред по 128 шагов и делает одно обновление батча из 2048 переходов, а воркеры A3C отправляют градиенты общим параметрам независимо и в разное время.</p>
+  <noscript><p class="fallback">A2C синхронно собирает 16 × 128 = 2048 переходов перед одним обновлением; A3C отправляет отдельные градиенты по мере готовности воркеров.</p></noscript>
+</main>
+<script>
+const data = [
+  {
+    origin:[0,0],
+    scale:1,
+    zero:0,
+    labelPad:10,
+    headLength:13,
+    headHalf:6,
+    dotRadius:4,
+    corner:10,
+    dash:[7,6],
+    tinyDash:[4,6],
+    lineGap:19
+  },
+  {
+    title:["A2C — синхронно",[32,34]],
+    subtitle:["все среды доходят до общей границы",[32,61]],
+    rows:[122,136,150,164,178,192,206,220,234,248,262,276,290,304,318,332],
+    laneStart:82,
+    syncX:318,
+    bracketX:62,
+    bracketStub:72,
+    bracketTop:118,
+    bracketBottom:336,
+    dimensionY:96,
+    dimensionTickTop:91,
+    dimensionTickBottom:101,
+    dimensionLabel:["128 шагов",[200,82]],
+    envLabel:["16 сред",[62,104]],
+    syncLabel:["общая граница",[318,356]],
+    funnel:[[318,118],[318,336],[366,303],[366,155]],
+    batch:{x:366,y:150,w:108,h:158,rx:10},
+    gridX:[393,420,447],
+    gridY:[181,212,243,274],
+    batchLabels:[
+      ["БАТЧ",[420,200],"strong"],
+      ["16 × 128",[420,228],"code strong"],
+      ["2048 переходов",[420,291],"small"]
+    ],
+    updateArrow:[[474,229],[491,229]],
+    update:{x:491,y:181,w:64,h:96,rx:10},
+    updateLabels:[
+      ["один",[523,207],"small strong"],
+      ["forward",[523,228],"code small"],
+      ["один",[523,249],"small strong"],
+      ["backward",[523,269],"code small"]
+    ],
+    updateCaption:[
+      ["одно обновление",[523,304],"strong"],
+      ["параметров θ",[523,324],"small"]
+    ],
+    footer:{x:32,y:392,w:523,h:52,rx:10},
+    footerLines:[
+      ["Ждут все среды",[50,410],"note-a2c strong","start"],
+      ["→ согласованный батч → один шаг оптимизатора",[50,430],"small","start"]
+    ]
+  },
+  {
+    title:["A3C — асинхронно",[606,34]],
+    subtitle:["каждый воркер отправляет градиент по готовности",[606,61]],
+    laneStart:650,
+    laneEnd:942,
+    workers:[
+      {name:"w₁",y:132,x:650,w:92,h:28,end:[742,132],arrival:[950,172],gradient:"g₁",offset:[10,-12]},
+      {name:"w₂",y:194,x:650,w:142,h:28,end:[792,194],arrival:[950,278],gradient:"g₂",offset:[10,15]},
+      {name:"w₃",y:256,x:650,w:72,h:28,end:[722,256],arrival:[950,214],gradient:"g₃",offset:[10,-12]},
+      {name:"w₄",y:318,x:650,w:180,h:28,end:[830,318],arrival:[950,306],gradient:"g₄",offset:[10,15]}
+    ],
+    workerLabelX:628,
+    rolloutText:"rollout",
+    shared:{x:950,y:137,w:136,h:187,rx:10},
+    sharedLabels:[
+      ["общие",[1018,183],"strong"],
+      ["параметры θ",[1018,207],"strong"],
+      ["градиенты",[1018,252],"small"],
+      ["приходят отдельно",[1018,272],"small"]
+    ],
+    timeArrow:[[650,356],[918,356]],
+    timeLabel:["время",[650,376]],
+    noBarrier:["нет общей границы",[918,376]],
+    footer:{x:588,y:392,w:498,h:52,rx:10},
+    footerLines:[
+      ["Не ждут друг друга",[606,410],"note-a3c strong","start"],
+      ["→ поток отдельных обновлений → рассогласование как шум",[606,430],"small","start"]
+    ]
+  },
+  {
+    divider:[[570,22],[570,450]]
+  }
+];
+
+const [cfg,a2c,a3c,layout] = data;
+const [originX,originY] = cfg.origin;
+const origin = {x:originX,y:originY};
+const scale = cfg.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try{
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const node = (name,attrs,parent=svg) => {
+    const item=document.createElementNS(ns,name);
+    for(const [key,value] of Object.entries(attrs)){
+      item.setAttribute(key,String(value));
+    }
+    parent.appendChild(item);
+    return item;
+  };
+
+  const line = (from,to,cls,dash) => {
+    const [x1,y1]=from;
+    const [x2,y2]=to;
+    const item=node("line",{
+      x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls
+    });
+    if(dash){
+      item.setAttribute("stroke-dasharray",dash.map(value=>sx(value)-sx(cfg.zero)).join(" "));
+    }
+    return item;
+  };
+
+  const rectangle = (box,cls) => node("rect",{
+    x:sx(box.x),
+    y:sy(box.y),
+    width:sx(box.w)-sx(cfg.zero),
+    height:sy(box.h)-sy(cfg.zero),
+    rx:sx(box.rx)-sx(cfg.zero),
+    class:cls
+  });
+
+  const circle = (point,cls) => {
+    const [x,y]=point;
+    return node("circle",{
+      cx:sx(x),cy:sy(y),r:sx(cfg.dotRadius)-sx(cfg.zero),class:cls
+    });
+  };
+
+  const polygon = (points,cls) => node("polygon",{
+    points:points.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+    class:cls
+  });
+
+  const label = (value,point,cls="",anchor="middle",offset=cfg.origin) => {
+    const [x,y]=point;
+    const [dx,dy]=offset;
+    const item=node("text",{
+      x:sx(x+dx),
+      y:sy(y+dy),
+      class:cls,
+      "text-anchor":anchor,
+      "dominant-baseline":"middle"
+    });
+    item.textContent=value;
+    return item;
+  };
+
+  const arrow = (from,to,lineClass,headClass) => {
+    const [x1,y1]=from;
+    const [x2,y2]=to;
+    const dx=x2-x1;
+    const dy=y2-y1;
+    const length=Math.hypot(dx,dy);
+    const ux=dx/length;
+    const uy=dy/length;
+    const baseX=x2-ux*cfg.headLength;
+    const baseY=y2-uy*cfg.headLength;
+    const left=[
+      baseX-uy*cfg.headHalf,
+      baseY+ux*cfg.headHalf
+    ];
+    const right=[
+      baseX+uy*cfg.headHalf,
+      baseY-ux*cfg.headHalf
+    ];
+    line(from,to,lineClass);
+    polygon([to,left,right],headClass);
+  };
+
+  line(layout.divider[0],layout.divider[1],"divider");
+
+  label(a2c.title[0],a2c.title[1],"panel-title","start");
+  label(a2c.subtitle[0],a2c.subtitle[1],"subtitle","start");
+
+  line([a2c.laneStart,a2c.dimensionY],[a2c.syncX,a2c.dimensionY],"base-line");
+  line([a2c.laneStart,a2c.dimensionTickTop],[a2c.laneStart,a2c.dimensionTickBottom],"base-line");
+  line([a2c.syncX,a2c.dimensionTickTop],[a2c.syncX,a2c.dimensionTickBottom],"base-line");
+  label(a2c.dimensionLabel[0],a2c.dimensionLabel[1],"small strong");
+  label(a2c.envLabel[0],a2c.envLabel[1],"small strong");
+
+  line([a2c.bracketX,a2c.bracketTop],[a2c.bracketX,a2c.bracketBottom],"base-line");
+  line([a2c.bracketX,a2c.bracketTop],[a2c.bracketStub,a2c.bracketTop],"base-line");
+  line([a2c.bracketX,a2c.bracketBottom],[a2c.bracketStub,a2c.bracketBottom],"base-line");
+  line([a2c.syncX,a2c.bracketTop],[a2c.syncX,a2c.bracketBottom],"sync-line",cfg.dash);
+
+  for(const y of a2c.rows){
+    circle([a2c.laneStart,y],"a2c-dot");
+    line([a2c.laneStart,y],[a2c.syncX,y],"a2c-line");
+  }
+
+  polygon(a2c.funnel,"funnel");
+  label(a2c.syncLabel[0],a2c.syncLabel[1],"small","middle");
+
+  rectangle(a2c.batch,"a2c-fill");
+  for(const x of a2c.gridX){
+    line([x,a2c.batch.y],[x,a2c.batch.y+a2c.batch.h],"a2c-line");
+  }
+  for(const y of a2c.gridY){
+    line([a2c.batch.x,y],[a2c.batch.x+a2c.batch.w,y],"a2c-line");
+  }
+  for(const [value,point,cls] of a2c.batchLabels){
+    label(value,point,cls);
+  }
+
+  arrow(a2c.updateArrow[0],a2c.updateArrow[1],"a2c-line","arrow-a2c");
+  rectangle(a2c.update,"accent-fill");
+  for(const [value,point,cls] of a2c.updateLabels){
+    label(value,point,cls);
+  }
+  for(const [value,point,cls] of a2c.updateCaption){
+    label(value,point,cls);
+  }
+
+  rectangle(a2c.footer,"soft-fill");
+  for(const [value,point,cls,anchor] of a2c.footerLines){
+    label(value,point,cls,anchor);
+  }
+
+  label(a3c.title[0],a3c.title[1],"panel-title","start");
+  label(a3c.subtitle[0],a3c.subtitle[1],"subtitle","start");
+
+  for(const worker of a3c.workers){
+    line([a3c.laneStart,worker.y],[a3c.laneEnd,worker.y],"base-line",cfg.tinyDash);
+    label(worker.name,[a3c.workerLabelX,worker.y],"code strong","end");
+    rectangle({
+      x:worker.x,
+      y:worker.y-worker.h/cfg.headHalf,
+      w:worker.w,
+      h:worker.h,
+      rx:cfg.corner
+    },"a3c-fill");
+    label(a3c.rolloutText,[worker.x+worker.w/cfg.headHalf,worker.y],"code small");
+    arrow(worker.end,worker.arrival,"a3c-line","arrow-a3c");
+    label(worker.gradient,worker.end,"code note-a3c strong","start",worker.offset);
+  }
+
+  rectangle(a3c.shared,"accent-fill");
+  for(const [value,point,cls] of a3c.sharedLabels){
+    label(value,point,cls);
+  }
+  for(const worker of a3c.workers){
+    circle(worker.arrival,"accent-dot");
+  }
+
+  arrow(a3c.timeArrow[0],a3c.timeArrow[1],"base-line","arrow-muted");
+  label(a3c.timeLabel[0],a3c.timeLabel[1],"small","start");
+  label(a3c.noBarrier[0],a3c.noBarrier[1],"small","end");
+
+  rectangle(a3c.footer,"soft-fill");
+  for(const [value,point,cls,anchor] of a3c.footerLines){
+    label(value,point,cls,anchor);
+  }
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const fallback=document.getElementById("fallback");
+  svg.hidden=true;
+  fallback.hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Две временные шкалы</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5c6470;
+    --slow:#c05a3e; --slowfill:#f0d3c8;
+    --fast:#2f7d6b; --fastfill:#cfe6df;
+    --axis:#8a929c; --rule:#7a5bd6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf1; --muted:#9aa4b2;
+      --slow:#e59376; --slowfill:#5a3327;
+      --fast:#6fd0b5; --fastfill:#204740;
+      --axis:#6b747f; --rule:#a98cf5;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px;}
+  h2{font-size:15px;margin:0 0 8px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Пять токенов: обычная генерация 150 мс против спекулятивной 45 мс</h2>
+  <div id="host"><noscript class="fail">Верхняя шкала: 5 блоков по 30 мс подряд = 150 мс. Нижняя: 5 блоков по 3 мс + один блок 30 мс = 45 мс.</noscript></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var TOTAL = 150;              // мс, длина обеих осей
+    var SLOW = [30,30,30,30,30];  // верхняя полоса: forward pass 70B
+    var DRAFT = [3,3,3,3,3];      // нижняя: черновики 3B
+    var VERIFY = 30;              // нижняя: одна проверка 70B
+    var RULER = 45;               // вертикальная линейка
+    var TICKS = [0,30,45,60,90,120,150];
+
+    // ---- холст ----
+    var W = 900, H = 330;
+    var PAD = 12, FS = 13, LW = 1.6;
+
+    // ---- одна пара перевода ----
+    var origin = {x:120, y:250};        // sx(0), sy(0)
+    var scale  = {x:(W-190)/TOTAL, y:26}; // px на мс; px на «дорожку»
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y - y*scale.y; }
+
+    // дорожки в единицах y
+    var Y_AXIS_S = 4.6, Y_BAR_S = 4.6, Y_H = 1.15;   // верхняя
+    var Y_AXIS_F = 1.2, Y_BAR_F = 1.2;               // нижняя
+
+    var ns='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(ns,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle','font-size':FS,fill:'currentColor'});
+      if(cls)t.setAttribute('class',cls);
+      t.textContent=s;return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,preserveAspectRatio:'xMidYMid meet',
+                        role:'img','aria-label':'Две временные шкалы генерации пяти токенов'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    // ---- ось одной полосы ----
+    function axis(yLvl){
+      svg.appendChild(el('line',{x1:sx(0),y1:sy(yLvl),x2:sx(TOTAL),y2:sy(yLvl),
+        stroke:'var(--axis)','stroke-width':LW}));
+      TICKS.forEach(function(t){
+        svg.appendChild(el('line',{x1:sx(t),y1:sy(yLvl),x2:sx(t),y2:sy(yLvl)+6,
+          stroke:'var(--axis)','stroke-width':LW}));
+        var lb=txt(sx(t),sy(yLvl)+6+FS+2,t,'middle');
+        lb.setAttribute('fill','var(--muted)');
+        svg.appendChild(lb);
+      });
+    }
+
+    // ---- блок ----
+    function bar(t0,dur,yBase,color,fill,label){
+      var g=el('g',{});
+      g.appendChild(el('rect',{x:sx(t0),y:sy(yBase+Y_H),
+        width:sx(t0+dur)-sx(t0), height:sy(yBase)-sy(yBase+Y_H),
+        fill:fill, stroke:color,'stroke-width':LW, rx:2}));
+      if(label){
+        var c=txt((sx(t0)+sx(t0+dur))/2, (sy(yBase)+sy(yBase+Y_H))/2 + FS*0.35, label,'middle');
+        c.setAttribute('fill',color);
+        g.appendChild(c);
+      }
+      svg.appendChild(g);
+    }
+
+    // ===== верхняя полоса =====
+    axis(Y_AXIS_S);
+    var acc=0;
+    SLOW.forEach(function(d,i){
+      bar(acc,d,Y_BAR_S,'var(--slow)','var(--slowfill)','t'+(i+1));
+      acc+=d;
+    });
+    var hS=txt(sx(0)-PAD, sy(Y_BAR_S+Y_H)-PAD*0.5,'Обычная генерация: 5 × 30 мс','start');
+    hS.setAttribute('fill','var(--slow)');hS.setAttribute('font-weight','600');
+    svg.appendChild(hS);
+    var endS=txt(sx(TOTAL), sy(Y_AXIS_S)-6-FS*1.6,'150 мс','end');
+    endS.setAttribute('fill','var(--slow)');endS.setAttribute('font-weight','600');
+    svg.appendChild(endS);
+
+    // ===== нижняя полоса =====
+    axis(Y_AXIS_F);
+    acc=0;
+    DRAFT.forEach(function(d){
+      bar(acc,d,Y_BAR_F,'var(--fast)','var(--fastfill)',null);
+      acc+=d;
+    });
+    var draftEnd=acc;
+    bar(draftEnd,VERIFY,Y_BAR_F,'var(--fast)','var(--fastfill)','проверка 5 токенов, 30 мс');
+    var hF=txt(sx(0)-PAD, sy(Y_BAR_F+Y_H)-PAD*0.5,'Speculative: 5 × 3 мс + 30 мс','start');
+    hF.setAttribute('fill','var(--fast)');hF.setAttribute('font-weight','600');
+    svg.appendChild(hF);
+    // подпись к черновикам — снизу, чтобы не столкнуться с заголовком полосы
+    var dl=txt(sx(draftEnd/2), sy(Y_AXIS_F)+6+FS*2.5,'5 черновиков по 3 мс','middle');
+    dl.setAttribute('fill','var(--fast)');
+    svg.appendChild(dl);
+
+    // ===== линейка на 45 мс =====
+    svg.appendChild(el('line',{x1:sx(RULER),y1:sy(Y_BAR_S+Y_H+0.55),x2:sx(RULER),y2:sy(0.1),
+      stroke:'var(--rule)','stroke-width':LW,'stroke-dasharray':'6 4'}));
+    var rl=txt(sx(RULER)+PAD, sy(Y_BAR_S+Y_H+0.55)+FS,'линейка 45 мс','start');
+    rl.setAttribute('fill','var(--rule)');rl.setAttribute('font-weight','600');
+    svg.appendChild(rl);
+
+    // отметки состояния на 45 мс: верх — справа от линейки, низ — тоже справа, но своя дорожка
+    var mS=txt(sx(RULER)+PAD, (sy(Y_BAR_S)+sy(Y_BAR_S+Y_H))/2 + FS*0.35,'здесь готов 1½ токена','start');
+    mS.setAttribute('fill','var(--slow)');
+    svg.appendChild(mS);
+
+    var mF=txt(sx(RULER)+PAD, sy(Y_AXIS_F)+6+FS*2.5,'здесь готовы все 5 токенов','start');
+    mF.setAttribute('fill','var(--fast)');
+    svg.appendChild(mF);
+
+    // ось времени: подпись единиц у правого края, ниже нижней шкалы
+    var unit=txt(sx(TOTAL), sy(Y_AXIS_F)+6+FS*2.5,'мс','end');
+    unit.setAttribute('fill','var(--muted)');
+    svg.appendChild(unit);
+
+    // ===== вывод: три прогона =====
+    var y3=sy(Y_AXIS_F)+6+FS*4.6;
+    var concl=txt(sx(0), y3,'Пока верхняя доходит до 150 мс, нижняя успевает трижды: 45 + 45 + 45 = 135 мс','start');
+    concl.setAttribute('fill','var(--muted)');
+    svg.appendChild(concl);
+
+    host.innerHTML='';
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна показывать две шкалы времени от нуля: '
+      +'верхняя — обычная генерация, пять блоков по 30 мс подряд, финиш на 150 мс; '
+      +'нижняя — speculative decoding, пять узких блоков по 3 мс и один блок 30 мс, финиш на 45 мс. '
+      +'Вертикальная линейка на 45 мс: внизу готовы все пять токенов, наверху — полтора.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

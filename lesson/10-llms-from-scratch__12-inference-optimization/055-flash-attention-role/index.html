@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отделяем роль FlashAttention от KV-кэша и планировщика — Inference Optimization</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/">← Inference Optimization</a>
+<span class="counter" data-counter>55 / 60</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-stoimost-prostoya" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/001-stoimost-prostoya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Почему дорогой GPU может работать медленно</span></a></li>
+<li><a class="toc-link" data-step="002-latency-throughput" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/002-latency-throughput/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Разделяем задержку пользователя и пропускную способность сервера</span></a></li>
+<li><a class="toc-link" data-step="003-problem-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/003-problem-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Находим потери при росте числа запросов</span></a></li>
+<li><a class="toc-link" data-step="004-two-phases" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/004-two-phases/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Разделяем инференс на prefill и decode</span></a></li>
+<li><a class="toc-link" data-step="005-phases-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/005-phases-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Один запрос проходит две разные фазы</span></a></li>
+<li><a class="toc-link" data-step="006-prefill-compute" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/006-prefill-compute/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Почему prefill упирается в вычисления</span></a></li>
+<li><a class="toc-link" data-step="007-decode-memory" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/007-decode-memory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Почему decode упирается в пропускную способность памяти</span></a></li>
+<li><a class="toc-link" data-step="008-matvec-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/008-matvec-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Матрично-векторное умножение как основная форма работы decode</span></a></li>
+<li><a class="toc-link" data-step="009-matvec-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/009-matvec-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Пишем matvec</span></a></li>
+<li><a class="toc-link" data-step="010-ops-byte" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/010-ops-byte/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Измеряем арифметическую интенсивность через ops:byte</span></a></li>
+<li><a class="toc-link" data-step="011-roofline-boundary" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/011-roofline-boundary/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Находим границу между memory-bound и compute-bound</span></a></li>
+<li><a class="toc-link" data-step="012-phases-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/012-phases-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Определяем узкое место по фазе и размеру батча</span></a></li>
+<li><a class="toc-link" data-step="013-attention-inference" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/013-attention-inference/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Смотрим на знакомый attention как на задачу повторного использования данных</span></a></li>
+<li><a class="toc-link" data-step="014-softmax-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/014-softmax-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Нормализуем attention scores устойчивым softmax</span></a></li>
+<li><a class="toc-link" data-step="015-softmax-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/015-softmax-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Пишем softmax</span></a></li>
+<li><a class="toc-link" data-step="016-attention-contract" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/016-attention-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Фиксируем формы query, keys, values и причинную маску</span></a></li>
+<li><a class="toc-link" data-step="017-attention-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/017-attention-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Пишем attention</span></a></li>
+<li><a class="toc-link" data-step="018-no-cache-cost" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/018-no-cache-cost/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Прослеживаем повторные вычисления генерации без KV-кэша</span></a></li>
+<li><a class="toc-link" data-step="019-no-cache-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/019-no-cache-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Пишем generate_no_cache</span></a></li>
+<li><a class="toc-link" data-step="020-recompute-growth" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/020-recompute-growth/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Почему цена генерации без кэша растёт с каждым токеном</span></a></li>
+<li><a class="toc-link" data-step="021-kv-mechanics" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/021-kv-mechanics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Сохраняем key и value каждого прошлого токена</span></a></li>
+<li><a class="toc-link" data-step="022-kv-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/022-kv-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Сравниваем повторный расчёт и чтение из KV-кэша</span></a></li>
+<li><a class="toc-link" data-step="023-with-cache-algorithm" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/023-with-cache-algorithm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Разделяем prefill кэша и однотокенные шаги decode</span></a></li>
+<li><a class="toc-link" data-step="024-with-cache-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/024-with-cache-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Пишем generate_with_cache</span></a></li>
+<li><a class="toc-link" data-step="025-cache-equivalence" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/025-cache-equivalence/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Проверяем, что кэш меняет работу, но не результат модели</span></a></li>
+<li><a class="toc-link" data-step="026-kv-correctness-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/026-kv-correctness-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Находим ошибку в обновлении позиции KV-кэша</span></a></li>
+<li><a class="toc-link" data-step="027-kv-memory-formula" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/027-kv-memory-formula/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Выводим размер KV-кэша из слоёв, голов и длины контекста</span></a></li>
+<li><a class="toc-link" data-step="028-kv-bytes-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/028-kv-bytes-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Пишем kv_cache_bytes</span></a></li>
+<li><a class="toc-link" data-step="029-llama-memory" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/029-llama-memory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Считаем KV-память Llama 3 70B на 4K и 128K токенов</span></a></li>
+<li><a class="toc-link" data-step="030-gqa-savings" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/030-gqa-savings/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Связываем GQA с восьмикратной экономией KV-памяти</span></a></li>
+<li><a class="toc-link" data-step="031-reserved-used" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/031-reserved-used/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Различаем забронированную и фактически занятую память кэша</span></a></li>
+<li><a class="toc-link" data-step="032-memory-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/032-memory-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Оцениваем, сколько диалогов помещается в память GPU</span></a></li>
+<li><a class="toc-link" data-step="033-static-batching" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/033-static-batching/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Почему статический батч ждёт самый длинный ответ</span></a></li>
+<li><a class="toc-link" data-step="034-batching-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/034-batching-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Пустые слоты статического батча</span></a></li>
+<li><a class="toc-link" data-step="035-continuous-batching" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/035-continuous-batching/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Заменяем завершённые запросы на каждой итерации decode</span></a></li>
+<li><a class="toc-link" data-step="036-prefill-scheduling" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/036-prefill-scheduling/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Согласуем длинный prefill с короткими итерациями decode</span></a></li>
+<li><a class="toc-link" data-step="037-batching-contract" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/037-batching-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Проектируем счётчик шагов для двух стратегий батчинга</span></a></li>
+<li><a class="toc-link" data-step="038-batching-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/038-batching-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Пишем batching_steps</span></a></li>
+<li><a class="toc-link" data-step="039-batching-metrics" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/039-batching-metrics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Измеряем utilization, throughput и хвостовую задержку</span></a></li>
+<li><a class="toc-link" data-step="040-batching-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/040-batching-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Сравниваем расписания запросов разной длины</span></a></li>
+<li><a class="toc-link" data-step="041-paged-memory" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/041-paged-memory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">Выделяем KV-кэш страницами вместо непрерывного блока</span></a></li>
+<li><a class="toc-link" data-step="042-paged-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/042-paged-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Отображаем логические токены на физические страницы</span></a></li>
+<li><a class="toc-link" data-step="043-fragmentation" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/043-fragmentation/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">43</span><span class="toc-title">Убираем внешнюю фрагментацию и ограничиваем внутренние потери</span></a></li>
+<li><a class="toc-link" data-step="044-copy-on-write" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/044-copy-on-write/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">44</span><span class="toc-title">Делим страницы общего префикса через copy-on-write</span></a></li>
+<li><a class="toc-link" data-step="045-prefix-caching" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/045-prefix-caching/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">45</span><span class="toc-title">Пропускаем повторный prefill с кэшированием префиксов</span></a></li>
+<li><a class="toc-link" data-step="046-radix-tree" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/046-radix-tree/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">46</span><span class="toc-title">Находим полное и частичное совпадение префикса в radix tree</span></a></li>
+<li><a class="toc-link" data-step="047-memory-prefix-check" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/047-memory-prefix-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">47</span><span class="toc-title">Выбираем между страницами, copy-on-write и prefix cache</span></a></li>
+<li><a class="toc-link" data-step="048-speculation-serving" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/048-speculation-serving/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">48</span><span class="toc-title">Переносим знакомое speculative decoding в модель стоимости сервинга</span></a></li>
+<li><a class="toc-link" data-step="049-speculation-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/049-speculation-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">49</span><span class="toc-title">Черновик предлагает, большая модель проверяет</span></a></li>
+<li><a class="toc-link" data-step="050-acceptance-exactness" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/050-acceptance-exactness/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">50</span><span class="toc-title">Связываем долю принятия с ускорением без изменения распределения</span></a></li>
+<li><a class="toc-link" data-step="051-speedup-model" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/051-speedup-model/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">51</span><span class="toc-title">Считаем стоимость последовательного и спекулятивного decode</span></a></li>
+<li><a class="toc-link" data-step="052-speedup-code" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/052-speedup-code/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">52</span><span class="toc-title">Пишем speculative_speedup</span></a></li>
+<li><a class="toc-link" data-step="053-speculation-methods" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/053-speculation-methods/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">53</span><span class="toc-title">Сравниваем draft-target, EAGLE и n-gram lookup</span></a></li>
+<li><a class="toc-link" data-step="054-speculation-limits" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/054-speculation-limits/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">54</span><span class="toc-title">Определяем, когда проверка кандидатов не окупается</span></a></li>
+<li><a class="toc-link is-current" data-step="055-flash-attention-role" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/055-flash-attention-role/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">55</span><span class="toc-title">Отделяем роль FlashAttention от KV-кэша и планировщика</span></a></li>
+<li><a class="toc-link" data-step="056-engine-choice" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/056-engine-choice/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">56</span><span class="toc-title">Сопоставляем vLLM, SGLang и TensorRT-LLM с типом нагрузки</span></a></li>
+<li><a class="toc-link" data-step="057-optimization-map" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/057-optimization-map/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">57</span><span class="toc-title">Выбираем оптимизацию по фазе и узкому месту</span></a></li>
+<li><a class="toc-link" data-step="058-production-benchmark" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/058-production-benchmark/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">58</span><span class="toc-title">Строим бенчмарк по TTFT, TPOT, throughput и concurrency</span></a></li>
+<li><a class="toc-link" data-step="059-shipping-plan" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/059-shipping-plan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">59</span><span class="toc-title">Собираем навык диагностики сервинга от измерения до решения</span></a></li>
+<li><a class="toc-link" data-step="060-final-quiz" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/060-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">60</span><span class="toc-title">Итоговая проверка: фазы инференса, кэши, планирование и ускорение</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Отделяем роль FlashAttention от KV-кэша и планировщика</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты запускаешь длинный prompt и видишь: attention стал быстрее, временной памяти требуется меньше. Но число одновременных диалогов почти не выросло, а завершившиеся запросы всё ещё оставляют пустые места в батче. Почему одна оптимизация не исправила всё сразу?</p>
+<p>Здесь важно разделить три разные работы. <strong>FlashAttention</strong> меняет то, <em>как GPU вычисляет attention</em>. Вместо того чтобы целиком записывать большую матрицу attention scores в медленную память GPU, он обрабатывает её небольшими блоками: загрузил данные в быструю память рядом с вычислителями, посчитал, сразу использовал результат. Математический ответ остаётся тем же, но лишних перемещений данных становится меньше. Особенно заметен выигрыш на длинном <strong>prefill</strong>, который мы выделили в <a href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/004-two-phases/">шаге 4</a>.</p>
+<p><strong>KV-кэш</strong> решает другую проблему: не пересчитывать key и value прошлых токенов на каждом шаге генерации. Однако этот кэш всё равно нужно хранить и читать. FlashAttention не отменяет его размер из <a href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/027-kv-memory-formula/">шага 27</a> и не превращает 40 ГиБ в ноль.</p>
+<p><strong>Планировщик</strong> работает ещё уровнем выше: выбирает, какие запросы сейчас попадут на GPU, кого добавить после завершения и как согласовать prefill с decode. Именно он устраняет пустые слоты через continuous batching из <a href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/035-continuous-batching/">шага 35</a>.</p>
+<p>Поэтому ускорив attention, ты можешь всё ещё упираться в чтение KV-кэша или плохое расписание. Быстрый вычислитель, память истории и диспетчер запросов — три разных рычага.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь художника-мозаичиста. FlashAttention даёт ему маленький удобный стол: он выкладывает участок мозаики и сразу переносит его на стену, не раскладывая весь рисунок на полу. KV-кэш — склад уже подобранных плиток. Планировщик — человек, который решает, какую стену мастер обрабатывает следующей. Удобный стол не расширяет склад и не составляет очередь заказов.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/054-speculation-limits/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/10-llms-from-scratch__12-inference-optimization/056-engine-choice/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"10-llms-from-scratch__12-inference-optimization","stepId":"055-flash-attention-role","number":55,"plannedCount":60}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

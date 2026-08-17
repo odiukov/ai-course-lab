@@ -1,0 +1,176 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Мячи Роджера: с CoT и без</title>
+<style>
+  :root{
+    --bg:#f5f6fa; --panel:#ffffff; --ink:#1a1a2e; --muted:#5a5f78;
+    --plain:#e94560; --cot:#2f9e44; --reason:#e8850c; --wire:#8b90a8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12121c; --panel:#1a1a2e; --ink:#eef1ff; --muted:#a3a9c6;
+      --plain:#ff6b81; --cot:#51cf66; --reason:#ffa500; --wire:#6b melts;
+      --wire:#767c98;
+    }
+  }
+  body{margin:0;padding:16px;background:var(--bg);color:var(--ink);
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;}
+  h2{font-size:17px;margin:0 0 10px;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{border:1px solid var(--plain);padding:12px;border-radius:6px;color:var(--ink);}
+  text{font-family:inherit;fill:var(--ink);}
+</style>
+<div class="wrap">
+  <h2>Один вопрос, два маршрута: ответ совпадает, дорога — нет</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---------- данные схемы в собственных единицах ---------- */
+    var TOP = 3.4, BOT = 1.3;
+    var Q = ['У Роджера 5 мячей.','Купил 2 банки по 3.','Сколько мячей?'];
+
+    var nodes = [
+      {x0:0.35, x1:3.05, y:TOP, h:0.65, tone:'plain',  size:14, lines:Q},
+      {x0:7.70, x1:9.30, y:TOP, h:0.45, tone:'plain',  size:17, lines:['A: 11']},
+      {x0:0.35, x1:3.05, y:BOT, h:0.65, tone:'cot',    size:14, lines:Q},
+      {x0:3.55, x1:7.25, y:BOT, h:0.65, tone:'reason', size:14,
+       lines:['У Роджера 5 мячей.','2 банки по 3 — это 6.','5 + 6 = 11.']},
+      {x0:7.70, x1:9.30, y:BOT, h:0.45, tone:'cot',    size:17, lines:['A: 11']}
+    ];
+
+    var arrows = [
+      {x0:3.05, x1:7.70, y:TOP, tone:'plain'},
+      {x0:3.05, x1:3.55, y:BOT, tone:'cot'},
+      {x0:7.25, x1:7.70, y:BOT, tone:'cot'}
+    ];
+
+    var labels = [
+      {x:0.35, y:4.35, t:'Без CoT: вопрос → ответ', a:'start', tone:'plain',  size:16, bold:1},
+      {x:0.35, y:2.25, t:'С CoT: вопрос → шаги → ответ', a:'start', tone:'cot', size:16, bold:1},
+      {x:3.50, y:3.72, t:'сразу «11»', a:'start', tone:'plain', size:13},
+      {x:3.50, y:3.02, t:'ответ «8» — и не за что взяться', a:'start', tone:'muted', size:13},
+      {x:5.40, y:2.24, t:'промежуточные числа снаружи', a:'middle', tone:'reason', size:13},
+      {x:5.40, y:0.35, t:'ошибка приземляется в конкретную строку', a:'middle', tone:'muted', size:13}
+    ];
+
+    /* ---------- один origin, один scale, одна пара sx/sy ---------- */
+    var origin = {x:50, y:380};
+    var scale  = 80;
+    function sx(x){ return origin.x + x * scale; }
+    function sy(y){ return origin.y - y * scale; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 900 368');
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label','Сравнение ответа без цепочки рассуждений и с ней');
+
+    function el(n,attrs){
+      var e = document.createElementNS(NS,n);
+      for(var k in attrs) e.setAttribute(k, attrs[k]);
+      svg.appendChild(e); return e;
+    }
+    function color(tone){ return 'var(--' + tone + ')'; }
+
+    /* коробки */
+    nodes.forEach(function(n){
+      el('rect',{
+        x: sx(n.x0), y: sy(n.y + n.h),
+        width:  sx(n.x1) - sx(n.x0),
+        height: sy(n.y - n.h) - sy(n.y + n.h),
+        rx: sx(0.16) - sx(0),
+        fill:'var(--panel)', stroke:color(n.tone), 'stroke-width':2
+      });
+      var mid = (n.lines.length - 1) / 2;
+      n.lines.forEach(function(line,i){
+        var t = el('text',{
+          x: sx((n.x0 + n.x1) / 2),
+          y: sy(n.y + (mid - i) * 0.34),
+          'text-anchor':'middle','dominant-baseline':'middle',
+          'font-size': n.size
+        });
+        if(n.lines.length === 1){ t.setAttribute('font-weight','700');
+          t.setAttribute('fill', color(n.tone)); }
+        t.textContent = line;
+      });
+    });
+
+    /* стрелки: наконечник тоже через sx/sy */
+    var HEAD = 0.17;
+    arrows.forEach(function(a){
+      el('line',{
+        x1: sx(a.x0), y1: sy(a.y),
+        x2: sx(a.x1 - HEAD), y2: sy(a.y),
+        stroke: color(a.tone), 'stroke-width':2
+      });
+      el('polygon',{
+        points: [
+          sx(a.x1) + ',' + sy(a.y),
+          sx(a.x1 - HEAD) + ',' + sy(a.y + HEAD * 0.62),
+          sx(a.x1 - HEAD) + ',' + sy(a.y - HEAD * 0.62)
+        ].join(' '),
+        fill: color(a.tone)
+      });
+    });
+
+    /* подписи */
+    labels.forEach(function(l){
+      var t = el('text',{
+        x: sx(l.x), y: sy(l.y),
+        'text-anchor': l.a, 'font-size': l.size,
+        fill: color(l.tone)
+      });
+      if(l.bold) t.setAttribute('font-weight','700');
+      t.textContent = l.t;
+    });
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML = '<div class="fallback">Схема не построилась. Она показывает один и тот же ' +
+      'вопрос («У Роджера 5 мячей, купил 2 банки по 3 — сколько мячей?») на двух маршрутах. ' +
+      'Верхний, без CoT: вопрос → «A: 11», между ними ничего. Нижний, с CoT: вопрос → ' +
+      'клетка с тремя строками «У Роджера 5 мячей», «2 банки по 3 — это 6», «5 + 6 = 11» → ' +
+      '«A: 11». Ответ одинаковый; в нижнем маршруте ошибка видна в конкретной строке.</div>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

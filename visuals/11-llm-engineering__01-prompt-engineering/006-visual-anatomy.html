@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Анатомия промпта</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a2e;
+    --muted: #5a6072;
+    --line: #8a90a2;
+    --sys: #e94560;
+    --usr: #d98200;
+    --pre: #2f9e50;
+    --card: #f6f7fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12131a;
+      --fg: #f0f2f8;
+      --muted: #a8b0c4;
+      --line: #79809a;
+      --sys: #e94560;
+      --usr: #ffa500;
+      --pre: #51cf66;
+      --card: #1a1a2e;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 8px 12px 12px; }
+  h2 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 520px; background: var(--bg); }
+  .fallback { color: var(--fg); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Анатомия промпта: три блока и три срока жизни</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById("host");
+  try {
+    // ---- данные схемы (единственные литералы-данные) ----
+    var BLOCKS = [
+      { id: "S", y: 0, title: "System",
+        lines: ["личность, правила", "живёт весь диалог"],
+        color: "var(--sys)", note: "написан один раз" },
+      { id: "U", y: -2, title: "User",
+        lines: ["задача", "меняется каждый ход"],
+        color: "var(--usr)", note: "устаревает после ответа" },
+      { id: "A", y: -4, title: "Assistant prefill",
+        lines: ["начало ответа", "исчезает вместе с ответом"],
+        color: "var(--pre)", note: "optional" }
+    ];
+    var BOX_W = 5, BOX_H = 1.2;   // в единицах данных
+
+    // ---- холст (литералы: viewBox / размеры) ----
+    var VB_W = 760, VB_H = 340;
+    var PAD = 8;                  // пиксельный отступ подписи от якоря
+    var STROKE = 1.6;
+    var FS = 13, FS_T = 15, FS_S = 11.5;
+
+    // ---- один origin, один scale ----
+    var origin = { x: 250, y: 56 };
+    var scale = 52;
+    function sx(x) { return origin.x + x * scale; }
+    function sy(y) { return origin.y - y * scale; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function text(x, y, s, anchor, size, fill, weight) {
+      var t = el("text", { x: x, y: y, "text-anchor": anchor,
+        "font-size": size, fill: fill, "font-family": "inherit",
+        "font-weight": weight || "400", "dominant-baseline": "middle" });
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el("svg", { viewBox: "0 0 " + VB_W + " " + VB_H,
+      preserveAspectRatio: "xMidYMid meet", role: "img",
+      "aria-label": "Три блока промпта сверху вниз: System, User, Assistant prefill" });
+
+    var defs = el("defs");
+    var m = el("marker", { id: "ah", markerWidth: "9", markerHeight: "9",
+      refX: "7", refY: "3.2", orient: "auto", markerUnits: "strokeWidth" });
+    m.appendChild(el("path", { d: "M0,0 L7,3.2 L0,6.4 Z", fill: "var(--line)" }));
+    defs.appendChild(m);
+    svg.appendChild(defs);
+
+    // ---- стрелка порядка чтения: хвост у верхнего блока, вдоль левой стороны ----
+    var ax = -BOX_W / 2 - 1;
+    var aTop = BLOCKS[0].y - BOX_H / 2;
+    var aBot = BLOCKS[BLOCKS.length - 1].y + BOX_H / 2;
+    svg.appendChild(el("path", {
+      d: "M" + sx(ax) + "," + sy(aTop) + " L" + sx(ax) + "," + sy(aBot),
+      stroke: "var(--line)", "stroke-width": STROKE, fill: "none",
+      "marker-end": "url(#ah)" }));
+    // подпись у ХВОСТА стрелки, сверху
+    svg.appendChild(text(sx(ax), sy(aTop) - PAD * 2, "порядок чтения",
+      "middle", FS_S, "var(--muted)"));
+
+    // ---- блоки ----
+    BLOCKS.forEach(function (b) {
+      var x0 = sx(-BOX_W / 2), x1 = sx(BOX_W / 2);
+      var y0 = sy(b.y + BOX_H / 2), y1 = sy(b.y - BOX_H / 2);
+      svg.appendChild(el("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0,
+        rx: 10, fill: "var(--card)", stroke: b.color, "stroke-width": STROKE }));
+
+      var cx = sx(0);
+      svg.appendChild(text(cx, sy(b.y) - FS_T, b.title, "middle", FS_T, b.color, "600"));
+      svg.appendChild(text(cx, sy(b.y) + PAD * 0.4, b.lines[0], "middle", FS, "var(--fg)"));
+      svg.appendChild(text(cx, sy(b.y) + PAD * 2.4, b.lines[1], "middle", FS_S, "var(--muted)"));
+
+      // пометка справа от блока, anchor=start
+      svg.appendChild(text(x1 + PAD, sy(b.y), b.note, "start", FS_S, b.color));
+    });
+
+    // ---- «optional» у нижнего блока, слева от него, anchor=end ----
+    var last = BLOCKS[BLOCKS.length - 1];
+    svg.appendChild(text(sx(-BOX_W / 2) - PAD * 2.2, sy(last.y), "optional",
+      "end", FS_S, "var(--pre)"));
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<p class="fallback">Схема должна показывать три блока сверху вниз: ' +
+      '<b>System</b> — личность и правила, живёт весь диалог; ' +
+      '<b>User</b> — задача, меняется каждый ход; ' +
+      '<b>Assistant prefill</b> — начало ответа, опционален, исчезает вместе с ответом. ' +
+      'Стрелка сверху вниз — порядок чтения модели.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Какая память исчезает на каждой стадии ZeRO</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f7fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --border: #cbd5e1;
+      --card: #eef2f7;
+      --slot: #d8dee8;
+      --adam: #8b5cf6;
+      --grad: #ec4899;
+      --param: #0ea5e9;
+      --activation: #f59e0b;
+      --arrow: #334155;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111827;
+        --panel: #182131;
+        --text: #f1f5f9;
+        --muted: #a8b3c5;
+        --border: #475569;
+        --card: #253247;
+        --slot: #445065;
+        --adam: #a78bfa;
+        --grad: #f472b6;
+        --param: #38bdf8;
+        --activation: #fbbf24;
+        --arrow: #d7e0ec;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 12px;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 14px 10px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin: 5px 0 7px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 425px;
+      overflow: visible;
+    }
+
+    svg text {
+      fill: var(--text);
+      font-family: inherit;
+    }
+
+    .legend-label,
+    .gpu-note,
+    .row-detail,
+    .comm-label,
+    .footer-note {
+      font-size: 13px;
+    }
+
+    .row-title {
+      font-size: 19px;
+      font-weight: 760;
+    }
+
+    .row-detail,
+    .gpu-note,
+    .footer-note {
+      fill: var(--muted);
+    }
+
+    .section-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 1px;
+    }
+
+    .card {
+      fill: var(--card);
+      stroke: var(--border);
+      stroke-width: 1px;
+    }
+
+    .slot {
+      fill: var(--slot);
+    }
+
+    .adam {
+      fill: var(--adam);
+    }
+
+    .grad {
+      fill: var(--grad);
+    }
+
+    .param {
+      fill: var(--param);
+    }
+
+    .activation {
+      fill: var(--activation);
+    }
+
+    .guide {
+      stroke: var(--border);
+      stroke-width: 1px;
+      fill: none;
+    }
+
+    .comm-low,
+    .comm-mid,
+    .comm-high {
+      stroke: var(--arrow);
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .comm-low {
+      stroke-width: 3px;
+    }
+
+    .comm-mid {
+      stroke-width: 5px;
+    }
+
+    .comm-high {
+      stroke-width: 7px;
+    }
+
+    .fallback {
+      display: none;
+      margin: 12px 0 4px;
+      padding: 12px;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Какая память исчезает на каждой стадии ZeRO</h1>
+    <p class="subtitle">
+      Цветная полоса — полная копия на GPU; цветной фрагмент — собственный шард.
+    </p>
+
+    <svg id="diagram"
+      viewBox="0 0 1200 425"
+      width="1200"
+      height="425"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Шардирование памяти в ZeRO на восьми GPU</title>
+      <desc id="svg-desc">
+        В ZeRO-1 шардируются состояния Adam, в ZeRO-2 также градиенты,
+        а в ZeRO-3 также параметры. Активации остаются полными.
+        Интенсивность обмена растёт от стадии к стадии.
+      </desc>
+    </svg>
+
+    <div id="fallback" class="fallback" role="img">
+      Схема должна была показать три стадии ZeRO на 8 GPU: сначала
+      шардируются состояния Adam, затем градиенты, затем параметры.
+      Активации остаются на каждой GPU, а интенсивность обмена растёт.
+    </div>
+  </main>
+
+  <script>
+    const data = {
+      origin: { x: 0, y: 0 },
+      scale: 1,
+      canvas: { width: 1200, height: 425 },
+      values: {
+        zero: 0,
+        two: 2,
+        cardWidth: 82,
+        cardHeight: 88,
+        barInset: 7,
+        barWidth: 68,
+        barHeight: 10,
+        legendMark: 12,
+        arrowHeadX: 9,
+        arrowHeadY: 6,
+        stageTextX: 18,
+        tableLeft: 180,
+        tableRight: 906,
+        tableCenter: 543,
+        legendY: 23,
+        groupLabelY: 55,
+        bracketY: 67,
+        footerY: 406,
+        commStart: 962,
+        commHeaderX: 1072,
+        commHeaderY: 23,
+        commArrowOffsetY: 62,
+        commTextOffsetY: 37
+      },
+      categories: [
+        {
+          key: "adam",
+          label: "Состояния Adam",
+          className: "adam",
+          offsetY: 12,
+          legendX: 180
+        },
+        {
+          key: "grad",
+          label: "Градиенты",
+          className: "grad",
+          offsetY: 30,
+          legendX: 352
+        },
+        {
+          key: "param",
+          label: "Параметры",
+          className: "param",
+          offsetY: 48,
+          legendX: 500
+        },
+        {
+          key: "activation",
+          label: "Активации — без изменений",
+          className: "activation",
+          offsetY: 66,
+          legendX: 653
+        }
+      ],
+      gpus: [
+        { x: 180 },
+        { x: 272 },
+        { x: 364 },
+        { x: 456 },
+        { x: 548 },
+        { x: 640 },
+        { x: 732 },
+        { x: 824 }
+      ],
+      rows: [
+        {
+          y: 80,
+          title: "ZeRO-1",
+          details: ["Шардируется Adam"],
+          sharded: ["adam"],
+          commEnd: 1018,
+          commLabel: "как при data parallel",
+          commClass: "comm-low"
+        },
+        {
+          y: 181,
+          title: "ZeRO-2",
+          details: ["Adam + градиенты"],
+          sharded: ["adam", "grad"],
+          commEnd: 1066,
+          commLabel: "обмена чуть больше",
+          commClass: "comm-mid"
+        },
+        {
+          y: 282,
+          title: "ZeRO-3",
+          details: ["Adam + градиенты", "+ параметры"],
+          sharded: ["adam", "grad", "param"],
+          commEnd: 1125,
+          commLabel: "all-gather для каждого слоя",
+          commClass: "comm-high"
+        }
+      ],
+      text: {
+        stageTitleY: 27,
+        stageDetailY: 51,
+        stageDetailGap: 18,
+        legendTextGap: 19
+      }
+    };
+
+    const origin = Object.freeze(data.origin);
+    const scale = data.scale;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const node = (name, attributes, className) => {
+        const element = document.createElementNS(ns, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        if (className) {
+          element.setAttribute("class", className);
+        }
+        return element;
+      };
+
+      const rect = (parent, x, y, width, height, className) => {
+        const element = node("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(x),
+          height: sy(y + height) - sy(y)
+        }, className);
+        parent.appendChild(element);
+        return element;
+      };
+
+      const line = (parent, x1, y1, x2, y2, className) => {
+        const element = node("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2)
+        }, className);
+        parent.appendChild(element);
+        return element;
+      };
+
+      const text = (parent, value, x, y, className, anchor) => {
+        const element = node("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor
+        }, className);
+        element.textContent = value;
+        parent.appendChild(element);
+        return element;
+      };
+
+      const root = node("g", {}, "");
+      svg.appendChild(root);
+
+      for (const category of data.categories) {
+        rect(
+          root,
+          category.legendX,
+          data.values.legendY - data.values.legendMark,
+          data.values.legendMark,
+          data.values.legendMark,
+          category.className
+        );
+        text(
+          root,
+          category.label,
+          category.legendX + data.text.legendTextGap,
+          data.values.legendY,
+          "legend-label",
+          "start"
+        );
+      }
+
+      text(
+        root,
+        "8 GPU · каждый большой блок — одна GPU",
+        data.values.tableCenter,
+        data.values.groupLabelY,
+        "gpu-note",
+        "middle"
+      );
+
+      line(
+        root,
+        data.values.tableLeft,
+        data.values.bracketY,
+        data.values.tableRight,
+        data.values.bracketY,
+        "guide"
+      );
+      line(
+        root,
+        data.values.tableLeft,
+        data.values.bracketY,
+        data.values.tableLeft,
+        data.values.bracketY - data.values.arrowHeadY,
+        "guide"
+      );
+      line(
+        root,
+        data.values.tableRight,
+        data.values.bracketY,
+        data.values.tableRight,
+        data.values.bracketY - data.values.arrowHeadY,
+        "guide"
+      );
+
+      text(
+        root,
+        "ИНТЕНСИВНОСТЬ ОБМЕНА",
+        data.values.commHeaderX,
+        data.values.commHeaderY,
+        "section-label",
+        "middle"
+      );
+
+      const shardWidth = data.values.barWidth / data.gpus.length;
+
+      for (const row of data.rows) {
+        text(
+          root,
+          row.title,
+          data.values.stageTextX,
+          row.y + data.text.stageTitleY,
+          "row-title",
+          "start"
+        );
+
+        for (const [detailIndex, detail] of row.details.entries()) {
+          text(
+            root,
+            detail,
+            data.values.stageTextX,
+            row.y + data.text.stageDetailY +
+              detailIndex * data.text.stageDetailGap,
+            "row-detail",
+            "start"
+          );
+        }
+
+        for (const [gpuIndex, gpu] of data.gpus.entries()) {
+          rect(
+            root,
+            gpu.x,
+            row.y,
+            data.values.cardWidth,
+            data.values.cardHeight,
+            "card"
+          );
+
+          for (const category of data.categories) {
+            const barX = gpu.x + data.values.barInset;
+            const barY = row.y + category.offsetY;
+
+            rect(
+              root,
+              barX,
+              barY,
+              data.values.barWidth,
+              data.values.barHeight,
+              "slot"
+            );
+
+            if (row.sharded.includes(category.key)) {
+              rect(
+                root,
+                barX + gpuIndex * shardWidth,
+                barY,
+                shardWidth,
+                data.values.barHeight,
+                category.className
+              );
+            } else {
+              rect(
+                root,
+                barX,
+                barY,
+                data.values.barWidth,
+                data.values.barHeight,
+                category.className
+              );
+            }
+          }
+        }
+
+        const arrowY = row.y + data.values.commArrowOffsetY;
+
+        text(
+          root,
+          row.commLabel,
+          data.values.commStart,
+          row.y + data.values.commTextOffsetY,
+          "comm-label",
+          "start"
+        );
+
+        line(
+          root,
+          data.values.commStart,
+          arrowY,
+          row.commEnd,
+          arrowY,
+          row.commClass
+        );
+        line(
+          root,
+          row.commEnd,
+          arrowY,
+          row.commEnd - data.values.arrowHeadX,
+          arrowY - data.values.arrowHeadY,
+          row.commClass
+        );
+        line(
+          root,
+          row.commEnd,
+          arrowY,
+          row.commEnd - data.values.arrowHeadX,
+          arrowY + data.values.arrowHeadY,
+          row.commClass
+        );
+      }
+
+      text(
+        root,
+        "Сверху вниз исчезают полные дубликаты: Adam → градиенты → параметры. Активации ZeRO не шардирует.",
+        data.canvas.width / data.values.two,
+        data.values.footerY,
+        "footer-note",
+        "middle"
+      );
+    } catch (error) {
+      document.getElementById("diagram").style.display = "none";
+      document.getElementById("fallback").style.display = "block";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

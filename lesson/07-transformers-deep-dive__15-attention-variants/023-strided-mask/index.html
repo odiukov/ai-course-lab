@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пишем strided_mask — Attention Variants</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/">← Attention Variants</a>
+<span class="counter" data-counter>23 / 46</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-cena-kvadrata" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/001-cena-kvadrata/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Полный attention платит квадратом</span></a></li>
+<li><a class="toc-link" data-step="002-flash-ne-spasaet" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/002-flash-ne-spasaet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Flash Attention прячет память, но не арифметику</span></a></li>
+<li><a class="toc-link" data-step="003-tri-klassa" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/003-tri-klassa/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Три способа согнуть матрицу attention</span></a></li>
+<li><a class="toc-link" data-step="004-check-klassy" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/004-check-klassy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Проверка: что именно меняет каждый класс</span></a></li>
+<li><a class="toc-link" data-step="005-maska-slagaemoe" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/005-maska-slagaemoe/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Маска — это слагаемое: 0 и -inf</span></a></li>
+<li><a class="toc-link" data-step="006-causal-mask" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/006-causal-mask/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Пишем causal_mask</span></a></li>
+<li><a class="toc-link" data-step="007-swa-okno" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/007-swa-okno/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Sliding window: окно последних W токенов</span></a></li>
+<li><a class="toc-link" data-step="008-visual-dve-setki" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/008-visual-dve-setki/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Полная маска против окна W=4</span></a></li>
+<li><a class="toc-link" data-step="009-swa-mask" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/009-swa-mask/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Пишем swa_mask</span></a></li>
+<li><a class="toc-link" data-step="010-check-granicy" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/010-check-granicy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Проверка: window=n и window=1</span></a></li>
+<li><a class="toc-link" data-step="011-skolko-kletok" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/011-skolko-kletok/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Сколько клеток осталось: Σ min(i+1, W)</span></a></li>
+<li><a class="toc-link" data-step="012-count-attended" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/012-count-attended/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Пишем count_attended</span></a></li>
+<li><a class="toc-link" data-step="013-chestnoe-sravnenie" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/013-chestnoe-sravnenie/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">4.3× против рекламных 8×</span></a></li>
+<li><a class="toc-link" data-step="014-check-4x" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/014-check-4x/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Проверка: с чем сравнивать N·W</span></a></li>
+<li><a class="toc-link" data-step="015-kv-usyhaet" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/015-kv-usyhaet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">KV cache ужимается до последних W токенов</span></a></li>
+<li><a class="toc-link" data-step="016-cena-kachestva" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/016-cena-kachestva/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Чем платит чистый SWA: дальний поиск</span></a></li>
+<li><a class="toc-link" data-step="017-pole-zreniya" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/017-pole-zreniya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Перекрытие окон: L·(W−1)+1 токенов назад</span></a></li>
+<li><a class="toc-link" data-step="018-erf" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/018-erf/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Пишем effective_receptive_field</span></a></li>
+<li><a class="toc-link" data-step="019-check-13" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/019-check-13/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Проверка: 4 слоя с окном 4 — почему 13, а не 16</span></a></li>
+<li><a class="toc-link" data-step="020-smes-5-1" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/020-smes-5-1/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Смесь слоёв 5:1 у Gemma 3</span></a></li>
+<li><a class="toc-link" data-step="021-sparse-shablon" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/021-sparse-shablon/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Sparse: шаблон разреженности выбирают заранее</span></a></li>
+<li><a class="toc-link" data-step="022-local-strided" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/022-local-strided/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Local + strided: окно плюс каждый stride-й токен</span></a></li>
+<li><a class="toc-link is-current" data-step="023-strided-mask" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/023-strided-mask/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Пишем strided_mask</span></a></li>
+<li><a class="toc-link" data-step="024-kolonka-nol" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/024-kolonka-nol/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Побочный эффект: колонка 0 открыта всегда</span></a></li>
+<li><a class="toc-link" data-step="025-check-mayaki" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/025-check-mayaki/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Проверка: сколько колонок откроет stride=8 при i=100</span></a></li>
+<li><a class="toc-link" data-step="026-longformer-bigbird" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/026-longformer-bigbird/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Longformer и BigBird: local + global + random</span></a></li>
+<li><a class="toc-link" data-step="027-native-sparse" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/027-native-sparse/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Native Sparse Attention: разреженность учат</span></a></li>
+<li><a class="toc-link" data-step="028-yadra-a-ne-matematika" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/028-yadra-a-ne-matematika/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Экономию даёт ядро, а не маска</span></a></li>
+<li><a class="toc-link" data-step="029-check-sparse" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/029-check-sparse/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Проверка: почему маскирование в лоб ничего не экономит</span></a></li>
+<li><a class="toc-link" data-step="030-attention-sink" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/030-attention-sink/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Attention sink: softmax обязан раздать всю единицу</span></a></li>
+<li><a class="toc-link" data-step="031-odna-stroka" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/031-odna-stroka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Одна строка attention под маской</span></a></li>
+<li><a class="toc-link" data-step="032-masked-row" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/032-masked-row/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Пишем masked_attention_row</span></a></li>
+<li><a class="toc-link" data-step="033-diff-formula" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/033-diff-formula/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Две карты и вычитание с коэффициентом λ</span></a></li>
+<li><a class="toc-link" data-step="034-diff-row" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/034-diff-row/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Пишем diff_attention_row</span></a></li>
+<li><a class="toc-link" data-step="035-stok-vyuchivaetsya" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/035-stok-vyuchivaetsya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Сток выучивается — на случайных Q/K его нет</span></a></li>
+<li><a class="toc-link" data-step="036-check-lambda" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/036-check-lambda/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Проверка: считаем 0.5 и 0.3 при λ = 0.6</span></a></li>
+<li><a class="toc-link" data-step="037-diff-rezultaty" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/037-diff-rezultaty/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Что даёт DIFF Transformer и чем платит</span></a></li>
+<li><a class="toc-link" data-step="038-kv-v-baytah" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/038-kv-v-baytah/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">KV cache в байтах для каждого варианта</span></a></li>
+<li><a class="toc-link" data-step="039-kv-cache-bytes" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/039-kv-cache-bytes/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Пишем kv_cache_bytes</span></a></li>
+<li><a class="toc-link" data-step="040-visual-kv-scale" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/040-visual-kv-scale/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Один параметр двигает VRAM на два порядка</span></a></li>
+<li><a class="toc-link" data-step="041-tablica-variantov" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/041-tablica-variantov/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">Таблица вариантов: бесплатных строк нет</span></a></li>
+<li><a class="toc-link" data-step="042-check-tablica" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/042-check-tablica/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Проверка: кто платит дважды и за что</span></a></li>
+<li><a class="toc-link" data-step="043-flexattention" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/043-flexattention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">43</span><span class="toc-title">FlexAttention: маска как функция на Python</span></a></li>
+<li><a class="toc-link" data-step="044-kogda-chto-brat" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/044-kogda-chto-brat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">44</span><span class="toc-title">Порог 32K и правило выбора топологии</span></a></li>
+<li><a class="toc-link" data-step="045-skill-picker" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/045-skill-picker/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">45</span><span class="toc-title">Артефакт: скилл-подборщик топологии attention</span></a></li>
+<li><a class="toc-link" data-step="046-quiz" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/046-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">46</span><span class="toc-title">Итоговая проверка урока</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Пишем strided_mask</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>У тебя уже есть <code>swa_mask</code> из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/009-swa-mask/">шага 9</a>: строка 500 видит четыре колонки перед собой и всё. Позиция 12 для неё не существует — до неё придётся добираться через слои, как в <a href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/017-pole-zreniya/">шаге 17</a>. А что если оставить окно как есть, но дополнительно приоткрыть редкие колонки далеко назад — те самые «маячки» из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/022-local-strided/">шага 22</a>?</p>
+<p>Соблазн — написать одно условие на клетку: «открывай, если попадает в окно <strong>или</strong> делится на stride». Работает, но читается тяжело и легко ошибиться в границах. Проще думать не про клетку, а про два прохода по одной и той же строке.</p>
+<p>Заводишь матрицу <code>n × n</code>, целиком забитую <code>-inf</code> — всё закрыто. Первый проход по строке <code>i</code> открывает плотный кусок: от <code>max(0, i - window + 1)</code> до <code>i</code> включительно. Второй проход идёт с шагом <code>stride</code> от начала строки и открывает каждую <code>stride</code>-ю колонку — но только до <code>i</code> включительно, не дальше. Это важнее всего: как только маячок заедет за диагональ, токен начнёт читать будущее, и причинность из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/006-causal-mask/">шага 6</a> сломается.</p>
+<p>Проходы перекрываются: часть маячков падает прямо внутрь окна. Ничего страшного — ты пишешь <code>0.0</code> поверх <code>0.0</code>, результат тот же. Зато становится понятно, почему оценка <code>W + N/stride</code> из <a href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/022-local-strided/">шага 22</a> — прикидка сверху, а не точный счёт: часть колонок посчитана дважды.</p>
+<p>Проверяй так: <code>n=12, window=2, stride=3</code>, распечатай маску. Над диагональю — сплошной <code>-inf</code>, вдоль неё — узкая полоса, а слева от неё вертикальные полосы через каждые три колонки. Клетка <code>(i, i)</code> открыта в любой строке: токен всегда видит сам себя.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Красишь длинную стену валиком, краска одна. Сначала прокатываешь широкую полосу вдоль пола, потом отдельно проходишь узкие вертикальные штрихи по всей стене через каждый метр. Там, где штрих попал на уже прокрашенную полосу, ты просто мажешь белым по белому — хуже не стало. Стене всё равно, сколько раз по ней проехали: важно только, что в итоге покрашено, а что нет.</p>
+</blockquote></div>
+
+
+<section class="practice-panel">
+<h2 class="practice-title">Практика: <code>strided_mask</code></h2>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
+<div class="practice-actions">
+<button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
+<button type="button" class="nav-button" data-reset>Сбросить</button>
+<button type="button" class="nav-button" data-show-solution>Показать решение</button>
+</div>
+<p class="run-status" data-run-status></p>
+<div data-results></div>
+<pre class="solution" data-solution hidden></pre>
+<script type="application/json" data-exercise>{"slug":"p07-l15-attention-variants","fn":"strided_mask","functions":["causal_mask","swa_mask","strided_mask","count_attended","effective_receptive_field","masked_attention_row","diff_attention_row","kv_cache_bytes"],"urls":{"template":"/ai-course-lab/exercise/p07-l15-attention-variants/template.py","test":"/ai-course-lab/exercise/p07-l15-attention-variants/test.py","solution":"/ai-course-lab/exercise/p07-l15-attention-variants/solution.py"},"assets":{"pyodide":"/ai-course-lab/assets/pyodide/","harness":"/ai-course-lab/assets/harness.py"}}</script>
+</section>
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/022-local-strided/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/07-transformers-deep-dive__15-attention-variants/024-kolonka-nol/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"07-transformers-deep-dive__15-attention-variants","stepId":"023-strided-mask","number":23,"plannedCount":46}</script>
+<script src="/ai-course-lab/assets/editor.js"></script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+<script>
+(function () {
+  var node = document.querySelector("[data-exercise]");
+  if (!node) return;
+  var data = JSON.parse(node.textContent || "{}");
+
+  var area = document.querySelector("[data-code]");
+  var runButton = document.querySelector("[data-run]");
+  var resetButton = document.querySelector("[data-reset]");
+  var solutionButton = document.querySelector("[data-show-solution]");
+  var solutionBox = document.querySelector("[data-solution]");
+  var status = document.querySelector("[data-run-status]");
+  var results = document.querySelector("[data-results]");
+  if (!area || !runButton) return;
+
+  var storageKey = "course-exercise:" + data.slug;
+  var template = "";
+  // Полный файл упражнения. В редакторе видна только функция шага, но на
+  // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
+  // сразу, и файл с одной функцией не загрузился бы вовсе.
+  var full = "";
+
+  /**
+   * Делит файл на «до функции», саму функцию и «после».
+   *
+   * Границы ищутся по тексту, а не по номерам строк из сборки: файл живёт в
+   * браузере и уже мог измениться — человек дописал функцию выше, и любые
+   * заранее посчитанные номера уехали бы.
+   */
+  function split(source, fn) {
+    var lines = source.split("\n");
+    var head = new RegExp("^(async\\s+)?def\\s+" + fn + "\\s*\\(");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (head.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    // Конец блока — только НАСТОЯЩЕЕ следующее определение, а не любая строка
+    // с левого края.
+    //
+    // Раньше границей считался левый край как таковой, и обломок вроде
+    // «for x in v))», случайно оставшийся без отступа, оказывался снаружи
+    // блока: замена функции его не трогала, файл навсегда переставал
+    // разбираться, а в редакторе этой строки не видно. Теперь такой мусор
+    // остаётся внутри блока и уходит вместе с ним.
+    var boundary = /^(async\s+def\s|def\s|class\s|@|import\s|from\s|if\s+__name__)/;
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      if (boundary.test(lines[j])) { end = j; break; }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+
+    return {
+      before: lines.slice(0, start).join("\n"),
+      code: lines.slice(start, end).join("\n"),
+      after: lines.slice(end).join("\n"),
+    };
+  }
+
+  function join(source, fn, code) {
+    var parts = split(source, fn);
+    if (!parts) return source;
+    return [parts.before, code, parts.after].join("\n");
+  }
+
+  function save() {
+    full = join(full, data.fn, area.value);
+    try {
+      localStorage.setItem(storageKey, full);
+    } catch (error) {
+      // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
+    }
+  }
+
+  function setCode(text) {
+    area.value = text;
+    // Редактор, если он поднялся, слушает это событие и подхватывает текст.
+    area.dispatchEvent(new Event("course-editor-reset"));
+  }
+
+  function text(url) {
+    return fetch(url).then(function (response) {
+      if (!response.ok) throw new Error("не удалось загрузить " + url);
+      return response.text();
+    });
+  }
+
+  // Заготовка нужна всегда: по ней работает «Сбросить».
+  text(data.urls.template).then(function (source) {
+    template = source;
+    var saved = null;
+    try {
+      saved = localStorage.getItem(storageKey);
+    } catch (error) {
+      saved = null;
+    }
+    full = saved === null ? source : saved;
+
+    var parts = split(full, data.fn);
+    // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
+    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
+    // или чужим кодом.
+    if (!parts) {
+      full = source;
+      parts = split(full, data.fn);
+    }
+    setCode(parts ? parts.code : full);
+    if (window.CourseEditor) window.CourseEditor.mount(area);
+  });
+
+  area.addEventListener("input", save);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (!template) return;
+      if (!window.confirm("Вернуть заготовку этой функции? Написанный код пропадёт.")) return;
+      // Сбрасывается только функция шага: остальное в файле человек писал на
+      // других шагах, и терять это из-за одной кнопки он не подписывался.
+      var fresh = split(template, data.fn);
+      setCode(fresh ? fresh.code : template);
+      save();
+    });
+  }
+
+  if (solutionButton && solutionBox && data.urls.solution) {
+    solutionButton.addEventListener("click", function () {
+      if (!solutionBox.hidden) {
+        solutionBox.hidden = true;
+        solutionButton.textContent = "Показать решение";
+        return;
+      }
+      text(data.urls.solution).then(function (source) {
+        solutionBox.textContent = source;
+        solutionBox.hidden = false;
+        solutionButton.textContent = "Скрыть решение";
+      });
+    });
+  } else if (solutionButton) {
+    solutionButton.hidden = true;
+  }
+
+  var pyodidePromise = null;
+
+  function loadPyodideOnce() {
+    if (pyodidePromise) return pyodidePromise;
+
+    pyodidePromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = data.assets.pyodide + "pyodide.js";
+      script.onload = resolve;
+      script.onerror = function () {
+        reject(new Error("не удалось загрузить Python"));
+      };
+      document.head.appendChild(script);
+    })
+      .then(function () {
+        return window.loadPyodide({ indexURL: data.assets.pyodide });
+      })
+      .then(function (pyodide) {
+        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+          pyodide.FS.mkdirTree("/exercise");
+          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          pyodide.runPython(files[0]);
+          return pyodide;
+        });
+      })
+      .catch(function (error) {
+        // Неудачную загрузку нельзя оставлять в памяти: иначе каждая
+        // следующая попытка мгновенно спотыкается о тот же отказ, и кнопка
+        // «Запустить тесты» перестаёт работать до перезагрузки страницы.
+        pyodidePromise = null;
+        throw error;
+      });
+
+    return pyodidePromise;
+  }
+
+  function render(report) {
+    results.innerHTML = "";
+    if (report.loadError) {
+      // Статус обязан смениться: без этого на экране остаётся «Гоняю тесты…»,
+      // и прогон выглядит зависшим, хотя он давно закончился ошибкой.
+      status.className = "run-status";
+      status.textContent = "Файл упражнения не разобрался — Python остановился на этом месте:";
+
+      var problem = document.createElement("p");
+      problem.className = "run-error";
+      problem.textContent = report.loadError;
+      results.appendChild(problem);
+
+      // Файл не разобрался, а видно в редакторе только одну функцию: ошибка
+      // вполне может сидеть в другой части файла — например, осталась от
+      // прежних правок. Дать выход, а не оставлять человека гадать.
+      var rescue = document.createElement("button");
+      rescue.type = "button";
+      rescue.className = "nav-button";
+      rescue.textContent = "Сбросить весь файл упражнения";
+      rescue.addEventListener("click", function () {
+        if (!template) return;
+        if (!window.confirm("Вернуть всё упражнение к заготовке? Пропадёт код и других шагов.")) {
+          return;
+        }
+        full = template;
+        var fresh = split(full, data.fn);
+        setCode(fresh ? fresh.code : full);
+        save();
+        results.innerHTML = "";
+        status.textContent = "Упражнение сброшено к заготовке.";
+      });
+      results.appendChild(rescue);
+      return;
+    }
+
+    var passed = 0;
+    var list = document.createElement("ul");
+    list.className = "test-list";
+    for (var i = 0; i < report.results.length; i += 1) {
+      var item = report.results[i];
+      if (item.passed) passed += 1;
+      var row = document.createElement("li");
+      row.className = item.passed ? "test is-passed" : "test is-failed";
+      row.textContent = (item.passed ? "✓ " : "✗ ") + item.name + (item.message ? " — " + item.message : "");
+      list.appendChild(row);
+    }
+
+    var total = report.results.length;
+    status.textContent =
+      passed + " из " + total + " зелёные" +
+      (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
+    status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    results.appendChild(list);
+  }
+
+  runButton.addEventListener("click", function () {
+    runButton.disabled = true;
+    status.className = "run-status";
+    status.textContent = "Готовлю Python…";
+
+    loadPyodideOnce()
+      .then(function (pyodide) {
+        status.textContent = "Гоняю тесты…";
+        // В Python уезжает файл целиком, а не то, что в редакторе: тесты
+        // импортируют из него все имена упражнения разом.
+        pyodide.globals.set(
+          "PAYLOAD",
+          JSON.stringify({
+            code: join(full, data.fn, area.value),
+            fn: data.fn,
+            functions: data.functions,
+          })
+        );
+        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+      })
+      .then(render)
+      .catch(function (error) {
+        status.className = "run-status";
+        status.textContent = String(error && error.message ? error.message : error);
+      })
+      .then(function () {
+        runButton.disabled = false;
+      });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Цикл взаимодействия агента со средой</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ed;
+      --canvas: #fffdf8;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #9aa4b2;
+      --agent: #e8f1ff;
+      --agent-edge: #2866c7;
+      --environment: #fff0dc;
+      --environment-edge: #b85d16;
+      --state: #2866c7;
+      --action: #9a3f86;
+      --response: #16836f;
+      --tuple: #eee9ff;
+      --tuple-edge: #6551b9;
+      --error: #a52b2b;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --canvas: #161c27;
+        --ink: #f2f4f8;
+        --muted: #b1bac8;
+        --line: #718096;
+        --agent: #172d4d;
+        --agent-edge: #75aaff;
+        --environment: #3a281b;
+        --environment-edge: #ffad68;
+        --state: #75aaff;
+        --action: #f09bdc;
+        --response: #61d5bb;
+        --tuple: #292442;
+        --tuple-edge: #b6a6ff;
+        --error: #ff8f8f;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: unset;
+    }
+
+    main {
+      width: 100%;
+    }
+
+    h2 {
+      margin: unset;
+      font-size: 22px;
+      font-weight: bold;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--canvas);
+      text-rendering: geometricPrecision;
+    }
+
+    .flow {
+      fill: none;
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .flow.state {
+      stroke: var(--state);
+    }
+
+    .flow.action {
+      stroke: var(--action);
+    }
+
+    .flow.response {
+      stroke: var(--response);
+    }
+
+    .arrow-head {
+      stroke: none;
+    }
+
+    .arrow-head.state {
+      fill: var(--state);
+    }
+
+    .arrow-head.action {
+      fill: var(--action);
+    }
+
+    .arrow-head.response {
+      fill: var(--response);
+    }
+
+    .node {
+      stroke-width: 3px;
+    }
+
+    .node.agent {
+      fill: var(--agent);
+      stroke: var(--agent-edge);
+    }
+
+    .node.environment {
+      fill: var(--environment);
+      stroke: var(--environment-edge);
+    }
+
+    .node-title {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+      text-anchor: middle;
+    }
+
+    .node-subtitle {
+      fill: var(--muted);
+      font-size: 14px;
+      text-anchor: middle;
+    }
+
+    .label {
+      font-size: 17px;
+      font-weight: bold;
+      paint-order: stroke;
+      stroke: var(--canvas);
+      stroke-width: 6px;
+      stroke-linejoin: round;
+    }
+
+    .label.state {
+      fill: var(--state);
+    }
+
+    .label.action {
+      fill: var(--action);
+    }
+
+    .label.response {
+      fill: var(--response);
+    }
+
+    .side-label {
+      fill: var(--muted);
+      font-size: 13px;
+      paint-order: stroke;
+      stroke: var(--canvas);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .tuple-frame {
+      fill: var(--tuple);
+      stroke: var(--tuple-edge);
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .tuple-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+      text-anchor: middle;
+    }
+
+    .tuple-detail {
+      fill: var(--muted);
+      font-size: 13px;
+      text-anchor: middle;
+    }
+
+    .fallback {
+      color: var(--error);
+      border: 2px solid var(--error);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main aria-labelledby="diagram-heading">
+    <h2 id="diagram-heading">Цикл взаимодействия агента со средой</h2>
+
+    <svg
+      id="diagram"
+      viewBox="0 35 960 355"
+      width="960"
+      height="355"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Цикл агента и среды в марковском процессе принятия решений</title>
+      <desc id="svg-description">
+        Среда сообщает агенту состояние, агент выбирает действие, после чего
+        среда возвращает следующее состояние и награду.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать замкнутый цикл: состояние sₜ, действие aₜ,
+      следующее состояние sₜ₊₁ и награду rₜ, а также кортеж MDP
+      (S, A, P, R, γ).
+    </p>
+  </main>
+
+  <script>
+    const diagramData = [
+      {
+        kind: "meta",
+        origin: { x: 30, y: 10 },
+        scale: { x: 1, y: 1 },
+        zero: 0,
+        one: 1,
+        two: 2,
+        headLength: 15,
+        headWing: 8,
+        titleShift: -6,
+        subtitleShift: 24,
+        labelPadding: 14
+      },
+      {
+        kind: "arrow",
+        tone: "state",
+        points: [
+          { x: 650, y: 75 },
+          { x: 250, y: 75 }
+        ]
+      },
+      {
+        kind: "arrow",
+        tone: "action",
+        points: [
+          { x: 250, y: 150 },
+          { x: 650, y: 150 }
+        ]
+      },
+      {
+        kind: "arrow",
+        tone: "response",
+        points: [
+          { x: 725, y: 215 },
+          { x: 725, y: 275 },
+          { x: 175, y: 275 },
+          { x: 175, y: 215 }
+        ]
+      },
+      {
+        kind: "node",
+        role: "agent",
+        center: { x: 175, y: 150 },
+        radius: 65,
+        title: "АГЕНТ",
+        subtitle: "выбирает действие"
+      },
+      {
+        kind: "node",
+        role: "environment",
+        center: { x: 725, y: 150 },
+        radius: 65,
+        title: "СРЕДА",
+        subtitle: "задаёт переход и награду"
+      },
+      {
+        kind: "label",
+        tone: "state",
+        point: { x: 450, y: 55 },
+        anchor: "middle",
+        text: "текущее состояние sₜ"
+      },
+      {
+        kind: "label",
+        tone: "action",
+        point: { x: 450, y: 128 },
+        anchor: "middle",
+        text: "действие aₜ"
+      },
+      {
+        kind: "label",
+        tone: "response",
+        point: { x: 475, y: 258 },
+        anchor: "middle",
+        text: "следующее состояние sₜ₊₁"
+      },
+      {
+        kind: "label",
+        tone: "response",
+        point: { x: 475, y: 301 },
+        anchor: "middle",
+        text: "награда rₜ"
+      },
+      {
+        kind: "side",
+        point: { x: 105, y: 245 },
+        anchor: "end",
+        text: "новый круг"
+      },
+      {
+        kind: "side",
+        point: { x: 746, y: 245 },
+        anchor: "start",
+        text: "ответ среды"
+      },
+      {
+        kind: "tuple",
+        points: [
+          { x: 220, y: 318 },
+          { x: 680, y: 318 },
+          { x: 680, y: 372 },
+          { x: 220, y: 372 }
+        ],
+        titlePoint: { x: 450, y: 341 },
+        detailPoint: { x: 450, y: 361 },
+        title: "Кортеж MDP: (S, A, P, R, γ)",
+        detail: "состояния · действия · переходы · награды · дисконт"
+      }
+    ];
+
+    const meta = diagramData.find((item) => item.kind === "meta");
+    const origin = meta.origin;
+    const scale = meta.scale;
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const makeElement = (tag, attributes, text) => {
+        const element = document.createElementNS(namespace, tag);
+
+        for (const [name, value] of Object.entries(attributes)) {
+          element.setAttribute(name, value);
+        }
+
+        if (text) {
+          element.textContent = text;
+        }
+
+        return element;
+      };
+
+      const pointString = (points) =>
+        points
+          .map(({ x, y }) => `${sx(x)},${sy(y)}`)
+          .join(" ");
+
+      const makeArrowHead = (arrow) => {
+        const tip = arrow.points.at(-meta.one);
+        const previous = arrow.points.at(-meta.two);
+        const dx = tip.x - previous.x;
+        const dy = tip.y - previous.y;
+        const length = Math.hypot(dx, dy);
+
+        if (!length) {
+          throw new Error("У стрелки совпадают хвост и наконечник");
+        }
+
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = tip.x - ux * meta.headLength;
+        const baseY = tip.y - uy * meta.headLength;
+        const normalX = -uy * meta.headWing;
+        const normalY = ux * meta.headWing;
+        const vertices = [
+          { x: tip.x, y: tip.y },
+          { x: baseX + normalX, y: baseY + normalY },
+          { x: baseX - normalX, y: baseY - normalY }
+        ];
+
+        return makeElement("polygon", {
+          points: pointString(vertices),
+          class: `arrow-head ${arrow.tone}`,
+          "aria-hidden": "true"
+        });
+      };
+
+      const arrows = diagramData.filter((item) => item.kind === "arrow");
+
+      for (const arrow of arrows) {
+        drawing.appendChild(
+          makeElement("polyline", {
+            points: pointString(arrow.points),
+            class: `flow ${arrow.tone}`,
+            "aria-hidden": "true"
+          })
+        );
+        drawing.appendChild(makeArrowHead(arrow));
+      }
+
+      const nodes = diagramData.filter((item) => item.kind === "node");
+
+      for (const node of nodes) {
+        const group = makeElement("g", {
+          class: `node-group ${node.role}`
+        });
+
+        group.appendChild(
+          makeElement("circle", {
+            cx: sx(node.center.x),
+            cy: sy(node.center.y),
+            r: Math.abs(sx(node.radius) - sx(meta.zero)),
+            class: `node ${node.role}`
+          })
+        );
+
+        group.appendChild(
+          makeElement(
+            "text",
+            {
+              x: sx(node.center.x),
+              y: sy(node.center.y + meta.titleShift),
+              class: "node-title"
+            },
+            node.title
+          )
+        );
+
+        group.appendChild(
+          makeElement(
+            "text",
+            {
+              x: sx(node.center.x),
+              y: sy(node.center.y + meta.subtitleShift),
+              class: "node-subtitle"
+            },
+            node.subtitle
+          )
+        );
+
+        drawing.appendChild(group);
+      }
+
+      const labels = diagramData.filter((item) => item.kind === "label");
+
+      for (const label of labels) {
+        drawing.appendChild(
+          makeElement(
+            "text",
+            {
+              x: sx(label.point.x),
+              y: sy(label.point.y),
+              class: `label ${label.tone}`,
+              "text-anchor": label.anchor
+            },
+            label.text
+          )
+        );
+      }
+
+      const sideLabels = diagramData.filter((item) => item.kind === "side");
+
+      for (const label of sideLabels) {
+        drawing.appendChild(
+          makeElement(
+            "text",
+            {
+              x: sx(label.point.x),
+              y: sy(label.point.y),
+              class: "side-label",
+              "text-anchor": label.anchor
+            },
+            label.text
+          )
+        );
+      }
+
+      const tuple = diagramData.find((item) => item.kind === "tuple");
+
+      drawing.appendChild(
+        makeElement("polygon", {
+          points: pointString(tuple.points),
+          class: "tuple-frame"
+        })
+      );
+
+      drawing.appendChild(
+        makeElement(
+          "text",
+          {
+            x: sx(tuple.titlePoint.x),
+            y: sy(tuple.titlePoint.y),
+            class: "tuple-title"
+          },
+          tuple.title
+        )
+      );
+
+      drawing.appendChild(
+        makeElement(
+          "text",
+          {
+            x: sx(tuple.detailPoint.x),
+            y: sy(tuple.detailPoint.y),
+            class: "tuple-detail"
+          },
+          tuple.detail
+        )
+      );
+
+      svg.removeAttribute("aria-busy");
+    } catch (error) {
+      const failedDiagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      if (failedDiagram) {
+        failedDiagram.hidden = true;
+      }
+
+      if (fallback) {
+        fallback.hidden = false;
+      }
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

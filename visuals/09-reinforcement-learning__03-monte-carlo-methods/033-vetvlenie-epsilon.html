@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как ε=0.1 меняет выбор действия</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #526078;
+    --line: #64748b;
+    --greedy: #2563eb;
+    --greedy-fill: #dbeafe;
+    --random: #c2410c;
+    --random-fill: #ffedd5;
+    --best-fill: #dcfce7;
+    --best-line: #15803d;
+    --other-fill: #f1f5f9;
+    --guide: #d7dee9;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101621;
+      --panel: #182131;
+      --text: #edf3ff;
+      --muted: #b8c4d8;
+      --line: #94a3b8;
+      --greedy: #60a5fa;
+      --greedy-fill: #172f52;
+      --random: #fb923c;
+      --random-fill: #512814;
+      --best-fill: #163d2a;
+      --best-line: #4ade80;
+      --other-fill: #273244;
+      --guide: #344156;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  .frame {
+    max-width: 1000px;
+    background: var(--bg);
+  }
+
+  .heading {
+    margin: 12px 16px 6px;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow.greedy-flow {
+    stroke: var(--greedy);
+    stroke-width: 4;
+  }
+
+  .flow.random-flow {
+    stroke: var(--random);
+    stroke-width: 2.5;
+  }
+
+  .arrow-head {
+    stroke: none;
+    fill: var(--line);
+  }
+
+  .arrow-head.greedy-flow {
+    fill: var(--greedy);
+  }
+
+  .arrow-head.random-flow {
+    fill: var(--random);
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+  }
+
+  .fork {
+    fill: var(--panel);
+    stroke: var(--text);
+    stroke-width: 2.5;
+  }
+
+  .greedy-node {
+    fill: var(--greedy-fill);
+    stroke: var(--greedy);
+    stroke-width: 2.5;
+  }
+
+  .random-node {
+    fill: var(--random-fill);
+    stroke: var(--random);
+    stroke-width: 2.5;
+  }
+
+  .best-node {
+    fill: var(--best-fill);
+    stroke: var(--best-line);
+    stroke-width: 2.5;
+  }
+
+  .other-node {
+    fill: var(--other-fill);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .guide {
+    fill: none;
+    stroke: var(--guide);
+    stroke-width: 1.5;
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 18px;
+    dominant-baseline: middle;
+  }
+
+  .large {
+    font-size: 26px;
+    font-weight: bold;
+  }
+
+  .strong {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 15px;
+  }
+
+  .greedy-text {
+    fill: var(--greedy);
+  }
+
+  .random-text {
+    fill: var(--random);
+  }
+
+  .best-text {
+    fill: var(--best-line);
+  }
+
+  .fallback {
+    margin: 16px;
+    padding: 16px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1 class="heading">Как ε=0.1 меняет выбор действия</h1>
+  <svg id="diagram"
+       viewBox="0 0 1000 430"
+       width="1000"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Развилка ста решений при ε, равном 0.1</title>
+    <desc id="svg-desc">
+      Из ста решений девяносто идут к жадному действию по Q, а десять —
+      к случайному выбору из полного набора четырёх действий.
+    </desc>
+    <g id="plot"></g>
+  </svg>
+  <p id="fallback" class="fallback" hidden>
+    Из 100 решений примерно 90 выбирают лучшее действие по Q, а примерно
+    10 запускают случайный выбор из всех 4 действий. Поэтому случайная
+    ветка тоже может снова привести к лучшему действию.
+  </p>
+</main>
+
+<script>
+const data = Object.freeze({
+  canvas: { width: 1000, height: 430 },
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  counts: {
+    total: 100,
+    greedy: 90,
+    random: 10,
+    perAction: 2.5,
+    bestTotal: 92.5,
+    epsilon: 0.1,
+    actions: 4
+  },
+  math: {
+    half: 2
+  },
+  arrow: {
+    length: 13,
+    halfWidth: 7
+  },
+  nodes: {
+    source: {
+      center: { x: 125, y: 190 },
+      width: 170,
+      height: 76,
+      className: "node"
+    },
+    fork: {
+      center: { x: 310, y: 190 },
+      halfWidth: 44,
+      halfHeight: 50,
+      className: "fork"
+    },
+    greedy: {
+      center: { x: 500, y: 100 },
+      width: 220,
+      height: 80,
+      className: "greedy-node"
+    },
+    random: {
+      center: { x: 500, y: 278 },
+      width: 220,
+      height: 80,
+      className: "random-node"
+    },
+    set: {
+      center: { x: 735, y: 278 },
+      width: 180,
+      height: 80,
+      className: "random-node"
+    },
+    best: {
+      center: { x: 830, y: 100 },
+      width: 190,
+      height: 76,
+      className: "best-node"
+    }
+  },
+  actionNodes: [
+    {
+      center: { x: 930, y: 210 },
+      width: 120,
+      height: 32,
+      className: "best-node",
+      label: "лучшее"
+    },
+    {
+      center: { x: 930, y: 258 },
+      width: 120,
+      height: 32,
+      className: "other-node",
+      label: "другое"
+    },
+    {
+      center: { x: 930, y: 306 },
+      width: 120,
+      height: 32,
+      className: "other-node",
+      label: "другое"
+    },
+    {
+      center: { x: 930, y: 354 },
+      width: 120,
+      height: 32,
+      className: "other-node",
+      label: "другое"
+    }
+  ],
+  connections: {
+    sourceFork: {
+      from: { x: 210, y: 190 },
+      to: { x: 266, y: 190 },
+      className: "flow"
+    },
+    forkGreedy: {
+      from: { x: 344, y: 164 },
+      to: { x: 390, y: 100 },
+      className: "flow greedy-flow"
+    },
+    forkRandom: {
+      from: { x: 344, y: 216 },
+      to: { x: 390, y: 278 },
+      className: "flow random-flow"
+    },
+    greedyBest: {
+      from: { x: 610, y: 100 },
+      to: { x: 735, y: 100 },
+      className: "flow greedy-flow"
+    },
+    randomSet: {
+      from: { x: 610, y: 278 },
+      to: { x: 645, y: 278 },
+      className: "flow random-flow"
+    }
+  },
+  fanOrigin: { x: 825, y: 278 },
+  fanTargets: [
+    { x: 870, y: 210 },
+    { x: 870, y: 258 },
+    { x: 870, y: 306 },
+    { x: 870, y: 354 }
+  ],
+  labels: [
+    {
+      point: { x: 125, y: 178 },
+      text: "100 решений",
+      className: "strong",
+      anchor: "middle"
+    },
+    {
+      point: { x: 125, y: 204 },
+      text: "ε-жадная политика",
+      className: "small",
+      anchor: "middle"
+    },
+    {
+      point: { x: 310, y: 190 },
+      text: "ε = 0.1",
+      className: "strong",
+      anchor: "middle"
+    },
+    {
+      point: { x: 500, y: 86 },
+      text: "90 из 100",
+      className: "large greedy-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 500, y: 119 },
+      text: "жадно по Q",
+      className: "strong greedy-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 500, y: 264 },
+      text: "10 из 100",
+      className: "large random-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 500, y: 297 },
+      text: "случайно",
+      className: "strong random-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 735, y: 264 },
+      text: "весь ACTIONS",
+      className: "strong random-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 735, y: 296 },
+      text: "4 действия",
+      className: "small",
+      anchor: "middle"
+    },
+    {
+      point: { x: 830, y: 90 },
+      text: "лучшее действие",
+      className: "strong best-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 830, y: 116 },
+      text: "по Q",
+      className: "small",
+      anchor: "middle"
+    },
+    {
+      point: { x: 830, y: 26 },
+      text: "Итого лучшее: ≈ 92.5 из 100",
+      className: "strong best-text",
+      anchor: "middle"
+    },
+    {
+      point: { x: 830, y: 48 },
+      text: "90 + ≈ 2.5 из случайной ветки",
+      className: "small",
+      anchor: "middle"
+    },
+    {
+      point: { x: 500, y: 414 },
+      text: "Случайная ветка: каждому из 4 действий ≈ 2.5 из 100",
+      className: "small",
+      anchor: "middle"
+    }
+  ]
+});
+
+const origin = Object.freeze(data.origin);
+const scale = Object.freeze(data.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function element(name, attributes, className) {
+  const node = document.createElementNS(SVG_NS, name);
+  Object.entries(attributes).forEach(([key, value]) => {
+    node.setAttribute(key, String(value));
+  });
+  if (className) node.setAttribute("class", className);
+  return node;
+}
+
+function pointList(points) {
+  return points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+}
+
+function boxPoints(specification) {
+  const halfWidth = specification.width / data.math.half;
+  const halfHeight = specification.height / data.math.half;
+  return [
+    {
+      x: specification.center.x - halfWidth,
+      y: specification.center.y - halfHeight
+    },
+    {
+      x: specification.center.x + halfWidth,
+      y: specification.center.y - halfHeight
+    },
+    {
+      x: specification.center.x + halfWidth,
+      y: specification.center.y + halfHeight
+    },
+    {
+      x: specification.center.x - halfWidth,
+      y: specification.center.y + halfHeight
+    }
+  ];
+}
+
+function drawBox(parent, specification) {
+  parent.appendChild(element(
+    "polygon",
+    { points: pointList(boxPoints(specification)) },
+    specification.className
+  ));
+}
+
+function drawDiamond(parent, specification) {
+  const points = [
+    {
+      x: specification.center.x,
+      y: specification.center.y - specification.halfHeight
+    },
+    {
+      x: specification.center.x + specification.halfWidth,
+      y: specification.center.y
+    },
+    {
+      x: specification.center.x,
+      y: specification.center.y + specification.halfHeight
+    },
+    {
+      x: specification.center.x - specification.halfWidth,
+      y: specification.center.y
+    }
+  ];
+  parent.appendChild(element(
+    "polygon",
+    { points: pointList(points) },
+    specification.className
+  ));
+}
+
+function drawArrow(parent, from, to, className) {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const magnitude = Math.hypot(deltaX, deltaY);
+  const unitX = deltaX / magnitude;
+  const unitY = deltaY / magnitude;
+  const base = {
+    x: to.x - unitX * data.arrow.length,
+    y: to.y - unitY * data.arrow.length
+  };
+  const sideX = -unitY * data.arrow.halfWidth;
+  const sideY = unitX * data.arrow.halfWidth;
+  const head = [
+    to,
+    { x: base.x + sideX, y: base.y + sideY },
+    { x: base.x - sideX, y: base.y - sideY }
+  ];
+
+  parent.appendChild(element("line", {
+    x1: sx(from.x),
+    y1: sy(from.y),
+    x2: sx(to.x),
+    y2: sy(to.y)
+  }, className));
+
+  const tone = className.includes("greedy")
+    ? "arrow-head greedy-flow"
+    : className.includes("random")
+      ? "arrow-head random-flow"
+      : "arrow-head";
+
+  parent.appendChild(element(
+    "polygon",
+    { points: pointList(head) },
+    tone
+  ));
+}
+
+function drawLabel(parent, specification) {
+  const node = element("text", {
+    x: sx(specification.point.x),
+    y: sy(specification.point.y),
+    "text-anchor": specification.anchor
+  }, specification.className);
+  node.textContent = specification.text;
+  parent.appendChild(node);
+}
+
+try {
+  const plot = document.getElementById("plot");
+
+  drawArrow(
+    plot,
+    data.connections.sourceFork.from,
+    data.connections.sourceFork.to,
+    data.connections.sourceFork.className
+  );
+  drawArrow(
+    plot,
+    data.connections.forkGreedy.from,
+    data.connections.forkGreedy.to,
+    data.connections.forkGreedy.className
+  );
+  drawArrow(
+    plot,
+    data.connections.forkRandom.from,
+    data.connections.forkRandom.to,
+    data.connections.forkRandom.className
+  );
+  drawArrow(
+    plot,
+    data.connections.greedyBest.from,
+    data.connections.greedyBest.to,
+    data.connections.greedyBest.className
+  );
+  drawArrow(
+    plot,
+    data.connections.randomSet.from,
+    data.connections.randomSet.to,
+    data.connections.randomSet.className
+  );
+
+  data.fanTargets.forEach(target => {
+    drawArrow(
+      plot,
+      data.fanOrigin,
+      target,
+      "flow random-flow"
+    );
+  });
+
+  drawBox(plot, data.nodes.source);
+  drawDiamond(plot, data.nodes.fork);
+  drawBox(plot, data.nodes.greedy);
+  drawBox(plot, data.nodes.random);
+  drawBox(plot, data.nodes.set);
+  drawBox(plot, data.nodes.best);
+
+  data.actionNodes.forEach(action => {
+    drawBox(plot, action);
+    drawLabel(plot, {
+      point: action.center,
+      text: action.label,
+      className: action.className.includes("best")
+        ? "small best-text"
+        : "small",
+      anchor: "middle"
+    });
+  });
+
+  data.labels.forEach(specification => {
+    drawLabel(plot, specification);
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

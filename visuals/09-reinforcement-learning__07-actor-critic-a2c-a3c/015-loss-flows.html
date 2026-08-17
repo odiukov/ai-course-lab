@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Какая часть loss что обновляет</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: white;
+      --ink: black;
+      --muted: dimgray;
+      --frame: slategray;
+      --sum-fill: whitesmoke;
+      --policy: royalblue;
+      --policy-fill: aliceblue;
+      --value: seagreen;
+      --value-fill: honeydew;
+      --entropy: darkorange;
+      --entropy-fill: oldlace;
+      --target-fill: ghostwhite;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: black;
+        --ink: white;
+        --muted: gainsboro;
+        --frame: lightslategray;
+        --sum-fill: darkslategray;
+        --policy: lightskyblue;
+        --policy-fill: darkslateblue;
+        --value: lightgreen;
+        --value-fill: darkgreen;
+        --entropy: orange;
+        --entropy-fill: saddlebrown;
+        --target-fill: darkslategray;
+      }
+    }
+
+    html,
+    body,
+    figure {
+      margin: unset;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, sans-serif;
+    }
+
+    .frame {
+      box-sizing: border-box;
+      width: 100%;
+      background: var(--bg);
+      border: 2px solid var(--frame);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 14px 18px;
+      border-bottom: 2px solid var(--frame);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+    }
+
+    .box {
+      stroke-width: 2px;
+    }
+
+    .flow,
+    .branch {
+      fill: none;
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .branch {
+      stroke: var(--frame);
+    }
+
+    .arrowhead {
+      stroke: none;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    .box-title {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .formula {
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .flow-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .footer {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 18px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="frame" aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Какая часть loss обновляет актёра, критика и исследование</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 390"
+      width="1200"
+      height="390"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Общий loss разделён на policy-loss, value-loss и entropy-loss. Policy-loss обновляет параметры актёра, value-loss обновляет параметры критика, а entropy-loss воздействует на вероятности действий и поддерживает исследование."
+    ></svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать три адресных сигнала общего loss:
+      −A · log π обновляет актёра, 0.5 · (V − target)² обновляет критика,
+      а −0.01 · H(π) изменяет вероятности действий и поддерживает исследование.
+    </p>
+  </figure>
+
+  <script>
+    const diagramData = [
+      {
+        kind: "meta",
+        origin: { x: 20, y: 10 },
+        scale: { x: 10, y: 10 },
+        radius: 0.8,
+        arrow: { head: 1.15, wing: 0.72 },
+        summaryJoin: { x: 24, y: 18 },
+        fork: { x: 29, top: 6, middle: 18, bottom: 30 },
+        footerRule: { x1: 9, x2: 107, y: 34.2 }
+      },
+      {
+        kind: "box",
+        id: "sum",
+        x: 2,
+        y: 8,
+        w: 22,
+        h: 20,
+        stroke: "var(--frame)",
+        fill: "var(--sum-fill)",
+        lines: [
+          { x: 13, y: 12, text: "Общий loss", className: "label box-title" },
+          { x: 13, y: 16, text: "одно число", className: "label formula" },
+          { x: 13, y: 21.4, text: "сумма трёх", className: "label note" },
+          { x: 13, y: 24.2, text: "адресных сигналов", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "policy",
+        x: 34,
+        y: 1,
+        w: 29,
+        h: 10,
+        stroke: "var(--policy)",
+        fill: "var(--policy-fill)",
+        lines: [
+          { x: 48.5, y: 3.7, text: "Policy-loss", className: "label box-title" },
+          { x: 48.5, y: 6.5, text: "−A · log π", className: "label formula" },
+          { x: 48.5, y: 9, text: "A — готовая оценка", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "value",
+        x: 34,
+        y: 13,
+        w: 29,
+        h: 10,
+        stroke: "var(--value)",
+        fill: "var(--value-fill)",
+        lines: [
+          { x: 48.5, y: 15.7, text: "Value-loss", className: "label box-title" },
+          { x: 48.5, y: 18.5, text: "0.5 · (V − target)²", className: "label formula" },
+          { x: 48.5, y: 21, text: "ошибка оценки ценности", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "entropy",
+        x: 34,
+        y: 25,
+        w: 29,
+        h: 10,
+        stroke: "var(--entropy)",
+        fill: "var(--entropy-fill)",
+        lines: [
+          { x: 48.5, y: 27.7, text: "Entropy-loss", className: "label box-title" },
+          { x: 48.5, y: 30.5, text: "−0.01 · H(π)", className: "label formula" },
+          { x: 48.5, y: 33, text: "бонус за разнообразие", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "actor",
+        x: 85,
+        y: 1,
+        w: 29,
+        h: 10,
+        stroke: "var(--policy)",
+        fill: "var(--target-fill)",
+        lines: [
+          { x: 99.5, y: 3.7, text: "Параметры актёра θ", className: "label box-title" },
+          { x: 99.5, y: 6.6, text: "вероятность действия", className: "label note" },
+          { x: 99.5, y: 9, text: "выше или ниже", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "critic",
+        x: 85,
+        y: 13,
+        w: 29,
+        h: 10,
+        stroke: "var(--value)",
+        fill: "var(--target-fill)",
+        lines: [
+          { x: 99.5, y: 15.7, text: "Параметры критика φ", className: "label box-title" },
+          { x: 99.5, y: 18.6, text: "V приближается", className: "label note" },
+          { x: 99.5, y: 21, text: "к target", className: "label note" }
+        ]
+      },
+      {
+        kind: "box",
+        id: "actions",
+        x: 85,
+        y: 25,
+        w: 29,
+        h: 10,
+        stroke: "var(--entropy)",
+        fill: "var(--target-fill)",
+        lines: [
+          { x: 99.5, y: 27.7, text: "Вероятности действий π", className: "label box-title" },
+          { x: 99.5, y: 30.6, text: "не схлопываются", className: "label note" },
+          { x: 99.5, y: 33, text: "исследование дольше", className: "label note" }
+        ]
+      },
+      {
+        kind: "arrow",
+        from: { x: 29, y: 6 },
+        to: { x: 34, y: 6 },
+        color: "var(--policy)"
+      },
+      {
+        kind: "arrow",
+        from: { x: 29, y: 18 },
+        to: { x: 34, y: 18 },
+        color: "var(--value)"
+      },
+      {
+        kind: "arrow",
+        from: { x: 29, y: 30 },
+        to: { x: 34, y: 30 },
+        color: "var(--entropy)"
+      },
+      {
+        kind: "arrow",
+        from: { x: 63, y: 6 },
+        to: { x: 85, y: 6 },
+        color: "var(--policy)"
+      },
+      {
+        kind: "arrow",
+        from: { x: 63, y: 18 },
+        to: { x: 85, y: 18 },
+        color: "var(--value)"
+      },
+      {
+        kind: "arrow",
+        from: { x: 63, y: 30 },
+        to: { x: 85, y: 30 },
+        color: "var(--entropy)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 4.55,
+        text: "градиент по θ",
+        anchor: "start",
+        className: "label flow-label",
+        fill: "var(--policy)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 8.35,
+        text: "меняет актёра",
+        anchor: "start",
+        className: "label note",
+        fill: "var(--policy)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 16.55,
+        text: "градиент по φ",
+        anchor: "start",
+        className: "label flow-label",
+        fill: "var(--value)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 20.35,
+        text: "исправляет V",
+        anchor: "start",
+        className: "label note",
+        fill: "var(--value)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 28.55,
+        text: "через πθ",
+        anchor: "start",
+        className: "label flow-label",
+        fill: "var(--entropy)"
+      },
+      {
+        kind: "text",
+        x: 66,
+        y: 32.35,
+        text: "сохраняет выбор",
+        anchor: "start",
+        className: "label note",
+        fill: "var(--entropy)"
+      },
+      {
+        kind: "text",
+        x: 58,
+        y: 37,
+        text: "Два сигнала → актёру · один сигнал → критику",
+        anchor: "middle",
+        className: "label footer",
+        fill: "var(--ink)"
+      }
+    ];
+
+    const meta = diagramData.find(item => item.kind === "meta");
+    const origin = meta.origin;
+    const scale = meta.scale;
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, content) => {
+        const element = document.createElementNS(namespace, tag);
+
+        for (const [name, value] of Object.entries(attributes)) {
+          element.setAttribute(name, String(value));
+        }
+
+        if (content) {
+          element.textContent = content;
+        }
+
+        return element;
+      };
+
+      const appendLine = (parent, start, end, className, color) => {
+        parent.appendChild(make("line", {
+          x1: sx(start.x),
+          y1: sy(start.y),
+          x2: sx(end.x),
+          y2: sy(end.y),
+          class: className,
+          stroke: color
+        }));
+      };
+
+      const appendArrow = item => {
+        const group = make("g", {});
+        const baseX = item.to.x - meta.arrow.head;
+
+        appendLine(
+          group,
+          item.from,
+          { x: baseX, y: item.to.y },
+          "flow",
+          item.color
+        );
+
+        group.appendChild(make("polygon", {
+          points: [
+            sx(item.to.x) + "," + sy(item.to.y),
+            sx(baseX) + "," + sy(item.to.y - meta.arrow.wing),
+            sx(baseX) + "," + sy(item.to.y + meta.arrow.wing)
+          ].join(" "),
+          class: "arrowhead",
+          fill: item.color
+        }));
+
+        svg.appendChild(group);
+      };
+
+      const appendText = item => {
+        svg.appendChild(make("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          "text-anchor": item.anchor || "middle",
+          class: item.className,
+          fill: item.fill || "var(--ink)"
+        }, item.text));
+      };
+
+      const appendBox = item => {
+        const group = make("g", {});
+
+        group.appendChild(make("rect", {
+          x: sx(item.x),
+          y: sy(item.y),
+          width: sx(item.x + item.w) - sx(item.x),
+          height: sy(item.y + item.h) - sy(item.y),
+          rx: sx(meta.radius) - sx(0),
+          ry: sy(meta.radius) - sy(0),
+          class: "box",
+          stroke: item.stroke,
+          fill: item.fill
+        }));
+
+        for (const line of item.lines) {
+          group.appendChild(make("text", {
+            x: sx(line.x),
+            y: sy(line.y),
+            "text-anchor": "middle",
+            class: line.className
+          }, line.text));
+        }
+
+        svg.appendChild(group);
+      };
+
+      svg.replaceChildren();
+
+      appendLine(
+        svg,
+        meta.summaryJoin,
+        { x: meta.fork.x, y: meta.fork.middle },
+        "branch",
+        "var(--frame)"
+      );
+
+      appendLine(
+        svg,
+        { x: meta.fork.x, y: meta.fork.top },
+        { x: meta.fork.x, y: meta.fork.bottom },
+        "branch",
+        "var(--frame)"
+      );
+
+      for (const item of diagramData.filter(entry => entry.kind === "arrow")) {
+        appendArrow(item);
+      }
+
+      for (const item of diagramData.filter(entry => entry.kind === "box")) {
+        appendBox(item);
+      }
+
+      appendLine(
+        svg,
+        { x: meta.footerRule.x1, y: meta.footerRule.y },
+        { x: meta.footerRule.x2, y: meta.footerRule.y },
+        "branch",
+        "var(--frame)"
+      );
+
+      for (const item of diagramData.filter(entry => entry.kind === "text")) {
+        appendText(item);
+      }
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

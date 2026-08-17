@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Полный путь регрессионной оценки в CI</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f8fc;
+  --surface: #ffffff;
+  --surface-alt: #eef3fa;
+  --ink: #182033;
+  --muted: #56627a;
+  --line: #71809b;
+  --accent: #3767d6;
+  --cyan: #087f91;
+  --gate: #6c4bc4;
+  --pass: #147a45;
+  --fail: #b33b3b;
+  --pass-bg: #e2f5e9;
+  --fail-bg: #fde8e8;
+  --tag-bg: #e4ebfa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111621;
+    --surface: #1b2230;
+    --surface-alt: #242d3d;
+    --ink: #edf2ff;
+    --muted: #aeb9ce;
+    --line: #8290aa;
+    --accent: #78a0ff;
+    --cyan: #56c7d5;
+    --gate: #b39aff;
+    --pass: #63d394;
+    --fail: #ff8585;
+    --pass-bg: #183b2a;
+    --fail-bg: #442326;
+    --tag-bg: #27334b;
+  }
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main {
+  max-width: 1200px;
+  margin: auto;
+}
+h1 {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+svg text {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.shape {
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.node {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 2px;
+}
+.node-alt {
+  fill: var(--surface-alt);
+  stroke: var(--line);
+  stroke-width: 2px;
+}
+.gate-box {
+  fill: var(--surface);
+  stroke: var(--gate);
+  stroke-width: 3px;
+}
+.gate-row {
+  fill: var(--surface-alt);
+  stroke: var(--line);
+  stroke-width: 1px;
+}
+.pass-box {
+  fill: var(--pass-bg);
+  stroke: var(--pass);
+  stroke-width: 3px;
+}
+.fail-box {
+  fill: var(--fail-bg);
+  stroke: var(--fail);
+  stroke-width: 3px;
+}
+.strip-accent { fill: var(--accent); }
+.strip-cyan { fill: var(--cyan); }
+.strip-gate { fill: var(--gate); }
+.connector {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 2px;
+}
+.arrow { fill: var(--line); }
+.branch-pass {
+  fill: none;
+  stroke: var(--pass);
+  stroke-width: 3px;
+}
+.branch-fail {
+  fill: none;
+  stroke: var(--fail);
+  stroke-width: 3px;
+}
+.arrow-pass { fill: var(--pass); }
+.arrow-fail { fill: var(--fail); }
+.node-label {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: bold;
+}
+.node-small {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: normal;
+}
+.gate-title {
+  fill: var(--gate);
+  font-size: 15px;
+  font-weight: bold;
+}
+.gate-label {
+  fill: var(--ink);
+  font-size: 13px;
+}
+.gate-mark {
+  fill: var(--gate);
+  stroke: var(--gate);
+  stroke-width: 1px;
+}
+.tag {
+  fill: var(--tag-bg);
+  stroke: var(--accent);
+  stroke-width: 1px;
+}
+.tag-text {
+  fill: var(--accent);
+  font-size: 11px;
+  font-weight: bold;
+}
+.branch-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.pass-text {
+  fill: var(--pass);
+  font-size: 13px;
+  font-weight: bold;
+}
+.fail-text {
+  fill: var(--fail);
+  font-size: 13px;
+  font-weight: bold;
+}
+#fallback {
+  color: var(--fail);
+  font-size: 16px;
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Полный путь регрессионной оценки в CI</h1>
+  <svg width="1200" height="430" viewBox="0 0 1200 430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img" aria-labelledby="diagram-title diagram-desc">
+    <title id="diagram-title">Маршрут пул-реквеста через регрессионную оценку</title>
+    <desc id="diagram-desc">Версионированный набор проходит новую версию RAG, фиксированные метрики и судью, общий отчёт и CI-гейт, который разрешает или блокирует слияние.</desc>
+    <g id="diagram"></g>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать путь пул-реквеста через зафиксированный eval-набор, RAG, фиксированного судью и CI-гейт к разрешению или блокировке слияния.</p>
+</main>
+<script>
+const D = {
+  n: {
+    z: 0, o: 1, t: 2,
+    line: 0.24, strip: 0.07,
+    head: 11, half: 6
+  },
+  nodes: [
+    {x: 0.25, y: 1.85, w: 1.2, h: 0.9, lines: ["ПУЛ-РЕКВЕСТ"], cls: "node", strip: "strip-accent"},
+    {x: 1.8, y: 0.55, w: 2.05, h: 0.9, lines: ["ВЕРСИОНИРОВАННЫЙ", "EVAL-НАБОР"], cls: "node-alt", strip: "strip-accent"},
+    {x: 1.8, y: 2.05, w: 2.05, h: 0.9, lines: ["НОВАЯ ВЕРСИЯ RAG"], cls: "node", strip: "strip-cyan"},
+    {x: 4.35, y: 2.05, w: 1.45, h: 0.9, lines: ["ОТВЕТЫ", "И КОНТЕКСТЫ"], cls: "node-alt", strip: "strip-cyan"},
+    {x: 6.15, y: 1.55, w: 1.75, h: 1.3, lines: ["ТЕ ЖЕ МЕТРИКИ", "ФИКСИРОВАННЫЙ", "LLM-СУДЬЯ"], cls: "node", strip: "strip-gate"},
+    {x: 6.15, y: 3.3, w: 1.75, h: 0.85, lines: ["ОБЩИЙ ОТЧЁТ", "ОЦЕНКИ + ПРИЧИНЫ"], cls: "node-alt", strip: "strip-accent"}
+  ],
+  tags: [
+    {x: 2.825, y: 0.34, w: 1.65, h: 0.28, text: "НАБОР ЗАФИКСИРОВАН"},
+    {x: 7.025, y: 1.34, w: 1.55, h: 0.28, text: "СУДЬЯ ЗАФИКСИРОВАН"}
+  ],
+  links: [
+    [{x: 1.45, y: 2.3}, {x: 1.62, y: 2.3}, {x: 1.62, y: 1}, {x: 1.8, y: 1}],
+    [{x: 2.825, y: 1.45}, {x: 2.825, y: 2.05}],
+    [{x: 3.85, y: 2.5}, {x: 4.35, y: 2.5}],
+    [{x: 5.8, y: 2.5}, {x: 6.15, y: 2.5}],
+    [{x: 7.025, y: 2.85}, {x: 7.025, y: 3.3}],
+    [{x: 7.9, y: 3.725}, {x: 8.35, y: 3.725}]
+  ],
+  gate: {
+    x: 8.35, y: 0.55, w: 2.5, h: 3.6,
+    title: "CI-ГЕЙТ",
+    rows: [
+      {x: 8.53, y: 1.27, w: 2.14, h: 0.53, text: "Верность ≥ 0,85"},
+      {x: 8.53, y: 1.96, w: 2.14, h: 0.53, text: "Релевантность ≥ 0,70"},
+      {x: 8.53, y: 2.65, w: 2.14, h: 0.53, text: "Число ошибок разбора"},
+      {x: 8.53, y: 3.34, w: 2.14, h: 0.53, text: "Худшие 10%"}
+    ],
+    mark: 0.12
+  },
+  branches: [
+    {
+      cls: "branch-pass", arrow: "arrow-pass",
+      points: [{x: 9.6, y: 4.15}, {x: 9.6, y: 4.42}, {x: 7.025, y: 4.42}, {x: 7.025, y: 4.7}],
+      lx: 7.9, ly: 4.34, label: "ВСЕ УСЛОВИЯ СОБЛЮДЕНЫ"
+    },
+    {
+      cls: "branch-fail", arrow: "arrow-fail",
+      points: [{x: 9.6, y: 4.15}, {x: 9.6, y: 4.42}, {x: 9.9, y: 4.42}, {x: 9.9, y: 4.7}],
+      lx: 10.08, ly: 4.34, label: "УСЛОВИЕ НАРУШЕНО"
+    }
+  ],
+  outcomes: [
+    {x: 6.05, y: 4.7, w: 1.95, h: 0.65, text: "СЛИЯНИЕ РАЗРЕШЕНО", box: "pass-box", label: "pass-text"},
+    {x: 8.95, y: 4.7, w: 1.9, h: 0.65, text: "СЛИЯНИЕ ЗАБЛОКИРОВАНО", box: "fail-box", label: "fail-text"}
+  ]
+};
+const origin = Object.freeze({x: 48, y: 20});
+const scale = Object.freeze({x: 103, y: 72});
+
+function sx(x) { return origin.x + x * scale.x; }
+function sy(y) { return origin.y + y * scale.y; }
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("diagram");
+
+  function el(name, cls) {
+    const e = document.createElementNS(NS, name);
+    if (cls) e.setAttribute("class", cls);
+    return e;
+  }
+
+  function rect(parent, x, y, w, h, cls) {
+    const e = el("rect", "shape " + cls);
+    e.setAttribute("x", sx(x));
+    e.setAttribute("y", sy(y));
+    e.setAttribute("width", sx(x + w) - sx(x));
+    e.setAttribute("height", sy(y + h) - sy(y));
+    parent.appendChild(e);
+    return e;
+  }
+
+  function text(parent, value, x, y, cls, anchor) {
+    const e = el("text", cls);
+    e.setAttribute("x", sx(x));
+    e.setAttribute("y", sy(y));
+    e.setAttribute("text-anchor", anchor);
+    e.setAttribute("dominant-baseline", "middle");
+    e.textContent = value;
+    parent.appendChild(e);
+    return e;
+  }
+
+  function labels(parent, values, x, y, h, cls) {
+    const start = y + h / D.n.t - (values.length - D.n.o) * D.n.line / D.n.t;
+    values.forEach((value, index) => {
+      text(parent, value, x, start + index * D.n.line, cls, "middle");
+    });
+  }
+
+  function arrow(parent, points, lineClass, arrowClass) {
+    const p = el("path", "shape " + lineClass);
+    let d = "";
+    points.forEach((point, index) => {
+      d += (index ? " L " : "M ") + sx(point.x) + " " + sy(point.y);
+    });
+    p.setAttribute("d", d);
+    parent.appendChild(p);
+
+    const a = points[points.length - D.n.t];
+    const b = points[points.length - D.n.o];
+    const px = (b.x - a.x) * scale.x;
+    const py = (b.y - a.y) * scale.y;
+    const length = Math.hypot(px, py);
+    const ux = px / length;
+    const uy = py / length;
+    const left = {
+      x: b.x - ux * D.n.head / scale.x - uy * D.n.half / scale.x,
+      y: b.y - uy * D.n.head / scale.y + ux * D.n.half / scale.y
+    };
+    const right = {
+      x: b.x - ux * D.n.head / scale.x + uy * D.n.half / scale.x,
+      y: b.y - uy * D.n.head / scale.y - ux * D.n.half / scale.y
+    };
+    const tip = el("polygon", arrowClass);
+    tip.setAttribute("points",
+      sx(b.x) + "," + sy(b.y) + " " +
+      sx(left.x) + "," + sy(left.y) + " " +
+      sx(right.x) + "," + sy(right.y)
+    );
+    parent.appendChild(tip);
+  }
+
+  D.links.forEach(points => arrow(root, points, "connector", "arrow"));
+
+  D.nodes.forEach(node => {
+    rect(root, node.x, node.y, node.w, node.h, node.cls);
+    rect(root, node.x, node.y, D.n.strip, node.h, node.strip);
+    labels(root, node.lines, node.x + node.w / D.n.t, node.y, node.h, "node-label");
+  });
+
+  D.tags.forEach(tag => {
+    rect(root, tag.x - tag.w / D.n.t, tag.y - tag.h / D.n.t, tag.w, tag.h, "tag");
+    text(root, tag.text, tag.x, tag.y, "tag-text", "middle");
+  });
+
+  rect(root, D.gate.x, D.gate.y, D.gate.w, D.gate.h, "gate-box");
+  text(root, D.gate.title, D.gate.x + D.gate.w / D.n.t, D.gate.y + 0.38, "gate-title", "middle");
+
+  D.gate.rows.forEach(row => {
+    rect(root, row.x, row.y, row.w, row.h, "gate-row");
+    rect(root, row.x + 0.14, row.y + row.h / D.n.t - D.gate.mark / D.n.t,
+      D.gate.mark, D.gate.mark, "gate-mark");
+    text(root, row.text, row.x + 0.42, row.y + row.h / D.n.t, "gate-label", "start");
+  });
+
+  D.branches.forEach(branch => {
+    arrow(root, branch.points, branch.cls, branch.arrow);
+    text(root, branch.label, branch.lx, branch.ly, "branch-label", "middle");
+  });
+
+  D.outcomes.forEach(outcome => {
+    rect(root, outcome.x, outcome.y, outcome.w, outcome.h, outcome.box);
+    text(root, outcome.text, outcome.x + outcome.w / D.n.t,
+      outcome.y + outcome.h / D.n.t, outcome.label, "middle");
+  });
+} catch (error) {
+  document.getElementById("diagram").replaceChildren();
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

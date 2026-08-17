@@ -1,0 +1,183 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>CoT против декомпозиции</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --ink:#2b2f3d; --line:#5a6076; --soft:#8b91a6;
+    --box:#ffffff; --task:#eef1f8; --bad:#d64550; --ok:#2f9e5f; --warn:#c07a12;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161f; --ink:#e6e8f0; --line:#9aa2bd; --soft:#7d84a0;
+      --box:#1d2130; --task:#252a3c; --bad:#ff7b83; --ok:#5fd493; --warn:#e0a63c;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1140px;margin:0 auto;padding:12px}
+  h2{font-size:15px;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .legend{margin-top:6px;font-size:12px;color:var(--soft)}
+  .fb{font-size:13px;color:var(--bad)}
+  text{fill:var(--ink);font-family:inherit}
+  .t-title{font-size:13px;font-weight:600}
+  .t-lbl{font-size:12px}
+  .t-small{font-size:11px}
+  .t-note{font-size:10px;font-style:italic;fill:var(--soft)}
+  .t-bad{fill:var(--bad)}
+  .t-warn{fill:var(--warn)}
+  rect.box{fill:var(--box);stroke:var(--line)}
+  rect.task{fill:var(--task);stroke:var(--line)}
+  rect.bad{stroke:var(--bad)}
+  rect.ok{stroke:var(--ok)}
+  .ln{stroke:var(--line);fill:none}
+  .hd{fill:var(--line);stroke:none}
+  .ln-bad{stroke:var(--bad)} .hd-bad{fill:var(--bad)}
+  .ln-ok{stroke:var(--ok)} .hd-ok{fill:var(--ok)}
+  .dot{fill:var(--line)}
+  .dot-bad{fill:var(--bad)}
+  .div{stroke:var(--soft);stroke-dasharray:4 5;opacity:.6}
+</style>
+<div class="wrap">
+  <h2>Один поток против трёх вызовов с паузами</h2>
+  <svg id="s" viewBox="0 0 880 400" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Слева цепочка CoT одним вызовом, справа три подзадачи со слиянием и проверкой"></svg>
+  <p class="legend">Слева — одна стрелка без разрывов: правка возможна только заново.
+     Справа — разрывы между вызовами: результат видно и можно поправить до слияния.</p>
+  <p class="fb" id="fb" hidden>Схема: слева задача → шаг 1 → шаг 2 (ошибка ×12 вместо ×11) → шаг 3 → кривой ответ, одной непрерывной стрелкой. Справа та же задача делится на три независимых вызова (числа, расчёт, вывод), между ними паузы для правки, затем слияние и проверка.</p>
+</div>
+<script>
+(function(){
+try{
+  var S = 60, O = {x:30, y:30};
+  var sx = function(x){ return O.x + x*S; };
+  var sy = function(y){ return O.y + y*S; };
+
+  var TASK = '4 900 ₽ × 340 чел. − 1,2 млн/год';
+  var D = {
+    titles:[{x:2.6,y:0,t:'CoT: один вызов'},{x:10.1,y:0,t:'Декомпозиция: три вызова'}],
+    boxes:[
+      {x:2.6, y:0.75,w:3.2,h:0.55,t:TASK,cls:'task',fs:'t-small'},
+      {x:2.6, y:4.75,w:2.0,h:0.50,t:'ответ',cls:'box bad'},
+      {x:10.1,y:0.75,w:3.2,h:0.55,t:TASK,cls:'task',fs:'t-small'},
+      {x:7.6, y:1.90,w:2.2,h:0.50,t:'вызов 1: числа',fs:'t-small'},
+      {x:10.1,y:1.90,w:2.2,h:0.50,t:'вызов 2: расчёт',fs:'t-small'},
+      {x:12.6,y:1.90,w:2.2,h:0.50,t:'вызов 3: вывод',fs:'t-small'},
+      {x:10.1,y:4.75,w:2.6,h:0.50,t:'слияние решений',fs:'t-small'},
+      {x:10.1,y:5.60,w:2.6,h:0.50,t:'проверка',cls:'box ok'}
+    ],
+    steps:[{y:1.9,t:'шаг 1'},{y:2.85,t:'шаг 2',bad:true},{y:3.8,t:'шаг 3'}],
+    arrows:[
+      {a:[2.6,1.03], b:[2.6,4.50], k:'bad'},
+      {a:[10.1,1.03],b:[7.6,1.60]},
+      {a:[10.1,1.03],b:[10.1,1.60]},
+      {a:[10.1,1.03],b:[12.6,1.60]},
+      {a:[7.6,2.15], b:[7.6,2.95]},
+      {a:[10.1,2.15],b:[10.1,2.95]},
+      {a:[12.6,2.15],b:[12.6,2.95]},
+      {a:[7.6,3.45], b:[9.4,4.50]},
+      {a:[10.1,3.45],b:[10.1,4.50]},
+      {a:[12.6,3.45],b:[10.8,4.50]},
+      {a:[10.1,5.00],b:[10.1,5.35],k:'ok'}
+    ],
+    gaps:[7.6,10.1,12.6],
+    notes:[
+      {x:2.6,y:2.85,t:'×12, а надо ×11',an:'start',dx:9,dy:4,cls:'t-small t-bad'},
+      {x:3.6,y:4.75,t:'кривой итог',an:'start',dx:9,dy:4,cls:'t-small t-bad'},
+      {x:2.6,y:3.35,t:'остановиться негде',an:'end',dx:-9,dy:3,cls:'t-note'},
+      {x:2.6,y:5.60,t:'править — только всё заново',an:'middle',dx:0,dy:4,cls:'t-note'}
+    ],
+    divider:{x:6.2,y1:-0.25,y2:5.95}
+  };
+
+  var NS='http://www.w3.org/2000/svg', svg=document.getElementById('s');
+  function el(n,at){var e=document.createElementNS(NS,n);for(var k in at)e.setAttribute(k,at[k]);svg.appendChild(e);return e;}
+  function txt(x,y,s,an,dx,dy,cls){
+    var t=el('text',{x:sx(x)+dx,y:sy(y)+dy,'text-anchor':an,'class':cls||'t-lbl'});
+    t.textContent=s; return t;
+  }
+  var R = sx(0.08)-sx(0);
+
+  el('line',{x1:sx(D.divider.x),y1:sy(D.divider.y1),x2:sx(D.divider.x),y2:sy(D.divider.y2),
+             'class':'div','stroke-width':1});
+
+  function arrow(a,b,k){
+    var dx=b[0]-a[0], dy=b[1]-a[1], L=Math.hypot(dx,dy);
+    var ux=dx/L, uy=dy/L, hs=0.20, hw=0.085;
+    var bx=b[0]-ux*hs, by=b[1]-uy*hs;
+    var lc='ln'+(k?' ln-'+k:''), hc='hd'+(k?' hd-'+k:'');
+    el('line',{x1:sx(a[0]),y1:sy(a[1]),x2:sx(bx),y2:sy(by),'class':lc,'stroke-width':1.6});
+    el('polygon',{points:[
+      sx(b[0])+','+sy(b[1]),
+      (sx(bx-uy*hw))+','+(sy(by+ux*hw)),
+      (sx(bx+uy*hw))+','+(sy(by-ux*hw))].join(' '),'class':hc});
+  }
+  D.arrows.forEach(function(a){ arrow(a.a,a.b,a.k); });
+
+  D.gaps.forEach(function(x){
+    el('line',{x1:sx(x-0.22),y1:sy(3.05),x2:sx(x+0.22),y2:sy(3.05),
+               'class':'ln','stroke-width':1,'stroke-dasharray':'3 3'});
+    el('line',{x1:sx(x-0.22),y1:sy(3.38),x2:sx(x+0.22),y2:sy(3.38),
+               'class':'ln','stroke-width':1,'stroke-dasharray':'3 3'});
+    txt(x,3.22,'правка','middle',0,4,'t-small t-warn');
+  });
+
+  D.steps.forEach(function(s){
+    el('circle',{cx:sx(2.6),cy:sy(s.y),r:R,'class':s.bad?'dot-bad':'dot'});
+    txt(2.6,s.y,s.t,'end',-9,4,'t-lbl'+(s.bad?' t-bad':''));
+  });
+
+  D.boxes.forEach(function(b){
+    var cls=b.cls||'box';
+    if(cls.indexOf('box')<0 && cls.indexOf('task')<0) cls='box '+cls;
+    el('rect',{x:sx(b.x-b.w/2),y:sy(b.y-b.h/2),
+               width:sx(b.x+b.w/2)-sx(b.x-b.w/2),
+               height:sy(b.y+b.h/2)-sy(b.y-b.h/2),
+               rx:R,'class':cls,'stroke-width':1.4});
+    txt(b.x,b.y,b.t,'middle',0,4,b.fs||'t-lbl');
+  });
+
+  D.notes.forEach(function(n){ txt(n.x,n.y,n.t,n.an,n.dx,n.dy,n.cls); });
+  D.titles.forEach(function(t){ txt(t.x,t.y,t.t,'middle',0,0,'t-title'); });
+
+}catch(e){
+  document.getElementById('s').setAttribute('hidden','');
+  document.getElementById('fb').removeAttribute('hidden');
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

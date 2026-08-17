@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как скрытые состояния превращаются в один reward score</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --background: #f8fafc;
+    --panel: #ffffff;
+    --panel-soft: #eef2f7;
+    --text: #182235;
+    --muted: #58677d;
+    --line: #52647d;
+    --flow: #2867c7;
+    --flow-soft: #d9e8ff;
+    --accent: #d2691e;
+    --accent-soft: #fff0df;
+    --answer: #dff4ea;
+    --answer-line: #2b7a58;
+    --matrix: #e7edf5;
+    --matrix-alt: #d7e0ec;
+    --formula: #f1f5f9;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #111722;
+      --panel: #192231;
+      --panel-soft: #222e40;
+      --text: #edf3ff;
+      --muted: #b3bfd1;
+      --line: #8190a7;
+      --flow: #79adff;
+      --flow-soft: #203c62;
+      --accent: #ffb269;
+      --accent-soft: #49301f;
+      --answer: #173e34;
+      --answer-line: #73d3ad;
+      --matrix: #29374a;
+      --matrix-alt: #34445a;
+      --formula: #202b3b;
+    }
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  main {
+    background: var(--background);
+  }
+
+  h2 {
+    margin: 0;
+    padding: 10px 14px 7px;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  figure {
+    margin: 0;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--background);
+    shape-rendering: geometricPrecision;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.6px;
+  }
+
+  .soft-panel {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 1.4px;
+  }
+
+  .formula-panel {
+    fill: var(--formula);
+    stroke: var(--line);
+    stroke-width: 1.4px;
+  }
+
+  .token-prompt {
+    fill: var(--flow-soft);
+    stroke: var(--flow);
+    stroke-width: 1.2px;
+  }
+
+  .token-answer {
+    fill: var(--answer);
+    stroke: var(--answer-line);
+    stroke-width: 1.2px;
+  }
+
+  .mask-cell {
+    fill: var(--flow-soft);
+    stroke: var(--flow);
+    stroke-width: 1px;
+  }
+
+  .state-cell {
+    fill: var(--matrix);
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .state-cell-alt {
+    fill: var(--matrix-alt);
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .last-state {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 2.2px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--flow);
+    stroke-width: 2.2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow-head {
+    fill: var(--flow);
+    stroke: var(--flow);
+    stroke-width: 1px;
+    stroke-linejoin: round;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  text {
+    fill: var(--text);
+    dominant-baseline: middle;
+  }
+
+  .box-title {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .tiny {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .vector-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .operator {
+    fill: var(--flow);
+    font-size: 19px;
+    font-weight: bold;
+  }
+
+  .score-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .score {
+    fill: var(--accent);
+    font-size: 28px;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .formula-caption {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .formula {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 15px;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  #fallback {
+    margin: 0;
+    padding: 14px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    font-size: 15px;
+  }
+
+  #fallback[hidden] {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h2 id="diagram-heading">Как скрытые состояния превращаются в один reward score</h2>
+  <figure aria-labelledby="diagram-heading">
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 470"
+      width="1200"
+      height="470"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Последовательность до 128 токенов проходит через каузальный трансформер. Последнее скрытое состояние длины 128 скалярно умножается на 128 весов reward head и превращается в reward score 1,25."
+    ></svg>
+    <p id="fallback" hidden>
+      Схема должна была показать путь от последовательности до 128 токенов
+      через каузальный трансформер к последнему скрытому вектору длины 128,
+      а затем его скалярное произведение с reward_head и результат 1,25.
+    </p>
+    <noscript>
+      <p id="fallback-noscript">
+        Последнее скрытое состояние длины 128 скалярно умножается на 128
+        весов reward_head и превращается в один reward score.
+      </p>
+    </noscript>
+  </figure>
+</main>
+
+<script>
+const data = [{
+  canvas: [1200, 470],
+  origin: [12, 8],
+  scale: [9.7, 9.4],
+  zero: 0,
+
+  panels: {
+    sequence: [2, 7, 24, 29],
+    transformer: [29, 7, 47, 29],
+    states: [52, 7, 70, 29],
+    vector: [75, 4, 87, 21],
+    weights: [75, 25, 87, 42],
+    product: [93, 12, 104, 34],
+    score: [109, 15, 121, 31],
+    formula: [2, 43, 121, 49]
+  },
+
+  tokens: [
+    [4, 16, 7, 20, "token-prompt"],
+    [8, 16, 11, 20, "token-prompt"],
+    [12, 16, 15, 20, "token-prompt"],
+    [18, 16, 21, 20, "token-answer"],
+    [22, 16, 23, 20, "token-answer"]
+  ],
+
+  mask: [
+    [34, 17, 36, 19],
+    [34, 20, 36, 22],
+    [37, 20, 39, 22],
+    [34, 23, 36, 25],
+    [37, 23, 39, 25],
+    [40, 23, 42, 25]
+  ],
+
+  states: [
+    [54, 16, 56.3, 23, "state-cell"],
+    [56.8, 16, 59.1, 23, "state-cell-alt"],
+    [59.6, 16, 61.9, 23, "state-cell"],
+    [62.4, 16, 64.7, 23, "state-cell-alt"],
+    [65.2, 16, 68.5, 23, "last-state"]
+  ],
+
+  vectorRows: [
+    [75, 10.5, 87, 13.1, "0,8"],
+    [75, 13.1, 87, 15.7, "−0,3"],
+    [75, 15.7, 87, 18.3, "1,1"],
+    [75, 18.3, 87, 20.9, "0,2"]
+  ],
+
+  weightRows: [
+    [75, 31.5, 87, 34.1, "0,5"],
+    [75, 34.1, 87, 36.7, "−0,2"],
+    [75, 36.7, 87, 39.3, "0,7"],
+    [75, 39.3, 87, 41.9, "0,1"]
+  ],
+
+  dividers: [
+    [75, 13.1, 87, 13.1],
+    [75, 15.7, 87, 15.7],
+    [75, 18.3, 87, 18.3],
+    [75, 34.1, 87, 34.1],
+    [75, 36.7, 87, 36.7],
+    [75, 39.3, 87, 39.3]
+  ],
+
+  arrows: [
+    {
+      line: [24.5, 18, 28.5, 18],
+      head: [[28.5, 18], [27.3, 17.1], [27.3, 18.9]]
+    },
+    {
+      line: [47.5, 18, 51.5, 18],
+      head: [[51.5, 18], [50.3, 17.1], [50.3, 18.9]]
+    },
+    {
+      line: [70.5, 18, 74.5, 13],
+      head: [[74.5, 13], [72.9, 13.4], [73.8, 14.3]]
+    },
+    {
+      line: [87.5, 15, 92.5, 19.5],
+      head: [[92.5, 19.5], [90.8, 19.1], [91.7, 18.1]]
+    },
+    {
+      line: [87.5, 33.5, 92.5, 27.5],
+      head: [[92.5, 27.5], [91.9, 29.2], [90.8, 28.3]]
+    },
+    {
+      line: [104.5, 23, 108.5, 23],
+      head: [[108.5, 23], [107.3, 22.1], [107.3, 23.9]]
+    }
+  ],
+
+  texts: [
+    [13, 10.5, "Последовательность", "box-title", "middle"],
+    [13, 13.1, "до 128 токенов", "small", "middle"],
+    [9.5, 23.2, "промпт", "tiny", "middle"],
+    [20.5, 23.2, "ответ", "tiny", "middle"],
+    [16.5, 18, "…", "operator", "middle"],
+
+    [38, 10.5, "Каузальный", "box-title", "middle"],
+    [38, 13.1, "трансформер", "box-title", "middle"],
+    [43.5, 21, "маска", "tiny", "middle"],
+    [38, 27.1, "последняя позиция видит всё слева", "tiny", "middle"],
+
+    [61, 10.5, "Скрытые состояния", "box-title", "middle"],
+    [61, 13.1, "всех позиций", "small", "middle"],
+    [66.8, 26.2, "последнее", "tiny", "middle"],
+    [66.8, 27.8, "состояние", "tiny", "middle"],
+
+    [81, 6.5, "Последний вектор", "box-title", "middle"],
+    [81, 8.8, "128 чисел", "small", "middle"],
+
+    [81, 27.5, "reward_head", "box-title", "middle"],
+    [81, 29.8, "128 весов", "small", "middle"],
+
+    [98.5, 16.2, "Скалярное", "box-title", "middle"],
+    [98.5, 18.7, "произведение", "box-title", "middle"],
+    [98.5, 24.2, "h · w", "operator", "middle"],
+    [98.5, 30.4, "попарно умножить", "tiny", "middle"],
+    [98.5, 32, "и сложить", "tiny", "middle"],
+
+    [115, 18.2, "reward score", "score-label", "middle"],
+    [115, 24.5, "1,25", "score", "middle"],
+    [115, 28.6, "одно число", "small", "middle"],
+
+    [61.5, 44.4, "Показаны 4 из 128 координат; в модели так же обрабатываются все 128 пар:", "formula-caption", "middle"],
+    [61.5, 46.5, "0,8 × 0,5 + (−0,3) × (−0,2) + 1,1 × 0,7 + 0,2 × 0,1 = 1,25", "formula", "middle"],
+    [61.5, 48.2, "Смысл распределён между координатами: reward_head оценивает их сочетание, а не отдельные ярлыки.", "note", "middle"]
+  ]
+}];
+
+const [D] = data;
+const origin = D.origin;
+const scale = D.scale;
+const [originX, originY] = origin;
+const [scaleX, scaleY] = scale;
+const sx = x => originX + x * scaleX;
+const sy = y => originY + y * scaleY;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const element = (name, attributes, className) => {
+    const item = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      item.setAttribute(key, String(value));
+    }
+    if (className) item.setAttribute("class", className);
+    return item;
+  };
+
+  const addRect = (box, className) => {
+    const [x1, y1, x2, y2] = box;
+    svg.appendChild(element("rect", {
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1)
+    }, className));
+  };
+
+  const addLine = (segment, className) => {
+    const [x1, y1, x2, y2] = segment;
+    svg.appendChild(element("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    }, className));
+  };
+
+  const addPolygon = (points, className) => {
+    const converted = points
+      .map(([x, y]) => `${sx(x)},${sy(y)}`)
+      .join(" ");
+    svg.appendChild(element("polygon", {
+      points: converted
+    }, className));
+  };
+
+  const addText = ([x, y, value, className, anchor]) => {
+    const label = element("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor
+    }, className);
+    label.textContent = value;
+    svg.appendChild(label);
+  };
+
+  addRect(D.panels.sequence, "panel");
+  addRect(D.panels.transformer, "panel");
+  addRect(D.panels.states, "panel");
+  addRect(D.panels.vector, "soft-panel");
+  addRect(D.panels.weights, "soft-panel");
+  addRect(D.panels.product, "panel");
+  addRect(D.panels.score, "panel");
+  addRect(D.panels.formula, "formula-panel");
+
+  D.tokens.forEach(([x1, y1, x2, y2, className]) => {
+    addRect([x1, y1, x2, y2], className);
+  });
+
+  D.mask.forEach(box => addRect(box, "mask-cell"));
+
+  D.states.forEach(([x1, y1, x2, y2, className]) => {
+    addRect([x1, y1, x2, y2], className);
+  });
+
+  D.vectorRows.forEach(([x1, y1, x2, y2]) => {
+    addRect([x1, y1, x2, y2], "soft-panel");
+  });
+
+  D.weightRows.forEach(([x1, y1, x2, y2]) => {
+    addRect([x1, y1, x2, y2], "soft-panel");
+  });
+
+  D.dividers.forEach(segment => addLine(segment, "divider"));
+
+  D.arrows.forEach(({line, head}) => {
+    addLine(line, "flow");
+    addPolygon(head, "arrow-head");
+  });
+
+  D.vectorRows.forEach(([x1, y1, x2, y2, value]) => {
+    addText([
+      (x1 + x2) / (D.zero + D.zero + scaleX / scaleX + scaleX / scaleX),
+      (y1 + y2) / (D.zero + D.zero + scaleY / scaleY + scaleY / scaleY),
+      value,
+      "vector-value",
+      "middle"
+    ]);
+  });
+
+  D.weightRows.forEach(([x1, y1, x2, y2, value]) => {
+    addText([
+      (x1 + x2) / (D.zero + D.zero + scaleX / scaleX + scaleX / scaleX),
+      (y1 + y2) / (D.zero + D.zero + scaleY / scaleY + scaleY / scaleY),
+      value,
+      "vector-value",
+      "middle"
+    ]);
+  });
+
+  D.texts.forEach(addText);
+  fallback.hidden = true;
+} catch (error) {
+  const diagram = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  diagram.replaceChildren();
+  diagram.hidden = true;
+  fallback.hidden = false;
+  console.error(error);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

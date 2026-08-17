@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Тайлинг вместо целой матрицы</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5c6672;
+    --mat:#e8edf3; --matline:#b9c4d0;
+    --tile:#2f7d5a; --tilefill:rgba(47,125,90,.18);
+    --naive:#c2410c; --flash:#2f7d5a; --hbm:#8a94a0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171b; --fg:#e6eaef; --muted:#9aa5b1;
+      --mat:#232830; --matline:#3c4550;
+      --tile:#5fd8a0; --tilefill:rgba(95,216,160,.18);
+      --naive:#ff9a5c; --flash:#5fd8a0; --hbm:#78838f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 0 4px;}
+  h2{font-size:15px;margin:0 0 2px 10px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{padding:10px;font-size:13px;line-height:1.5;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Тайлинг вместо целой матрицы</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var D={
+      N:4096, tile:128,
+      matX:0, matY:0,            // левый нижний угол матрицы S в единицах схемы
+      hbmX:5200, hbmY:900, hbmW:1500, hbmH:2400,
+      sramX:5200, sramY:-2000, sramW:1500, sramH:1100
+    };
+    // ---- одна пара origin/scale ----
+    var ORIGIN={x:150,y:430}, SCALE=0.0855;
+    function sx(x){ return ORIGIN.x + x*SCALE; }
+    function sy(y){ return ORIGIN.y - y*SCALE; }
+
+    var VB={w:760,h:500};
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    var svg=el('svg',{viewBox:'0 0 '+VB.w+' '+VB.h,preserveAspectRatio:'xMidYMid meet'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VB.w,height:VB.h,fill:'var(--bg)'}));
+
+    var defs=el('defs',{});
+    [['ah-naive','var(--naive)'],['ah-flash','var(--flash)']].forEach(function(p){
+      var m=el('marker',{id:p[0],viewBox:'0 0 10 10',refX:8,refY:5,
+        markerWidth:6,markerHeight:6,orient:'auto-start-reverse'});
+      m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:p[1]}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+
+    function line(x1,y1,x2,y2,st){
+      return el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:st.c,'stroke-width':st.w||1.6,'stroke-dasharray':st.d||'none',
+        'marker-end':st.m||'','stroke-linecap':'round'});
+    }
+    function box(x,y,w,h,st){
+      return el('rect',{x:sx(x),y:sy(y+h),width:sx(x+w)-sx(x),height:sy(y)-sy(y+h),
+        fill:st.f,stroke:st.s,'stroke-width':st.w||1.4,rx:2});
+    }
+    function txt(x,y,dx,dy,s,anch,cls,size){
+      var t=el('text',{x:sx(x)+dx,y:sy(y)+dy,'text-anchor':anch,
+        'font-size':size||11.5,fill:cls,'font-family':'inherit'});
+      t.textContent=s; return t;
+    }
+
+    // ---- матрица N×N ----
+    svg.appendChild(box(D.matX,D.matY,D.N,D.N,{f:'var(--mat)',s:'var(--matline)'}));
+    // сетка тайлов: шаг 128*8 для читаемости — кратен tile
+    var step=D.tile*8;
+    for(var g=step; g<D.N; g+=step){
+      svg.appendChild(line(D.matX+g,D.matY,D.matX+g,D.matY+D.N,{c:'var(--matline)',w:.5}));
+      svg.appendChild(line(D.matX,D.matY+g,D.matX+D.N,D.matY+g,{c:'var(--matline)',w:.5}));
+    }
+    // ---- блок 128×128 в SRAM ----
+    var tX=D.matX+step*2, tY=D.matY+D.N-step*2-D.tile*4;
+    svg.appendChild(box(tX,tY,D.tile*4,D.tile*4,{f:'var(--tilefill)',s:'var(--tile)',w:2}));
+
+    // подписи матрицы: сверху и слева, в разные стороны
+    svg.appendChild(txt(D.matX+D.N/2,D.matY+D.N,0,-8,'матрица S: 4096 × 4096 ≈ 16,7 млн чисел, ≈ 33 МБ','middle','var(--fg)',12));
+    svg.appendChild(txt(D.matX,D.matY,-8,14,'0','end','var(--muted)',10.5));
+    svg.appendChild(txt(D.matX+D.N,D.matY,0,20,'N = 4096','middle','var(--muted)',11));
+    svg.appendChild(txt(D.matX,D.matY+D.N,-8,4,'N','end','var(--muted)',11));
+
+    // подпись тайла — снизу от него, не пересекает верхний текст
+    svg.appendChild(txt(tX+D.tile*2,tY,0,18,'блок 128 × 128 ≈ 32 КБ','middle','var(--tile)',11.5));
+
+    // ---- HBM и SRAM ----
+    svg.appendChild(box(D.hbmX,D.hbmY,D.hbmW,D.hbmH,{f:'none',s:'var(--hbm)',w:1.4}));
+    svg.appendChild(txt(D.hbmX+D.hbmW/2,D.hbmY+D.hbmH,0,-10,'HBM','middle','var(--fg)',13));
+    svg.appendChild(box(D.sramX,D.sramY,D.sramW,D.sramH,{f:'var(--tilefill)',s:'var(--tile)',w:1.4}));
+    svg.appendChild(txt(D.sramX+D.sramW/2,D.sramY+D.sramH,0,-10,'SRAM','middle','var(--tile)',13));
+
+    // ---- наивный путь: вся матрица в HBM трижды ----
+    var yTop=D.matY+D.N, lanes=[yTop-step*1.5, yTop-step*3, yTop-step*4.5];
+    var names=['S = Q·Kᵀ','softmax','·V'];
+    lanes.forEach(function(ly,i){
+      svg.appendChild(line(D.matX+D.N+140,ly,D.hbmX-140,ly,
+        {c:'var(--naive)',w:1.8,m:'url(#ah-naive)'}));
+      svg.appendChild(txt(D.matX+D.N+150,ly,0,-6,names[i],'start','var(--naive)',10.5));
+    });
+    svg.appendChild(txt(D.matX+D.N+150,lanes[2],0,20,'наивно: вся N×N ходит в HBM трижды','start','var(--naive)',11));
+
+    // ---- Flash: тайл в SRAM, наружу только O_tile ----
+    svg.appendChild(line(tX+D.tile*4,tY+D.tile*4,D.sramX,D.sramY+D.sramH/2,
+      {c:'var(--flash)',w:1.8,d:'5 4',m:'url(#ah-flash)'}));
+    svg.appendChild(txt(tX+D.tile*4,tY+D.tile*4,14,-8,'тайл живёт в SRAM','start','var(--flash)',11));
+    svg.appendChild(line(D.sramX+D.sramW/2,D.sramY,D.hbmX+D.hbmW/2,D.hbmY+D.hbmH,
+      {c:'var(--flash)',w:2.2,m:'url(#ah-flash)'}));
+    svg.appendChild(txt(D.sramX+D.sramW,D.sramY,12,6,'в HBM только O_tile','start','var(--flash)',11.5));
+
+    // ---- итог ----
+    svg.appendChild(txt(D.matX,D.matY,0,42,'пик памяти: O(N²) → O(N); матрица N×N не собирается ни разу','start','var(--muted)',11.5));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема должна была показать: матрицу оценок S размером 4096 × 4096 (≈ 16,7 млн чисел, ≈ 33 МБ) и поверх неё один блок 128 × 128 (≈ 32 КБ). Наивный путь тремя стрелками гоняет всю матрицу N×N в HBM и обратно (S = Q·Kᵀ, softmax, умножение на V). Flash держит блок в SRAM и уносит в HBM только готовый O_tile, из-за чего пик памяти падает с O(N²) до O(N).</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Устройство числовых форматов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f6f8fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #58647a;
+    --outline: #65728a;
+    --bit-line: rgba(255, 255, 255, 0.58);
+    --sign: #a855f7;
+    --exponent: #2878d0;
+    --mantissa: #168f70;
+    --integer: #d2691e;
+    --note: #edf2fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101521;
+      --panel: #171e2d;
+      --text: #f1f5fb;
+      --muted: #b9c4d8;
+      --outline: #9ba8bd;
+      --bit-line: rgba(255, 255, 255, 0.42);
+      --sign: #a96bdc;
+      --exponent: #397fc1;
+      --mantissa: #218d76;
+      --integer: #bd682e;
+      --note: #222c3e;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .card {
+    width: 100%;
+    max-height: 520px;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--outline);
+    border-radius: 10px;
+    padding: 12px 14px 10px;
+  }
+
+  h2 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    line-height: normal;
+    font-weight: 720;
+    letter-spacing: 0.01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  .format-name {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: 720;
+    dominant-baseline: middle;
+  }
+
+  .total {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 650;
+    dominant-baseline: middle;
+  }
+
+  .field-label {
+    fill: #ffffff;
+    font-size: 13px;
+    font-weight: 720;
+    dominant-baseline: middle;
+    pointer-events: none;
+  }
+
+  .segment {
+    stroke: var(--outline);
+    stroke-width: 1.4px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .bit-divider {
+    stroke: var(--bit-line);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .legend-label {
+    fill: var(--text);
+    font-size: 14px;
+    dominant-baseline: middle;
+  }
+
+  .legend-swatch {
+    stroke: var(--outline);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .scale-note {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: 620;
+    dominant-baseline: middle;
+  }
+
+  .note-band {
+    fill: var(--note);
+    stroke: var(--outline);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 17px;
+  }
+</style>
+</head>
+<body>
+<figure class="card" aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Одинаковая ширина — разное устройство числа</h2>
+  <svg
+    id="diagram"
+    viewBox="0 0 1200 455"
+    width="1200"
+    height="455"
+    role="img"
+    aria-labelledby="svg-title svg-desc"
+    preserveAspectRatio="xMidYMid meet"
+  >
+    <title id="svg-title">Сравнение битовых полей FP32, FP16, BF16, FP8, INT8 и INT4</title>
+    <desc id="svg-desc">
+      Полосы показывают, как биты форматов распределяются между знаком,
+      экспонентой, мантиссой и целым значением.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  origin: { x: 220, y: 0 },
+  scale: { x: 28, y: 1 },
+  geometry: {
+    nameX: -0.8,
+    barHeight: 34,
+    totalGap: 0.45,
+    rows: [24, 76, 128, 180, 232, 284, 336],
+    legendY: 397,
+    legendSwatchY: 388,
+    legendSwatchWidth: 0.72,
+    legendSwatchHeight: 18,
+    legendTextGap: 0.92,
+    legendXs: [0, 7.2, 14.4, 21.6],
+    noteX: -3.65,
+    noteY: 425,
+    noteWidth: 27.4,
+    noteHeight: 26,
+    noteTextX: 10.05,
+    noteTextY: 438,
+    fallbackX: -2.5,
+    fallbackY: 110
+  },
+  colors: {
+    sign: "var(--sign)",
+    exponent: "var(--exponent)",
+    mantissa: "var(--mantissa)",
+    integer: "var(--integer)"
+  },
+  formats: [
+    {
+      name: "FP32",
+      total: 32,
+      totalLabel: "32 бита",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "exponent", bits: 8, label: "экспонента · 8" },
+        { kind: "mantissa", bits: 23, label: "мантисса · 23" }
+      ]
+    },
+    {
+      name: "FP16",
+      total: 16,
+      totalLabel: "16 бит",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "exponent", bits: 5, label: "эксп. · 5" },
+        { kind: "mantissa", bits: 10, label: "мантисса · 10" }
+      ]
+    },
+    {
+      name: "BF16",
+      total: 16,
+      totalLabel: "16 бит",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "exponent", bits: 8, label: "экспонента · 8" },
+        { kind: "mantissa", bits: 7, label: "мантисса · 7" }
+      ]
+    },
+    {
+      name: "FP8 E4M3",
+      total: 8,
+      totalLabel: "8 бит",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "exponent", bits: 4, label: "эксп. · 4" },
+        { kind: "mantissa", bits: 3, label: "мант. · 3" }
+      ]
+    },
+    {
+      name: "FP8 E5M2",
+      total: 8,
+      totalLabel: "8 бит",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "exponent", bits: 5, label: "эксп. · 5" },
+        { kind: "mantissa", bits: 2, label: "м. · 2" }
+      ]
+    },
+    {
+      name: "INT8",
+      total: 8,
+      totalLabel: "8 бит",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "integer", bits: 7, label: "целое значение · 7" }
+      ]
+    },
+    {
+      name: "INT4",
+      total: 4,
+      totalLabel: "4 бита",
+      fields: [
+        { kind: "sign", bits: 1, label: "1" },
+        { kind: "integer", bits: 3, label: "целое · 3" }
+      ]
+    }
+  ],
+  legend: [
+    { kind: "sign", label: "знак" },
+    { kind: "exponent", label: "экспонента" },
+    { kind: "mantissa", label: "мантисса" },
+    { kind: "integer", label: "целое значение" }
+  ],
+  note: "INT8 и INT4: вещественный шаг задаёт отдельный масштаб"
+};
+
+const origin = DATA.origin;
+const scale = DATA.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const geometry = DATA.geometry;
+
+  const make = name => document.createElementNS(svg.namespaceURI, name);
+
+  const setRect = (node, x, y, width, height) => {
+    node.setAttribute("x", sx(x));
+    node.setAttribute("y", sy(y));
+    node.setAttribute("width", sx(x + width) - sx(x));
+    node.setAttribute("height", sy(y + height) - sy(y));
+  };
+
+  const setText = (node, x, y, anchor, value, className) => {
+    node.setAttribute("x", sx(x));
+    node.setAttribute("y", sy(y));
+    node.setAttribute("text-anchor", anchor);
+    node.setAttribute("class", className);
+    node.textContent = value;
+  };
+
+  let rowPosition = DATA.zero;
+
+  for (const format of DATA.formats) {
+    const rowY = geometry.rows[rowPosition];
+    const centerY = rowY + geometry.barHeight / DATA.two;
+
+    const name = make("text");
+    setText(
+      name,
+      geometry.nameX,
+      centerY,
+      "end",
+      format.name,
+      "format-name"
+    );
+    drawing.appendChild(name);
+
+    let cursor = DATA.zero;
+
+    for (const field of format.fields) {
+      const segment = make("rect");
+      setRect(segment, cursor, rowY, field.bits, geometry.barHeight);
+      segment.setAttribute("fill", DATA.colors[field.kind]);
+      segment.setAttribute("class", "segment");
+      drawing.appendChild(segment);
+
+      let division = DATA.one;
+      while (division < field.bits) {
+        const divider = make("line");
+        divider.setAttribute("x1", sx(cursor + division));
+        divider.setAttribute("y1", sy(rowY));
+        divider.setAttribute("x2", sx(cursor + division));
+        divider.setAttribute("y2", sy(rowY + geometry.barHeight));
+        divider.setAttribute("class", "bit-divider");
+        drawing.appendChild(divider);
+        division += DATA.one;
+      }
+
+      const label = make("text");
+      setText(
+        label,
+        cursor + field.bits / DATA.two,
+        centerY,
+        "middle",
+        field.label,
+        "field-label"
+      );
+      drawing.appendChild(label);
+
+      cursor += field.bits;
+    }
+
+    const total = make("text");
+    setText(
+      total,
+      format.total + geometry.totalGap,
+      centerY,
+      "start",
+      format.totalLabel,
+      "total"
+    );
+    drawing.appendChild(total);
+
+    rowPosition += DATA.one;
+  }
+
+  let legendPosition = DATA.zero;
+
+  for (const item of DATA.legend) {
+    const legendX = geometry.legendXs[legendPosition];
+
+    const swatch = make("rect");
+    setRect(
+      swatch,
+      legendX,
+      geometry.legendSwatchY,
+      geometry.legendSwatchWidth,
+      geometry.legendSwatchHeight
+    );
+    swatch.setAttribute("fill", DATA.colors[item.kind]);
+    swatch.setAttribute("class", "legend-swatch");
+    drawing.appendChild(swatch);
+
+    const label = make("text");
+    setText(
+      label,
+      legendX + geometry.legendTextGap,
+      geometry.legendY,
+      "start",
+      item.label,
+      "legend-label"
+    );
+    drawing.appendChild(label);
+
+    legendPosition += DATA.one;
+  }
+
+  const noteBand = make("rect");
+  setRect(
+    noteBand,
+    geometry.noteX,
+    geometry.noteY,
+    geometry.noteWidth,
+    geometry.noteHeight
+  );
+  noteBand.setAttribute("class", "note-band");
+  drawing.appendChild(noteBand);
+
+  const note = make("text");
+  setText(
+    note,
+    geometry.noteTextX,
+    geometry.noteTextY,
+    "middle",
+    DATA.note,
+    "scale-note"
+  );
+  drawing.appendChild(note);
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  drawing.replaceChildren();
+
+  const fallback = document.createElementNS(svg.namespaceURI, "text");
+  fallback.setAttribute("x", sx(DATA.geometry.fallbackX));
+  fallback.setAttribute("y", sy(DATA.geometry.fallbackY));
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent =
+    "Здесь должны быть полосы FP32, FP16, BF16, FP8, INT8 и INT4 с разделением битовых полей.";
+  drawing.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

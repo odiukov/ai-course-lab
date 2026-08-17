@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как микробатчи заполняют четырёхстадийный конвейер</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: white;
+      --panel: whitesmoke;
+      --ink: midnightblue;
+      --muted: slategray;
+      --grid: lightslategray;
+      --idle: gainsboro;
+      --idle-text: dimgray;
+      --focus: darkslateblue;
+      --micro-one: royalblue;
+      --micro-two: seagreen;
+      --micro-three: darkorange;
+      --micro-four: mediumpurple;
+      --on-color: white;
+      --on-orange: black;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: midnightblue;
+        --panel: darkslategray;
+        --ink: ghostwhite;
+        --muted: lightsteelblue;
+        --grid: lightslategray;
+        --idle: dimgray;
+        --idle-text: gainsboro;
+        --focus: lightsteelblue;
+        --micro-one: cornflowerblue;
+        --micro-two: mediumseagreen;
+        --micro-three: orange;
+        --micro-four: mediumorchid;
+        --on-color: white;
+        --on-orange: black;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--background);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1080px;
+      margin: auto;
+      background: var(--background);
+    }
+
+    h1 {
+      margin: unset;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--background);
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--grid);
+      stroke-width: 1px;
+    }
+
+    .section-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .stage-label {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .time-label,
+    .annotation,
+    .legend-label {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .cell-label {
+      font-size: 13px;
+      font-weight: bold;
+      pointer-events: none;
+    }
+
+    .idle-cell {
+      fill: var(--idle);
+      stroke: var(--grid);
+      stroke-width: 1px;
+    }
+
+    .active-cell {
+      stroke: var(--background);
+      stroke-width: 2px;
+    }
+
+    .micro-one {
+      fill: var(--micro-one);
+    }
+
+    .micro-two {
+      fill: var(--micro-two);
+    }
+
+    .micro-three {
+      fill: var(--micro-three);
+    }
+
+    .micro-four {
+      fill: var(--micro-four);
+    }
+
+    .light-label {
+      fill: var(--on-color);
+    }
+
+    .dark-label {
+      fill: var(--on-orange);
+    }
+
+    .time-line {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .focus-outline {
+      fill: none;
+      stroke: var(--focus);
+      stroke-width: 3px;
+    }
+
+    .divider {
+      stroke: var(--grid);
+      stroke-width: 1px;
+    }
+
+    .batch-note {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Как микробатчи заполняют четырёхстадийный конвейер</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1080 460"
+      width="1080"
+      height="460"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description">
+      <title>Сравнение движения одного и четырёх микробатчей по четырём стадиям</title>
+      <desc id="diagram-description">
+        Слева один микробатч последовательно проходит четыре стадии, оставляя
+        большую часть клеток пустыми. Справа четыре микробатча сдвинуты на одну
+        стадию и в четвёртом такте одновременно занимают весь конвейер.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const data = Object.freeze({
+      zero: 0,
+      one: 1,
+      stageCount: 4,
+      firstColumnCount: 4,
+      secondColumnCount: 7,
+
+      panelY: 0.18,
+      panelHeight: 6.02,
+      firstPanelX: -2.78,
+      firstPanelWidth: 7.72,
+      secondPanelX: 5.28,
+      secondPanelWidth: 10.42,
+
+      firstGridX: 0.22,
+      secondGridX: 8.22,
+      gridY: 1.58,
+      cellWidth: 0.96,
+      cellHeight: 0.78,
+      columnPitch: 1,
+      rowPitch: 0.91,
+
+      firstStageLabelX: 0.02,
+      secondStageLabelX: 8.02,
+      titleY: 0.62,
+      firstTitleX: 1.08,
+      secondTitleX: 10.48,
+
+      timeY: 1.18,
+      timeTextOffsetY: -0.05,
+      arrowStartOffset: 0.92,
+      arrowEndOffset: 0.14,
+      arrowHeadDx: 0.18,
+      arrowHeadDy: 0.10,
+
+      cellTextXOffset: 0.48,
+      cellTextYOffset: 0.39,
+      stageTextYOffset: 0.39,
+
+      noteY: 5.72,
+      firstNoteX: 2.22,
+      secondNoteX: 11.70,
+
+      focusColumn: 3,
+      focusXInset: -0.04,
+      focusYInset: -0.05,
+      focusWidth: 1.04,
+      focusHeight: 3.60,
+
+      dividerY: 6.56,
+      dividerStartX: -2.48,
+      dividerEndX: 15.42,
+
+      legendY: 7.02,
+      legendTextY: 7.23,
+      legendSwatchWidth: 0.36,
+      legendSwatchHeight: 0.36,
+      legendTextOffsetX: 0.50,
+      legendItems: [
+        { x: -2.28, value: 1, label: "Микробатч 1" },
+        { x: 1.18, value: 2, label: "Микробатч 2" },
+        { x: 4.64, value: 3, label: "Микробатч 3" },
+        { x: 8.10, value: 4, label: "Микробатч 4" },
+        { x: 11.58, value: null, label: "ожидание" }
+      ],
+
+      batchNoteX: 6.04,
+      batchNoteY: 8.22,
+
+      firstTitle: "1 микробатч: много ожидания",
+      secondTitle: "4 микробатча: сдвиг на одну стадию",
+      timeLabel: "время",
+      firstNote: "пустые клетки — ожидание",
+      secondNote: "все 4 стадии заняты одновременно",
+      batchNote: "Все 4 микробатча — части одного исходного батча и одного обновления",
+      stageLabels: [
+        "Стадия 1",
+        "Стадия 2",
+        "Стадия 3",
+        "Стадия 4"
+      ],
+
+      firstSchedule: [
+        [1, null, null, null],
+        [null, 1, null, null],
+        [null, null, 1, null],
+        [null, null, null, 1]
+      ],
+
+      secondSchedule: [
+        [1, 2, 3, 4, null, null, null],
+        [null, 1, 2, 3, 4, null, null],
+        [null, null, 1, 2, 3, 4, null],
+        [null, null, null, 1, 2, 3, 4]
+      ],
+
+      microClasses: [
+        "",
+        "micro-one",
+        "micro-two",
+        "micro-three",
+        "micro-four"
+      ],
+
+      labelClasses: [
+        "",
+        "light-label",
+        "light-label",
+        "dark-label",
+        "light-label"
+      ],
+
+      fallbackX: -2.48,
+      fallbackY: 3.10,
+      fallbackText:
+        "Схема должна показать: один микробатч оставляет стадии пустыми, а четыре заполняют конвейер по диагонали."
+    });
+
+    const origin = Object.freeze({ x: 168, y: 50 });
+    const scale = Object.freeze({ x: 55, y: 45 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const namespace = "http://www.w3.org/2000/svg";
+    const drawing = document.getElementById("drawing");
+
+    function createSvgElement(name, attributes, content) {
+      const node = document.createElementNS(namespace, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+
+      drawing.appendChild(node);
+      return node;
+    }
+
+    function drawRect(x, y, width, height, className) {
+      return createSvgElement("rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + width) - sx(x),
+        height: sy(y + height) - sy(y),
+        class: className
+      });
+    }
+
+    function drawLine(xOne, yOne, xTwo, yTwo, className) {
+      return createSvgElement("line", {
+        x1: sx(xOne),
+        y1: sy(yOne),
+        x2: sx(xTwo),
+        y2: sy(yTwo),
+        class: className
+      });
+    }
+
+    function drawText(x, y, content, className, anchor) {
+      return createSvgElement("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, content);
+    }
+
+    function drawTimeArrow(gridX, columnCount) {
+      const arrowStartX = gridX + data.arrowStartOffset;
+      const arrowEndX = gridX + columnCount - data.arrowEndOffset;
+
+      drawText(
+        gridX,
+        data.timeY + data.timeTextOffsetY,
+        data.timeLabel,
+        "time-label",
+        "start"
+      );
+
+      drawLine(
+        arrowStartX,
+        data.timeY,
+        arrowEndX,
+        data.timeY,
+        "time-line"
+      );
+
+      drawLine(
+        arrowEndX,
+        data.timeY,
+        arrowEndX - data.arrowHeadDx,
+        data.timeY - data.arrowHeadDy,
+        "time-line"
+      );
+
+      drawLine(
+        arrowEndX,
+        data.timeY,
+        arrowEndX - data.arrowHeadDx,
+        data.timeY + data.arrowHeadDy,
+        "time-line"
+      );
+    }
+
+    function drawStageLabels(labelX) {
+      data.stageLabels.forEach((label, stageIndex) => {
+        const labelY =
+          data.gridY +
+          stageIndex * data.rowPitch +
+          data.stageTextYOffset;
+
+        drawText(labelX, labelY, label, "stage-label", "end");
+      });
+    }
+
+    function drawSchedule(gridX, schedule) {
+      schedule.forEach((row, stageIndex) => {
+        row.forEach((microbatch, timeIndex) => {
+          const cellX = gridX + timeIndex * data.columnPitch;
+          const cellY = data.gridY + stageIndex * data.rowPitch;
+
+          if (microbatch === null) {
+            drawRect(
+              cellX,
+              cellY,
+              data.cellWidth,
+              data.cellHeight,
+              "idle-cell"
+            );
+            return;
+          }
+
+          drawRect(
+            cellX,
+            cellY,
+            data.cellWidth,
+            data.cellHeight,
+            `active-cell ${data.microClasses[microbatch]}`
+          );
+
+          drawText(
+            cellX + data.cellTextXOffset,
+            cellY + data.cellTextYOffset,
+            `МБ ${microbatch}`,
+            `cell-label ${data.labelClasses[microbatch]}`,
+            "middle"
+          );
+        });
+      });
+    }
+
+    function drawLegend() {
+      data.legendItems.forEach(item => {
+        const className =
+          item.value === null
+            ? "idle-cell"
+            : `active-cell ${data.microClasses[item.value]}`;
+
+        drawRect(
+          item.x,
+          data.legendY,
+          data.legendSwatchWidth,
+          data.legendSwatchHeight,
+          className
+        );
+
+        drawText(
+          item.x + data.legendTextOffsetX,
+          data.legendTextY,
+          item.label,
+          "legend-label",
+          "start"
+        );
+      });
+    }
+
+    function buildDiagram() {
+      drawRect(
+        data.firstPanelX,
+        data.panelY,
+        data.firstPanelWidth,
+        data.panelHeight,
+        "panel"
+      );
+
+      drawRect(
+        data.secondPanelX,
+        data.panelY,
+        data.secondPanelWidth,
+        data.panelHeight,
+        "panel"
+      );
+
+      drawText(
+        data.firstTitleX,
+        data.titleY,
+        data.firstTitle,
+        "section-title",
+        "middle"
+      );
+
+      drawText(
+        data.secondTitleX,
+        data.titleY,
+        data.secondTitle,
+        "section-title",
+        "middle"
+      );
+
+      drawTimeArrow(data.firstGridX, data.firstColumnCount);
+      drawTimeArrow(data.secondGridX, data.secondColumnCount);
+
+      drawStageLabels(data.firstStageLabelX);
+      drawStageLabels(data.secondStageLabelX);
+
+      drawSchedule(data.firstGridX, data.firstSchedule);
+      drawSchedule(data.secondGridX, data.secondSchedule);
+
+      drawRect(
+        data.secondGridX +
+          data.focusColumn * data.columnPitch +
+          data.focusXInset,
+        data.gridY + data.focusYInset,
+        data.focusWidth,
+        data.focusHeight,
+        "focus-outline"
+      );
+
+      drawText(
+        data.firstNoteX,
+        data.noteY,
+        data.firstNote,
+        "annotation",
+        "middle"
+      );
+
+      drawText(
+        data.secondNoteX,
+        data.noteY,
+        data.secondNote,
+        "annotation",
+        "middle"
+      );
+
+      drawLine(
+        data.dividerStartX,
+        data.dividerY,
+        data.dividerEndX,
+        data.dividerY,
+        "divider"
+      );
+
+      drawLegend();
+
+      drawText(
+        data.batchNoteX,
+        data.batchNoteY,
+        data.batchNote,
+        "batch-note",
+        "middle"
+      );
+    }
+
+    try {
+      buildDiagram();
+    } catch (error) {
+      while (drawing.firstChild) {
+        drawing.removeChild(drawing.firstChild);
+      }
+
+      const fallback = document.createElementNS(namespace, "text");
+      fallback.setAttribute("x", String(sx(data.fallbackX)));
+      fallback.setAttribute("y", String(sy(data.fallbackY)));
+      fallback.setAttribute("class", "fallback");
+      fallback.setAttribute("text-anchor", "start");
+      fallback.setAttribute("dominant-baseline", "middle");
+      fallback.textContent = data.fallbackText;
+      drawing.appendChild(fallback);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

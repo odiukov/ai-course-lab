@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Замкнутый цикл самоулучшения с внешней опорой</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --loop: #f1f2fb;
+    --text: #1d2130;
+    --muted: #5f6577;
+    --border: #cfd3df;
+    --flow: #b93461;
+    --flow-soft: #f8dce6;
+    --human: #176aa6;
+    --human-soft: #dceef9;
+    --risk: #a45b10;
+    --risk-soft: #fff0d5;
+    --model: #242441;
+    --model-text: #ffffff;
+    --next: #257046;
+    --crossing: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #11131a;
+      --panel: #191c25;
+      --loop: #202330;
+      --text: #f2f3f7;
+      --muted: #b8bdcb;
+      --border: #454b5d;
+      --flow: #ff759f;
+      --flow-soft: #482433;
+      --human: #70c7ff;
+      --human-soft: #18384d;
+      --risk: #ffc26f;
+      --risk-soft: #44321d;
+      --model: #292944;
+      --model-text: #ffffff;
+      --next: #68d391;
+      --crossing: #191c25;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--text);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .title {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--text);
+    font-family: inherit;
+  }
+
+  .band {
+    fill: var(--loop);
+    stroke: var(--border);
+  }
+
+  .band-label {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--border);
+  }
+
+  .model {
+    fill: var(--model);
+    stroke: var(--flow);
+  }
+
+  .model-next {
+    fill: var(--model);
+    stroke: var(--next);
+  }
+
+  .node-label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .model-label {
+    fill: var(--model-text);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--flow);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-head {
+    fill: var(--flow);
+  }
+
+  .human-line {
+    fill: none;
+    stroke: var(--human);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .human-head {
+    fill: var(--human);
+  }
+
+  .human-halo {
+    fill: none;
+    stroke: var(--crossing);
+    stroke-linecap: round;
+  }
+
+  .human-card {
+    fill: var(--human-soft);
+    stroke: var(--human);
+  }
+
+  .risk-card {
+    fill: var(--risk-soft);
+    stroke: var(--risk);
+  }
+
+  .risk-title {
+    fill: var(--risk);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .body-label {
+    font-size: 14px;
+  }
+
+  .small-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .human-title {
+    fill: var(--human);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .external-label {
+    fill: var(--human);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    padding: 16px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <div class="title">Замкнутый цикл самоулучшения с внешней опорой</div>
+  <svg id="diagram" viewBox="0 0 1100 440" width="1100" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Цикл обучения от SFT-модели v0 к модели v1</title>
+    <desc id="svgDesc">Модель генерирует G ответов, ответы оцениваются и фильтруются, затем используются для SFT или GRPO. Модель v1 возвращается в цикл. Небольшая доля свежих человеческих данных поступает в дообучение извне.</desc>
+  </svg>
+  <div id="fallback" class="fallback" hidden></div>
+</figure>
+
+<script>
+const DATA = [
+  {
+    kind: "space",
+    origin: { x: 0, y: 0 },
+    scale: 1,
+    zero: 0,
+    headLength: 11,
+    headHalf: 6,
+    radius: 12,
+    lineGap: 19,
+    labelPad: 12,
+    lastIndex: -1,
+    previousIndex: -2
+  },
+  {
+    kind: "style",
+    lineWidth: 3,
+    cardWidth: 2,
+    haloWidth: 9
+  },
+  {
+    kind: "band",
+    x: 18, y: 34, w: 1064, h: 240,
+    label: {
+      x: 36, y: 61,
+      lines: ["Автоматический контур: усиливает уже имеющийся сигнал"],
+      gap: 19, anchor: "start", className: "band-label"
+    }
+  },
+  {
+    kind: "node", id: "m0",
+    x: 35, y: 92, w: 130, h: 80,
+    className: "node model",
+    label: {
+      x: 100, y: 137,
+      lines: ["SFT-модель v0"],
+      gap: 19, anchor: "middle",
+      className: "node-label model-label"
+    }
+  },
+  {
+    kind: "node", id: "generate",
+    x: 195, y: 92, w: 145, h: 80,
+    className: "node",
+    label: {
+      x: 267.5, y: 125,
+      lines: ["Генерация G ответов", "на промпт"],
+      gap: 19, anchor: "middle", className: "node-label"
+    }
+  },
+  {
+    kind: "node", id: "score",
+    x: 370, y: 92, w: 180, h: 80,
+    className: "node",
+    label: {
+      x: 460, y: 125,
+      lines: ["Оценка правилом", "или конституцией"],
+      gap: 19, anchor: "middle", className: "node-label"
+    }
+  },
+  {
+    kind: "node", id: "filter",
+    x: 580, y: 92, w: 130, h: 80,
+    className: "node",
+    label: {
+      x: 645, y: 125,
+      lines: ["Фильтрация", "и ранжирование"],
+      gap: 19, anchor: "middle", className: "node-label"
+    }
+  },
+  {
+    kind: "node", id: "train",
+    x: 740, y: 92, w: 145, h: 80,
+    className: "node",
+    label: {
+      x: 812.5, y: 125,
+      lines: ["Дообучение", "SFT или GRPO"],
+      gap: 19, anchor: "middle", className: "node-label"
+    }
+  },
+  {
+    kind: "node", id: "m1",
+    x: 920, y: 92, w: 145, h: 80,
+    className: "node model-next",
+    label: {
+      x: 992.5, y: 137,
+      lines: ["SFT-модель v1"],
+      gap: 19, anchor: "middle",
+      className: "node-label model-label"
+    }
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [{ x: 165, y: 132 }, { x: 195, y: 132 }]
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [{ x: 340, y: 132 }, { x: 370, y: 132 }]
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [{ x: 550, y: 132 }, { x: 580, y: 132 }]
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [{ x: 710, y: 132 }, { x: 740, y: 132 }]
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [{ x: 885, y: 132 }, { x: 920, y: 132 }]
+  },
+  {
+    kind: "arrow", className: "flow",
+    route: [
+      { x: 992.5, y: 172 },
+      { x: 992.5, y: 246 },
+      { x: 267.5, y: 246 },
+      { x: 267.5, y: 172 }
+    ]
+  },
+  {
+    kind: "text",
+    x: 515, y: 235,
+    lines: ["итерация: Model v1 снова генерирует G ответов"],
+    gap: 19, anchor: "middle", className: "small-label"
+  },
+  {
+    kind: "card", className: "risk-card",
+    x: 35, y: 305, w: 505, h: 98,
+    texts: [
+      {
+        x: 58, y: 333,
+        lines: ["Риск: mode collapse"],
+        gap: 19, anchor: "start", className: "risk-title"
+      },
+      {
+        x: 58, y: 359,
+        lines: [
+          "Если полезного ответа среди кандидатов нет, фильтровать нечего.",
+          "Повторный отбор постепенно сужает разнообразие."
+        ],
+        gap: 22, anchor: "start", className: "body-label"
+      }
+    ]
+  },
+  {
+    kind: "card", className: "human-card",
+    x: 650, y: 315, w: 320, h: 82,
+    texts: [
+      {
+        x: 810, y: 345,
+        lines: ["Свежие человеческие данные"],
+        gap: 19, anchor: "middle", className: "human-title"
+      },
+      {
+        x: 810, y: 373,
+        lines: ["небольшая доля · редкие случаи · новые примеры"],
+        gap: 19, anchor: "middle", className: "body-label"
+      }
+    ]
+  },
+  {
+    kind: "arrow", className: "human", halo: true,
+    route: [{ x: 812.5, y: 315 }, { x: 812.5, y: 172 }]
+  },
+  {
+    kind: "text",
+    x: 812.5, y: 291, offset: true,
+    lines: ["внешняя опора"],
+    gap: 19, anchor: "start", className: "external-label"
+  }
+];
+
+const [space, style, ...items] = DATA;
+const origin = space.origin;
+const scale = space.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const svg = document.getElementById("diagram");
+const fallback = document.getElementById("fallback");
+const NS = "http://www.w3.org/2000/svg";
+
+try {
+  const layer = document.createElementNS(NS, "g");
+
+  function make(tag, attrs) {
+    const element = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([name, value]) => {
+      element.setAttribute(name, String(value));
+    });
+    return element;
+  }
+
+  function addText(spec, parent) {
+    const text = make("text", {
+      x: sx(spec.x + (spec.offset ? space.labelPad : space.zero)),
+      y: sy(spec.y),
+      "text-anchor": spec.anchor,
+      class: spec.className
+    });
+
+    spec.lines.forEach((line, index) => {
+      const span = make("tspan", {
+        x: sx(spec.x + (spec.offset ? space.labelPad : space.zero)),
+        y: sy(spec.y + index * spec.gap)
+      });
+      span.textContent = line;
+      text.append(span);
+    });
+
+    parent.append(text);
+  }
+
+  function addRect(spec, parent, className) {
+    parent.append(make("rect", {
+      x: sx(spec.x),
+      y: sy(spec.y),
+      width: sx(spec.x + spec.w) - sx(spec.x),
+      height: sy(spec.y + spec.h) - sy(spec.y),
+      rx: sx(space.radius) - sx(space.zero),
+      ry: sy(space.radius) - sy(space.zero),
+      class: className,
+      "stroke-width": style.cardWidth
+    }));
+  }
+
+  function addArrow(spec, parent) {
+    const route = spec.route;
+    const end = route.at(space.lastIndex);
+    const before = route.at(space.previousIndex);
+    const vx = end.x - before.x;
+    const vy = end.y - before.y;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const base = {
+      x: end.x - ux * space.headLength,
+      y: end.y - uy * space.headLength
+    };
+    const left = {
+      x: base.x - uy * space.headHalf,
+      y: base.y + ux * space.headHalf
+    };
+    const right = {
+      x: base.x + uy * space.headHalf,
+      y: base.y - ux * space.headHalf
+    };
+    const points = route
+      .map(point => `${sx(point.x)},${sy(point.y)}`)
+      .join(" ");
+
+    if (spec.halo) {
+      parent.append(make("polyline", {
+        points,
+        class: "human-halo",
+        "stroke-width": style.haloWidth
+      }));
+    }
+
+    parent.append(make("polyline", {
+      points,
+      class: `${spec.className}-line`,
+      "stroke-width": style.lineWidth
+    }));
+
+    parent.append(make("polygon", {
+      points: [
+        `${sx(end.x)},${sy(end.y)}`,
+        `${sx(left.x)},${sy(left.y)}`,
+        `${sx(right.x)},${sy(right.y)}`
+      ].join(" "),
+      class: `${spec.className}-head`
+    }));
+  }
+
+  items.filter(item => item.kind === "band").forEach(item => {
+    addRect(item, layer, "band");
+    addText(item.label, layer);
+  });
+
+  items.filter(item => item.kind === "arrow" && item.className === "flow")
+    .forEach(item => addArrow(item, layer));
+
+  items.filter(item => item.kind === "node").forEach(item => {
+    addRect(item, layer, item.className);
+    addText(item.label, layer);
+  });
+
+  items.filter(item => item.kind === "card").forEach(item => {
+    addRect(item, layer, item.className);
+    item.texts.forEach(text => addText(text, layer));
+  });
+
+  items.filter(item => item.kind === "arrow" && item.className === "human")
+    .forEach(item => addArrow(item, layer));
+
+  items.filter(item => item.kind === "text")
+    .forEach(item => addText(item, layer));
+
+  svg.append(layer);
+} catch (error) {
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать замкнутый цикл: SFT-модель v0 генерирует G ответов, правило или конституция оценивает их, фильтрация отбирает лучшие, SFT или GRPO создаёт Model v1, после чего цикл повторяется. Отдельная внешняя стрелка небольшой доли свежих человеческих данных ведёт прямо в дообучение.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

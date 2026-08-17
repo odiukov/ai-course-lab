@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Один запрос проходит две разные фазы</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: white;
+      --surface: ghostwhite;
+      --ink: midnightblue;
+      --muted: slategray;
+      --line: lightsteelblue;
+      --prefill: aliceblue;
+      --prefill-strong: royalblue;
+      --decode: oldlace;
+      --decode-strong: darkorange;
+      --token: white;
+      --boundary: seagreen;
+      --fallback: firebrick;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+    }
+
+    body {
+      margin: unset;
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      width: 1200px;
+      max-width: 100%;
+      margin: unset;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: unset;
+      padding: 16px 18px 10px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 1200px;
+      max-width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+    }
+
+    .panel {
+      fill: var(--surface);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .prefill-area {
+      fill: var(--prefill);
+      stroke: var(--prefill-strong);
+      stroke-width: 2px;
+    }
+
+    .decode-area {
+      fill: var(--decode);
+      stroke: var(--decode-strong);
+      stroke-width: 2px;
+    }
+
+    .prompt-band {
+      fill: var(--prefill-strong);
+      stroke: var(--prefill-strong);
+      stroke-width: 2px;
+    }
+
+    .prompt-divider {
+      stroke: var(--prefill);
+      stroke-width: 2px;
+    }
+
+    .token {
+      fill: var(--token);
+      stroke: var(--decode-strong);
+      stroke-width: 3px;
+    }
+
+    .token-dot {
+      fill: var(--decode-strong);
+      stroke: var(--decode-strong);
+      stroke-width: 2px;
+    }
+
+    .flow-prefill {
+      fill: var(--prefill-strong);
+      stroke: var(--prefill-strong);
+      stroke-width: 3px;
+    }
+
+    .flow-decode {
+      fill: var(--decode-strong);
+      stroke: var(--decode-strong);
+      stroke-width: 3px;
+    }
+
+    .timeline {
+      fill: var(--ink);
+      stroke: var(--ink);
+      stroke-width: 3px;
+    }
+
+    .tick {
+      stroke: var(--ink);
+      stroke-width: 2px;
+    }
+
+    .boundary {
+      stroke: var(--boundary);
+      stroke-width: 3px;
+    }
+
+    .boundary-dot {
+      fill: var(--boundary);
+      stroke: var(--boundary);
+      stroke-width: 2px;
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 17px;
+    }
+
+    .phase-title {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .phase-subtitle {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .inside-prefill {
+      fill: white;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .token-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .metric {
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .annotation {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .transition-label {
+      fill: var(--boundary);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 18px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: midnightblue;
+        --surface: darkslategray;
+        --ink: white;
+        --muted: lightsteelblue;
+        --line: slategray;
+        --prefill: darkslateblue;
+        --prefill-strong: deepskyblue;
+        --decode: saddlebrown;
+        --decode-strong: orange;
+        --token: midnightblue;
+        --boundary: lightgreen;
+        --fallback: lightsalmon;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="screen-title">
+    <h2 id="screen-title">Один запрос — две разные фазы</h2>
+    <svg id="diagram"
+         viewBox="0 0 1200 440"
+         width="1200"
+         height="440"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Временная шкала фаз prefill и decode</title>
+      <desc id="svg-description">
+        Сначала модель параллельно обрабатывает промпт из 4096 токенов за 400 миллисекунд.
+        Затем она последовательно создаёт токены ответа, затрачивая примерно 70 миллисекунд на каждый шаг.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </figure>
+
+  <script>
+    const DATA = [
+      {
+        origin: { x: 38, y: 10 },
+        scale: { x: 9.7, y: 9.6 },
+        arrow: { head: 1.8, wing: 1.05 },
+        lineGap: 2.2
+      },
+      {
+        panel: { x1: 4, y1: 2, x2: 52, y2: 18.5 },
+        title: { x: 6, y: 5.2, value: "PREFILL", anchor: "start" },
+        subtitle: {
+          x: 6,
+          y: 7.7,
+          value: "весь вход известен заранее",
+          anchor: "start"
+        },
+        band: { x1: 6, y1: 10, x2: 50, y2: 14.7 },
+        dividers: [10, 13, 16, 19.5, 23, 27, 31.5, 35, 39, 43.5, 47],
+        bandLabel: {
+          x: 28,
+          y: 13,
+          value: "Промпт: 4096 токенов",
+          anchor: "middle"
+        },
+        note: {
+          x: 28,
+          y: 17,
+          value: "токены обрабатываются параллельно",
+          anchor: "middle"
+        }
+      },
+      {
+        panel: { x1: 56, y1: 2, x2: 116, y2: 18.5 },
+        title: { x: 58, y: 5.2, value: "DECODE", anchor: "start" },
+        subtitle: {
+          x: 58,
+          y: 7.7,
+          value: "ответ строится последовательно",
+          anchor: "start"
+        },
+        nodes: [
+          { x: 60, y: 12, r: 2.05, label: "токен", labelY: 16.4 },
+          { x: 71.5, y: 12, r: 2.05, label: "токен", labelY: 16.4 },
+          { x: 83, y: 12, r: 2.05, label: "токен", labelY: 16.4 },
+          { x: 94.5, y: 12, r: 2.05, label: "токен", labelY: 16.4 },
+          { x: 106, y: 12, r: 2.05, label: "токен", labelY: 16.4 }
+        ],
+        arrows: [
+          { x1: 62.4, y1: 12, x2: 68.7, y2: 12 },
+          { x1: 73.9, y1: 12, x2: 80.2, y2: 12 },
+          { x1: 85.4, y1: 12, x2: 91.7, y2: 12 },
+          { x1: 96.9, y1: 12, x2: 103.2, y2: 12 }
+        ]
+      },
+      {
+        axis: { x1: 4, y1: 25, x2: 116, y2: 25 },
+        axisLabel: {
+          x: 4,
+          y: 22.5,
+          value: "время одного запроса",
+          anchor: "start"
+        },
+        boundary: { x: 54, y1: 20.5, y2: 40.8, r: 0.55 },
+        boundaryLabel: {
+          x: 54,
+          y: 20,
+          value: "первый токен ответа",
+          anchor: "middle"
+        },
+        prefill: {
+          x1: 4,
+          y1: 28,
+          x2: 54,
+          y2: 35.5,
+          labelX: 29,
+          labelY: 32.5,
+          label: "prefill: 400 мс"
+        },
+        decodeSteps: [
+          { x1: 54, y1: 28, x2: 62.75, y2: 35.5 },
+          { x1: 62.75, y1: 28, x2: 71.5, y2: 35.5 },
+          { x1: 71.5, y1: 28, x2: 80.25, y2: 35.5 },
+          { x1: 80.25, y1: 28, x2: 89, y2: 35.5 },
+          { x1: 89, y1: 28, x2: 97.75, y2: 35.5 },
+          { x1: 97.75, y1: 28, x2: 106.5, y2: 35.5 }
+        ],
+        ticks: [4, 54, 62.75, 71.5, 80.25, 89, 97.75, 106.5],
+        decodeLabel: {
+          x: 80.25,
+          y: 39,
+          value: "каждый шаг decode ≈ 70 мс",
+          anchor: "middle"
+        },
+        summary: {
+          x: 60,
+          y: 42,
+          value: "широкая параллельная работа → много маленьких зависимых шагов",
+          anchor: "middle"
+        }
+      },
+      {
+        fallback: {
+          x: 6,
+          y: 9,
+          lines: [
+            "Схема должна была показать две фазы запроса:",
+            "prefill промпта из 4096 токенов за 400 мс,",
+            "затем последовательные шаги decode примерно по 70 мс."
+          ]
+        }
+      }
+    ];
+
+    const [CONFIG, PREFILL, DECODE, TIMELINE, FAILURE] = DATA;
+    const origin = CONFIG.origin;
+    const scale = CONFIG.scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const create = (name, attributes, className) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const polygon = (points, className) => {
+        const value = points
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ");
+        return create("polygon", { points: value }, className);
+      };
+
+      const box = (shape, className) => polygon([
+        { x: shape.x1, y: shape.y1 },
+        { x: shape.x2, y: shape.y1 },
+        { x: shape.x2, y: shape.y2 },
+        { x: shape.x1, y: shape.y2 }
+      ], className);
+
+      const line = (shape, className) => create("line", {
+        x1: sx(shape.x1),
+        y1: sy(shape.y1),
+        x2: sx(shape.x2),
+        y2: sy(shape.y2)
+      }, className);
+
+      const circle = (shape, className) => create("circle", {
+        cx: sx(shape.x),
+        cy: sy(shape.y),
+        r: Math.abs(sx(shape.x + shape.r) - sx(shape.x))
+      }, className);
+
+      const label = (shape, className) => {
+        const node = create("text", {
+          x: sx(shape.x),
+          y: sy(shape.y),
+          "text-anchor": shape.anchor || "start",
+          "dominant-baseline": "middle"
+        }, className);
+        node.textContent = shape.value;
+        return node;
+      };
+
+      const arrow = (shape, className) => {
+        const group = create("g", {}, "");
+        const dx = shape.x2 - shape.x1;
+        const dy = shape.y2 - shape.y1;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const head = CONFIG.arrow.head;
+        const wing = CONFIG.arrow.wing;
+        const baseX = shape.x2 - ux * head;
+        const baseY = shape.y2 - uy * head;
+
+        group.append(
+          line(shape, className),
+          polygon([
+            { x: shape.x2, y: shape.y2 },
+            { x: baseX - uy * wing, y: baseY + ux * wing },
+            { x: baseX + uy * wing, y: baseY - ux * wing }
+          ], className)
+        );
+        return group;
+      };
+
+      drawing.append(
+        box(PREFILL.panel, "panel"),
+        box(DECODE.panel, "panel"),
+        label(PREFILL.title, "phase-title"),
+        label(PREFILL.subtitle, "phase-subtitle"),
+        label(DECODE.title, "phase-title"),
+        label(DECODE.subtitle, "phase-subtitle")
+      );
+
+      drawing.append(box(PREFILL.band, "prompt-band"));
+
+      PREFILL.dividers.forEach(x => {
+        drawing.append(line({
+          x1: x,
+          y1: PREFILL.band.y1,
+          x2: x,
+          y2: PREFILL.band.y2
+        }, "prompt-divider"));
+      });
+
+      drawing.append(
+        label(PREFILL.bandLabel, "inside-prefill"),
+        label(PREFILL.note, "annotation")
+      );
+
+      DECODE.arrows.forEach(connection => {
+        drawing.append(arrow(connection, "flow-decode"));
+      });
+
+      DECODE.nodes.forEach(node => {
+        drawing.append(
+          circle(node, "token"),
+          circle({ x: node.x, y: node.y, r: 0.55 }, "token-dot"),
+          label({
+            x: node.x,
+            y: node.labelY,
+            value: node.label,
+            anchor: "middle"
+          }, "token-label")
+        );
+      });
+
+      drawing.append(
+        arrow(TIMELINE.axis, "timeline"),
+        label(TIMELINE.axisLabel, "annotation"),
+        box(TIMELINE.prefill, "prefill-area")
+      );
+
+      TIMELINE.decodeSteps.forEach(step => {
+        drawing.append(box(step, "decode-area"));
+      });
+
+      TIMELINE.ticks.forEach(x => {
+        drawing.append(line({
+          x1: x,
+          y1: 24.2,
+          x2: x,
+          y2: 25.8
+        }, "tick"));
+      });
+
+      drawing.append(
+        line(TIMELINE.boundary, "boundary"),
+        circle({
+          x: TIMELINE.boundary.x,
+          y: TIMELINE.axis.y1,
+          r: TIMELINE.boundary.r
+        }, "boundary-dot"),
+        label(TIMELINE.boundaryLabel, "transition-label"),
+        label({
+          x: TIMELINE.prefill.labelX,
+          y: TIMELINE.prefill.labelY,
+          value: TIMELINE.prefill.label,
+          anchor: "middle"
+        }, "metric"),
+        label(TIMELINE.decodeLabel, "metric"),
+        label(TIMELINE.summary, "annotation")
+      );
+    } catch (error) {
+      const drawing = document.getElementById("drawing");
+      const namespace = "http://www.w3.org/2000/svg";
+      drawing.replaceChildren();
+
+      FAILURE.fallback.lines.forEach((value, index) => {
+        const node = document.createElementNS(namespace, "text");
+        node.setAttribute("x", String(sx(FAILURE.fallback.x)));
+        node.setAttribute(
+          "y",
+          String(sy(FAILURE.fallback.y + index * CONFIG.lineGap))
+        );
+        node.setAttribute("text-anchor", "start");
+        node.setAttribute("dominant-baseline", "middle");
+        node.setAttribute("class", "fallback");
+        node.textContent = value;
+        drawing.append(node);
+      });
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

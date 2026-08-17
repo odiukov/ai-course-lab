@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как выглядят здоровые и опасные кривые GRPO</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5f6f82;
+    --axis: #718096;
+    --grid: #dce5ef;
+    --healthy: #087f5b;
+    --healthy-soft: #dff5eb;
+    --danger: #d33f49;
+    --idle: #8a6d3b;
+    --frame: #cbd5e1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101722;
+      --panel: #172131;
+      --ink: #f1f5f9;
+      --muted: #b4c0cf;
+      --axis: #9aa9bc;
+      --grid: #344256;
+      --healthy: #4ed6a1;
+      --healthy-soft: #183e35;
+      --danger: #ff7b79;
+      --idle: #d7b878;
+      --frame: #415168;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: unset;
+    padding: 14px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+  }
+
+  h1 {
+    margin: unset;
+    padding: 4px 6px 10px;
+    font-size: 20px;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--bg);
+    border: 1px solid var(--frame);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--frame);
+    stroke-width: 1;
+  }
+
+  .healthy-zone {
+    fill: var(--healthy-soft);
+  }
+
+  .grid {
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .axis {
+    stroke: var(--axis);
+    stroke-width: 1.5;
+    fill: none;
+  }
+
+  .healthy {
+    stroke: var(--healthy);
+    stroke-width: 4;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .danger {
+    stroke: var(--danger);
+    stroke-width: 2.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .idle {
+    stroke: var(--idle);
+    stroke-width: 2.5;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .metric {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: 750;
+  }
+
+  .metric-note,
+  .axis-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .healthy-label {
+    fill: var(--healthy);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .danger-label {
+    fill: var(--danger);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .idle-label {
+    fill: var(--idle);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .legend-label {
+    fill: var(--ink);
+    font-size: 12px;
+  }
+
+  .summary {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  #fallback {
+    margin: unset;
+    padding: 18px;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--frame);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Как выглядят здоровые и опасные кривые GRPO</h1>
+  <svg id="diagram" viewBox="0 0 960 440" width="960" height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Три синхронных графика: награда, энтропия и KL. Здоровые кривые стабилизируются согласованно, а опасные показывают падение награды, обвал энтропии, неограниченный рост KL или отсутствие обучения.">
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать здоровое плато: награда растёт, энтропия плавно снижается, а KL выходит на ограниченный стабильный уровень. Опасные признаки — падение награды, резкий обвал энтропии, неограниченный рост KL и отсутствие обучения.</p>
+</figure>
+
+<script>
+const data = {
+  zero: 0,
+  panelRadius: { x: 0.12, y: 0.12 },
+  panels: [
+    { left: -1.58, right: 9.78, top: 0.42, bottom: 3.12 },
+    { left: -1.58, right: 9.78, top: 3.38, bottom: 6.08 },
+    { left: -1.58, right: 9.78, top: 6.34, bottom: 9.04 }
+  ],
+  guides: [2, 4, 6, 8],
+  axes: [
+    {
+      vertical: [{ x: 0, y: 2.92 }, { x: 0, y: 0.72 }],
+      horizontal: [{ x: 0, y: 2.92 }, { x: 9.52, y: 2.92 }],
+      xArrow: [{ x: 9.52, y: 2.84 }, { x: 9.72, y: 2.92 }, { x: 9.52, y: 3 }],
+      yArrow: [{ x: -0.08, y: 0.72 }, { x: 0, y: 0.52 }, { x: 0.08, y: 0.72 }]
+    },
+    {
+      vertical: [{ x: 0, y: 5.88 }, { x: 0, y: 3.68 }],
+      horizontal: [{ x: 0, y: 5.88 }, { x: 9.52, y: 5.88 }],
+      xArrow: [{ x: 9.52, y: 5.8 }, { x: 9.72, y: 5.88 }, { x: 9.52, y: 5.96 }],
+      yArrow: [{ x: -0.08, y: 3.68 }, { x: 0, y: 3.48 }, { x: 0.08, y: 3.68 }]
+    },
+    {
+      vertical: [{ x: 0, y: 8.84 }, { x: 0, y: 6.64 }],
+      horizontal: [{ x: 0, y: 8.84 }, { x: 9.52, y: 8.84 }],
+      xArrow: [{ x: 9.52, y: 8.76 }, { x: 9.72, y: 8.84 }, { x: 9.52, y: 8.92 }],
+      yArrow: [{ x: -0.08, y: 6.64 }, { x: 0, y: 6.44 }, { x: 0.08, y: 6.64 }]
+    }
+  ],
+  plateauZones: [
+    { left: 6.15, right: 9.48, top: 0.88, bottom: 1.5 },
+    { left: 6.15, right: 9.48, top: 5.18, bottom: 5.78 },
+    { left: 6.15, right: 9.48, top: 6.92, bottom: 7.52 }
+  ],
+  curves: [
+    {
+      className: "healthy",
+      points: [
+        { x: 0.28, y: 2.68 }, { x: 0.85, y: 2.35 },
+        { x: 1.55, y: 1.91 }, { x: 2.45, y: 1.52 },
+        { x: 3.55, y: 1.27 }, { x: 4.85, y: 1.13 },
+        { x: 6.3, y: 1.08 }, { x: 7.8, y: 1.07 },
+        { x: 9.38, y: 1.07 }
+      ]
+    },
+    {
+      className: "danger",
+      points: [
+        { x: 0.28, y: 2.7 }, { x: 1.1, y: 2.24 },
+        { x: 2.1, y: 1.69 }, { x: 3.3, y: 1.18 },
+        { x: 4.55, y: 0.82 }, { x: 5.55, y: 1.02 },
+        { x: 6.5, y: 1.47 }, { x: 7.45, y: 1.92 },
+        { x: 8.45, y: 2.25 }, { x: 9.38, y: 2.43 }
+      ]
+    },
+    {
+      className: "idle",
+      points: [
+        { x: 0.28, y: 2.67 }, { x: 1.6, y: 2.63 },
+        { x: 3.1, y: 2.61 }, { x: 4.8, y: 2.6 },
+        { x: 6.4, y: 2.59 }, { x: 7.9, y: 2.58 },
+        { x: 9.38, y: 2.58 }
+      ]
+    },
+    {
+      className: "healthy",
+      points: [
+        { x: 0.28, y: 3.78 }, { x: 1.05, y: 3.95 },
+        { x: 2.05, y: 4.24 }, { x: 3.25, y: 4.61 },
+        { x: 4.6, y: 4.98 }, { x: 5.95, y: 5.27 },
+        { x: 7.3, y: 5.45 }, { x: 8.4, y: 5.53 },
+        { x: 9.38, y: 5.57 }
+      ]
+    },
+    {
+      className: "danger",
+      points: [
+        { x: 0.28, y: 3.77 }, { x: 0.72, y: 3.9 },
+        { x: 1.12, y: 4.28 }, { x: 1.5, y: 5.03 },
+        { x: 1.88, y: 5.67 }, { x: 2.35, y: 5.79 },
+        { x: 4.2, y: 5.82 }, { x: 6.5, y: 5.83 },
+        { x: 9.38, y: 5.84 }
+      ]
+    },
+    {
+      className: "idle",
+      points: [
+        { x: 0.28, y: 3.82 }, { x: 1.6, y: 3.84 },
+        { x: 3.1, y: 3.85 }, { x: 4.8, y: 3.84 },
+        { x: 6.4, y: 3.86 }, { x: 7.9, y: 3.85 },
+        { x: 9.38, y: 3.86 }
+      ]
+    },
+    {
+      className: "healthy",
+      points: [
+        { x: 0.28, y: 8.67 }, { x: 1.05, y: 8.38 },
+        { x: 2.05, y: 7.97 }, { x: 3.2, y: 7.59 },
+        { x: 4.55, y: 7.34 }, { x: 5.9, y: 7.2 },
+        { x: 7.2, y: 7.15 }, { x: 8.4, y: 7.14 },
+        { x: 9.38, y: 7.14 }
+      ]
+    },
+    {
+      className: "danger",
+      points: [
+        { x: 0.28, y: 8.68 }, { x: 1.1, y: 8.42 },
+        { x: 2.1, y: 8.02 }, { x: 3.2, y: 7.57 },
+        { x: 4.35, y: 7.15 }, { x: 5.5, y: 6.85 },
+        { x: 6.65, y: 6.6 }, { x: 7.8, y: 6.44 },
+        { x: 9.38, y: 6.4 }
+      ]
+    },
+    {
+      className: "idle",
+      points: [
+        { x: 0.28, y: 8.75 }, { x: 1.6, y: 8.73 },
+        { x: 3.1, y: 8.72 }, { x: 4.8, y: 8.73 },
+        { x: 6.4, y: 8.72 }, { x: 7.9, y: 8.71 },
+        { x: 9.38, y: 8.72 }
+      ]
+    }
+  ],
+  labels: [
+    { text: "Награда", point: { x: -1.42, y: 0.86 }, dx: 0, dy: 0, anchor: "start", className: "metric" },
+    { text: "успех на заданиях", point: { x: -1.42, y: 1.2 }, dx: 0, dy: 0, anchor: "start", className: "metric-note" },
+    { text: "здоровое плато", point: { x: 9.25, y: 1.08 }, dx: -8, dy: -10, anchor: "end", className: "healthy-label" },
+    { text: "пик → падение", point: { x: 6.48, y: 1.48 }, dx: 8, dy: 16, anchor: "start", className: "danger-label" },
+    { text: "низкая награда", point: { x: 4.65, y: 2.6 }, dx: 0, dy: -8, anchor: "middle", className: "idle-label" },
+
+    { text: "Энтропия", point: { x: -1.42, y: 3.82 }, dx: 0, dy: 0, anchor: "start", className: "metric" },
+    { text: "разнообразие ответов", point: { x: -1.42, y: 4.16 }, dx: 0, dy: 0, anchor: "start", className: "metric-note" },
+    { text: "плавное снижение", point: { x: 9.25, y: 5.55 }, dx: -8, dy: -10, anchor: "end", className: "healthy-label" },
+    { text: "резкий обвал", point: { x: 2.1, y: 5.44 }, dx: 12, dy: -10, anchor: "start", className: "danger-label" },
+    { text: "высокая энтропия", point: { x: 5.25, y: 3.85 }, dx: 0, dy: -8, anchor: "middle", className: "idle-label" },
+
+    { text: "KL", point: { x: -1.42, y: 6.78 }, dx: 0, dy: 0, anchor: "start", className: "metric" },
+    { text: "уход от референса", point: { x: -1.42, y: 7.12 }, dx: 0, dy: 0, anchor: "start", className: "metric-note" },
+    { text: "ограниченный уровень", point: { x: 9.25, y: 7.15 }, dx: -8, dy: 18, anchor: "end", className: "healthy-label" },
+    { text: "неограниченный рост", point: { x: 6.65, y: 6.61 }, dx: 0, dy: -9, anchor: "middle", className: "danger-label" },
+    { text: "KL почти нулевой", point: { x: 4.8, y: 8.72 }, dx: 0, dy: -8, anchor: "middle", className: "idle-label" },
+    { text: "шаги обучения →", point: { x: 9.5, y: 9.22 }, dx: 0, dy: 0, anchor: "end", className: "axis-note" }
+  ],
+  legend: [
+    { className: "healthy", from: { x: 0, y: 9.64 }, to: { x: 0.52, y: 9.64 }, label: { text: "здоровая динамика", x: 0.68, y: 9.64 } },
+    { className: "danger", from: { x: 3.24, y: 9.64 }, to: { x: 3.76, y: 9.64 }, label: { text: "опасный сигнал", x: 3.92, y: 9.64 } },
+    { className: "idle", from: { x: 6.24, y: 9.64 }, to: { x: 6.76, y: 9.64 }, label: { text: "политика не учится", x: 6.92, y: 9.64 } }
+  ],
+  summary: {
+    text: "Здоровое плато: награда растёт · энтропия снижается плавно · KL стабилизируется",
+    point: { x: 0, y: 10.35 },
+    dx: 0,
+    dy: 0,
+    anchor: "start"
+  }
+};
+
+const origin = Object.freeze({ x: 150, y: 4 });
+const scale = Object.freeze({ x: 82, y: 40 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const node = (name, attributes, parent = svg) => {
+    const element = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+    parent.appendChild(element);
+    return element;
+  };
+
+  const line = (from, to, className, parent = svg) =>
+    node("line", {
+      x1: sx(from.x),
+      y1: sy(from.y),
+      x2: sx(to.x),
+      y2: sy(to.y),
+      class: className,
+      "vector-effect": "non-scaling-stroke"
+    }, parent);
+
+  const polyline = (points, className, parent = svg) =>
+    node("polyline", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: className,
+      "vector-effect": "non-scaling-stroke"
+    }, parent);
+
+  const curvePath = points => {
+    const [first, ...rest] = points;
+    return `M ${sx(first.x)} ${sy(first.y)} ` +
+      rest.map(point => `L ${sx(point.x)} ${sy(point.y)}`).join(" ");
+  };
+
+  const text = (label, parent = svg) => {
+    const element = node("text", {
+      x: sx(label.point.x) + label.dx,
+      y: sy(label.point.y) + label.dy,
+      "text-anchor": label.anchor,
+      class: label.className
+    }, parent);
+    element.textContent = label.text;
+    return element;
+  };
+
+  const backgroundLayer = node("g", { "aria-hidden": "true" });
+  for (const panel of data.panels) {
+    node("rect", {
+      x: sx(panel.left),
+      y: sy(panel.top),
+      width: sx(panel.right) - sx(panel.left),
+      height: sy(panel.bottom) - sy(panel.top),
+      rx: sx(data.panelRadius.x) - sx(data.zero),
+      ry: sy(data.panelRadius.y) - sy(data.zero),
+      class: "panel"
+    }, backgroundLayer);
+  }
+
+  for (const zone of data.plateauZones) {
+    node("rect", {
+      x: sx(zone.left),
+      y: sy(zone.top),
+      width: sx(zone.right) - sx(zone.left),
+      height: sy(zone.bottom) - sy(zone.top),
+      rx: sx(data.panelRadius.x) - sx(data.zero),
+      ry: sy(data.panelRadius.y) - sy(data.zero),
+      class: "healthy-zone"
+    }, backgroundLayer);
+  }
+
+  const gridLayer = node("g", { "aria-hidden": "true" });
+  for (const guide of data.guides) {
+    for (const panel of data.panels) {
+      line(
+        { x: guide, y: panel.top },
+        { x: guide, y: panel.bottom },
+        "grid",
+        gridLayer
+      );
+    }
+  }
+
+  const axisLayer = node("g", { "aria-hidden": "true" });
+  for (const axis of data.axes) {
+    line(axis.vertical[0], axis.vertical[1], "axis", axisLayer);
+    line(axis.horizontal[0], axis.horizontal[1], "axis", axisLayer);
+    polyline(axis.xArrow, "axis", axisLayer);
+    polyline(axis.yArrow, "axis", axisLayer);
+  }
+
+  const curveLayer = node("g", { "aria-hidden": "true" });
+  for (const curve of data.curves) {
+    node("path", {
+      d: curvePath(curve.points),
+      class: curve.className,
+      "vector-effect": "non-scaling-stroke"
+    }, curveLayer);
+  }
+
+  const labelLayer = node("g", {});
+  for (const label of data.labels) {
+    text(label, labelLayer);
+  }
+
+  const legendLayer = node("g", {});
+  for (const item of data.legend) {
+    line(item.from, item.to, item.className, legendLayer);
+    text({
+      text: item.label.text,
+      point: { x: item.label.x, y: item.label.y },
+      dx: 8,
+      dy: 4,
+      anchor: "start",
+      className: "legend-label"
+    }, legendLayer);
+  }
+
+  text({
+    text: data.summary.text,
+    point: data.summary.point,
+    dx: data.summary.dx,
+    dy: data.summary.dy,
+    anchor: data.summary.anchor,
+    className: "summary"
+  }, legendLayer);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

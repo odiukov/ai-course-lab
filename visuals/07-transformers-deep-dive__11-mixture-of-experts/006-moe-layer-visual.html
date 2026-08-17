@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Схема слоя MoE</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#6b7280;
+    --line:#9aa3ad; --gray:#d7dce2; --grayS:#b6bec7;
+    --hot:#2f6fd0; --hotS:#1b4a91; --sum:#c2410c;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e6ebf1; --muted:#98a3b0;
+      --line:#7b8794; --gray:#2a3138; --grayS:#454f59;
+      --hot:#6aa6ff; --hotS:#9cc4ff; --sum:#ff9b5c;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:10px 12px 14px}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fail{padding:10px;font-size:13px;line-height:1.5;color:var(--fg)}
+  text{fill:var(--fg)}
+  text.mut{fill:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Слой MoE: роутер выбирает 8 экспертов из 256</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы -------------------------------------------------
+    var E_TOTAL = 256, K = 8;
+    // 8 колонок веера: 6 серых-представителей + 2 подсвеченных
+    var SLOTS = [
+      {id:"1",  on:false, label:"…"},
+      {id:"2",  on:false, label:"…"},
+      {id:"e3", on:true,  label:"e₃",  w:"g₃"},
+      {id:"4",  on:false, label:"…"},
+      {id:"5",  on:false, label:"…"},
+      {id:"e7", on:true,  label:"e₇",  w:"g₇"},
+      {id:"7",  on:false, label:"…"},
+      {id:"8",  on:false, label:"…"}
+    ];
+
+    // ---- одна система координат ---------------------------------------
+    var ORIGIN = {x:70, y:34};   // пиксели точки (0,0) данных
+    var SCALE  = {x:52, y:34};   // пикселей на единицу данных
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    // ---- константы вида (только толщины/кегли/отступы) ----------------
+    var W = 900, H = 470, LW = 1.6, FS = 12.5, PAD = 7;
+
+    var ns = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(ns,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function line(x1,y1,x2,y2,st,extra){
+      var e=el("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:st,"stroke-width":LW,"stroke-linecap":"round"});
+      if(extra) for(var k in extra) e.setAttribute(k,extra[k]);
+      svg.appendChild(e); return e; }
+    function box(x,y,w,h,fill,stroke){
+      svg.appendChild(el("rect",{x:sx(x),y:sy(y),width:sx(x+w)-sx(x),
+        height:sy(y+h)-sy(y),rx:5,fill:fill,stroke:stroke,"stroke-width":LW}));}
+    function txt(x,y,s,anchor,dx,dy,cls,size){
+      var t=el("text",{x:sx(x)+(dx||0),y:sy(y)+(dy||0),"text-anchor":anchor,
+        "font-size":(size||FS)});
+      if(cls) t.setAttribute("class",cls);
+      t.textContent=s; svg.appendChild(t); return t; }
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H,
+      preserveAspectRatio:"xMidYMid meet",role:"img",
+      "aria-label":"Токен идёт в роутер, роутер даёт 8 оценок, два эксперта из 256 активны, их выходы складываются с весами гейта"});
+    var defs = el("defs",{});
+    ["line","hot","sum"].forEach(function(name){
+      var c = name==="line" ? "var(--line)" : (name==="hot"?"var(--hot)":"var(--sum)");
+      var m = el("marker",{id:"a-"+name,viewBox:"0 0 10 10",refX:"9",refY:"5",
+        markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+      m.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:c}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    // ---- ярусы (в единицах данных) ------------------------------------
+    var Y_IN=0, Y_ROUT_T=1, Y_ROUT_B=1.7, Y_BOX_T=3.4, Y_BOX_B=4.6,
+        Y_SUM=6.2, Y_OUT=7.4;
+    var BW = 0.7;                        // ширина коробки эксперта
+    var CX = 7;                          // центральная ось (x данных)
+    function colX(i){ return 3.5 + i*1.0; }   // центр колонки i
+
+    // ---- вход ---------------------------------------------------------
+    line(CX, Y_IN, CX, Y_ROUT_T, "var(--line)", {"marker-end":"url(#a-line)"});
+    txt(CX, Y_IN, "вход: вектор токена (после нормы)", "middle", 0, -PAD);
+
+    // ---- роутер -------------------------------------------------------
+    var RW = 2.2;
+    box(CX-RW/2, Y_ROUT_T, RW, Y_ROUT_B-Y_ROUT_T, "none", "var(--line)");
+    txt(CX, Y_ROUT_T, "роутер", "middle", 0, (sy(Y_ROUT_B)-sy(Y_ROUT_T))/2+4);
+    txt(CX-RW/2, Y_ROUT_B, "8 оценок из 256", "end", -PAD, -3, "mut");
+
+    // ---- веер: роутер -> коробки ---------------------------------------
+    SLOTS.forEach(function(s,i){
+      var c = s.on ? "var(--hot)" : "var(--grayS)";
+      var l = line(CX, Y_ROUT_B, colX(i), Y_BOX_T, c, {"marker-end":"url(#a-"+(s.on?"hot":"line")+")"});
+      if(!s.on){ l.setAttribute("stroke-dasharray","3 4"); l.setAttribute("opacity","0.75"); }
+    });
+
+    // ---- коробки экспертов ---------------------------------------------
+    SLOTS.forEach(function(s,i){
+      var x = colX(i)-BW/2;
+      box(x, Y_BOX_T, BW, Y_BOX_B-Y_BOX_T,
+          s.on?"var(--hot)":"var(--gray)",
+          s.on?"var(--hotS)":"var(--grayS)");
+      var ty = (sy(Y_BOX_B)-sy(Y_BOX_T))/2 + 4;
+      var t = txt(colX(i), Y_BOX_T, s.label, "middle", 0, ty);
+      if(s.on) t.setAttribute("fill","var(--bg)"); else t.setAttribute("class","mut");
+    });
+    txt(colX(0)-BW/2, Y_BOX_T, "серые: 248 хранятся,", "end", -PAD, 8, "mut");
+    txt(colX(0)-BW/2, Y_BOX_T, "не считаются", "end", -PAD, 8+FS+3, "mut");
+    txt(colX(7)+BW/2, Y_BOX_T, "всего экспертов: 256", "start", PAD, 8, "mut");
+    txt(colX(7)+BW/2, Y_BOX_T, "активных: 8", "start", PAD, 8+FS+3, "mut");
+
+    // ---- схлопывание: коробки -> сумма ----------------------------------
+    SLOTS.forEach(function(s,i){
+      if(!s.on) return;
+      line(colX(i), Y_BOX_B, CX, Y_SUM, "var(--hot)", {"marker-end":"url(#a-hot)"});
+      // множитель у хвоста стрелки, сбоку
+      var side = colX(i) < CX ? -1 : 1;
+      txt(colX(i), Y_BOX_B, "× "+s.w, side<0?"end":"start", side*PAD, FS+4);
+    });
+
+    // ---- узел суммы -----------------------------------------------------
+    var R = sx(0.42)-sx(0);
+    svg.appendChild(el("circle",{cx:sx(CX),cy:sy(Y_SUM),r:R,
+      fill:"none",stroke:"var(--sum)","stroke-width":LW}));
+    txt(CX, Y_SUM, "Σ", "middle", 0, 6, null, 17).setAttribute("fill","var(--sum)");
+    txt(CX+0.42, Y_SUM, "сумма 2 выходов с весами гейта", "start", PAD, 4, "mut");
+
+    // ---- выход ----------------------------------------------------------
+    line(CX, Y_SUM+0.42, CX, Y_OUT, "var(--sum)", {"marker-end":"url(#a-sum)"});
+    txt(CX, Y_OUT, "выход: та же размерность → в residual", "middle", 0, FS+PAD);
+
+    // ---- легенда --------------------------------------------------------
+    var ly = Y_OUT+0.75;
+    var lx = 0.2;
+    box(lx, ly-0.14, 0.32, 0.28, "var(--hot)", "var(--hotS)");
+    txt(lx+0.32, ly, "выбран роутером — считается", "start", PAD, 4, "mut");
+    var lx2 = 6.2;
+    box(lx2, ly-0.14, 0.32, 0.28, "var(--gray)", "var(--grayS)");
+    txt(lx2+0.32, ly, "лежит в памяти — не считается", "start", PAD, 4, "mut");
+    txt(11.3, ly, "gₑ — вес гейта от роутера", "start", PAD, 4, "mut");
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она должна была показать: '
+      + 'вектор токена входит в роутер; роутер выдаёт оценки и раскрывается веером на 256 экспертов; '
+      + 'подсвечены только 2 выбранных (e₃ и e₇), остальные серые — они хранятся в памяти, но не считаются; '
+      + 'выходы двух выбранных умножаются на веса гейта g₃ и g₇, сходятся в узел суммы, '
+      + 'и одна стрелка той же размерности уходит в residual.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

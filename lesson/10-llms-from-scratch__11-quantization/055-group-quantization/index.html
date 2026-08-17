@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Балансируем ошибку и накладные расходы размером группы весов — Quantization</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/">← Quantization</a>
+<span class="counter" data-counter>55 / 60</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-vram-barrier" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/001-vram-barrier/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Почему размер весов становится барьером для запуска модели</span></a></li>
+<li><a class="toc-link" data-step="002-memory-arithmetic" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/002-memory-arithmetic/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Переводим число параметров и битность в объём памяти</span></a></li>
+<li><a class="toc-link" data-step="003-memory-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/003-memory-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Проверяем расчёт памяти для 70B в FP16, FP8 и INT4</span></a></li>
+<li><a class="toc-link" data-step="004-float-parts" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/004-float-parts/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Как знак, экспонента и мантисса делят обязанности</span></a></li>
+<li><a class="toc-link" data-step="005-format-layout" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/005-format-layout/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Сравниваем устройство числовых форматов</span></a></li>
+<li><a class="toc-link" data-step="006-fp16-bf16" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/006-fp16-bf16/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Почему FP16 точнее в узком диапазоне, а BF16 устойчивее в широком</span></a></li>
+<li><a class="toc-link" data-step="007-float-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/007-float-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Выбираем между FP16 и BF16 для весов и градиентов</span></a></li>
+<li><a class="toc-link" data-step="008-fp8-integers" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/008-fp8-integers/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Чем FP8 отличается от равномерной сетки INT8 и INT4</span></a></li>
+<li><a class="toc-link" data-step="009-quant-grids" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/009-quant-grids/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Видим, как битность сокращает число доступных уровней</span></a></li>
+<li><a class="toc-link" data-step="010-quant-pipeline" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/010-quant-pipeline/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Разбираем путь float → scale → округление → integer</span></a></li>
+<li><a class="toc-link" data-step="011-symmetric-rule" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/011-symmetric-rule/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Строим симметричную шкалу и обрабатываем границы диапазона</span></a></li>
+<li><a class="toc-link" data-step="012-code-quantize-symmetric" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/012-code-quantize-symmetric/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Пишем quantize_symmetric</span></a></li>
+<li><a class="toc-link" data-step="013-dequantize-symmetric" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/013-dequantize-symmetric/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Восстанавливаем приближённые вещественные значения из целых</span></a></li>
+<li><a class="toc-link" data-step="014-code-dequantize" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/014-code-dequantize/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Пишем dequantize</span></a></li>
+<li><a class="toc-link" data-step="015-symmetric-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/015-symmetric-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Считаем scale, целый код и максимальную ошибку округления</span></a></li>
+<li><a class="toc-link" data-step="016-asymmetric-scale" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/016-asymmetric-scale/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Используем zero point для распределения со смещённым нулём</span></a></li>
+<li><a class="toc-link" data-step="017-code-quantize-asymmetric" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/017-code-quantize-asymmetric/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Пишем quantize_asymmetric</span></a></li>
+<li><a class="toc-link" data-step="018-asymmetric-reconstruction" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/018-asymmetric-reconstruction/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Обращаем асимметричное преобразование с учётом zero point</span></a></li>
+<li><a class="toc-link" data-step="019-code-dequantize-asymmetric" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/019-code-dequantize-asymmetric/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Пишем dequantize_asymmetric</span></a></li>
+<li><a class="toc-link" data-step="020-asymmetric-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/020-asymmetric-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Проверяем, когда асимметричная шкала использует уровни эффективнее</span></a></li>
+<li><a class="toc-link" data-step="021-outlier-problem" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/021-outlier-problem/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Почему один выброс портит per-tensor квантизацию всей матрицы</span></a></li>
+<li><a class="toc-link" data-step="022-channel-scales" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/022-channel-scales/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Назначаем отдельный scale каждому каналу и выбираем ось</span></a></li>
+<li><a class="toc-link" data-step="023-code-quantize-per-channel" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/023-code-quantize-per-channel/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Пишем quantize_per_channel</span></a></li>
+<li><a class="toc-link" data-step="024-channel-broadcast" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/024-channel-broadcast/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Возвращаем масштабы каналов к матрице через broadcasting</span></a></li>
+<li><a class="toc-link" data-step="025-code-dequantize-per-channel" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/025-code-dequantize-per-channel/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Пишем dequantize_per_channel</span></a></li>
+<li><a class="toc-link" data-step="026-channel-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/026-channel-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Проверяем формы scales и восстановленного тензора для обеих осей</span></a></li>
+<li><a class="toc-link" data-step="027-error-metrics" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/027-error-metrics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Применяем известные нормы и близость к ошибке квантизации</span></a></li>
+<li><a class="toc-link" data-step="028-error-contract" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/028-error-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Объединяем MSE, RMSE, max error, SNR и cosine similarity</span></a></li>
+<li><a class="toc-link" data-step="029-code-quantization-error" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/029-code-quantization-error/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Пишем quantization_error</span></a></li>
+<li><a class="toc-link" data-step="030-error-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/030-error-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Читаем противоречивые сигналы MSE, SNR и cosine similarity</span></a></li>
+<li><a class="toc-link" data-step="031-memory-contract" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/031-memory-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Считаем память весов по параметрам и битам без скрытых множителей</span></a></li>
+<li><a class="toc-link" data-step="032-code-model-memory" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/032-code-model-memory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Пишем model_memory_gb</span></a></li>
+<li><a class="toc-link" data-step="033-memory-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/033-memory-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Отличаем память весов от KV-кэша, временных буферов и служебных scales</span></a></li>
+<li><a class="toc-link" data-step="034-bit-sweep" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/034-bit-sweep/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Находим обрыв качества при снижении битности</span></a></li>
+<li><a class="toc-link" data-step="035-six-db-rule" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/035-six-db-rule/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Связываем число уровней, сжатие и ожидаемое падение SNR</span></a></li>
+<li><a class="toc-link" data-step="036-bitwidth-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/036-bitwidth-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Выбираем битность по кривой качества, а не только по размеру файла</span></a></li>
+<li><a class="toc-link" data-step="037-weight-sensitivity" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/037-weight-sensitivity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Почему веса обычно лучше других компонентов переносят низкую точность</span></a></li>
+<li><a class="toc-link" data-step="038-activation-sensitivity" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/038-activation-sensitivity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Как выбросы активаций раздувают scale и уничтожают полезные уровни</span></a></li>
+<li><a class="toc-link" data-step="039-kv-sensitivity" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/039-kv-sensitivity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Почему ошибка в KV-кэше влияет на все последующие токены</span></a></li>
+<li><a class="toc-link" data-step="040-logit-sensitivity" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/040-logit-sensitivity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Почему softmax усиливает ошибки в attention logits</span></a></li>
+<li><a class="toc-link" data-step="041-sensitivity-map" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/041-sensitivity-map/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">Сопоставляем компоненты трансформера по чувствительности</span></a></li>
+<li><a class="toc-link" data-step="042-sensitivity-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/042-sensitivity-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Выбираем точность отдельно для весов, активаций, KV-кэша и логитов</span></a></li>
+<li><a class="toc-link" data-step="043-ptq" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/043-ptq/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">43</span><span class="toc-title">Квантизуем готовую модель через PTQ и калибровочные данные</span></a></li>
+<li><a class="toc-link" data-step="044-gptq" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/044-gptq/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">44</span><span class="toc-title">Как GPTQ учитывает чувствительность выхода и компенсирует округление</span></a></li>
+<li><a class="toc-link" data-step="045-awq" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/045-awq/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">45</span><span class="toc-title">Как AWQ защищает веса, связанные с крупными активациями</span></a></li>
+<li><a class="toc-link" data-step="046-methods-map" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/046-methods-map/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">46</span><span class="toc-title">Сравниваем наивный PTQ, GPTQ и AWQ</span></a></li>
+<li><a class="toc-link" data-step="047-qat" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/047-qat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">47</span><span class="toc-title">Как QAT учит модель терпеть округление через fake quantization и STE</span></a></li>
+<li><a class="toc-link" data-step="048-ptq-qat-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/048-ptq-qat-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">48</span><span class="toc-title">Выбираем PTQ или QAT для INT8, INT4 и INT2</span></a></li>
+<li><a class="toc-link" data-step="049-gguf" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/049-gguf/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">49</span><span class="toc-title">Отделяем GGUF как формат упаковки от алгоритма квантизации</span></a></li>
+<li><a class="toc-link" data-step="050-hardware-route" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/050-hardware-route/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">50</span><span class="toc-title">Сопоставляем FP8, GPTQ, AWQ и GGUF с GPU, CPU и Apple Silicon</span></a></li>
+<li><a class="toc-link" data-step="051-model-quality" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/051-model-quality/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">51</span><span class="toc-title">Проверяем квантизованную модель известными perplexity и task-specific evals</span></a></li>
+<li><a class="toc-link" data-step="052-system-quality" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/052-system-quality/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">52</span><span class="toc-title">Измеряем latency, throughput, VRAM и время до первого токена</span></a></li>
+<li><a class="toc-link" data-step="053-tradeoff-check" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/053-tradeoff-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">53</span><span class="toc-title">Принимаем размен качества, памяти и скорости по нескольким метрикам</span></a></li>
+<li><a class="toc-link" data-step="054-calibration-data" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/054-calibration-data/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">54</span><span class="toc-title">Подбираем репрезентативные калибровочные примеры для GPTQ и AWQ</span></a></li>
+<li><a class="toc-link is-current" data-step="055-group-quantization" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/055-group-quantization/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">55</span><span class="toc-title">Балансируем ошибку и накладные расходы размером группы весов</span></a></li>
+<li><a class="toc-link" data-step="056-mixed-precision" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/056-mixed-precision/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">56</span><span class="toc-title">Оставляем чувствительные слои в высокой точности, а остальные сжимаем сильнее</span></a></li>
+<li><a class="toc-link" data-step="057-outlier-routing" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/057-outlier-routing/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">57</span><span class="toc-title">Выносим каналы-выбросы в FP16 по принципу LLM.int8()</span></a></li>
+<li><a class="toc-link" data-step="058-diagnostics" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/058-diagnostics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">58</span><span class="toc-title">Диагностируем худшие каналы по распределениям scales и ошибок</span></a></li>
+<li><a class="toc-link" data-step="059-deployment-plan" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/059-deployment-plan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">59</span><span class="toc-title">Собираем план квантизации, запуска и проверки реальной модели</span></a></li>
+<li><a class="toc-link" data-step="060-final-quiz" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/060-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">60</span><span class="toc-title">Итоговая проверка: шкалы, битность, чувствительность и выбор метода</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Балансируем ошибку и накладные расходы размером группы весов</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты квантизуешь канал из 4096 весов одним <code>scale</code> и замечаешь знакомую проблему: несколько крупных значений растягивают шкалу, а большинство небольших восстанавливается грубо. Это более локальная версия ситуации из <a href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/021-outlier-problem/">шага 21</a>. Отдельный <code>scale</code> на канал, введённый в <a href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/022-channel-scales/">шаге 22</a>, помогает, но внутри длинного канала веса тоже могут сильно различаться.</p>
+<p>Раздели канал на группы соседних весов и вычисляй <code>scale</code> для каждой группы. При размере группы 128 у канала из 4096 весов получится 32 группы, а значит, 32 масштаба вместо одного. Теперь крупное значение влияет только на свои 127 соседей, а не на весь канал.</p>
+<p>Почему бы тогда не брать группы по 32 веса? Ошибка обычно станет меньше: каждый масштаб точнее подстроится под локальный диапазон. Но масштабам тоже нужна память. Для групп 32, 64, 128 и 256 понадобится соответственно 128, 64, 32 и 16 значений <code>scale</code> на канал. Чем мельче разбиение, тем больше служебных данных приходится хранить и загружать вместе с весами.</p>
+<p>Поэтому ищут не минимальную ошибку любой ценой, а изгиб кривой: место, после которого уменьшение группы даёт совсем небольшой выигрыш по метрикам из <a href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/028-error-contract/">шага 28</a>, зато заметно увеличивает накладные расходы. Размер 128 часто оказывается хорошим компромиссом, но это отправная точка, а не универсальный закон.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь длинную грядку, разделённую на секции, и отдельную настройку полива для каждой секции. Короткие секции позволяют точнее подобрать воду растениям, но требуют больше клапанов и труб. Длинные секции дешевле обслуживать, зато один влаголюбивый куст задаёт режим всем соседям. Размер группы — это длина такой секции.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/054-calibration-data/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/10-llms-from-scratch__11-quantization/056-mixed-precision/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"10-llms-from-scratch__11-quantization","stepId":"055-group-quantization","number":55,"plannedCount":60}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

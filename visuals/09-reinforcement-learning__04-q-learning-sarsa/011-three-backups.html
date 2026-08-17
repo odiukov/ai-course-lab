@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Три способа получить цель обучения</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --ink: #172033;
+    --muted: #526176;
+    --line: #91a0b5;
+    --mc: #2563a8;
+    --mc-soft: #e5f0ff;
+    --dp: #a64b08;
+    --dp-soft: #fff0d8;
+    --td: #08784d;
+    --td-soft: #ddf7e9;
+    --target: #ffffff;
+    --common: #e9e5ff;
+    --common-line: #6352aa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101827;
+      --ink: #eef4ff;
+      --muted: #b4c0d2;
+      --line: #718096;
+      --mc: #70adff;
+      --mc-soft: #172b48;
+      --dp: #ffb45f;
+      --dp-soft: #412b16;
+      --td: #62d9a2;
+      --td-soft: #153a2d;
+      --target: #172131;
+      --common: #292348;
+      --common-line: #b3a7ff;
+    }
+  }
+
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    margin: unset;
+    padding: 12px 22px;
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 410px;
+    background: var(--bg);
+  }
+
+  .panel, .box, .node, .route, .arrow {
+    vector-effect: non-scaling-stroke;
+  }
+
+  .panel {
+    stroke-width: 1.5px;
+  }
+
+  .box, .node {
+    stroke-width: 2px;
+  }
+
+  .route, .arrow {
+    fill: none;
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .mc-panel { fill: var(--mc-soft); stroke: var(--mc); }
+  .dp-panel { fill: var(--dp-soft); stroke: var(--dp); }
+  .td-panel { fill: var(--td-soft); stroke: var(--td); }
+  .target { fill: var(--target); }
+  .common { fill: var(--common); stroke: var(--common-line); }
+
+  .mc-stroke { stroke: var(--mc); }
+  .dp-stroke { stroke: var(--dp); }
+  .td-stroke { stroke: var(--td); }
+  .neutral-stroke { stroke: var(--line); }
+  .common-stroke { stroke: var(--common-line); }
+
+  .mc-fill { fill: var(--mc); stroke: var(--mc); }
+  .dp-fill { fill: var(--dp); stroke: var(--dp); }
+  .td-fill { fill: var(--td); stroke: var(--td); }
+  .common-fill { fill: var(--common-line); stroke: var(--common-line); }
+
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .method {
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .formula {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .common-label {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  #fallback {
+    padding: 16px;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<h1>Три способа получить цель обучения</h1>
+
+<svg id="diagram" viewBox="0 0 1120 410" width="1120" height="410"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Сравнение целей Monte Carlo, динамического программирования и TD</title>
+  <desc id="svg-desc">MC ждёт конца эпизода, DP перебирает переходы известной модели, а TD строит цель по одному переходу и текущей оценке продолжения.</desc>
+  <g id="scene"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать три пути к одной оценке: MC ждёт конца эпизода,
+  DP перебирает переходы известной модели, а TD использует один переход и цель
+  r + γV(s′).
+</p>
+
+<script>
+const data = {
+  zero: 0,
+  origin: { x: 22, y: 2 },
+  scale: 10.7,
+
+  panels: [
+    { x: 1, y: 1.4, x2: 84, y2: 11.8, className: "panel mc-panel" },
+    { x: 1, y: 13.1, x2: 84, y2: 23.9, className: "panel dp-panel" },
+    { x: 1, y: 25.2, x2: 84, y2: 36, className: "panel td-panel" }
+  ],
+
+  boxes: [
+    { x: 3, y: 3.6, x2: 15, y2: 9.6, className: "box mc-panel" },
+    { x: 64, y: 3.6, x2: 82, y2: 9.6, className: "box target mc-panel" },
+
+    { x: 3, y: 15.5, x2: 15, y2: 21.5, className: "box dp-panel" },
+    { x: 18, y: 16.8, x2: 32, y2: 20.8, className: "box target dp-panel" },
+    { x: 64, y: 15.5, x2: 82, y2: 21.5, className: "box target dp-panel" },
+
+    { x: 3, y: 27.5, x2: 15, y2: 33.5, className: "box td-panel" },
+    { x: 49, y: 28.8, x2: 58, y2: 33.2, className: "box target td-panel" },
+    { x: 64, y: 27.5, x2: 82, y2: 33.5, className: "box target td-panel" },
+
+    { x: 88, y: 2, x2: 99, y2: 35.2, className: "box common" }
+  ],
+
+  lines: [
+    { a: { x: 18, y: 7.4 }, b: { x: 58, y: 7.4 }, className: "route mc-stroke" },
+    { a: { x: 58, y: 5.2 }, b: { x: 58, y: 9.2 }, className: "route mc-stroke" },
+
+    { a: { x: 32, y: 18.8 }, b: { x: 37, y: 18.8 }, className: "route dp-stroke" },
+    { a: { x: 37, y: 18.8 }, b: { x: 42.8, y: 16.2 }, className: "route dp-stroke" },
+    { a: { x: 37, y: 18.8 }, b: { x: 42.8, y: 18.8 }, className: "route dp-stroke" },
+    { a: { x: 37, y: 18.8 }, b: { x: 42.8, y: 21.4 }, className: "route dp-stroke" },
+    { a: { x: 45.2, y: 16.2 }, b: { x: 52.2, y: 18.8 }, className: "route dp-stroke" },
+    { a: { x: 45.2, y: 18.8 }, b: { x: 52.2, y: 18.8 }, className: "route dp-stroke" },
+    { a: { x: 45.2, y: 21.4 }, b: { x: 52.2, y: 18.8 }, className: "route dp-stroke" }
+  ],
+
+  circles: [
+    { x: 22, y: 7.4, r: .45, className: "node mc-panel" },
+    { x: 30, y: 7.4, r: .45, className: "node mc-panel" },
+    { x: 38, y: 7.4, r: .45, className: "node mc-panel" },
+    { x: 46, y: 7.4, r: .45, className: "node mc-panel" },
+    { x: 54, y: 7.4, r: .45, className: "node mc-panel" },
+
+    { x: 44, y: 16.2, r: 1.2, className: "node dp-panel" },
+    { x: 44, y: 18.8, r: 1.2, className: "node dp-panel" },
+    { x: 44, y: 21.4, r: 1.2, className: "node dp-panel" },
+
+    { x: 22, y: 31, r: 1.8, className: "node td-panel" },
+    { x: 43, y: 31, r: 1.8, className: "node td-panel" }
+  ],
+
+  polygons: [
+    {
+      points: [{ x: 58, y: 5.2 }, { x: 62, y: 6.3 }, { x: 58, y: 7.2 }],
+      className: "mc-fill"
+    },
+    {
+      points: [{ x: 54.2, y: 17 }, { x: 56.2, y: 18.8 },
+               { x: 54.2, y: 20.6 }, { x: 52.2, y: 18.8 }],
+      className: "dp-panel box"
+    }
+  ],
+
+  arrows: [
+    {
+      a: { x: 59, y: 7.4 }, b: { x: 63.2, y: 7.4 },
+      head: [{ x: 63.2, y: 7.4 }, { x: 61.7, y: 6.7 }, { x: 61.7, y: 8.1 }],
+      lineClass: "arrow mc-stroke", headClass: "mc-fill"
+    },
+    {
+      a: { x: 56.2, y: 18.8 }, b: { x: 63.2, y: 18.8 },
+      head: [{ x: 63.2, y: 18.8 }, { x: 61.7, y: 18.1 }, { x: 61.7, y: 19.5 }],
+      lineClass: "arrow dp-stroke", headClass: "dp-fill"
+    },
+    {
+      a: { x: 24, y: 31 }, b: { x: 40.2, y: 31 },
+      head: [{ x: 40.2, y: 31 }, { x: 38.7, y: 30.3 }, { x: 38.7, y: 31.7 }],
+      lineClass: "arrow td-stroke", headClass: "td-fill"
+    },
+    {
+      a: { x: 44.8, y: 31 }, b: { x: 48.2, y: 31 },
+      head: [{ x: 48.2, y: 31 }, { x: 46.8, y: 30.3 }, { x: 46.8, y: 31.7 }],
+      lineClass: "arrow td-stroke", headClass: "td-fill"
+    },
+    {
+      a: { x: 58, y: 31 }, b: { x: 63.2, y: 31 },
+      head: [{ x: 63.2, y: 31 }, { x: 61.7, y: 30.3 }, { x: 61.7, y: 31.7 }],
+      lineClass: "arrow td-stroke", headClass: "td-fill"
+    },
+    {
+      a: { x: 82, y: 6.6 }, b: { x: 87.3, y: 6.6 },
+      head: [{ x: 87.3, y: 6.6 }, { x: 85.8, y: 5.9 }, { x: 85.8, y: 7.3 }],
+      lineClass: "arrow common-stroke", headClass: "common-fill"
+    },
+    {
+      a: { x: 82, y: 18.8 }, b: { x: 87.3, y: 18.8 },
+      head: [{ x: 87.3, y: 18.8 }, { x: 85.8, y: 18.1 }, { x: 85.8, y: 19.5 }],
+      lineClass: "arrow common-stroke", headClass: "common-fill"
+    },
+    {
+      a: { x: 82, y: 30.5 }, b: { x: 87.3, y: 30.5 },
+      head: [{ x: 87.3, y: 30.5 }, { x: 85.8, y: 29.8 }, { x: 85.8, y: 31.2 }],
+      lineClass: "arrow common-stroke", headClass: "common-fill"
+    }
+  ],
+
+  labels: [
+    { x: 9, y: 5.7, dx: 0, dy: 4, text: "MC", anchor: "middle", className: "method" },
+    { x: 9, y: 8.1, dx: 0, dy: 4, text: "финал", anchor: "middle", className: "small" },
+    { x: 38, y: 3.2, dx: 0, dy: 0, text: "ждём до конца эпизода", anchor: "middle", className: "label" },
+    { x: 38, y: 10.7, dx: 0, dy: 0, text: "реально полученная полная отдача", anchor: "middle", className: "small" },
+    { x: 73, y: 5.5, dx: 0, dy: 4, text: "цель: Gₜ", anchor: "middle", className: "formula" },
+    { x: 73, y: 8, dx: 0, dy: 4, text: "итог эпизода", anchor: "middle", className: "small" },
+
+    { x: 9, y: 17.6, dx: 0, dy: 4, text: "DP", anchor: "middle", className: "method" },
+    { x: 9, y: 20, dx: 0, dy: 4, text: "модель", anchor: "middle", className: "small" },
+    { x: 25, y: 18.8, dx: 0, dy: 5, text: "известная модель", anchor: "middle", className: "label" },
+    { x: 43.7, y: 14.6, dx: 0, dy: 0, text: "все возможные переходы", anchor: "middle", className: "label" },
+    { x: 44, y: 16.2, dx: 0, dy: 4, text: "s′ₐ", anchor: "middle", className: "small" },
+    { x: 44, y: 18.8, dx: 0, dy: 4, text: "s′ᵦ", anchor: "middle", className: "small" },
+    { x: 44, y: 21.4, dx: 0, dy: 4, text: "s′𝚌", anchor: "middle", className: "small" },
+    { x: 48, y: 23, dx: 0, dy: 0, text: "вероятности и награды", anchor: "middle", className: "small" },
+    { x: 73, y: 17.5, dx: 0, dy: 4, text: "цель: 𝔼[r + γV(s′)]", anchor: "middle", className: "formula" },
+    { x: 73, y: 20, dx: 0, dy: 4, text: "по всем исходам", anchor: "middle", className: "small" },
+
+    { x: 9, y: 29.6, dx: 0, dy: 4, text: "TD", anchor: "middle", className: "method" },
+    { x: 9, y: 32, dx: 0, dy: 4, text: "шаг", anchor: "middle", className: "small" },
+    { x: 32.5, y: 27, dx: 0, dy: 0, text: "один реальный переход", anchor: "middle", className: "label" },
+    { x: 22, y: 31, dx: 0, dy: 5, text: "s", anchor: "middle", className: "label" },
+    { x: 43, y: 31, dx: 0, dy: 5, text: "s′", anchor: "middle", className: "label" },
+    { x: 32, y: 29.3, dx: 0, dy: 0, text: "награда r", anchor: "middle", className: "small" },
+    { x: 53.5, y: 31, dx: 0, dy: 5, text: "V(s′)", anchor: "middle", className: "formula" },
+    { x: 37, y: 35.2, dx: 0, dy: 0, text: "сразу после одного шага", anchor: "middle", className: "small" },
+    { x: 73, y: 29.5, dx: 0, dy: 4, text: "цель: r + γV(s′)", anchor: "middle", className: "formula" },
+    { x: 73, y: 32, dx: 0, dy: 4, text: "опыт + текущая догадка", anchor: "middle", className: "small" },
+
+    { x: 93.5, y: 16.8, dx: 0, dy: 0, text: "Одна и та же", anchor: "middle", className: "common-label" },
+    { x: 93.5, y: 19.7, dx: 0, dy: 4, text: "оценка V(s)", anchor: "middle", className: "common-label" },
+    { x: 93.5, y: 22.5, dx: 0, dy: 4, text: "меняется источник цели", anchor: "middle", className: "small" }
+  ]
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const scene = document.getElementById("scene");
+  const make = name => document.createElementNS(svg.namespaceURI, name);
+
+  const append = (name, attributes, parent = scene) => {
+    const element = make(name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+    parent.appendChild(element);
+    return element;
+  };
+
+  for (const item of data.panels) {
+    append("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x2) - sx(item.x),
+      height: sy(item.y2) - sy(item.y),
+      class: item.className
+    });
+  }
+
+  for (const item of data.boxes) {
+    append("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x2) - sx(item.x),
+      height: sy(item.y2) - sy(item.y),
+      class: item.className
+    });
+  }
+
+  for (const item of data.lines) {
+    append("line", {
+      x1: sx(item.a.x),
+      y1: sy(item.a.y),
+      x2: sx(item.b.x),
+      y2: sy(item.b.y),
+      class: item.className
+    });
+  }
+
+  for (const item of data.circles) {
+    append("circle", {
+      cx: sx(item.x),
+      cy: sy(item.y),
+      r: sx(item.r) - sx(data.zero),
+      class: item.className
+    });
+  }
+
+  for (const item of data.polygons) {
+    append("polygon", {
+      points: item.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: item.className
+    });
+  }
+
+  for (const item of data.arrows) {
+    append("line", {
+      x1: sx(item.a.x),
+      y1: sy(item.a.y),
+      x2: sx(item.b.x),
+      y2: sy(item.b.y),
+      class: item.lineClass
+    });
+    append("polygon", {
+      points: item.head.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: item.headClass
+    });
+  }
+
+  for (const item of data.labels) {
+    const label = append("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      dx: `${item.dx}px`,
+      dy: `${item.dy}px`,
+      "text-anchor": item.anchor,
+      class: item.className
+    });
+    label.textContent = item.text;
+  }
+} catch (error) {
+  document.getElementById("diagram").setAttribute("hidden", "");
+  document.getElementById("fallback").removeAttribute("hidden");
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

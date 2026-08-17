@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кривые деградации для поиска и рассуждения</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --surface: #ffffff;
+      --ink: #182230;
+      --muted: #5e6b7b;
+      --axis: #354254;
+      --guide: #dce2e9;
+      --retrieval: #087f8c;
+      --retrieval-fill: #dff5f3;
+      --reasoning: #d45245;
+      --reasoning-fill: #fde9e5;
+      --threshold: #9a6a12;
+      --threshold-soft: #f3e4bd;
+      --band-good: #e5f6ee;
+      --band-middle: #fff4d8;
+      --band-low: #f8e8e6;
+      --point-core: #ffffff;
+      --fallback: #8d2f26;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10151c;
+        --surface: #171e27;
+        --ink: #edf3f8;
+        --muted: #a9b6c5;
+        --axis: #c8d2dc;
+        --guide: #344252;
+        --retrieval: #55d2d8;
+        --retrieval-fill: #183a3d;
+        --reasoning: #ff8b7c;
+        --reasoning-fill: #472b2c;
+        --threshold: #efc66d;
+        --threshold-soft: #493e28;
+        --band-good: #18352d;
+        --band-middle: #3a3422;
+        --band-low: #382627;
+        --point-core: #171e27;
+        --fallback: #ff9a8d;
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    .figure {
+      max-width: 960px;
+      background: var(--surface);
+    }
+
+    .figure-title {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px 18px 6px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 28px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+      background: var(--surface);
+    }
+
+    svg text {
+      fill: var(--ink);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      text-rendering: geometricPrecision;
+    }
+
+    .band-good {
+      fill: var(--band-good);
+    }
+
+    .band-middle {
+      fill: var(--band-middle);
+    }
+
+    .band-low {
+      fill: var(--band-low);
+    }
+
+    .vertical-guide {
+      stroke: var(--guide);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .threshold-line {
+      stroke: var(--threshold);
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .retrieval-line,
+    .reasoning-line,
+    .legend-sample {
+      fill: none;
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .retrieval-line,
+    .legend-retrieval {
+      stroke: var(--retrieval);
+    }
+
+    .reasoning-line,
+    .legend-reasoning {
+      stroke: var(--reasoning);
+    }
+
+    .retrieval-point {
+      fill: var(--retrieval-fill);
+      stroke: var(--retrieval);
+      stroke-width: 3;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .reasoning-point {
+      fill: var(--reasoning-fill);
+      stroke: var(--reasoning);
+      stroke-width: 3;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .shared-point {
+      fill: var(--point-core);
+      stroke: var(--axis);
+      stroke-width: 3;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-title {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .tick-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .threshold-label {
+      fill: var(--threshold);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .legend-label {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .annotation {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .annotation-backdrop {
+      fill: var(--surface);
+      stroke: var(--guide);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fallback {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 24px;
+      background: var(--surface);
+      color: var(--fallback);
+      font-size: 16px;
+      line-height: 24px;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="figure-title">
+    <div id="figure-title" class="figure-title">
+      Кривые деградации для поиска и рассуждения
+    </div>
+
+    <svg
+      id="chart"
+      viewBox="0 0 960 450"
+      width="960"
+      height="450"
+      role="img"
+      aria-labelledby="figure-title chart-description"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <desc id="chart-description">
+        Точность по длине контекста: поиск одной иголки сохраняет высокий
+        результат дольше, а задачи multi-hop заметно падают раньше. Отмечены
+        пороги надёжности 90% и 70%.
+      </desc>
+    </svg>
+
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать две кривые точности от 16 до 128 тысяч
+      токенов: поиск держится дольше, multi-hop падает раньше; горизонтальные
+      пороги отмечены на 90% и 70%.
+    </div>
+  </main>
+
+  <script>
+    const DATA = {
+      zero: 0,
+      domain: {
+        xMin: 0,
+        xMax: 128,
+        yMin: 0,
+        yMax: 100
+      },
+      contexts: [
+        { x: 16, label: "16 тыс." },
+        { x: 32, label: "32 тыс." },
+        { x: 64, label: "64 тыс." },
+        { x: 128, label: "128 тыс." }
+      ],
+      retrieval: {
+        className: "retrieval-line",
+        pointClass: "retrieval-point",
+        points: [
+          { x: 16, y: 95 },
+          { x: 32, y: 95 },
+          { x: 64, y: 95 },
+          { x: 128, y: 90 }
+        ]
+      },
+      reasoning: {
+        className: "reasoning-line",
+        pointClass: "reasoning-point",
+        points: [
+          { x: 16, y: 95 },
+          { x: 32, y: 90 },
+          { x: 64, y: 70 },
+          { x: 128, y: 70 }
+        ]
+      },
+      thresholds: [
+        { y: 90, label: "порог 90%" },
+        { y: 70, label: "порог 70%" }
+      ],
+      bands: [
+        { low: 90, high: 100, className: "band-good" },
+        { low: 70, high: 90, className: "band-middle" },
+        { low: 0, high: 70, className: "band-low" }
+      ],
+      geometry: {
+        tickDepth: -3,
+        tickLabelY: -8,
+        xTitleY: -17,
+        yTitleY: 108,
+        pointRadius: 1.05,
+        sharedRadius: 1.35,
+        thresholdTickX: -2.2,
+        thresholdDash: [7, 7]
+      },
+      labels: {
+        thresholdDx: -12,
+        tickDy: 5,
+        xTitleDy: 5,
+        yTitleDy: 4,
+        legendDy: 5,
+        startDy: -14
+      },
+      legend: [
+        {
+          x1: 66,
+          x2: 74,
+          textX: 76,
+          y: 108,
+          className: "legend-retrieval",
+          label: "Поиск одной иголки — держится дольше"
+        },
+        {
+          x1: 66,
+          x2: 74,
+          textX: 76,
+          y: 102,
+          className: "legend-reasoning",
+          label: "Multi-hop — падает раньше"
+        }
+      ],
+      annotations: [
+        {
+          x: 16,
+          y: 95,
+          dx: 0,
+          dy: -14,
+          anchor: "middle",
+          label: "одинаковый старт: 95%"
+        }
+      ],
+      titles: {
+        y: "Точность · pass rate",
+        x: "Длина контекста, токены"
+      }
+    };
+
+    const origin = { x: 170, y: 375 };
+    const scale = { x: 5.4, y: -3.1 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes = {}, content = "") => {
+        const element = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+        if (content) {
+          element.textContent = content;
+        }
+        return element;
+      };
+
+      const layer = className => {
+        const group = make("g", { class: className });
+        svg.appendChild(group);
+        return group;
+      };
+
+      const addLine = (parent, from, to, className, extra = {}) => {
+        parent.appendChild(make("line", {
+          x1: sx(from.x),
+          y1: sy(from.y),
+          x2: sx(to.x),
+          y2: sy(to.y),
+          class: className,
+          ...extra
+        }));
+      };
+
+      const addText = (
+        parent,
+        point,
+        label,
+        className,
+        anchor,
+        dx,
+        dy
+      ) => {
+        parent.appendChild(make("text", {
+          x: sx(point.x),
+          y: sy(point.y),
+          dx: dx,
+          dy: dy,
+          class: className,
+          "text-anchor": anchor
+        }, label));
+      };
+
+      const spanX = (from, to) => Math.abs(sx(to) - sx(from));
+      const spanY = (from, to) => Math.abs(sy(to) - sy(from));
+      const radius = value => spanX(DATA.zero, value);
+
+      const bandLayer = layer("bands");
+      DATA.bands.forEach(band => {
+        bandLayer.appendChild(make("rect", {
+          x: sx(DATA.domain.xMin),
+          y: sy(band.high),
+          width: spanX(DATA.domain.xMin, DATA.domain.xMax),
+          height: spanY(band.low, band.high),
+          class: band.className
+        }));
+      });
+
+      const guideLayer = layer("guides");
+      DATA.contexts.forEach(context => {
+        addLine(
+          guideLayer,
+          { x: context.x, y: DATA.domain.yMin },
+          { x: context.x, y: DATA.domain.yMax },
+          "vertical-guide"
+        );
+      });
+
+      const thresholdLayer = layer("thresholds");
+      DATA.thresholds.forEach(threshold => {
+        addLine(
+          thresholdLayer,
+          { x: DATA.domain.xMin, y: threshold.y },
+          { x: DATA.domain.xMax, y: threshold.y },
+          "threshold-line",
+          {
+            "stroke-dasharray": DATA.geometry.thresholdDash.join(" ")
+          }
+        );
+
+        addLine(
+          thresholdLayer,
+          { x: DATA.geometry.thresholdTickX, y: threshold.y },
+          { x: DATA.domain.xMin, y: threshold.y },
+          "tick"
+        );
+
+        addText(
+          thresholdLayer,
+          { x: DATA.domain.xMin, y: threshold.y },
+          threshold.label,
+          "threshold-label",
+          "end",
+          DATA.labels.thresholdDx,
+          DATA.labels.tickDy
+        );
+      });
+
+      const axisLayer = layer("axes");
+      addLine(
+        axisLayer,
+        { x: DATA.domain.xMin, y: DATA.zero },
+        { x: DATA.domain.xMax, y: DATA.zero },
+        "axis"
+      );
+      addLine(
+        axisLayer,
+        { x: DATA.zero, y: DATA.domain.yMin },
+        { x: DATA.zero, y: DATA.domain.yMax },
+        "axis"
+      );
+
+      DATA.contexts.forEach(context => {
+        addLine(
+          axisLayer,
+          { x: context.x, y: DATA.zero },
+          { x: context.x, y: DATA.geometry.tickDepth },
+          "tick"
+        );
+
+        addText(
+          axisLayer,
+          { x: context.x, y: DATA.geometry.tickLabelY },
+          context.label,
+          "tick-label",
+          "middle",
+          DATA.zero,
+          DATA.labels.tickDy
+        );
+      });
+
+      addText(
+        axisLayer,
+        { x: DATA.domain.xMin, y: DATA.geometry.yTitleY },
+        DATA.titles.y,
+        "axis-title",
+        "start",
+        DATA.zero,
+        DATA.labels.yTitleDy
+      );
+
+      addText(
+        axisLayer,
+        {
+          x: DATA.contexts[DATA.contexts.length / DATA.contexts.length + 1].x,
+          y: DATA.geometry.xTitleY
+        },
+        DATA.titles.x,
+        "axis-title",
+        "middle",
+        DATA.zero,
+        DATA.labels.xTitleDy
+      );
+
+      const curveLayer = layer("curves");
+
+      const drawCurve = series => {
+        curveLayer.appendChild(make("polyline", {
+          points: series.points
+            .map(point => `${sx(point.x)},${sy(point.y)}`)
+            .join(" "),
+          class: series.className
+        }));
+
+        series.points.forEach(point => {
+          curveLayer.appendChild(make("circle", {
+            cx: sx(point.x),
+            cy: sy(point.y),
+            r: radius(DATA.geometry.pointRadius),
+            class: series.pointClass
+          }));
+        });
+      };
+
+      drawCurve(DATA.reasoning);
+      drawCurve(DATA.retrieval);
+
+      const [sharedPoint] = DATA.retrieval.points;
+      curveLayer.appendChild(make("circle", {
+        cx: sx(sharedPoint.x),
+        cy: sy(sharedPoint.y),
+        r: radius(DATA.geometry.sharedRadius),
+        class: "shared-point"
+      }));
+
+      const annotationLayer = layer("annotations");
+      DATA.annotations.forEach(annotation => {
+        addText(
+          annotationLayer,
+          { x: annotation.x, y: annotation.y },
+          annotation.label,
+          "annotation",
+          annotation.anchor,
+          annotation.dx,
+          annotation.dy
+        );
+      });
+
+      const legendLayer = layer("legend");
+      DATA.legend.forEach(item => {
+        addLine(
+          legendLayer,
+          { x: item.x1, y: item.y },
+          { x: item.x2, y: item.y },
+          `legend-sample ${item.className}`
+        );
+
+        addText(
+          legendLayer,
+          { x: item.textX, y: item.y },
+          item.label,
+          "legend-label",
+          "start",
+          DATA.zero,
+          DATA.labels.legendDy
+        );
+      });
+
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

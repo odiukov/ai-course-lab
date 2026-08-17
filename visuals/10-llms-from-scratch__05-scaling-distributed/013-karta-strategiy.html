@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Что разрезают стратегии параллелизма</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #58657a;
+    --border: #9aa8bd;
+    --guide: #68778f;
+    --data-a: #bfe3ff;
+    --data-b: #87c9f4;
+    --data-c: #4da8df;
+    --tensor-a: #d8c7ff;
+    --tensor-b: #a98ce8;
+    --pipe-a: #bcebd5;
+    --pipe-b: #94d8bd;
+    --pipe-c: #67c49e;
+    --pipe-d: #35a978;
+    --model: #ffe3a3;
+    --accent: #236fa1;
+  }
+
+  html,
+  body,
+  .figure {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+  }
+
+  .heading {
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--page);
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .object {
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+
+  .cell {
+    stroke: var(--panel);
+    stroke-width: 1px;
+  }
+
+  .arrow {
+    stroke: var(--guide);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .arrowhead {
+    fill: var(--guide);
+  }
+
+  .panel-title {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .label {
+    font-size: 12px;
+  }
+
+  .small {
+    font-size: 11px;
+  }
+
+  .summary {
+    font-size: 12px;
+    font-weight: bold;
+    fill: var(--accent);
+  }
+
+  .muted {
+    fill: var(--muted);
+  }
+
+  .data-a { fill: var(--data-a); }
+  .data-b { fill: var(--data-b); }
+  .data-c { fill: var(--data-c); }
+  .tensor-a { fill: var(--tensor-a); }
+  .tensor-b { fill: var(--tensor-b); }
+  .pipe-a { fill: var(--pipe-a); }
+  .pipe-b { fill: var(--pipe-b); }
+  .pipe-c { fill: var(--pipe-c); }
+  .pipe-d { fill: var(--pipe-d); }
+  .model { fill: var(--model); }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #192231;
+      --ink: #edf3fb;
+      --muted: #b7c2d2;
+      --border: #506078;
+      --guide: #aab8ca;
+      --data-a: #194e70;
+      --data-b: #176b94;
+      --data-c: #238ebd;
+      --tensor-a: #4c3878;
+      --tensor-b: #7655ad;
+      --pipe-a: #205b48;
+      --pipe-b: #26765a;
+      --pipe-c: #28936a;
+      --pipe-d: #30ad79;
+      --model: #755c24;
+      --accent: #7fc9f5;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <div class="heading">Три стратегии режут три разных объекта</div>
+  <svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Data parallel делит батч, tensor parallel делит матрицу слоя, pipeline parallel делит 32 слоя между 4 стадиями</title>
+    <desc id="svg-desc">Сравнительная схема из трёх панелей: фрагменты батча, восемь срезов матрицы и четыре стадии по восемь слоёв.</desc>
+  </svg>
+</main>
+
+<script>
+const DATA = Object.freeze([{
+  zero: 0,
+  one: 1,
+  origin: { x: 0, y: 0 },
+  scale: { x: 10, y: 10 },
+  canvas: { x: 0, y: 0, w: 120, h: 44 },
+  panels: [
+    { x: 1, y: 1, w: 38, h: 42 },
+    { x: 41, y: 1, w: 38, h: 42 },
+    { x: 81, y: 1, w: 38, h: 42 }
+  ],
+  panelCenters: [20, 60, 100],
+  headerY: 4.5,
+  data: {
+    batchX: 3,
+    batchY: 10,
+    batchW: 13,
+    batchH: 25,
+    modelX: 24,
+    modelW: 11,
+    arrowStartX: 17,
+    arrowEndX: 23,
+    rows: [
+      { y: 11, h: 7, centerY: 14.5, label: "примеры A", cls: "data-a" },
+      { y: 19, h: 7, centerY: 22.5, label: "примеры Б", cls: "data-b" },
+      { y: 27, h: 7, centerY: 30.5, label: "примеры В", cls: "data-c" }
+    ],
+    summaryY: 39.5
+  },
+  tensor: {
+    x: 46,
+    y: 13,
+    w: 28,
+    h: 17.5,
+    parts: 8,
+    objectLabelY: 10,
+    countLabelY: 34.5,
+    summaryY: 39.5
+  },
+  pipeline: {
+    top: 12,
+    layerH: 2,
+    cellH: 1.6,
+    layersPerStage: 8,
+    stageW: 7,
+    headlineY: 8.5,
+    stageLabelY: 30.5,
+    rangeLabelY: 33.5,
+    summaryY: 39.5,
+    stages: [
+      { x: 83, centerX: 86.5, name: "стадия 1", range: "слои 1–8", cls: "pipe-a" },
+      { x: 92, centerX: 95.5, name: "стадия 2", range: "слои 9–16", cls: "pipe-b" },
+      { x: 101, centerX: 104.5, name: "стадия 3", range: "слои 17–24", cls: "pipe-c" },
+      { x: 110, centerX: 113.5, name: "стадия 4", range: "слои 25–32", cls: "pipe-d" }
+    ]
+  },
+  arrowHead: 0.8,
+  fallbackX: 60,
+  fallbackY: 22,
+  fallback: "Схема: батч делится по данным, матрица — на 8 срезов, 32 слоя — между 4 стадиями."
+}]);
+
+const [D] = DATA;
+const origin = Object.freeze({ x: D.origin.x, y: D.origin.y });
+const scale = Object.freeze({ x: D.scale.x, y: D.scale.y });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const LABEL_PADDING = 6;
+const svg = document.getElementById("diagram");
+
+function element(tag, attrs, className) {
+  const item = document.createElementNS(svg.namespaceURI, tag);
+  Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+  if (className) item.setAttribute("class", className);
+  return item;
+}
+
+function addRect(parent, x, y, w, h, className) {
+  const item = element("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y)
+  }, className);
+  parent.appendChild(item);
+  return item;
+}
+
+function addText(parent, value, x, y, className, anchor, dx, dy) {
+  const item = element("text", {
+    x: sx(x) + LABEL_PADDING * (dx ?? D.zero),
+    y: sy(y) + LABEL_PADDING * (dy ?? D.zero),
+    "text-anchor": anchor ?? "middle",
+    "dominant-baseline": "middle"
+  }, className);
+  item.textContent = value;
+  parent.appendChild(item);
+  return item;
+}
+
+function addArrow(parent, x1, y1, x2, y2) {
+  parent.appendChild(element("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2)
+  }, "arrow"));
+
+  const head = D.arrowHead;
+  const points = [
+    `${sx(x2)},${sy(y2)}`,
+    `${sx(x2 - head)},${sy(y2 - head)}`,
+    `${sx(x2 - head)},${sy(y2 + head)}`
+  ].join(" ");
+
+  parent.appendChild(element("polygon", { points }, "arrowhead"));
+}
+
+try {
+  const drawing = element("g", {}, "drawing");
+  svg.appendChild(drawing);
+
+  addRect(drawing, D.canvas.x, D.canvas.y, D.canvas.w, D.canvas.h, "background");
+
+  D.panels.forEach(panel => {
+    addRect(drawing, panel.x, panel.y, panel.w, panel.h, "panel");
+  });
+
+  addText(
+    drawing,
+    "ПАРАЛЛЕЛИЗМ ПО ДАННЫМ",
+    D.panelCenters.at(D.zero),
+    D.headerY,
+    "panel-title"
+  );
+
+  addRect(
+    drawing,
+    D.data.batchX,
+    D.data.batchY,
+    D.data.batchW,
+    D.data.batchH,
+    "object"
+  );
+
+  D.data.rows.forEach(row => {
+    addRect(
+      drawing,
+      D.data.batchX + D.one,
+      row.y,
+      D.data.batchW - D.one - D.one,
+      row.h,
+      `cell ${row.cls}`
+    );
+    addText(
+      drawing,
+      row.label,
+      D.data.batchX + D.data.batchW / (D.one + D.one),
+      row.centerY,
+      "small"
+    );
+    addArrow(
+      drawing,
+      D.data.arrowStartX,
+      row.centerY,
+      D.data.arrowEndX,
+      row.centerY
+    );
+    addRect(
+      drawing,
+      D.data.modelX,
+      row.y,
+      D.data.modelW,
+      row.h,
+      "object model"
+    );
+    addText(
+      drawing,
+      "вся модель",
+      D.data.modelX + D.data.modelW / (D.one + D.one),
+      row.centerY,
+      "small"
+    );
+  });
+
+  addText(
+    drawing,
+    "делим батч • модель не режем",
+    D.panelCenters.at(D.zero),
+    D.data.summaryY,
+    "summary"
+  );
+
+  addText(
+    drawing,
+    "ТЕНЗОРНЫЙ ПАРАЛЛЕЛИЗМ",
+    D.panelCenters.at(D.one),
+    D.headerY,
+    "panel-title"
+  );
+
+  addText(
+    drawing,
+    "матрица весов одного слоя",
+    D.panelCenters.at(D.one),
+    D.tensor.objectLabelY,
+    "label muted"
+  );
+
+  addRect(
+    drawing,
+    D.tensor.x,
+    D.tensor.y,
+    D.tensor.w,
+    D.tensor.h,
+    "object"
+  );
+
+  const tensorWidth = D.tensor.w / D.tensor.parts;
+  let tensorIndex = D.zero;
+  let tensorAlternate = false;
+
+  while (tensorIndex < D.tensor.parts) {
+    addRect(
+      drawing,
+      D.tensor.x + tensorIndex * tensorWidth,
+      D.tensor.y,
+      tensorWidth,
+      D.tensor.h,
+      `cell ${tensorAlternate ? "tensor-b" : "tensor-a"}`
+    );
+    tensorAlternate = !tensorAlternate;
+    tensorIndex++;
+  }
+
+  addText(
+    drawing,
+    "8 GPU → 8 срезов матрицы",
+    D.panelCenters.at(D.one),
+    D.tensor.countLabelY,
+    "label"
+  );
+
+  addText(
+    drawing,
+    "делим слой • батч не режем",
+    D.panelCenters.at(D.one),
+    D.tensor.summaryY,
+    "summary"
+  );
+
+  addText(
+    drawing,
+    "КОНВЕЙЕРНЫЙ ПАРАЛЛЕЛИЗМ",
+    D.panelCenters.at(D.one + D.one),
+    D.headerY,
+    "panel-title"
+  );
+
+  addText(
+    drawing,
+    "32 слоя → 4 стадии",
+    D.panelCenters.at(D.one + D.one),
+    D.pipeline.headlineY,
+    "label muted"
+  );
+
+  D.pipeline.stages.forEach(stage => {
+    let layerIndex = D.zero;
+
+    while (layerIndex < D.pipeline.layersPerStage) {
+      addRect(
+        drawing,
+        stage.x,
+        D.pipeline.top + layerIndex * D.pipeline.layerH,
+        D.pipeline.stageW,
+        D.pipeline.cellH,
+        `cell ${stage.cls}`
+      );
+      layerIndex++;
+    }
+
+    addRect(
+      drawing,
+      stage.x,
+      D.pipeline.top,
+      D.pipeline.stageW,
+      D.pipeline.layerH * D.pipeline.layersPerStage,
+      "object"
+    );
+
+    addText(
+      drawing,
+      stage.name,
+      stage.centerX,
+      D.pipeline.stageLabelY,
+      "small"
+    );
+
+    addText(
+      drawing,
+      stage.range,
+      stage.centerX,
+      D.pipeline.rangeLabelY,
+      "small muted"
+    );
+  });
+
+  addText(
+    drawing,
+    "делим глубину модели • по 8 слоёв",
+    D.panelCenters.at(D.one + D.one),
+    D.pipeline.summaryY,
+    "summary"
+  );
+} catch (error) {
+  const failedDrawing = svg.querySelector(".drawing");
+  if (failedDrawing) failedDrawing.remove();
+
+  const fallback = document.createElementNS(svg.namespaceURI, "text");
+  fallback.setAttribute("x", sx(D.fallbackX));
+  fallback.setAttribute("y", sy(D.fallbackY));
+  fallback.setAttribute("text-anchor", "middle");
+  fallback.setAttribute("dominant-baseline", "middle");
+  fallback.setAttribute("class", "label");
+  fallback.textContent = D.fallback;
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

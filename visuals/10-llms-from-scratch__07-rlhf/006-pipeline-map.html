@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конвейер RLHF</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-alt: #f1f4fa;
+    --ink: #172033;
+    --muted: #596579;
+    --line: #8090a8;
+    --green: #16845b;
+    --green-soft: #e5f6ee;
+    --red: #c43e59;
+    --red-soft: #fdebf0;
+    --blue: #3268b8;
+    --blue-soft: #e9f1ff;
+    --violet: #7552b3;
+    --violet-soft: #f0eafd;
+    --band: #e9edf5;
+    --shadow: #c8d0de;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111622;
+      --panel: #1a2231;
+      --panel-alt: #202a3b;
+      --ink: #f1f4fa;
+      --muted: #b1bccd;
+      --line: #74839a;
+      --green: #65d7a3;
+      --green-soft: #183a31;
+      --red: #ff7891;
+      --red-soft: #40232d;
+      --blue: #82b3ff;
+      --blue-soft: #203552;
+      --violet: #c2a4ff;
+      --violet-soft: #33294a;
+      --band: #222c3d;
+      --shadow: #0b0e16;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .frame {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 10px 12px 12px;
+    background: var(--page);
+  }
+
+  .heading {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 455px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--shadow);
+  }
+
+  .panel-alt {
+    fill: var(--panel-alt);
+    stroke: var(--shadow);
+  }
+
+  .stage-rule {
+    stroke: var(--line);
+  }
+
+  .stage-title {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .node {
+    stroke-width: 2px;
+  }
+
+  .node-neutral {
+    fill: var(--panel-alt);
+    stroke: var(--line);
+  }
+
+  .node-sft {
+    fill: var(--green-soft);
+    stroke: var(--green);
+  }
+
+  .node-human {
+    fill: var(--violet-soft);
+    stroke: var(--violet);
+  }
+
+  .node-reward {
+    fill: var(--red-soft);
+    stroke: var(--red);
+  }
+
+  .node-policy {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+  }
+
+  .node-reference {
+    fill: var(--panel-alt);
+    stroke: var(--blue);
+  }
+
+  .node-ppo {
+    fill: var(--red-soft);
+    stroke: var(--red);
+  }
+
+  .node-title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .node-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .edge {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .edge-green {
+    stroke: var(--green);
+  }
+
+  .edge-red {
+    stroke: var(--red);
+  }
+
+  .edge-blue {
+    stroke: var(--blue);
+  }
+
+  .edge-violet {
+    stroke: var(--violet);
+  }
+
+  .arrow {
+    stroke: none;
+    fill: var(--line);
+  }
+
+  .arrow-green {
+    fill: var(--green);
+  }
+
+  .arrow-red {
+    fill: var(--red);
+  }
+
+  .arrow-blue {
+    fill: var(--blue);
+  }
+
+  .arrow-violet {
+    fill: var(--violet);
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .signal-band {
+    fill: var(--band);
+    stroke: var(--shadow);
+  }
+
+  .signal-title {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .signal-text {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .signal-arrow {
+    fill: var(--muted);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    padding: 18px;
+    border: 1px solid var(--shadow);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <div class="heading" id="diagram-title">
+    Конвейер RLHF: от демонстраций до обновления политики
+  </div>
+
+  <div class="fallback" id="fallback">
+    Схема должна показать три стадии: обучение SFT-модели, превращение
+    человеческого выбора в модель награды и цикл PPO со сравнением policy
+    с замороженной reference-моделью.
+  </div>
+
+  <svg id="diagram"
+       viewBox="0 0 1200 455"
+       width="1200"
+       height="455"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title"
+       hidden></svg>
+</main>
+
+<script>
+const DATA = [
+  { x: 0, y: 0, w: 1200, h: 455 },
+  { back: 10, wing: 6 },
+  [
+    { x: 18,  y: 12, w: 320, h: 374, kind: "panel" },
+    { x: 350, y: 12, w: 430, h: 374, kind: "panel-alt" },
+    { x: 792, y: 12, w: 390, h: 374, kind: "panel" }
+  ],
+  [
+    {
+      x: 44, y: 76, w: 132, h: 66, kind: "neutral",
+      lines: [
+        { x: 110, y: 97, text: "Демонстрации", kind: "title" },
+        { x: 110, y: 121, text: "инструкция → ответ", kind: "note" }
+      ]
+    },
+    {
+      x: 44, y: 226, w: 132, h: 58, kind: "neutral",
+      lines: [
+        { x: 110, y: 255, text: "Базовая модель", kind: "title" }
+      ]
+    },
+    {
+      x: 205, y: 157, w: 110, h: 96, kind: "sft",
+      lines: [
+        { x: 260, y: 187, text: "SFT-модель", kind: "title" },
+        { x: 260, y: 213, text: "учится отвечать", kind: "note" }
+      ]
+    },
+    {
+      x: 374, y: 66, w: 92, h: 50, kind: "neutral",
+      lines: [
+        { x: 420, y: 91, text: "Промпт", kind: "title" }
+      ]
+    },
+    {
+      x: 500, y: 54, w: 112, h: 48, kind: "sft",
+      lines: [
+        { x: 556, y: 78, text: "Ответ A", kind: "title" }
+      ]
+    },
+    {
+      x: 500, y: 124, w: 112, h: 48, kind: "sft",
+      lines: [
+        { x: 556, y: 148, text: "Ответ B", kind: "title" }
+      ]
+    },
+    {
+      x: 374, y: 231, w: 116, h: 66, kind: "human",
+      lines: [
+        { x: 432, y: 252, text: "Человек", kind: "title" },
+        { x: 432, y: 276, text: "выбирает лучшее", kind: "note" }
+      ]
+    },
+    {
+      x: 520, y: 218, w: 126, h: 82, kind: "human",
+      lines: [
+        { x: 583, y: 242, text: "Победитель", kind: "title" },
+        { x: 583, y: 263, text: "и проигравший", kind: "note" },
+        { x: 583, y: 283, text: "для одного промпта", kind: "note" }
+      ]
+    },
+    {
+      x: 665, y: 207, w: 94, h: 104, kind: "reward",
+      lines: [
+        { x: 712, y: 232, text: "Reward", kind: "title" },
+        { x: 712, y: 252, text: "model", kind: "title" },
+        { x: 712, y: 280, text: "ответ → балл", kind: "note" }
+      ]
+    },
+    {
+      x: 815, y: 66, w: 118, h: 68, kind: "policy",
+      lines: [
+        { x: 874, y: 90, text: "Policy", kind: "title" },
+        { x: 874, y: 112, text: "генерирует", kind: "note" }
+      ]
+    },
+    {
+      x: 815, y: 180, w: 118, h: 58, kind: "neutral",
+      lines: [
+        { x: 874, y: 209, text: "Новый ответ", kind: "title" }
+      ]
+    },
+    {
+      x: 965, y: 172, w: 112, h: 74, kind: "reward",
+      lines: [
+        { x: 1021, y: 197, text: "Reward model", kind: "title" },
+        { x: 1021, y: 221, text: "оценивает", kind: "note" }
+      ]
+    },
+    {
+      x: 1092, y: 180, w: 68, h: 58, kind: "reward",
+      lines: [
+        { x: 1126, y: 202, text: "Балл", kind: "title" },
+        { x: 1126, y: 220, text: "скаляр", kind: "note" }
+      ]
+    },
+    {
+      x: 815, y: 304, w: 142, h: 66, kind: "reference",
+      lines: [
+        { x: 886, y: 327, text: "Reference", kind: "title" },
+        { x: 886, y: 350, text: "замороженная SFT", kind: "note" }
+      ]
+    },
+    {
+      x: 1035, y: 298, w: 104, h: 74, kind: "ppo",
+      lines: [
+        { x: 1087, y: 323, text: "PPO", kind: "title" },
+        { x: 1087, y: 347, text: "обновляет policy", kind: "note" }
+      ]
+    }
+  ],
+  [
+    {
+      points: [{ x: 176, y: 109 }, { x: 190, y: 109 },
+               { x: 190, y: 181 }, { x: 205, y: 181 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 176, y: 255 }, { x: 190, y: 255 },
+               { x: 190, y: 229 }, { x: 205, y: 229 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 315, y: 181 }, { x: 480, y: 181 },
+               { x: 480, y: 78 }, { x: 500, y: 78 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 480, y: 112 }, { x: 480, y: 148 },
+               { x: 500, y: 148 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 466, y: 91 }, { x: 484, y: 91 },
+               { x: 484, y: 78 }, { x: 500, y: 78 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 484, y: 91 }, { x: 484, y: 148 },
+               { x: 500, y: 148 }],
+      head: "right", tone: "green"
+    },
+    {
+      points: [{ x: 556, y: 102 }, { x: 556, y: 202 },
+               { x: 553, y: 202 }, { x: 553, y: 218 }],
+      head: "down", tone: "violet"
+    },
+    {
+      points: [{ x: 590, y: 172 }, { x: 590, y: 202 },
+               { x: 613, y: 202 }, { x: 613, y: 218 }],
+      head: "down", tone: "violet"
+    },
+    {
+      points: [{ x: 490, y: 264 }, { x: 520, y: 264 }],
+      head: "right", tone: "violet"
+    },
+    {
+      points: [{ x: 646, y: 259 }, { x: 665, y: 259 }],
+      head: "right", tone: "red"
+    },
+    {
+      points: [{ x: 759, y: 259 }, { x: 786, y: 259 },
+               { x: 786, y: 153 }, { x: 1021, y: 153 },
+               { x: 1021, y: 172 }],
+      head: "down", tone: "red", dash: "8 7"
+    },
+    {
+      points: [{ x: 874, y: 134 }, { x: 874, y: 180 }],
+      head: "down", tone: "blue"
+    },
+    {
+      points: [{ x: 933, y: 209 }, { x: 965, y: 209 }],
+      head: "right", tone: "red"
+    },
+    {
+      points: [{ x: 1077, y: 209 }, { x: 1092, y: 209 }],
+      head: "right", tone: "red"
+    },
+    {
+      points: [{ x: 1126, y: 238 }, { x: 1126, y: 276 },
+               { x: 1087, y: 276 }, { x: 1087, y: 298 }],
+      head: "down", tone: "red"
+    },
+    {
+      points: [{ x: 957, y: 337 }, { x: 1035, y: 337 }],
+      head: "right", tone: "blue"
+    },
+    {
+      points: [{ x: 1139, y: 335 }, { x: 1164, y: 335 },
+               { x: 1164, y: 100 }, { x: 933, y: 100 }],
+      head: "left", tone: "blue"
+    }
+  ],
+  [
+    { x: 32, y: 35, text: "СТАДИЯ 1 · SFT", anchor: "start", kind: "stage" },
+    { x: 364, y: 35, text: "СТАДИЯ 2 · ПРЕДПОЧТЕНИЯ → НАГРАДА", anchor: "start", kind: "stage" },
+    { x: 806, y: 35, text: "СТАДИЯ 3 · PPO", anchor: "start", kind: "stage" },
+
+    { x: 326, y: 168, dx: 8, dy: -8, text: "генерирует варианты", anchor: "start", kind: "edge" },
+    { x: 500, y: 192, dx: 0, dy: 8, text: "пара ответов", anchor: "start", kind: "edge" },
+    { x: 650, y: 247, dx: 0, dy: -8, text: "обучает", anchor: "middle", kind: "edge" },
+    { x: 795, y: 143, dx: 8, dy: -8, text: "та же обученная модель", anchor: "start", kind: "edge" },
+    { x: 948, y: 198, dx: 0, dy: -8, text: "ответ", anchor: "middle", kind: "edge" },
+    { x: 996, y: 325, dx: 0, dy: -8, text: "KL-штраф", anchor: "middle", kind: "edge" },
+    { x: 1152, y: 84, dx: -8, dy: -8, text: "небольшое обновление", anchor: "end", kind: "edge" }
+  ],
+  [
+    { x: 18, y: 398, w: 1164, h: 43 },
+    { x: 34, y: 411, text: "ФОРМА СИГНАЛА", anchor: "start", kind: "signal-title" },
+    { x: 184, y: 420, text: "демонстрация", anchor: "middle", kind: "signal" },
+    { x: 342, y: 420, text: "→", anchor: "middle", kind: "signal-arrow" },
+    { x: 472, y: 420, text: "выбор A или B", anchor: "middle", kind: "signal" },
+    { x: 620, y: 420, text: "→", anchor: "middle", kind: "signal-arrow" },
+    { x: 750, y: 420, text: "числовой балл", anchor: "middle", kind: "signal" },
+    { x: 898, y: 420, text: "→", anchor: "middle", kind: "signal-arrow" },
+    { x: 1050, y: 420, text: "обновление policy", anchor: "middle", kind: "signal" }
+  ]
+];
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const [bounds, arrowShape, panels, nodes, edges, texts, bands] = DATA;
+
+  const make = (tag, attrs, content) => {
+    const item = document.createElementNS(svg.namespaceURI, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      item.setAttribute(name, value);
+    }
+    if (content !== undefined) item.textContent = content;
+    svg.appendChild(item);
+    return item;
+  };
+
+  const mappedPoints = points =>
+    points.map(point => sx(point.x) + "," + sy(point.y)).join(" ");
+
+  const drawText = item => {
+    const className =
+      item.kind === "stage" ? "stage-title" :
+      item.kind === "edge" ? "edge-label" :
+      item.kind === "signal-title" ? "signal-title" :
+      item.kind === "signal-arrow" ? "signal-arrow" :
+      item.kind === "signal" ? "signal-text" :
+      item.kind === "title" ? "node-title" : "node-note";
+
+    make("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      dx: item.dx === undefined ? "" : item.dx + "px",
+      dy: item.dy === undefined ? "" : item.dy + "px",
+      "text-anchor": item.anchor || "middle",
+      "dominant-baseline": "middle",
+      class: className
+    }, item.text);
+  };
+
+  const drawArrowhead = edge => {
+    let end;
+    for (const point of edge.points) end = point;
+
+    const back = arrowShape.back;
+    const wing = arrowShape.wing;
+    let tip;
+
+    if (edge.head === "right") {
+      tip = [
+        { x: end.x, y: end.y },
+        { x: end.x - back, y: end.y - wing },
+        { x: end.x - back, y: end.y + wing }
+      ];
+    } else if (edge.head === "left") {
+      tip = [
+        { x: end.x, y: end.y },
+        { x: end.x + back, y: end.y - wing },
+        { x: end.x + back, y: end.y + wing }
+      ];
+    } else if (edge.head === "down") {
+      tip = [
+        { x: end.x, y: end.y },
+        { x: end.x - wing, y: end.y - back },
+        { x: end.x + wing, y: end.y - back }
+      ];
+    } else {
+      tip = [
+        { x: end.x, y: end.y },
+        { x: end.x - wing, y: end.y + back },
+        { x: end.x + wing, y: end.y + back }
+      ];
+    }
+
+    make("polygon", {
+      points: mappedPoints(tip),
+      class: "arrow arrow-" + edge.tone
+    });
+  };
+
+  make("rect", {
+    x: sx(bounds.x),
+    y: sy(bounds.y),
+    width: sx(bounds.x + bounds.w) - sx(bounds.x),
+    height: sy(bounds.y + bounds.h) - sy(bounds.y),
+    fill: "var(--page)"
+  });
+
+  for (const panel of panels) {
+    make("rect", {
+      x: sx(panel.x),
+      y: sy(panel.y),
+      width: sx(panel.x + panel.w) - sx(panel.x),
+      height: sy(panel.y + panel.h) - sy(panel.y),
+      class: panel.kind,
+      "stroke-width": "1"
+    });
+  }
+
+  for (const edge of edges) {
+    const attrs = {
+      points: mappedPoints(edge.points),
+      class: "edge edge-" + edge.tone
+    };
+    if (edge.dash) attrs["stroke-dasharray"] = edge.dash;
+    make("polyline", attrs);
+    drawArrowhead(edge);
+  }
+
+  for (const node of nodes) {
+    make("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: sx(node.x + node.w) - sx(node.x),
+      height: sy(node.y + node.h) - sy(node.y),
+      class: "node node-" + node.kind
+    });
+    for (const line of node.lines) drawText(line);
+  }
+
+  for (const textItem of texts) drawText(textItem);
+
+  const [band, ...bandTexts] = bands;
+  make("rect", {
+    x: sx(band.x),
+    y: sy(band.y),
+    width: sx(band.x + band.w) - sx(band.x),
+    height: sy(band.y + band.h) - sy(band.y),
+    class: "signal-band",
+    "stroke-width": "1"
+  });
+
+  for (const bandText of bandTexts) drawText(bandText);
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

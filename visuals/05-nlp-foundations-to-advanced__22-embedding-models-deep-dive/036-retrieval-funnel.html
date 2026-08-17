@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Воронка production-поиска</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #71809b;
+    --dense: #dce9ff;
+    --dense-strong: #376fc7;
+    --sparse: #fff0c9;
+    --sparse-strong: #a86500;
+    --fusion: #e9e0ff;
+    --fusion-strong: #7151b5;
+    --rank: #d9f4e7;
+    --rank-strong: #18734f;
+    --output: #eef2f8;
+    --shadow: #d9dfeb;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    max-width: 1200px;
+    margin-inline: auto;
+  }
+
+  h2 {
+    font-size: 24px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  figure {
+    margin-inline: auto;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--panel);
+    border: 1px solid var(--shadow);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+
+  .eyebrow {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .08em;
+  }
+
+  .stage-title {
+    font-size: 20px;
+    font-weight: 750;
+  }
+
+  .stage-copy {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .count {
+    font-size: 18px;
+    font-weight: 750;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .code {
+    fill: var(--sparse-strong);
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  .dense-shape {
+    fill: var(--dense);
+    stroke: var(--dense-strong);
+    stroke-width: 2px;
+  }
+
+  .fusion-shape {
+    fill: var(--fusion);
+    stroke: var(--fusion-strong);
+    stroke-width: 2px;
+  }
+
+  .rank-shape {
+    fill: var(--rank);
+    stroke: var(--rank-strong);
+    stroke-width: 2px;
+  }
+
+  .sparse-card {
+    fill: var(--sparse);
+    stroke: var(--sparse-strong);
+    stroke-width: 2px;
+  }
+
+  .output-card {
+    fill: var(--output);
+    stroke: var(--rank-strong);
+    stroke-width: 2px;
+  }
+
+  .guide {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .dense-line {
+    fill: none;
+    stroke: var(--dense-strong);
+    stroke-width: 3px;
+  }
+
+  .sparse-line {
+    fill: none;
+    stroke: var(--sparse-strong);
+    stroke-width: 3px;
+  }
+
+  .rank-line {
+    fill: none;
+    stroke: var(--rank-strong);
+    stroke-width: 3px;
+  }
+
+  .dense-arrow {
+    fill: var(--dense-strong);
+  }
+
+  .sparse-arrow {
+    fill: var(--sparse-strong);
+  }
+
+  .rank-arrow {
+    fill: var(--rank-strong);
+  }
+
+  .rrf-mark {
+    fill: var(--panel);
+    stroke: var(--fusion-strong);
+    stroke-width: 2px;
+  }
+
+  .rrf-text {
+    fill: var(--fusion-strong);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .result-line {
+    stroke: var(--rank-strong);
+    stroke-width: 4px;
+  }
+
+  .result-line-muted {
+    stroke: var(--line);
+    stroke-width: 4px;
+  }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--shadow);
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --panel: #171d28;
+      --ink: #eef3ff;
+      --muted: #abb7ca;
+      --line: #8492aa;
+      --dense: #19345c;
+      --dense-strong: #79adff;
+      --sparse: #4b3817;
+      --sparse-strong: #ffc866;
+      --fusion: #332755;
+      --fusion-strong: #bba1ff;
+      --rank: #153f32;
+      --rank-strong: #65d9aa;
+      --output: #222b39;
+      --shadow: #303a4b;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h2>Воронка production-поиска</h2>
+  <figure aria-labelledby="diagram-title diagram-desc">
+    <svg id="diagram" viewBox="0 0 1200 440" role="img"
+         preserveAspectRatio="xMidYMid meet">
+      <title id="diagram-title">Трёхуровневая воронка production-поиска</title>
+      <desc id="diagram-desc">Dense-поиск быстро сокращает миллион документов, sparse-поиск возвращает точные совпадения, а multi-vector или cross-encoder внимательно переставляет финальные top-50.</desc>
+    </svg>
+    <div id="fallback" hidden>
+      Dense bi-encoder быстро просматривает 1 000 000 документов и оставляет
+      около 1 000 смысловых кандидатов. Sparse-поиск возвращает пропущенные
+      точные совпадения вроде XQ-17, RRF объединяет позиции, а multi-vector
+      или cross-encoder внимательно переставляет финальные top-50.
+    </div>
+    <noscript>
+      <p>Воронка поиска: dense просматривает 1 000 000 документов, sparse добавляет точные совпадения, а multi-vector или cross-encoder переставляет top-50.</p>
+    </noscript>
+  </figure>
+</main>
+
+<script>
+const data = [{
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  canvas: { width: 1200, height: 440 },
+  labelPadding: { near: 6, normal: 10, far: 16 },
+  lineWidth: { hair: 1, normal: 2, strong: 3, result: 4 },
+  fontSize: { eyebrow: 13, small: 14, body: 16, count: 18, title: 20 },
+  polygons: [
+    {
+      className: "dense-shape",
+      points: [
+        { x: 55, y: 108 }, { x: 455, y: 158 },
+        { x: 455, y: 292 }, { x: 55, y: 342 }
+      ]
+    },
+    {
+      className: "fusion-shape",
+      points: [
+        { x: 455, y: 158 }, { x: 760, y: 184 },
+        { x: 760, y: 266 }, { x: 455, y: 292 }
+      ]
+    },
+    {
+      className: "rank-shape",
+      points: [
+        { x: 760, y: 184 }, { x: 1050, y: 204 },
+        { x: 1050, y: 246 }, { x: 760, y: 266 }
+      ]
+    }
+  ],
+  rectangles: [
+    {
+      className: "sparse-card",
+      x1: 255, y1: 350, x2: 585, y2: 420
+    },
+    {
+      className: "output-card",
+      x1: 1080, y1: 178, x2: 1160, y2: 272
+    }
+  ],
+  lines: [
+    {
+      className: "guide",
+      x1: 55, y1: 91, x2: 55, y2: 108
+    },
+    {
+      className: "guide",
+      x1: 455, y1: 126, x2: 455, y2: 158
+    },
+    {
+      className: "guide",
+      x1: 760, y1: 151, x2: 760, y2: 184
+    },
+    {
+      className: "guide",
+      x1: 1050, y1: 170, x2: 1050, y2: 204
+    },
+    {
+      className: "dense-line",
+      x1: 96, y1: 225, x2: 155, y2: 225
+    },
+    {
+      className: "rank-line",
+      x1: 1050, y1: 225, x2: 1080, y2: 225
+    },
+    {
+      className: "result-line",
+      x1: 1096, y1: 199, x2: 1144, y2: 199
+    },
+    {
+      className: "result-line",
+      x1: 1096, y1: 225, x2: 1134, y2: 225
+    },
+    {
+      className: "result-line-muted",
+      x1: 1096, y1: 251, x2: 1123, y2: 251
+    }
+  ],
+  paths: [
+    {
+      className: "sparse-line",
+      commands: [
+        { op: "M", x: 540, y: 350 },
+        { op: "C", x: 555, y: 324, x2: 582, y2: 302, x3: 610, y3: 278 }
+      ]
+    }
+  ],
+  arrowheads: [
+    {
+      className: "dense-arrow",
+      points: [
+        { x: 155, y: 225 }, { x: 141, y: 216 }, { x: 141, y: 234 }
+      ]
+    },
+    {
+      className: "sparse-arrow",
+      points: [
+        { x: 610, y: 278 }, { x: 591, y: 282 }, { x: 603, y: 294 }
+      ]
+    },
+    {
+      className: "rank-arrow",
+      points: [
+        { x: 1080, y: 225 }, { x: 1065, y: 216 }, { x: 1065, y: 234 }
+      ]
+    }
+  ],
+  diamonds: [
+    {
+      className: "rrf-mark",
+      points: [
+        { x: 610, y: 203 }, { x: 647, y: 225 },
+        { x: 610, y: 247 }, { x: 573, y: 225 }
+      ]
+    }
+  ],
+  texts: [
+    {
+      x: 55, y: 48, dx: 0, dy: 0,
+      anchor: "start", className: "eyebrow",
+      value: "ШИРОКИЙ ОХВАТ"
+    },
+    {
+      x: 1148, y: 48, dx: 0, dy: 0,
+      anchor: "end", className: "eyebrow",
+      value: "ТОЧНАЯ СОРТИРОВКА"
+    },
+    {
+      x: 55, y: 76, dx: 0, dy: 0,
+      anchor: "start", className: "count",
+      value: "1 000 000 документов"
+    },
+    {
+      x: 55, y: 95, dx: 0, dy: 0,
+      anchor: "start", className: "small",
+      value: "весь индекс"
+    },
+    {
+      x: 455, y: 91, dx: 0, dy: 0,
+      anchor: "middle", className: "count",
+      value: "≈ 1 000 кандидатов"
+    },
+    {
+      x: 455, y: 111, dx: 0, dy: 0,
+      anchor: "middle", className: "small",
+      value: "после быстрого просмотра"
+    },
+    {
+      x: 760, y: 119, dx: 0, dy: 0,
+      anchor: "middle", className: "count",
+      value: "top-50"
+    },
+    {
+      x: 760, y: 139, dx: 0, dy: 0,
+      anchor: "middle", className: "small",
+      value: "для дорогой проверки"
+    },
+    {
+      x: 1050, y: 139, dx: 0, dy: 0,
+      anchor: "end", className: "count",
+      value: "точный порядок"
+    },
+    {
+      x: 1050, y: 159, dx: 0, dy: 0,
+      anchor: "end", className: "small",
+      value: "релевантных фрагментов"
+    },
+    {
+      x: 255, y: 209, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-title",
+      value: "Dense bi-encoder"
+    },
+    {
+      x: 255, y: 237, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-copy",
+      value: "быстрый смысловой просмотр"
+    },
+    {
+      x: 255, y: 260, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-copy",
+      value: "всего индекса"
+    },
+    {
+      x: 610, y: 230, dx: 0, dy: 0,
+      anchor: "middle", className: "rrf-text",
+      value: "RRF"
+    },
+    {
+      x: 610, y: 176, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-copy",
+      value: "объединяет позиции"
+    },
+    {
+      x: 900, y: 218, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-title",
+      value: "Multi-vector"
+    },
+    {
+      x: 900, y: 240, dx: 0, dy: 0,
+      anchor: "middle", className: "stage-copy",
+      value: "или cross-encoder"
+    },
+    {
+      x: 275, y: 375, dx: 0, dy: 0,
+      anchor: "start", className: "stage-title",
+      value: "Sparse-поиск"
+    },
+    {
+      x: 275, y: 400, dx: 0, dy: 0,
+      anchor: "start", className: "stage-copy",
+      value: "возвращает точное совпадение"
+    },
+    {
+      x: 555, y: 397, dx: 0, dy: 0,
+      anchor: "end", className: "code",
+      value: "XQ-17"
+    },
+    {
+      x: 604, y: 323, dx: 10, dy: 0,
+      anchor: "start", className: "small",
+      value: "добавляет пропущенное"
+    },
+    {
+      x: 1050, y: 294, dx: 0, dy: 0,
+      anchor: "end", className: "small",
+      value: "внимательно сравнивает только финалистов"
+    }
+  ]
+}];
+
+const [diagramData] = data;
+const origin = diagramData.origin;
+const scale = diagramData.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const append = (name, attributes, content) => {
+    const node = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, value);
+    }
+    if (content !== undefined) {
+      node.textContent = content;
+    }
+    svg.appendChild(node);
+    return node;
+  };
+
+  const pointString = points =>
+    points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+  for (const polygon of diagramData.polygons) {
+    append("polygon", {
+      points: pointString(polygon.points),
+      class: polygon.className
+    });
+  }
+
+  for (const rectangle of diagramData.rectangles) {
+    append("rect", {
+      x: sx(rectangle.x1),
+      y: sy(rectangle.y1),
+      width: sx(rectangle.x2) - sx(rectangle.x1),
+      height: sy(rectangle.y2) - sy(rectangle.y1),
+      class: rectangle.className
+    });
+  }
+
+  for (const line of diagramData.lines) {
+    append("line", {
+      x1: sx(line.x1),
+      y1: sy(line.y1),
+      x2: sx(line.x2),
+      y2: sy(line.y2),
+      class: line.className
+    });
+  }
+
+  for (const path of diagramData.paths) {
+    const commands = path.commands.map(command => {
+      if (command.op === "M") {
+        return `M ${sx(command.x)} ${sy(command.y)}`;
+      }
+      return `C ${sx(command.x)} ${sy(command.y)} ${sx(command.x2)} ${sy(command.y2)} ${sx(command.x3)} ${sy(command.y3)}`;
+    }).join(" ");
+    append("path", {
+      d: commands,
+      class: path.className
+    });
+  }
+
+  for (const arrowhead of diagramData.arrowheads) {
+    append("polygon", {
+      points: pointString(arrowhead.points),
+      class: arrowhead.className
+    });
+  }
+
+  for (const diamond of diagramData.diamonds) {
+    append("polygon", {
+      points: pointString(diamond.points),
+      class: diamond.className
+    });
+  }
+
+  for (const label of diagramData.texts) {
+    append("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      dx: label.dx,
+      dy: label.dy,
+      "text-anchor": label.anchor,
+      class: label.className
+    }, label.value);
+  }
+
+  fallback.hidden = true;
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  if (svg) {
+    svg.hidden = true;
+  }
+  if (fallback) {
+    fallback.hidden = false;
+  }
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

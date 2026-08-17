@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Короткий и безопасный маршруты у обрыва</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #536176;
+    --grid: #aeb8c7;
+    --cell: #f7f9fc;
+    --terminal: #e8edf4;
+    --cliff: #ffe1df;
+    --cliff-ink: #9b2522;
+    --cliff-line: #d45a54;
+    --q: #d76b00;
+    --sarsa: #1677c8;
+    --halo: #ffffff;
+    --border: #cbd3df;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .panel {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: 0;
+    padding: 14px 18px 8px;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1.25;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 465px;
+    background: var(--panel);
+  }
+
+  .cell {
+    fill: var(--cell);
+    stroke: var(--grid);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .terminal {
+    fill: var(--terminal);
+  }
+
+  .cliff {
+    fill: var(--cliff);
+    stroke: var(--cliff-line);
+  }
+
+  .outer-border {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .cliff-mark {
+    stroke: var(--cliff-line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .reward {
+    fill: var(--cliff-ink);
+    font-size: 12px;
+    font-weight: bold;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  .route-halo {
+    fill: none;
+    stroke: var(--halo);
+    stroke-width: 10px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .route {
+    fill: none;
+    stroke-width: 6px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .q-route {
+    stroke: var(--q);
+  }
+
+  .sarsa-route {
+    stroke: var(--sarsa);
+  }
+
+  .route-dot {
+    stroke: var(--halo);
+    stroke-width: 3px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .q-dot {
+    fill: var(--q);
+  }
+
+  .sarsa-dot {
+    fill: var(--sarsa);
+  }
+
+  .terminal-dot {
+    fill: var(--panel);
+    stroke: var(--ink);
+    stroke-width: 3px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .side-label {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+    dominant-baseline: middle;
+  }
+
+  .grid-caption {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend-text {
+    fill: var(--ink);
+    font-size: 15px;
+    dominant-baseline: middle;
+  }
+
+  .legend-line {
+    fill: none;
+    stroke-width: 6px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .legend-cliff {
+    fill: var(--cliff);
+    stroke: var(--cliff-line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fallback {
+    margin: 0;
+    padding: 22px;
+    color: var(--ink);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141c;
+      --panel: #171d27;
+      --ink: #edf2fa;
+      --muted: #aebbd0;
+      --grid: #667287;
+      --cell: #202937;
+      --terminal: #303b4c;
+      --cliff: #572d31;
+      --cliff-ink: #ffb5ae;
+      --cliff-line: #e67e76;
+      --q: #ff9b35;
+      --sarsa: #58b5ff;
+      --halo: #171d27;
+      --border: #3c4657;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="panel">
+  <h1 id="scheme-title">Короткий и безопасный маршруты у обрыва</h1>
+
+  <svg
+    id="diagram"
+    viewBox="0 0 1050 420"
+    width="1050"
+    height="420"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="scheme-title scheme-desc">
+    <desc id="scheme-desc">
+      Сетка четыре на двенадцать. Q-learning идёт по клеткам рядом с
+      обрывом, а SARSA проходит на одну клетку дальше от края.
+    </desc>
+  </svg>
+
+  <p id="fallback" class="fallback" hidden>
+    Сетка 4×12: маршрут Q-learning идёт вдоль клеток обрыва с наградой
+    −100, а маршрут SARSA проходит на одну клетку дальше от края.
+  </p>
+</main>
+
+<script>
+(() => {
+  const data = [
+    {
+      kind: "layout",
+      columns: 12,
+      rows: 4,
+      begin: 0,
+      unit: 1,
+      center: 0.5,
+      cliffRow: 3,
+      cliffFrom: 1,
+      cliffTo: 11,
+      startColumn: 0,
+      goalColumn: 11,
+      reward: -100,
+      dotRadius: 0.105,
+      terminalRadius: 0.17,
+      captionX: 0,
+      captionY: -0.2,
+      markInset: 0.13,
+      markReach: 0.42
+    },
+    {
+      kind: "route",
+      name: "SARSA",
+      className: "sarsa-route",
+      dotClass: "sarsa-dot",
+      row: 1,
+      points: [
+        [0.5, 3.5],
+        [0.5, 1.5],
+        [11.5, 1.5],
+        [11.5, 3.5]
+      ]
+    },
+    {
+      kind: "route",
+      name: "Q-learning",
+      className: "q-route",
+      dotClass: "q-dot",
+      row: 2,
+      points: [
+        [0.5, 3.5],
+        [0.5, 2.5],
+        [11.5, 2.5],
+        [11.5, 3.5]
+      ]
+    },
+    {
+      kind: "label",
+      text: "СТАРТ",
+      x: -0.18,
+      y: 3.5,
+      anchor: "end"
+    },
+    {
+      kind: "label",
+      text: "ЦЕЛЬ",
+      x: 12.18,
+      y: 3.5,
+      anchor: "start"
+    },
+    {
+      kind: "legend-route",
+      route: "Q-learning",
+      x1: 0.7,
+      x2: 1.4,
+      textX: 1.65,
+      y: 4.65,
+      text: "Q-learning — короткий маршрут вдоль края"
+    },
+    {
+      kind: "legend-route",
+      route: "SARSA",
+      x1: 6.5,
+      x2: 7.2,
+      textX: 7.45,
+      y: 4.65,
+      text: "SARSA — на одну клетку дальше от края"
+    },
+    {
+      kind: "legend-cliff",
+      x: 4.3,
+      y: 5.03,
+      width: 0.55,
+      height: 0.38,
+      textX: 5.05,
+      textY: 5.22,
+      text: "Обрыв: −100 и возврат в старт"
+    }
+  ];
+
+  const origin = { x: 118, y: 34 };
+  const scale = { x: 68, y: 68 };
+  const sx = x => origin.x + x * scale.x;
+  const sy = y => origin.y + y * scale.y;
+
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  try {
+    const layout = data.find(item => item.kind === "layout");
+    const routes = data.filter(item => item.kind === "route");
+    const labels = data.filter(item => item.kind === "label");
+    const routeLegends = data.filter(item => item.kind === "legend-route");
+    const cliffLegend = data.find(item => item.kind === "legend-cliff");
+
+    const make = (name, attributes, content) => {
+      const node = document.createElementNS(namespace, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+
+      return node;
+    };
+
+    const add = (parent, name, attributes, content) => {
+      const node = make(name, attributes, content);
+      parent.appendChild(node);
+      return node;
+    };
+
+    const lengthX = value => sx(value) - sx(layout.begin);
+    const lengthY = value => sy(value) - sy(layout.begin);
+    const routeByName = name => routes.find(route => route.name === name);
+    const routePoints = route =>
+      route.points.map(point => `${sx(point[layout.begin])},${sy(point[layout.unit])}`).join(" ");
+
+    const gridLayer = add(svg, "g", { "aria-label": "Сетка 4 на 12" });
+
+    add(
+      gridLayer,
+      "text",
+      {
+        x: sx(layout.captionX),
+        y: sy(layout.captionY),
+        class: "grid-caption",
+        "text-anchor": "start"
+      },
+      "Сетка 4 × 12"
+    );
+
+    for (
+      let row = layout.begin;
+      row < layout.rows;
+      row += layout.unit
+    ) {
+      for (
+        let column = layout.begin;
+        column < layout.columns;
+        column += layout.unit
+      ) {
+        const isCliff =
+          row === layout.cliffRow &&
+          column >= layout.cliffFrom &&
+          column < layout.cliffTo;
+
+        const isTerminal =
+          row === layout.cliffRow &&
+          (
+            column === layout.startColumn ||
+            column === layout.goalColumn
+          );
+
+        const classes = [
+          "cell",
+          isCliff ? "cliff" : "",
+          isTerminal ? "terminal" : ""
+        ].filter(Boolean).join(" ");
+
+        add(gridLayer, "rect", {
+          x: sx(column),
+          y: sy(row),
+          width: sx(column + layout.unit) - sx(column),
+          height: sy(row + layout.unit) - sy(row),
+          class: classes
+        });
+
+        if (isCliff) {
+          add(gridLayer, "line", {
+            x1: sx(column + layout.markInset),
+            y1: sy(row + layout.markInset),
+            x2: sx(column + layout.markReach),
+            y2: sy(row + layout.markReach),
+            class: "cliff-mark"
+          });
+
+          add(gridLayer, "line", {
+            x1: sx(column + layout.unit - layout.markReach),
+            y1: sy(row + layout.unit - layout.markReach),
+            x2: sx(column + layout.unit - layout.markInset),
+            y2: sy(row + layout.unit - layout.markInset),
+            class: "cliff-mark"
+          });
+
+          add(
+            gridLayer,
+            "text",
+            {
+              x: sx(column + layout.center),
+              y: sy(row + layout.center),
+              class: "reward"
+            },
+            String(layout.reward).replace("-", "−")
+          );
+        }
+      }
+    }
+
+    add(gridLayer, "rect", {
+      x: sx(layout.begin),
+      y: sy(layout.begin),
+      width: sx(layout.columns) - sx(layout.begin),
+      height: sy(layout.rows) - sy(layout.begin),
+      class: "outer-border"
+    });
+
+    const routeLayer = add(svg, "g", {
+      "aria-label": "Маршруты Q-learning и SARSA"
+    });
+
+    routes.forEach(route => {
+      add(routeLayer, "polyline", {
+        points: routePoints(route),
+        class: "route-halo"
+      });
+    });
+
+    routes.forEach(route => {
+      add(routeLayer, "polyline", {
+        points: routePoints(route),
+        class: `route ${route.className}`
+      });
+    });
+
+    routes.forEach(route => {
+      for (
+        let column = layout.begin;
+        column < layout.columns;
+        column += layout.unit
+      ) {
+        add(routeLayer, "circle", {
+          cx: sx(column + layout.center),
+          cy: sy(route.row + layout.center),
+          r: lengthX(layout.dotRadius),
+          class: `route-dot ${route.dotClass}`
+        });
+      }
+    });
+
+    const terminalLayer = add(svg, "g", {
+      "aria-label": "Старт и цель"
+    });
+
+    [
+      [layout.startColumn + layout.center, layout.cliffRow + layout.center],
+      [layout.goalColumn + layout.center, layout.cliffRow + layout.center]
+    ].forEach(point => {
+      add(terminalLayer, "circle", {
+        cx: sx(point[layout.begin]),
+        cy: sy(point[layout.unit]),
+        r: lengthX(layout.terminalRadius),
+        class: "terminal-dot"
+      });
+    });
+
+    labels.forEach(label => {
+      add(
+        terminalLayer,
+        "text",
+        {
+          x: sx(label.x),
+          y: sy(label.y),
+          class: "side-label",
+          "text-anchor": label.anchor
+        },
+        label.text
+      );
+    });
+
+    const legendLayer = add(svg, "g", {
+      "aria-label": "Условные обозначения"
+    });
+
+    routeLegends.forEach(item => {
+      const route = routeByName(item.route);
+
+      add(legendLayer, "line", {
+        x1: sx(item.x1),
+        y1: sy(item.y),
+        x2: sx(item.x2),
+        y2: sy(item.y),
+        class: `legend-line ${route.className}`
+      });
+
+      add(
+        legendLayer,
+        "text",
+        {
+          x: sx(item.textX),
+          y: sy(item.y),
+          class: "legend-text",
+          "text-anchor": "start"
+        },
+        item.text
+      );
+    });
+
+    add(legendLayer, "rect", {
+      x: sx(cliffLegend.x),
+      y: sy(cliffLegend.y),
+      width: lengthX(cliffLegend.width),
+      height: lengthY(cliffLegend.height),
+      class: "legend-cliff"
+    });
+
+    add(
+      legendLayer,
+      "text",
+      {
+        x: sx(cliffLegend.textX),
+        y: sy(cliffLegend.textY),
+        class: "legend-text",
+        "text-anchor": "start"
+      },
+      cliffLegend.text
+    );
+  } catch (error) {
+    svg.setAttribute("hidden", "");
+    fallback.hidden = false;
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

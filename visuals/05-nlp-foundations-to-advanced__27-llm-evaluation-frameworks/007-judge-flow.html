@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь одного примера через LLM-судью</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #eef2ff;
+    --panel-warm: #fff6df;
+    --panel-bad: #fff0f0;
+    --ink: #172033;
+    --muted: #58647a;
+    --line: #7a879d;
+    --accent: #5267d8;
+    --accent-strong: #3048bd;
+    --bad: #b33a46;
+    --good: #16735a;
+    --json: #eaf8f2;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101522;
+      --panel: #192131;
+      --panel-soft: #202b4d;
+      --panel-warm: #392f1d;
+      --panel-bad: #3b2228;
+      --ink: #eef2ff;
+      --muted: #aeb9ce;
+      --line: #8290aa;
+      --accent: #93a4ff;
+      --accent-strong: #b9c3ff;
+      --bad: #ff8791;
+      --good: #67d6b0;
+      --json: #18372f;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--bg);
+    max-width: 1200px;
+    margin: auto;
+  }
+
+  .title {
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 448px;
+    background: var(--bg);
+  }
+
+  .box {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .soft {
+    fill: var(--panel-soft);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .warm {
+    fill: var(--panel-warm);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .badbox {
+    fill: var(--panel-bad);
+    stroke: var(--bad);
+    stroke-width: 2px;
+  }
+
+  .jsonbox {
+    fill: var(--json);
+    stroke: var(--good);
+    stroke-width: 2px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .feed {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .axis {
+    stroke: var(--ink);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .marker {
+    stroke: var(--bad);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrowhead {
+    fill: var(--accent);
+  }
+
+  .dot {
+    fill: var(--accent);
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .tag {
+    fill: var(--accent-strong);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .badtext {
+    fill: var(--bad);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .score {
+    fill: var(--bad);
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  .mono {
+    fill: var(--ink);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .footer {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--bad);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <div class="title">Путь одного примера через LLM-судью</div>
+  <svg id="diagram"
+       viewBox="0 0 1200 420"
+       width="1200"
+       height="420"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Путь одного примера через LLM-судью</title>
+    <desc id="svg-desc">Вопрос, контекст, ответ и рубрика объединяются в промпт. LLM-судья возвращает JSON, из которого извлекается итоговая оценка 0,1 на шкале от 0 до 1.</desc>
+  </svg>
+</main>
+
+<script>
+const data = {
+  zero: 0,
+  origin: { x: 12, y: 8 },
+  scale: { x: 1, y: 1 },
+  radius: 10,
+  lineHeight: 17,
+  tightLine: 16,
+  labelPad: 8,
+  arrow: { length: 12, half: 7 },
+  input: {
+    x: 8, w: 280,
+    cards: [
+      {
+        y: 8, h: 68, kind: "box", tag: "QUERY",
+        lines: ["Можно ли вернуть распакованные", "наушники через 30 дней?"]
+      },
+      {
+        y: 86, h: 76, kind: "warm", tag: "CONTEXT",
+        lines: ["Возврат — в течение 14 дней,", "если товар не использовался"]
+      },
+      {
+        y: 172, h: 84, kind: "badbox", tag: "ANSWER",
+        lines: ["Да, вернуть можно в течение 30 дней", "независимо от состояния"]
+      },
+      {
+        y: 266, h: 84, kind: "soft", tag: "РУБРИКА",
+        lines: ["Проверить: подтверждается ли", "контекстом каждый факт ответа"]
+      }
+    ]
+  },
+  bus: { x: 313, top: 42, bottom: 308, joinY: 179 },
+  prompt: {
+    x: 338, y: 26, w: 246, h: 326,
+    titleY: 50,
+    rows: [
+      {
+        y: 68, h: 58, tag: "query",
+        lines: ["вопрос о возврате", "через 30 дней"]
+      },
+      {
+        y: 132, h: 58, tag: "context",
+        lines: ["14 дней; товар", "не использовался"]
+      },
+      {
+        y: 196, h: 58, tag: "answer",
+        lines: ["30 дней; независимо", "от состояния"]
+      },
+      {
+        y: 260, h: 72, tag: "rubric",
+        lines: ["каждый факт подтверждён", "найденным контекстом?"]
+      }
+    ]
+  },
+  judge: {
+    x: 638, y: 88, w: 174, h: 210,
+    titleY: 116,
+    linesY: 150,
+    lines: [
+      "Сопоставляет факты:",
+      "«30 дней» ≠ «14 дней»",
+      "«независимо» ≠",
+      "«не использовался»"
+    ],
+    verdictY: 272
+  },
+  json: {
+    x: 862, y: 70, w: 168, h: 246,
+    titleY: 98,
+    textX: 878,
+    textY: 128,
+    lines: [
+      "{",
+      "  \"score\": 0.1,",
+      "  \"reason\":",
+      "  \"Оба ключевых",
+      "  утверждения",
+      "  не подтверждены",
+      "  контекстом\"",
+      "}"
+    ]
+  },
+  result: {
+    x: 1072, y: 88, w: 104, h: 210,
+    titleY: 116,
+    scoreY: 164,
+    axisStart: 1084,
+    axisEnd: 1164,
+    axisY: 226,
+    tickHalf: 7,
+    markerX: 1092,
+    markerTop: 204,
+    markerBottom: 240,
+    labelsY: 258,
+    captionY: 282
+  },
+  arrows: [
+    { x1: 584, y1: 179, x2: 638, y2: 179, label: "один prompt", lx: 592, ly: 164 },
+    { x1: 812, y1: 179, x2: 862, y2: 179, label: "ответ JSON", lx: 816, ly: 164 },
+    { x1: 1030, y1: 179, x2: 1072, y2: 179, label: "score", lx: 1034, ly: 164 }
+  ],
+  footer: {
+    x: 592,
+    y: 390,
+    lines: ["Один пример → один запрос к судье → один JSON → одна оценка по faithfulness"]
+  },
+  fallback: {
+    x: 592,
+    y: 196,
+    lines: [
+      "Схема должна показать: query + context + answer + рубрика",
+      "→ LLM-судья → JSON → итоговый score 0,1 на шкале от 0 до 1."
+    ]
+  }
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const add = (tag, attrs, text) => {
+    const element = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      element.setAttribute(name, value);
+    }
+    if (text !== undefined) element.textContent = text;
+    svg.appendChild(element);
+    return element;
+  };
+
+  const rect = (x, y, w, h, className) => add("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    rx: sx(data.radius) - sx(data.zero),
+    ry: sy(data.radius) - sy(data.zero),
+    class: className
+  });
+
+  const line = (x1, y1, x2, y2, className) => add("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className
+  });
+
+  const textLine = (x, y, value, className, anchor) => add("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor
+  }, value);
+
+  const textBlock = (x, y, lines, className, anchor, lineHeight) => {
+    const text = add("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    });
+    let first = true;
+    for (const value of lines) {
+      const span = document.createElementNS(ns, "tspan");
+      span.setAttribute("x", sx(x));
+      if (first) {
+        span.setAttribute("y", sy(y));
+        first = false;
+      } else {
+        span.setAttribute("dy", sy(lineHeight) - sy(data.zero));
+      }
+      span.textContent = value;
+      text.appendChild(span);
+    }
+    return text;
+  };
+
+  const arrow = item => {
+    const tipX = item.x2;
+    const baseX = item.x2 - data.arrow.length;
+    line(item.x1, item.y1, baseX, item.y2, "flow");
+    add("polygon", {
+      points: [
+        sx(tipX) + "," + sy(item.y2),
+        sx(baseX) + "," + sy(item.y2 - data.arrow.half),
+        sx(baseX) + "," + sy(item.y2 + data.arrow.half)
+      ].join(" "),
+      class: "arrowhead"
+    });
+    textLine(item.lx, item.ly, item.label, "small", "start");
+  };
+
+  const inputRight = data.input.x + data.input.w;
+  for (const card of data.input.cards) {
+    rect(data.input.x, card.y, data.input.w, card.h, card.kind);
+    textLine(
+      data.input.x + data.labelPad,
+      card.y + data.labelPad + data.lineHeight,
+      card.tag,
+      "tag",
+      "start"
+    );
+    textBlock(
+      data.input.x + data.labelPad,
+      card.y + data.labelPad + data.lineHeight + data.tightLine,
+      card.lines,
+      "label",
+      "start",
+      data.lineHeight
+    );
+
+    const cardCenter = card.y + card.h / data.scale.x / (data.scale.x + data.scale.x);
+    line(inputRight, cardCenter, data.bus.x, cardCenter, "feed");
+    add("circle", {
+      cx: sx(data.bus.x),
+      cy: sy(cardCenter),
+      r: sx(data.arrow.half / data.scale.x / (data.scale.x + data.scale.x)) - sx(data.zero),
+      class: "dot"
+    });
+  }
+
+  line(data.bus.x, data.bus.top, data.bus.x, data.bus.bottom, "feed");
+  line(
+    data.bus.x,
+    data.bus.joinY,
+    data.prompt.x - data.arrow.length,
+    data.bus.joinY,
+    "flow"
+  );
+  add("polygon", {
+    points: [
+      sx(data.prompt.x) + "," + sy(data.bus.joinY),
+      sx(data.prompt.x - data.arrow.length) + "," + sy(data.bus.joinY - data.arrow.half),
+      sx(data.prompt.x - data.arrow.length) + "," + sy(data.bus.joinY + data.arrow.half)
+    ].join(" "),
+    class: "arrowhead"
+  });
+  textLine(data.bus.x, data.bus.top - data.labelPad, "четыре части", "small", "middle");
+
+  rect(data.prompt.x, data.prompt.y, data.prompt.w, data.prompt.h, "soft");
+  textLine(
+    data.prompt.x + data.prompt.w / (data.scale.x + data.scale.x),
+    data.prompt.titleY,
+    "ПРОМПТ СУДЬЕ",
+    "heading",
+    "middle"
+  );
+
+  for (const row of data.prompt.rows) {
+    rect(
+      data.prompt.x + data.labelPad,
+      row.y,
+      data.prompt.w - data.labelPad - data.labelPad,
+      row.h,
+      "box"
+    );
+    textLine(
+      data.prompt.x + data.labelPad + data.labelPad,
+      row.y + data.lineHeight,
+      row.tag,
+      "tag",
+      "start"
+    );
+    textBlock(
+      data.prompt.x + data.labelPad + data.labelPad,
+      row.y + data.lineHeight + data.tightLine,
+      row.lines,
+      "small",
+      "start",
+      data.tightLine
+    );
+  }
+
+  for (const item of data.arrows) arrow(item);
+
+  rect(data.judge.x, data.judge.y, data.judge.w, data.judge.h, "box");
+  textLine(
+    data.judge.x + data.judge.w / (data.scale.x + data.scale.x),
+    data.judge.titleY,
+    "LLM-СУДЬЯ",
+    "heading",
+    "middle"
+  );
+  textBlock(
+    data.judge.x + data.labelPad + data.labelPad,
+    data.judge.linesY,
+    data.judge.lines,
+    "label",
+    "start",
+    data.lineHeight
+  );
+  textLine(
+    data.judge.x + data.judge.w / (data.scale.x + data.scale.x),
+    data.judge.verdictY,
+    "оба факта не подтверждены",
+    "badtext",
+    "middle"
+  );
+
+  rect(data.json.x, data.json.y, data.json.w, data.json.h, "jsonbox");
+  textLine(
+    data.json.x + data.json.w / (data.scale.x + data.scale.x),
+    data.json.titleY,
+    "ОТВЕТ СУДЬИ",
+    "heading",
+    "middle"
+  );
+  textBlock(
+    data.json.textX,
+    data.json.textY,
+    data.json.lines,
+    "mono",
+    "start",
+    data.tightLine
+  );
+
+  rect(data.result.x, data.result.y, data.result.w, data.result.h, "badbox");
+  textBlock(
+    data.result.x + data.result.w / (data.scale.x + data.scale.x),
+    data.result.titleY,
+    ["ИТОГОВЫЙ", "SCORE"],
+    "heading",
+    "middle",
+    data.lineHeight
+  );
+  textLine(
+    data.result.x + data.result.w / (data.scale.x + data.scale.x),
+    data.result.scoreY,
+    "0,1",
+    "score",
+    "middle"
+  );
+
+  line(
+    data.result.axisStart,
+    data.result.axisY,
+    data.result.axisEnd,
+    data.result.axisY,
+    "axis"
+  );
+  line(
+    data.result.axisStart,
+    data.result.axisY - data.result.tickHalf,
+    data.result.axisStart,
+    data.result.axisY + data.result.tickHalf,
+    "axis"
+  );
+  line(
+    data.result.axisEnd,
+    data.result.axisY - data.result.tickHalf,
+    data.result.axisEnd,
+    data.result.axisY + data.result.tickHalf,
+    "axis"
+  );
+  line(
+    data.result.markerX,
+    data.result.markerTop,
+    data.result.markerX,
+    data.result.markerBottom,
+    "marker"
+  );
+  textLine(data.result.axisStart, data.result.labelsY, "0", "small", "start");
+  textLine(data.result.axisEnd, data.result.labelsY, "1", "small", "end");
+  textLine(
+    data.result.x + data.result.w / (data.scale.x + data.scale.x),
+    data.result.captionY,
+    "низкая оценка",
+    "badtext",
+    "middle"
+  );
+
+  line(
+    data.input.x,
+    data.footer.y - data.lineHeight,
+    data.result.x + data.result.w,
+    data.footer.y - data.lineHeight,
+    "divider"
+  );
+  textBlock(
+    data.footer.x,
+    data.footer.y,
+    data.footer.lines,
+    "footer",
+    "middle",
+    data.lineHeight
+  );
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  while (svg.lastChild) svg.removeChild(svg.lastChild);
+  const ns = "http://www.w3.org/2000/svg";
+  const text = document.createElementNS(ns, "text");
+  text.setAttribute("x", sx(data.fallback.x));
+  text.setAttribute("y", sy(data.fallback.y));
+  text.setAttribute("class", "fallback");
+  text.setAttribute("text-anchor", "middle");
+  let first = true;
+  for (const value of data.fallback.lines) {
+    const span = document.createElementNS(ns, "tspan");
+    span.setAttribute("x", sx(data.fallback.x));
+    if (first) {
+      span.setAttribute("y", sy(data.fallback.y));
+      first = false;
+    } else {
+      span.setAttribute("dy", sy(data.lineHeight + data.labelPad) - sy(data.zero));
+    }
+    span.textContent = value;
+    text.appendChild(span);
+  }
+  svg.appendChild(text);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

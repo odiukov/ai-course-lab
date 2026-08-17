@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Обрыв качества при снижении битности</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #182230;
+      --muted: #64748b;
+      --grid: #dbe3ee;
+      --axis: #94a3b8;
+      --snr: #1769aa;
+      --cosine: #16856b;
+      --danger: #c93f4f;
+      --danger-fill: #fff0f1;
+      --callout: #7e2632;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--grid);
+      font-size: 20px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      background: var(--panel);
+    }
+
+    .frame {
+      fill: var(--panel);
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .break-zone {
+      fill: var(--danger-fill);
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+    }
+
+    .snr-line,
+    .cosine-line {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 4;
+    }
+
+    .snr-line {
+      stroke: var(--snr);
+    }
+
+    .cosine-line {
+      stroke: var(--cosine);
+    }
+
+    .snr-dot {
+      fill: var(--panel);
+      stroke: var(--snr);
+      stroke-width: 3;
+    }
+
+    .cosine-dot {
+      fill: var(--panel);
+      stroke: var(--cosine);
+      stroke-width: 3;
+    }
+
+    .danger-dot {
+      fill: var(--danger);
+      stroke: var(--panel);
+      stroke-width: 3;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--danger);
+      stroke-width: 3;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--danger);
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .bit {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .level {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .snr-text {
+      fill: var(--snr);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .cosine-text {
+      fill: var(--cosine);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .break-text {
+      fill: var(--callout);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      padding: 14px 18px;
+      color: var(--danger);
+      font-size: 14px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0b111a;
+        --panel: #111a26;
+        --ink: #edf3fb;
+        --muted: #a9b8ca;
+        --grid: #2c3a4d;
+        --axis: #66778d;
+        --snr: #68b8f5;
+        --cosine: #63d5b3;
+        --danger: #ff7382;
+        --danger-fill: #321b23;
+        --callout: #ff9aa5;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Где начинается обрыв качества?</h1>
+    <svg
+      id="chart"
+      viewBox="0 0 960 480"
+      width="960"
+      height="480"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Сравнение качества при 16, 8, 4, 3 и 2 битах</title>
+      <desc id="svg-desc">
+        Кривые отношения сигнал к шуму и косинусной близости меняются умеренно
+        до перехода к двум битам, где обе метрики заметно проваливаются.
+      </desc>
+    </svg>
+    <div id="fallback" hidden>
+      Схема должна была показать плавное снижение SNR и косинусной близости
+      при 16, 8, 4 и 3 битах и резкий провал при переходе к 2 битам.
+    </div>
+  </main>
+
+  <script>
+    const data = [
+      {
+        kind: "layout",
+        origin: { x: 60, y: 460 },
+        scale: { x: 8, y: -8 },
+        frame: [{ x: 8, y: 1 }, { x: 111, y: 57 }],
+        breakZone: [{ x: 92, y: 8 }, { x: 109, y: 52 }],
+        axisX: 18,
+        axisBottom: 8,
+        axisTop: 52,
+        axisRight: 106,
+        dividerY: 29,
+        gridBottom: 8,
+        gridTop: 52,
+        dotRadius: 0.7,
+        dangerRadius: 1,
+        legend: [
+          {
+            className: "snr-line",
+            from: { x: 20, y: 54 },
+            to: { x: 24, y: 54 },
+            label: "Отношение сигнал/шум (SNR)",
+            at: { x: 26, y: 54 },
+            anchor: "start",
+            textClass: "snr-text"
+          },
+          {
+            className: "cosine-line",
+            from: { x: 52, y: 54 },
+            to: { x: 56, y: 54 },
+            label: "Косинусная близость",
+            at: { x: 58, y: 54 },
+            anchor: "start",
+            textClass: "cosine-text"
+          }
+        ],
+        labels: [
+          {
+            value: "SNR",
+            at: { x: 16, y: 43 },
+            anchor: "end",
+            className: "metric"
+          },
+          {
+            value: "Косинусная",
+            at: { x: 16, y: 22 },
+            anchor: "end",
+            className: "metric"
+          },
+          {
+            value: "близость",
+            at: { x: 16, y: 20 },
+            anchor: "end",
+            className: "metric"
+          },
+          {
+            value: "≈ 1.0",
+            at: { x: 16, y: 17 },
+            anchor: "end",
+            className: "small"
+          },
+          {
+            value: "битность",
+            at: { x: 16, y: 5 },
+            anchor: "end",
+            className: "small"
+          },
+          {
+            value: "уровни",
+            at: { x: 16, y: 2 },
+            anchor: "end",
+            className: "small"
+          },
+          {
+            value: "обрыв при переходе к 2 битам",
+            at: { x: 108, y: 54 },
+            anchor: "end",
+            className: "break-text"
+          }
+        ],
+        arrow: {
+          from: { x: 98, y: 51 },
+          to: { x: 94, y: 34 },
+          head: [
+            { x: 94, y: 32 },
+            { x: 92.8, y: 35.4 },
+            { x: 95.8, y: 34.7 }
+          ]
+        }
+      },
+      {
+        kind: "point",
+        bit: "16",
+        levels: "65536",
+        x: 22,
+        snrY: 48,
+        cosineY: 22
+      },
+      {
+        kind: "point",
+        bit: "8",
+        levels: "256",
+        x: 42,
+        snrY: 46,
+        cosineY: 21.5
+      },
+      {
+        kind: "point",
+        bit: "4",
+        levels: "16",
+        x: 62,
+        snrY: 43,
+        cosineY: 21
+      },
+      {
+        kind: "point",
+        bit: "3",
+        levels: "8",
+        x: 82,
+        snrY: 40,
+        cosineY: 19
+      },
+      {
+        kind: "point",
+        bit: "2",
+        levels: "4",
+        x: 102,
+        snrY: 27,
+        cosineY: 11,
+        breakPoint: true
+      }
+    ];
+
+    const origin = Object.freeze(
+      data.find((item) => item.kind === "layout").origin
+    );
+    const scale = Object.freeze(
+      data.find((item) => item.kind === "layout").scale
+    );
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const layout = data.find((item) => item.kind === "layout");
+      const points = data.filter((item) => item.kind === "point");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function element(name, attributes, className) {
+        const node = document.createElementNS(namespace, name);
+        if (className) node.setAttribute("class", className);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+        svg.appendChild(node);
+        return node;
+      }
+
+      function line(from, to, className) {
+        return element(
+          "line",
+          {
+            x1: sx(from.x),
+            y1: sy(from.y),
+            x2: sx(to.x),
+            y2: sy(to.y)
+          },
+          className
+        );
+      }
+
+      function rectangle(corners, className) {
+        const [first, second] = corners;
+        return element(
+          "rect",
+          {
+            x: sx(first.x),
+            y: sy(second.y),
+            width: Math.abs(sx(second.x) - sx(first.x)),
+            height: Math.abs(sy(first.y) - sy(second.y))
+          },
+          className
+        );
+      }
+
+      function curve(curvePoints, className) {
+        const commands = curvePoints.map((point, position) => {
+          const command = position ? "L" : "M";
+          return `${command} ${sx(point.x)} ${sy(point.y)}`;
+        });
+        return element("path", { d: commands.join(" ") }, className);
+      }
+
+      function circle(point, radius, className) {
+        return element(
+          "circle",
+          {
+            cx: sx(point.x),
+            cy: sy(point.y),
+            r: Math.abs(sx(radius) - sx(0))
+          },
+          className
+        );
+      }
+
+      function text(label) {
+        const node = element(
+          "text",
+          {
+            x: sx(label.at.x),
+            y: sy(label.at.y),
+            "text-anchor": label.anchor,
+            "dominant-baseline": "middle"
+          },
+          label.className
+        );
+        node.textContent = label.value;
+        return node;
+      }
+
+      function polygon(vertices, className) {
+        const value = vertices
+          .map((vertex) => `${sx(vertex.x)},${sy(vertex.y)}`)
+          .join(" ");
+        return element("polygon", { points: value }, className);
+      }
+
+      rectangle(layout.frame, "frame");
+      rectangle(layout.breakZone, "break-zone");
+
+      points.forEach((point) => {
+        line(
+          { x: point.x, y: layout.gridBottom },
+          { x: point.x, y: layout.gridTop },
+          "grid"
+        );
+      });
+
+      line(
+        { x: layout.axisX, y: layout.axisBottom },
+        { x: layout.axisRight, y: layout.axisBottom },
+        "axis"
+      );
+      line(
+        { x: layout.axisX, y: layout.axisBottom },
+        { x: layout.axisX, y: layout.axisTop },
+        "axis"
+      );
+      line(
+        { x: layout.axisX, y: layout.dividerY },
+        { x: layout.axisRight, y: layout.dividerY },
+        "grid"
+      );
+
+      layout.legend.forEach((item) => {
+        line(item.from, item.to, item.className);
+        text({
+          value: item.label,
+          at: item.at,
+          anchor: item.anchor,
+          className: item.textClass
+        });
+      });
+
+      const snrPoints = points.map((point) => ({
+        x: point.x,
+        y: point.snrY
+      }));
+      const cosinePoints = points.map((point) => ({
+        x: point.x,
+        y: point.cosineY
+      }));
+
+      curve(snrPoints, "snr-line");
+      curve(cosinePoints, "cosine-line");
+
+      points.forEach((point) => {
+        const snrPoint = { x: point.x, y: point.snrY };
+        const cosinePoint = { x: point.x, y: point.cosineY };
+        const radius = point.breakPoint
+          ? layout.dangerRadius
+          : layout.dotRadius;
+
+        circle(
+          snrPoint,
+          radius,
+          point.breakPoint ? "danger-dot" : "snr-dot"
+        );
+        circle(
+          cosinePoint,
+          radius,
+          point.breakPoint ? "danger-dot" : "cosine-dot"
+        );
+
+        text({
+          value: point.bit,
+          at: { x: point.x, y: 5 },
+          anchor: "middle",
+          className: "bit"
+        });
+        text({
+          value: point.levels,
+          at: { x: point.x, y: 2 },
+          anchor: "middle",
+          className: "level"
+        });
+      });
+
+      layout.labels.forEach(text);
+      line(layout.arrow.from, layout.arrow.to, "arrow");
+      polygon(layout.arrow.head, "arrow-head");
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
