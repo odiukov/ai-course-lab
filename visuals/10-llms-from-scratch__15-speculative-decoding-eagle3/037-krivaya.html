@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Кривая принятых токенов от alpha</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --axis: #444444;
+    --curve: #b3261e;
+    --lin: #8a8a8a;
+    --mark: #1f5fa8;
+    --grid: #e2e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --fg: #e9e9e9;
+      --muted: #a3a3a3;
+      --axis: #b0b0b0;
+      --curve: #ff8a7a;
+      --lin: #7d7d7d;
+      --mark: #79b8ff;
+      --grid: #2b2f36;
+    }
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  .wrap { background: var(--bg); padding: 8px 10px 10px; font: 14px/1.35 system-ui, "Segoe UI", Arial, sans-serif; }
+  h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; background: var(--bg); }
+  .legend { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+  .legend b { color: var(--fg); font-weight: 600; }
+  .fail { font-size: 13px; color: var(--fg); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Ожидаемое число принятых токенов за один вызов verifier, N = 5</h2>
+  <div id="slot"></div>
+  <p class="legend"><b>Сплошная</b> — E[accepted] = (1 − α<sup>6</sup>)/(1 − α). <b>Пунктир</b> — прямая между α = 0.6 и α = 0.9: кривая идёт ниже, значит рост ускоряется вправо.</p>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    // ---- данные схемы ----
+    var DATA = [
+      { a: 0.5,  e: 1.97 },
+      { a: 0.6,  e: 2.38 },
+      { a: 0.7,  e: 3.0  },
+      { a: 0.85, e: 4.2  },
+      { a: 0.9,  e: 4.69 },
+      { a: 0.95, e: 5.4  }
+    ];
+    var CEIL = 6;          // потолок N+1
+    var XMAX = 1, YMAX = 6.6;
+    var XT = [0, 0.2, 0.4, 0.6, 0.8, 1];
+    var YT = [0, 2, 4, 6];
+
+    // ---- холст ----
+    var W = 880, H = 460;
+    var PAD_L = 92, PAD_R = 118, PAD_T = 26, PAD_B = 62;
+    var FS = 13, LW = 1.4, GAP = 8, GAP2 = 16;
+
+    // ---- единственная пара перевода ----
+    var origin = { x: PAD_L, y: H - PAD_B };
+    var scale  = { x: (W - PAD_L - PAD_R) / XMAX, y: (H - PAD_T - PAD_B) / YMAX };
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y - y * scale.y; }
+
+    function E(a) { return a === 1 ? CEIL : (1 - Math.pow(a, 6)) / (1 - a); }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, at) { var e = document.createElementNS(NS, n); for (var k in at) e.setAttribute(k, at[k]); return e; }
+    function txt(x, y, s, anchor, cls) {
+      var t = el('text', { x: x, y: y, 'text-anchor': anchor, 'font-size': FS, fill: 'var(--' + (cls || 'fg') + ')' });
+      t.textContent = s; return t;
+    }
+
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'xMidYMid meet', role: 'img' });
+
+    // сетка по y
+    YT.forEach(function (v) {
+      svg.appendChild(el('line', { x1: sx(0), y1: sy(v), x2: sx(XMAX), y2: sy(v), stroke: 'var(--grid)', 'stroke-width': LW }));
+    });
+
+    // потолок N+1
+    svg.appendChild(el('line', {
+      x1: sx(0), y1: sy(CEIL), x2: sx(XMAX), y2: sy(CEIL),
+      stroke: 'var(--muted)', 'stroke-width': LW, 'stroke-dasharray': '7 5'
+    }));
+    svg.appendChild(txt(sx(XMAX) + GAP, sy(CEIL) - GAP, 'потолок N+1 = 6', 'start', 'muted'));
+
+    // оси
+    svg.appendChild(el('line', { x1: sx(0), y1: sy(0), x2: sx(XMAX), y2: sy(0), stroke: 'var(--axis)', 'stroke-width': LW }));
+    svg.appendChild(el('line', { x1: sx(0), y1: sy(0), x2: sx(0), y2: sy(YMAX), stroke: 'var(--axis)', 'stroke-width': LW }));
+
+    XT.forEach(function (v) {
+      svg.appendChild(el('line', { x1: sx(v), y1: sy(0), x2: sx(v), y2: sy(0) + GAP * 0.6, stroke: 'var(--axis)', 'stroke-width': LW }));
+      svg.appendChild(txt(sx(v), sy(0) + GAP2 + FS * 0.3, String(v), 'middle', 'muted'));
+    });
+    YT.forEach(function (v) {
+      svg.appendChild(el('line', { x1: sx(0) - GAP * 0.6, y1: sy(v), x2: sx(0), y2: sy(v), stroke: 'var(--axis)', 'stroke-width': LW }));
+      svg.appendChild(txt(sx(0) - GAP2, sy(v) + FS * 0.35, String(v), 'end', 'muted'));
+    });
+
+    svg.appendChild(txt(sx(XMAX / 2), sy(0) + GAP2 * 2.6, 'доля принятия α', 'middle', 'fg'));
+    var yl = txt(0, 0, 'принятых токенов', 'middle', 'fg');
+    yl.setAttribute('transform', 'translate(' + (sx(0) - GAP2 * 3.2) + ',' + sy(YMAX / 2) + ') rotate(-90)');
+    svg.appendChild(yl);
+
+    // кривая
+    var d = '';
+    for (var i = 0; i <= 100; i++) {
+      var a = i / 100 * XMAX;
+      d += (i ? 'L' : 'M') + sx(a).toFixed(2) + ' ' + sy(E(a)).toFixed(2) + ' ';
+    }
+    svg.appendChild(el('path', { d: d, fill: 'none', stroke: 'var(--curve)', 'stroke-width': LW * 2, 'stroke-linejoin': 'round' }));
+
+    // хорда 0.6 -> 0.9 (линейная догадка)
+    svg.appendChild(el('line', {
+      x1: sx(0.6), y1: sy(2.38), x2: sx(0.9), y2: sy(4.69),
+      stroke: 'var(--lin)', 'stroke-width': LW * 1.4, 'stroke-dasharray': '5 5'
+    }));
+    svg.appendChild(txt(sx(0.75), sy(3.53) - GAP2, 'линейно было бы 3.53', 'middle', 'muted'));
+    svg.appendChild(el('circle', { cx: sx(0.75), cy: sy(3.29), r: 3.5, fill: 'var(--lin)' }));
+    svg.appendChild(txt(sx(0.75) - GAP, sy(3.29) + GAP2, 'на деле 3.29', 'end', 'muted'));
+
+    // засечки 0.6 и 0.9
+    [{ a: 0.6, e: 2.38 }, { a: 0.9, e: 4.69 }].forEach(function (p) {
+      svg.appendChild(el('line', {
+        x1: sx(p.a), y1: sy(0), x2: sx(p.a), y2: sy(p.e),
+        stroke: 'var(--mark)', 'stroke-width': LW, 'stroke-dasharray': '4 4'
+      }));
+      svg.appendChild(el('line', {
+        x1: sx(0), y1: sy(p.e), x2: sx(p.a), y2: sy(p.e),
+        stroke: 'var(--mark)', 'stroke-width': LW, 'stroke-dasharray': '4 4'
+      }));
+      svg.appendChild(el('circle', { cx: sx(p.a), cy: sy(p.e), r: 4.5, fill: 'var(--mark)' }));
+    });
+    svg.appendChild(txt(sx(0.6) + GAP, sy(2.38) - GAP, 'α = 0.6 → 2.38', 'start', 'mark'));
+    svg.appendChild(txt(sx(0.9) - GAP, sy(4.69) - GAP, 'α = 0.9 → 4.69', 'end', 'mark'));
+
+    // точки данных
+    DATA.forEach(function (p) {
+      svg.appendChild(el('circle', { cx: sx(p.a), cy: sy(p.e), r: 3, fill: 'var(--curve)' }));
+    });
+    svg.appendChild(txt(sx(0.5) - GAP, sy(1.97) + GAP2, '0.5 → 1.97', 'end', 'curve'));
+    svg.appendChild(txt(sx(0.7) + GAP, sy(3.0) + GAP2, '0.7 → 3.0', 'start', 'curve'));
+    svg.appendChild(txt(sx(0.85) + GAP, sy(4.2) + GAP2, '0.85 → 4.2', 'start', 'curve'));
+    svg.appendChild(txt(sx(0.95) + GAP, sy(5.4) - GAP * 0.5, '0.95 → 5.4', 'start', 'curve'));
+
+    // плоская левая половина
+    svg.appendChild(txt(sx(0.12), sy(1.1), 'слева почти плоско', 'start', 'muted'));
+
+    slot.appendChild(svg);
+  } catch (err) {
+    var p = document.createElement('p');
+    p.className = 'fail';
+    p.textContent = 'Схема не построилась. Она показывает E[accepted] = (1 − α^6)/(1 − α) при N = 5: '
+      + 'α=0.5 → 1.97, α=0.6 → 2.38, α=0.7 → 3.0, α=0.85 → 4.2, α=0.9 → 4.69, α=0.95 → 5.4. '
+      + 'Кривая упирается в потолок N+1 = 6, слева почти плоская, справа круто растёт; '
+      + 'при α=0.75 линейная догадка дала бы 3.53, а формула даёт 3.29.';
+    slot.appendChild(p);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

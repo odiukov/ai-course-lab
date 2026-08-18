@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сравнение с окном, strided, H2O и MoBA — Native Sparse Attention</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/">← Native Sparse Attention</a>
+<span class="counter" data-counter>23 / 51</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-attention-latency" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/001-attention-latency/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">На 64k attention съедает 70-80 % времени</span></a></li>
+<li><a class="toc-link" data-step="002-fixed-pattern" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/002-fixed-pattern/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Первая корзина: разреженность с фиксированным шаблоном</span></a></li>
+<li><a class="toc-link" data-step="003-inference-sparsity" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/003-inference-sparsity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Вторая корзина: обрезка KV на инференсе</span></a></li>
+<li><a class="toc-link" data-step="004-check-buckets" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/004-check-buckets/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Проверка: почему обе корзины проигрывают</span></a></li>
+<li><a class="toc-link" data-step="005-nsa-idea" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/005-nsa-idea/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">NSA делает оба дела сразу</span></a></li>
+<li><a class="toc-link" data-step="006-three-branches-map" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/006-three-branches-map/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Карта трёх веток</span></a></li>
+<li><a class="toc-link" data-step="007-compressed-branch" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/007-compressed-branch/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Сжатая ветка: крупнозернистая картина всей последовательности</span></a></li>
+<li><a class="toc-link" data-step="008-selected-branch" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/008-selected-branch/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Выбранная ветка: мелкая детализация top-k блоков</span></a></li>
+<li><a class="toc-link" data-step="009-window-branch" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/009-window-branch/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Оконная ветка: последние W токенов ради локальных связей</span></a></li>
+<li><a class="toc-link" data-step="010-gate" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/010-gate/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Гейт: три веса, которые не обязаны суммироваться в 1</span></a></li>
+<li><a class="toc-link" data-step="011-check-branches" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/011-check-branches/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Проверка: какая ветка отвечает за что</span></a></li>
+<li><a class="toc-link" data-step="012-topk-discrete" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/012-topk-discrete/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Почему дискретный top-k рвёт градиент</span></a></li>
+<li><a class="toc-link" data-step="013-scores-differentiable" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/013-scores-differentiable/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Оценки сжатой ветки дифференцируемы сами по себе</span></a></li>
+<li><a class="toc-link" data-step="014-topk-as-address" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/014-topk-as-address/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">top_k — это адрес, а не вычисление</span></a></li>
+<li><a class="toc-link" data-step="015-check-gradient" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/015-check-gradient/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Проверка: куда доходит градиент в NSA и в обрезке KV</span></a></li>
+<li><a class="toc-link" data-step="016-kernel-loops" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/016-kernel-loops/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Ядро: внешний цикл по группам GQA, внутренний по блокам</span></a></li>
+<li><a class="toc-link" data-step="017-per-group-not-head" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/017-per-group-not-head/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Выбор на группу, а не на голову: 512 блоков против 64</span></a></li>
+<li><a class="toc-link" data-step="018-budget-formula" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/018-budget-formula/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Формула бюджета: O(N × (N/l + k·b + w))</span></a></li>
+<li><a class="toc-link" data-step="019-budget-64k" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/019-budget-64k/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">64k: 2536 ключей против 64000</span></a></li>
+<li><a class="toc-link" data-step="020-budget-128k" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/020-budget-128k/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">128k: почему выигрыш растёт с длиной</span></a></li>
+<li><a class="toc-link" data-step="021-budget-visual" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/021-budget-visual/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Из чего складываются 2536 ключей</span></a></li>
+<li><a class="toc-link" data-step="022-check-budget" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/022-check-budget/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Проверка: посчитайте ключи для l=64, k=8, w=256</span></a></li>
+<li><a class="toc-link is-current" data-step="023-compare-methods" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/023-compare-methods/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Сравнение с окном, strided, H2O и MoBA</span></a></li>
+<li><a class="toc-link" data-step="024-build-plan" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/024-build-plan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Что строим: игрушечная последовательность 1024 токена</span></a></li>
+<li><a class="toc-link" data-step="025-softmax-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/025-softmax-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Устойчивый softmax: вычитаем максимум</span></a></li>
+<li><a class="toc-link" data-step="026-softmax" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/026-softmax/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Пишем softmax</span></a></li>
+<li><a class="toc-link" data-step="027-scores-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/027-scores-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Оценки attention и деление на sqrt(d)</span></a></li>
+<li><a class="toc-link" data-step="028-attention-weights" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/028-attention-weights/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Пишем attention_weights</span></a></li>
+<li><a class="toc-link" data-step="029-attend-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/029-attend-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Веса умножаются на V: взвешенная сумма значений</span></a></li>
+<li><a class="toc-link" data-step="030-attend" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/030-attend/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Пишем attend</span></a></li>
+<li><a class="toc-link" data-step="031-compress-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/031-compress-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Mean-pool блока: l токенов превращаются в один вектор</span></a></li>
+<li><a class="toc-link" data-step="032-compress-tail" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/032-compress-tail/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Хвостовой блок короче: делим на len(block), а не на l</span></a></li>
+<li><a class="toc-link" data-step="033-compress-blocks" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/033-compress-blocks/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Пишем compress_blocks</span></a></li>
+<li><a class="toc-link" data-step="034-compressed-attention" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/034-compressed-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Один расчёт, две работы: ответ и указатель</span></a></li>
+<li><a class="toc-link" data-step="035-check-compressed" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/035-check-compressed/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Проверка: сколько сжатых ключей при N=1024 и l=32</span></a></li>
+<li><a class="toc-link" data-step="036-topk-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/036-topk-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Берём индексы k блоков с наибольшими оценками</span></a></li>
+<li><a class="toc-link" data-step="037-top-k-blocks" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/037-top-k-blocks/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Пишем top_k_blocks</span></a></li>
+<li><a class="toc-link" data-step="038-selected-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/038-selected-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">От номера блока к диапазону несжатых токенов</span></a></li>
+<li><a class="toc-link" data-step="039-selected-branch" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/039-selected-branch/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Пишем selected_branch</span></a></li>
+<li><a class="toc-link" data-step="040-window-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/040-window-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Оконная ветка: обычный attention по последним w токенам</span></a></li>
+<li><a class="toc-link" data-step="041-gate-mlp" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/041-gate-mlp/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">Гейт как крошечная MLP по запросу</span></a></li>
+<li><a class="toc-link" data-step="042-nsa-attention" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/042-nsa-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Пишем nsa_attention</span></a></li>
+<li><a class="toc-link" data-step="043-counting-theory" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/043-counting-theory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">43</span><span class="toc-title">Считаем ключи на запрос: 32 + 128 + 128</span></a></li>
+<li><a class="toc-link" data-step="044-keys-per-query" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/044-keys-per-query/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">44</span><span class="toc-title">Пишем keys_per_query</span></a></li>
+<li><a class="toc-link" data-step="045-toy-vs-real" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/045-toy-vs-real/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">45</span><span class="toc-title">Почему на игрушке 3.5×, а на 64k — 25×</span></a></li>
+<li><a class="toc-link" data-step="046-check-counts" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/046-check-counts/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">46</span><span class="toc-title">Проверка: разложите 288 ключей по веткам</span></a></li>
+<li><a class="toc-link" data-step="047-integration-status" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/047-integration-status/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">47</span><span class="toc-title">Где NSA работает: DeepSeek, vLLM, SGLang, llama.cpp</span></a></li>
+<li><a class="toc-link" data-step="048-when-not" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/048-when-not/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">48</span><span class="toc-title">Когда NSA не подходит: готовые плотные веса и контекст до 16k</span></a></li>
+<li><a class="toc-link" data-step="049-kv-memory-trap" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/049-kv-memory-trap/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">49</span><span class="toc-title">Ловушка: вычисления режутся, а KV-кэш остаётся полным</span></a></li>
+<li><a class="toc-link" data-step="050-ship-skill" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/050-ship-skill/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">50</span><span class="toc-title">Скилл-интегратор NSA: что он должен выдать</span></a></li>
+<li><a class="toc-link" data-step="051-quiz" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/051-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">51</span><span class="toc-title">Итоговая проверка: три ветки, гейт, поток градиента и бюджет вычислений</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Сравнение с окном, strided, H2O и MoBA</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Представь, что перед тобой лежит табличка на пять строк: скользящее окно, strided, обрезка KV вроде H2O и StreamingLLM, MoBA и NSA. В колонке «даёт ли реальное ускорение» у всех пяти стоит «да». Выбирай.</p>
+<p>Так выбрать нельзя. Колонка, где все ответы одинаковые, ничего не различает — она только создаёт ощущение, что все методы равны.</p>
+<p>Смотри на две другие колонки. Дальний поиск: у чистого окна он просто проваливается, потому что за прорезь из <a href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/002-fixed-pattern/">шага 2</a> нужный токен не попадает никогда. У strided — частично: сетка ловит то, что попало на её узлы. У обрезки KV — тоже частично, и это ровно та потеря, которую разобрали в <a href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/003-inference-sparsity/">шаге 3</a>: выброшенное не вернуть. У MoBA — хорошо. У NSA — «не уступает полному attention».</p>
+<p>И колонка про дифференцируемость. Обрезка KV к ней вообще неприменима: она живёт на инференсе, обучение её не видит (<a href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/015-check-gradient/">шаг 15</a>). У MoBA — частично. У NSA — «да», причём нативно, за счёт трюка с оценками сжатой ветки из <a href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/013-scores-differentiable/">шага 13</a>.</p>
+<p>MoBA от Moonshot (arXiv:2502.13189) вышел почти одновременно и идёт тем же путём «три лучше одного», перенося идею MoE на блоки attention. Эти две архитектуры и стоит держать в голове, говоря про long-context претрейн образца 2026 года.</p>
+<p>Ускорение без качества уже пробовали — и оно не взлетело. Поэтому таблицу читают справа налево.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Пять пылесосов в магазине, у всех на ценнике «1800 Вт». Эта строчка не помогает: она одинаковая. Разница вылезает в строчке ниже — сколько остаётся пыли в углу под диваном. Четыре оставляют, пятый нет. Мощность ты и так получишь у любого, платишь ты за угол под диваном.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/022-check-budget/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/10-llms-from-scratch__17-native-sparse-attention/024-build-plan/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"10-llms-from-scratch__17-native-sparse-attention","stepId":"023-compare-methods","number":23,"plannedCount":51}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

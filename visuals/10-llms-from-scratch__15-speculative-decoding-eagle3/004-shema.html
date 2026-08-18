@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Один forward verifier вместо пяти</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5c6672;
+    --slow:#b4442e; --fast:#1f7a4d; --draft:#3b6ea8; --grid:#c9d0d8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e6ebf1; --muted:#9aa6b3;
+      --slow:#e2795f; --fast:#4fc98a; --draft:#7aaee0; --grid:#39424d;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  p.sub{margin:0 0 6px;font-size:12px;color:var(--muted);}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;color:var(--slow);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Один forward verifier вместо пяти</h2>
+  <p class="sub">Слева: 5 проходов 70B, по одному токену. Справа: 1 проход 70B по префиксу и 5 черновикам плюс 5 крошечных проходов черновика.</p>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные схемы ----------
+    var N = 5;                       // длина черновика из текста шага
+    var DRAFT_COST = 0.05;           // c = cost(draft)/cost(verifier)
+    // единица оси X = стоимость одного прохода verifier (перетаскивание 140 ГБ весов)
+    var left = [];                   // 5 последовательных проходов 70B
+    for (var i=0;i<N;i++) left.push({row:i, x0:i, w:1, kind:'big', tag:'70B · токен '+(i+1)});
+    var right = [];                  // 5 крошечных проходов черновика + 1 проход 70B
+    for (var j=0;j<N;j++) right.push({row:j, x0:j*DRAFT_COST, w:DRAFT_COST, kind:'draft', tag:'d'+(j+1)});
+    right.push({row:N, x0:N*DRAFT_COST, w:1, kind:'big', tag:'70B · префикс + 5 черновиков'});
+
+    var ROWS = N+1;                  // 6 строк: 5 черновиков + проход verifier
+    var XMAX = N;                    // 5 единиц стоимости
+    var outs = 6;                    // шесть распределений за один проход
+
+    // ---------- один origin, один scale, одна пара sx/sy ----------
+    var VB_W = 1000, VB_H = 470;
+    var origin = {x: 118, y: 96};
+    var scale  = {x: 74,  y: 52};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    var PAD = 6, FS = 13, FS_S = 11.5, LW = 1.4;
+
+    var s = [];
+    function el(t,a,txt){
+      var o='<'+t; for(var k in a) o+=' '+k+'="'+a[k]+'"';
+      return txt===undefined ? o+'/>' : o+'>'+txt+'</'+t+'>';
+    }
+    function T(x,y,txt,anchor,cls,size){
+      return el('text',{x:x,y:y,'text-anchor':anchor,'font-size':(size||FS),
+        fill:'var(--'+(cls||'fg')+')','dominant-baseline':'middle'},txt);
+    }
+
+    // ---------- панель ----------
+    // левая панель занимает X 0..5 в своих координатах; правая сдвинута вдоль той же оси
+    var SHIFT = 6.4;                 // сдвиг правой панели в единицах оси X
+
+    function panel(dx, items, title, note, totalX, totalLabel){
+      var g = [];
+      // ось времени панели
+      var ax0 = sx(dx), ax1 = sx(dx+XMAX+0.15), ay = sy(ROWS+0.25);
+      g.push(el('line',{x1:ax0,y1:ay,x2:ax1,y2:ay,stroke:'var(--grid)','stroke-width':LW}));
+      g.push(el('polygon',{points:[sx(dx+XMAX+0.15)+','+sy(ROWS+0.25),
+                                   sx(dx+XMAX+0.02)+','+sy(ROWS+0.1),
+                                   sx(dx+XMAX+0.02)+','+sy(ROWS+0.4)].join(' '),
+                           fill:'var(--grid)'}));
+      for(var t=0;t<=XMAX;t++){
+        g.push(el('line',{x1:sx(dx+t),y1:sy(ROWS+0.25),x2:sx(dx+t),y2:sy(ROWS+0.42),
+                          stroke:'var(--grid)','stroke-width':LW}));
+        g.push(T(sx(dx+t), sy(ROWS+0.42)+PAD+FS_S, String(t), 'middle','muted',FS_S));
+      }
+      g.push(T(sx(dx+XMAX/2), sy(ROWS+0.42)+PAD+FS_S*2.4,
+               'проходов 70B (стоимость = 140 ГБ весов из памяти)','middle','muted',FS_S));
+
+      // заголовок панели
+      g.push(T(sx(dx), sy(-0.9), title, 'start','fg',FS+1));
+      g.push(T(sx(dx), sy(-0.45), note, 'start','muted',FS_S));
+
+      // бруски
+      items.forEach(function(b){
+        var col = b.kind==='big' ? (dx===0?'slow':'fast') : 'draft';
+        var x = sx(dx+b.x0), w = sx(dx+b.x0+b.w)-x;
+        var y = sy(b.row+0.12), h = sy(b.row+0.78)-y;
+        g.push(el('rect',{x:x,y:y,width:Math.max(w,2),height:h,rx:3,
+                          fill:'var(--'+col+')','fill-opacity':(b.kind==='big'?0.85:0.9)}));
+        // подпись бруска: у больших — внутри слева, у крошечных — справа от бруска
+        if(b.kind==='big'){
+          g.push(el('text',{x:x+PAD,y:sy(b.row+0.45),'text-anchor':'start','font-size':FS_S,
+            fill:'var(--bg)','dominant-baseline':'middle'}, b.tag));
+        }else{
+          g.push(T(x+w+PAD, sy(b.row+0.45), b.tag+' — черновик, c = '+DRAFT_COST,'start','muted',FS_S));
+        }
+      });
+
+      // итоговая линия стоимости
+      var lx = sx(dx+totalX);
+      g.push(el('line',{x1:lx,y1:sy(-0.15),x2:lx,y2:sy(ROWS+0.25),
+        stroke:'var(--'+(dx===0?'slow':'fast')+')','stroke-width':LW,'stroke-dasharray':'5 4'}));
+      g.push(T(lx-PAD, sy(-0.15)-PAD-FS*0.2, totalLabel,'end',(dx===0?'slow':'fast'),FS_S));
+      return g.join('');
+    }
+
+    s.push(panel(0, left,
+      'Пять проходов 70B','по одному токену за проход',
+      5, '5 проходов ≈ обычное декодирование'));
+
+    s.push(panel(SHIFT, right,
+      'Один проход 70B','5 крошечных проходов черновика + 1 проход verifier',
+      N*DRAFT_COST+1, '0.25 + 1 ≈ 1.25 прохода'));
+
+    // разделитель между панелями
+    s.push(el('line',{x1:sx(SHIFT-0.7),y1:sy(-1.15),x2:sx(SHIFT-0.7),y2:sy(ROWS+1.35),
+      stroke:'var(--grid)','stroke-width':LW}));
+
+    // шесть распределений за один проход — подписи справа от бруска verifier
+    var by = sy(N+0.45);
+    var bx = sx(SHIFT + N*DRAFT_COST + 1);
+    s.push(el('line',{x1:bx,y1:by,x2:sx(SHIFT+XMAX+0.9),y2:by,
+      stroke:'var(--fast)','stroke-width':LW}));
+    s.push(el('polygon',{points:[sx(SHIFT+XMAX+1.05)+','+by+' '+
+                                 sx(SHIFT+XMAX+0.9)+','+sy(N+0.32)+' '+
+                                 sx(SHIFT+XMAX+0.9)+','+sy(N+0.58)].join(''),
+      fill:'var(--fast)'}));
+    s.push(T(sx(SHIFT + N*DRAFT_COST + 1)+PAD, sy(N+0.05),
+      outs+' распределений: 5 проверок + 1 бонус','start','fast',FS_S));
+
+    // легенда
+    var ly = sy(ROWS+1.5);
+    var keys = [
+      {c:'slow',  t:'проход 70B в обычном декодировании'},
+      {c:'fast',  t:'проход 70B как verifier'},
+      {c:'draft', t:'проход черновика (c = 0.05)'}
+    ];
+    var lx0 = sx(0);
+    keys.forEach(function(k,i){
+      var x = lx0 + i*(scale.x*3.35);
+      s.push(el('rect',{x:x,y:ly-FS_S*0.55,width:FS_S,height:FS_S,rx:2,fill:'var(--'+k.c+')'}));
+      s.push(T(x+FS_S+PAD, ly, k.t,'start','muted',FS_S));
+    });
+
+    host.innerHTML = el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet',
+      xmlns:'http://www.w3.org/2000/svg',role:'img'}, s.join(''));
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать: слева пять последовательных '+
+      'проходов 70B, по одному токену каждый — суммарная стоимость 5 проходов. '+
+      'Справа пять крошечных проходов черновика (c = 0.05, всего 0.25) и один проход 70B '+
+      'по префиксу с пятью черновиками — суммарно ≈1.25 прохода, и он выдаёт 6 распределений: '+
+      'пять на проверку черновиков и одно на бонусный токен.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

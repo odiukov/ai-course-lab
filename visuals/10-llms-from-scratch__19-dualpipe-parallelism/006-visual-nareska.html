@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Как модель режут по стадиям</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d23; --muted:#5b6472; --line:#3a4250;
+    --fwd:#1f6feb; --bwd:#c2410c; --box:#eef2f7; --boxstroke:#94a3b8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1319; --fg:#e6eaf0; --muted:#9aa5b4; --line:#8b97a8;
+      --fwd:#6aa8ff; --bwd:#ff9457; --box:#1b2230; --boxstroke:#48546a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:6px 0 2px;}
+  h2{font-size:15px;margin:0 0 2px;padding:0 10px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{padding:10px;color:var(--muted);font-size:13px;line-height:1.5;}
+  text{fill:var(--fg);font-family:inherit;}
+  .muted{fill:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Как модель режут по стадиям: 32 слоя на 4 устройства</h2>
+  <div id="host">
+    <noscript class="fail">Схема: модель из 32 слоёв делится на 4 устройства по 8 слоёв
+      (устройство i держит слои i·8 … (i+1)·8−1). Активации идут вперёд 0→3,
+      градиенты — назад 3→0.</noscript>
+  </div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var N=32, P=4, PER=N/P;
+    var stages=[];
+    for(var i=0;i<P;i++){
+      stages.push({i:i, from:i*PER, to:(i+1)*PER-1});
+    }
+
+    // ---- одна система координат ----
+    var origin={x:70,y:170}, scale={x:112,y:26};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y - y*scale.y; }
+
+    // логические координаты: x = индекс устройства (0..3), y = уровень
+    var BOX_W=0.82, BOX_TOP=2.6, BOX_BOT=0.0;
+    var Y_FWD=4.2, Y_BWD=-1.5, Y_TITLE=5.4, Y_LEG=-3.2;
+
+    var W=560,H=380; // холст
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+
+    function el(n,a){var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e;}
+    function txt(x,y,s,anchor,cls,size,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle',
+        'font-size':(size||12),'font-weight':(weight||'400')});
+      if(cls) t.setAttribute('class',cls);
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+    var PAD=6; // отступ подписи от точки привязки, px
+
+    // ---- маркеры стрелок ----
+    var defs=el('defs',{});
+    [['ahF','var(--fwd)'],['ahB','var(--bwd)']].forEach(function(m){
+      var mk=el('marker',{id:m[0],viewBox:'0 0 10 10',refX:'9',refY:'5',
+        markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+      mk.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:m[1]}));
+      defs.appendChild(mk);
+    });
+    svg.appendChild(defs);
+
+    // ---- коробки устройств ----
+    stages.forEach(function(s){
+      var x0=sx(s.i-BOX_W/2), x1=sx(s.i+BOX_W/2);
+      svg.appendChild(el('rect',{x:x0,y:sy(BOX_TOP),width:x1-x0,
+        height:sy(BOX_BOT)-sy(BOX_TOP),rx:8,
+        fill:'var(--box)',stroke:'var(--boxstroke)','stroke-width':1.5}));
+
+      // полоски слоёв внутри
+      for(var k=0;k<PER;k++){
+        var yTop=BOX_TOP - 0.28 - k*0.28;
+        svg.appendChild(el('line',{x1:sx(s.i-BOX_W/2+0.09),y1:sy(yTop),
+          x2:sx(s.i+BOX_W/2-0.09),y2:sy(yTop),
+          stroke:'var(--boxstroke)','stroke-width':1,opacity:0.55}));
+      }
+
+      txt(sx(s.i),sy(BOX_TOP)-PAD-4,'устройство '+s.i,'middle',null,12,'600');
+      txt(sx(s.i),sy(BOX_BOT)+PAD+11,'слои '+s.from+'…'+s.to,'middle','muted',12);
+      txt(sx(s.i),sy(BOX_BOT)+PAD+27,PER+' слоёв','middle','muted',11);
+    });
+
+    // ---- forward: слева направо, 0 -> 3 ----
+    var fY=sy(Y_FWD);
+    svg.appendChild(el('line',{x1:sx(0-BOX_W/2),y1:fY,x2:sx(P-1+BOX_W/2),y2:fY,
+      stroke:'var(--fwd)','stroke-width':2,'marker-end':'url(#ahF)'}));
+    stages.forEach(function(s){
+      svg.appendChild(el('line',{x1:sx(s.i),y1:fY,x2:sx(s.i),y2:sy(BOX_TOP),
+        stroke:'var(--fwd)','stroke-width':1,'stroke-dasharray':'3 3',opacity:0.6}));
+    });
+    // подпись у хвоста стрелки
+    txt(sx(0-BOX_W/2),fY-PAD-3,'forward: 0 → 3, активации','start',null,12,'600')
+      .setAttribute('fill','var(--fwd)');
+
+    // ---- backward: справа налево, 3 -> 0 ----
+    var bY=sy(Y_BWD);
+    svg.appendChild(el('line',{x1:sx(P-1+BOX_W/2),y1:bY,x2:sx(0-BOX_W/2),y2:bY,
+      stroke:'var(--bwd)','stroke-width':2,'marker-end':'url(#ahB)'}));
+    stages.forEach(function(s){
+      svg.appendChild(el('line',{x1:sx(s.i),y1:bY,x2:sx(s.i),y2:sy(BOX_BOT)+34,
+        stroke:'var(--bwd)','stroke-width':1,'stroke-dasharray':'3 3',opacity:0.6}));
+    });
+    // подпись у хвоста (правый конец) — снизу, чтобы не столкнуться с forward
+    txt(sx(P-1+BOX_W/2),bY+PAD+11,'backward: 3 → 0, градиенты','end',null,12,'600')
+      .setAttribute('fill','var(--bwd)');
+
+    // ---- заголовок формулы сверху ----
+    txt(sx((P-1)/2),sy(Y_TITLE),
+      'N = '+N+' слоёв, P = '+P+' устройств: устройство i держит слои i·'+PER+' … (i+1)·'+PER+'−1',
+      'middle','muted',12);
+
+    // ---- легенда снизу ----
+    txt(sx(0-BOX_W/2),sy(Y_LEG),
+      'через границу летит только активация; веса стадии не переезжают',
+      'start','muted',11);
+
+    host.innerHTML=''; host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема не построилась. Она должна показывать: '+
+      'модель из 32 слоёв, разрезанная на 4 устройства по 8 слоёв — устройство i держит '+
+      'слои i·8 … (i+1)·8−1 (0–7, 8–15, 16–23, 24–31). Активации идут вперёд от устройства 0 '+
+      'к устройству 3, градиенты — назад от 3 к 0.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

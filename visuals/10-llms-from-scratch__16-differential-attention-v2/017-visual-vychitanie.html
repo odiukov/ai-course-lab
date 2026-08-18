@@ -1,0 +1,218 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Что гасится, а что выживает</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5c636d; --axis:#9aa1ab;
+    --a1:#2563eb; --a2:#8a94a6; --res:#0f8a5f; --grid:#c9ced6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e7eaee; --muted:#a4acb8; --axis:#6f7883;
+      --a1:#63a4ff; --a2:#9aa4b4; --res:#3ddc9a; --grid:#3a414b;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{background:var(--bg);padding:10px 12px 12px;max-width:900px}
+  h3{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:400px}
+  .legend{margin-top:6px;color:var(--muted);font-size:12.5px}
+  .legend span.sw{display:inline-block;width:11px;height:11px;margin-right:5px;
+    vertical-align:-1px;border-radius:2px}
+  .legend b{color:var(--fg);font-weight:600}
+  .fallback{color:var(--fg);font-size:13px}
+</style>
+<div class="wrap">
+  <h3>Что гасится, а что выживает: lambda = 0.8</h3>
+  <div id="host"></div>
+  <div class="legend" id="legend">
+    <span><span class="sw" style="background:var(--a1)"></span>A₁ — первая карта softmax</span> &nbsp;·&nbsp;
+    <span><span class="sw" style="background:var(--a2)"></span>A₂ — вторая карта</span> &nbsp;·&nbsp;
+    <span><span class="sw" style="background:var(--res)"></span>A₁ − 0.8·A₂ — результат</span><br>
+    Шум обеим картам достаётся одинаковый (0.001 и 0.001), поэтому вычитается почти начисто.
+    Сигнал картам достаётся разный (0.4 и 0.05), поэтому теряет десятую часть.
+    Отношение сигнала к шуму: <b>было 400×, стало 1800×</b>.
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    /* ---------- данные схемы ---------- */
+    var D = {
+      xmin: 0, xmax: 1024,        /* позиция токена в контексте */
+      ymin: -4, ymax: 0,          /* log10 веса attention */
+      barHalf: 13,                /* полуширина столбика, в токенах */
+      dxOff: 36,                  /* разнос столбиков внутри группы, в токенах */
+      headDx: 13, headDy: 0.10,   /* наконечник стрелки, в единицах данных */
+      floor: 0.001,               /* общий шумовой пол обеих карт */
+      groups: [
+        { x: 300, name: "шумовой токен",
+          a1: 0.001, a2: 0.001, res: 0.0002,
+          note: "впятеро ниже" },
+        { x: 760, name: "сигнальный токен",
+          a1: 0.4, a2: 0.05, res: 0.36,
+          note: "пик почти на месте" }
+      ]
+    };
+
+    /* ---------- холст ---------- */
+    var W = 760, H = 400, ML = 88, MR = 40, MT = 40, MB = 60;
+    var PAD = 8, PADX = 18, PADROW = 18;   /* пиксельные отступы подписей */
+
+    /* ---------- один origin, один scale, одна пара sx/sy ---------- */
+    var origin = { px: ML, py: H - MB };                 /* точка (xmin, ymin) */
+    var scale  = { x: (W - ML - MR) / (D.xmax - D.xmin),
+                   y: (H - MT - MB) / (D.ymax - D.ymin) };
+    function sx(x){ return origin.px + (x - D.xmin) * scale.x; }
+    function sy(y){ return origin.py - (y - D.ymin) * scale.y; }
+    var L = function(v){ return Math.log10(v); };
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(t, a, txt){
+      var n = document.createElementNS(NS, t);
+      for(var k in a) n.setAttribute(k, a[k]);
+      if(txt != null) n.appendChild(document.createTextNode(txt));
+      return n;
+    }
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet", role: "img" });
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+    function add(n){ svg.appendChild(n); return n; }
+    function line(x1,y1,x2,y2,st){
+      return add(el("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:st.c,"stroke-width":st.w||1,"stroke-dasharray":st.d||"none"}));
+    }
+    function label(x,y,dx,dy,anchor,txt,color,size,weight){
+      return add(el("text",{x:sx(x)+dx,y:sy(y)+dy,"text-anchor":anchor,
+        fill:color,"font-size":size||12,"font-weight":weight||"normal",
+        "font-family":"inherit"},txt));
+    }
+
+    /* ---------- общий шумовой пол: пунктир через все 1024 токена ---------- */
+    line(D.xmin, L(D.floor), D.xmax, L(D.floor), {c:"var(--grid)", w:1, d:"5 4"});
+    label(D.xmin, L(D.floor), PAD, PADROW, "start",
+      "шумовой пол, общий для A₁ и A₂", "var(--muted)", 11.5);
+
+    /* ---------- оси ---------- */
+    line(D.xmin, D.ymin, D.xmax, D.ymin, {c:"var(--axis)", w:1.2});
+    line(D.xmin, D.ymin, D.xmin, D.ymax, {c:"var(--axis)", w:1.2});
+
+    for(var y = D.ymin; y <= D.ymax + 0.001; y += 1){
+      line(D.xmin, y, D.xmin, y, {c:"var(--axis)"});
+      add(el("line",{x1:sx(D.xmin),y1:sy(y),x2:sx(D.xmin)-PAD/2,y2:sy(y),
+        stroke:"var(--axis)","stroke-width":1}));
+      var v = Math.pow(10, y);
+      label(D.xmin, y, -PAD, 4, "end", y===0 ? "1" : v.toFixed(-y), "var(--muted)", 11.5);
+    }
+    var yMid = (D.ymin + D.ymax) / 2, tx = sx(D.xmin) - 70, ty = sy(yMid);
+    add(el("text",{x:tx,y:ty,"text-anchor":"middle",fill:"var(--muted)",
+      "font-size":11.5,transform:"rotate(-90 "+tx+" "+ty+")"},
+      "вес attention (лог. шкала)"));
+
+    [D.xmin, D.xmax].forEach(function(xt){
+      add(el("line",{x1:sx(xt),y1:sy(D.ymin),x2:sx(xt),y2:sy(D.ymin)+PAD/2,
+        stroke:"var(--axis)","stroke-width":1}));
+      label(xt, D.ymin, 0, PADROW, "middle", String(xt), "var(--muted)", 11.5);
+    });
+    label((D.xmin + D.xmax) / 2, D.ymin, 0, PADROW * 2, "middle",
+      "позиция токена в контексте из 1024", "var(--muted)", 11.5);
+
+    /* ---------- столбики ---------- */
+    function bar(xc, val, color, fillOp){
+      var x0 = sx(xc - D.barHalf), x1 = sx(xc + D.barHalf);
+      var yt = sy(L(val)), yb = sy(D.ymin);
+      add(el("rect",{x:x0,y:yt,width:x1-x0,height:yb-yt,fill:color,
+        "fill-opacity":fillOp,stroke:color,"stroke-width":1}));
+    }
+    function arrowDown(xc, yFrom, yTo, color){
+      add(el("line",{x1:sx(xc),y1:sy(yFrom),x2:sx(xc),y2:sy(yTo),
+        stroke:color,"stroke-width":1.4}));
+      add(el("polygon",{points:
+        sx(xc)+","+sy(yTo)+" "+
+        sx(xc - D.headDx)+","+sy(yTo + D.headDy)+" "+
+        sx(xc + D.headDx)+","+sy(yTo + D.headDy),fill:color}));
+    }
+
+    D.groups.forEach(function(g){
+      var xa1 = g.x - D.dxOff, xa2 = g.x, xr = g.x + D.dxOff;
+      bar(xa1, g.a1, "var(--a1)", 0.30);
+      bar(xa2, g.a2, "var(--a2)", 0.30);
+      bar(xr,  g.res, "var(--res)", 0.45);
+
+      label(g.x, D.ymin, 0, PADROW, "middle", g.name, "var(--fg)", 12, "600");
+
+      if(g.a1 === g.a2){
+        /* одно значение на две карты — одна подпись над парой */
+        label((xa1 + xa2) / 2, L(g.a1), 0, -PAD, "middle",
+          String(g.a1), "var(--a1)", 12.5, "600");
+      } else {
+        label(xa1, L(g.a1), 0, -PAD, "middle", String(g.a1), "var(--a1)", 12.5, "600");
+        label(xa2, L(g.a2), 0, -PAD, "middle", String(g.a2), "var(--a2)", 12.5, "600");
+      }
+
+      /* результат: у шума подпись сверху, у сигнала — сбоку, чтобы не столкнуть с 0.4 */
+      if(g.a1 === g.a2)
+        label(xr, L(g.res), 0, -PAD, "middle", String(g.res), "var(--res)", 12.5, "600");
+      else
+        label(xr + D.barHalf, L(g.res), PADX, 4, "start",
+          String(g.res), "var(--res)", 12.5, "600");
+
+      /* стрелка падения рисуется только там, где падение видно глазом */
+      var xn = xr + D.dxOff * 1.6;
+      if(g.a1 === g.a2){
+        arrowDown(xn, L(g.a1), L(g.res), "var(--res)");
+        label(xn + D.headDx, (L(g.a1) + L(g.res)) / 2, PADX, 4, "start",
+          g.note, "var(--res)", 11.5);
+      } else {
+        label(xr + D.barHalf, L(g.a2) + 0.42, PADX, 4, "start",
+          g.note, "var(--res)", 11.5);
+      }
+    });
+
+    host.appendChild(svg);
+  } catch(e){
+    host.innerHTML = '<p class="fallback">Схема должна была показать две карты весов над ' +
+      '1024 токенами. Шумовой токен: в A₁ 0.001 и в A₂ 0.001, после вычитания с ' +
+      'lambda = 0.8 остаётся 0.0002 — впятеро меньше. Сигнальный токен: в A₁ 0.4, ' +
+      'в A₂ 0.05, после вычитания 0.36 — потеря около десятой части. Гасится не ' +
+      'слабое, а общее: отношение сигнала к шуму растёт с 400× до 1800×.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

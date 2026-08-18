@@ -1,0 +1,158 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Forward-чанк: счёт и сеть через одну</title>
+<style>
+  :root{
+    --bg:#fbfbf8; --fg:#1b1d21; --muted:#6b7280; --line:#9aa1ac;
+    --c-fill:#cfe0ff; --c-stroke:#2563eb; --c-text:#12306e;
+    --n-fill:#ffe3bf; --n-stroke:#b45309; --n-text:#6b3505;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8eaee; --muted:#98a0ad; --line:#727a86;
+      --c-fill:#1e3563; --c-stroke:#7ba7ff; --c-text:#dbe7ff;
+      --n-fill:#4a2f0b; --n-stroke:#f0a94c; --n-text:#ffe6c2;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:10px 8px 14px}
+  h1{font-size:15px;font-weight:600;margin:0 0 4px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fb{font-size:13px;color:var(--muted);padding:8px 0}
+  text{font-family:inherit;fill:var(--fg)}
+  .muted{fill:var(--muted)}
+  .cfill{fill:var(--c-fill);stroke:var(--c-stroke)}
+  .nfill{fill:var(--n-fill);stroke:var(--n-stroke)}
+  .ctext{fill:var(--c-text)}
+  .ntext{fill:var(--n-text)}
+  .hole{fill:none;stroke:var(--line);stroke-dasharray:4 4}
+  .axis{stroke:var(--line);fill:none}
+</style>
+<div class="wrap">
+  <h1>Один forward-чанк на ленте времени: счёт и сеть строго через одну</h1>
+  <svg id="d" viewBox="0 0 720 330" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Полоса forward-чанка из четырёх блоков: attention, dispatch, MLP, combine"></svg>
+  <div id="fb" class="fb" hidden></div>
+</div>
+<script>
+(function(){
+  var svg=document.getElementById("d"), fb=document.getElementById("fb");
+  try{
+    // ---- данные схемы ----
+    var blocks=[
+      {label:"attention", kind:"c"},
+      {label:"dispatch",  kind:"n"},
+      {label:"MLP",       kind:"c"},
+      {label:"combine",   kind:"n"}
+    ];
+    var lanes=[
+      {label:"тензорные ядра", kind:"c", y0:0.62},
+      {label:"сеть",           kind:"n", y0:1.02}
+    ];
+    var legend=[
+      {kind:"c", y0:1.72, text:"счёт — тензорные ядра (attention, MLP)"},
+      {kind:"n", y0:1.92, text:"сеть — all-to-all между узлами (dispatch, combine)"}
+    ];
+    var BAND_Y=0, BAND_H=0.4, LANE_H=0.32, SW=0.16, AX=1.55, HEAD=0.055;
+
+    // ---- одна пара перевода координат ----
+    var origin={x:130,y:52}, scale=130;
+    function sx(x){return origin.x + x*scale;}
+    function sy(y){return origin.y + y*scale;}
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e;}
+    function add(e){svg.appendChild(e); return e;}
+    function box(x0,x1,y0,y1,cls){
+      return add(el("rect",{x:sx(x0),y:sy(y0),width:sx(x1)-sx(x0),
+        height:sy(y1)-sy(y0),rx:6,class:cls,"stroke-width":1.6}));}
+    function txt(x,y,s,anchor,cls,size,dx,dy){
+      var t=add(el("text",{x:sx(x)+(dx||0),y:sy(y)+(dy||0),"text-anchor":anchor,
+        "dominant-baseline":"middle","font-size":size,class:cls||""}));
+      t.textContent=s; return t;}
+
+    var fillOf={c:"cfill",n:"nfill"}, textOf={c:"ctext",n:"ntext"};
+
+    // подпись сверху: ширины равны
+    txt(2,-0.28,"ширины равны: 1 GPU-час связи на 1 GPU-час счёта","middle","muted",13);
+
+    // полоса чанка
+    blocks.forEach(function(b,i){
+      box(i,i+1,BAND_Y,BAND_Y+BAND_H,fillOf[b.kind]);
+      txt(i+0.5,BAND_Y+BAND_H/2,b.label,"middle",textOf[b.kind],14);
+    });
+
+    // дорожки ресурсов: занято / простой
+    lanes.forEach(function(L){
+      txt(0,L.y0+LANE_H/2,L.label,"end","muted",13,-10,0);
+      blocks.forEach(function(b,i){
+        if(b.kind===L.kind){
+          box(i,i+1,L.y0,L.y0+LANE_H,fillOf[L.kind]);
+        }else{
+          box(i,i+1,L.y0,L.y0+LANE_H,"hole");
+          txt(i+0.5,L.y0+LANE_H/2,"простой","middle","muted",12);
+        }
+      });
+    });
+    txt(4,lanes[1].y0+LANE_H/2,"половина ленты — дырка","start","muted",12,12,0);
+
+    // ось времени
+    add(el("path",{class:"axis","stroke-width":1.4,
+      d:"M "+sx(0)+" "+sy(AX)+" L "+sx(4)+" "+sy(AX)}));
+    add(el("polygon",{fill:"var(--line)",points:
+      sx(4)+","+sy(AX)+" "+sx(4-HEAD)+","+sy(AX-HEAD*0.7)+" "+sx(4-HEAD)+","+sy(AX+HEAD*0.7)}));
+    txt(0,AX,"время","start","muted",12,0,16);
+
+    // легенда
+    legend.forEach(function(g){
+      box(0,SW,g.y0,g.y0+SW,fillOf[g.kind]);
+      txt(SW,g.y0+SW/2,g.text,"start","muted",13,10,0);
+    });
+  }catch(e){
+    svg.setAttribute("hidden","");
+    fb.hidden=false;
+    fb.textContent="Схема: forward-чанк из четырёх блоков подряд — attention (счёт), "+
+      "all-to-all dispatch (сеть), MLP (счёт), all-to-all combine (сеть). Ширины блоков "+
+      "равны: 1 GPU-час связи на 1 GPU-час счёта. Счёт и сеть чередуются строго через "+
+      "одну, поэтому в каждой половине ленты один из двух ресурсов простаивает.";
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>
