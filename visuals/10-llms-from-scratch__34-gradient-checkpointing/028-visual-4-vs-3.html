@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Стоимость шага: с чекпойнтом и без</title>
+<style>
+  :root{
+    --bg:#fdfdfb; --fg:#1c1c1c; --muted:#5c5c5c;
+    --fwd:#3d7fbf; --bwd:#7a5ca8; --rec:#cc7a29; --grid:#8a8a8a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#161a1f; --fg:#e8e8e6; --muted:#a4a8ad;
+      --fwd:#6fb0e6; --bwd:#b295dc; --rec:#e8a44f;
+      --grid:#7b8188;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:6px 0;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 4px 10px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  text{fill:var(--fg);font-family:inherit;}
+  .fail{padding:10px;font-size:13px;line-height:1.5;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Стоимость одного шага в «единицах forward»</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (единицы forward) ----
+    var BARS = [
+      { y:0, name:"без чекпойнта", total:3, cells:[
+          {from:0, to:1, kind:"fwd", label:"fwd 1"},
+          {from:1, to:3, kind:"bwd", label:"bwd 2"}]},
+      { y:1, name:"с чекпойнтом", total:4, cells:[
+          {from:0, to:1, kind:"fwd", label:"fwd 1"},
+          {from:1, to:2, kind:"rec", label:"recompute 1"},
+          {from:2, to:4, kind:"bwd", label:"bwd 2"}]}
+    ];
+    var TICKS = [0,1,2,3,4];
+    var COLOR = { fwd:"var(--fwd)", bwd:"var(--bwd)", rec:"var(--rec)" };
+
+    // ---- холст ----
+    var W = 720, H = 300;
+
+    // ---- одна пара функций перевода ----
+    var origin = { x:150, y:70 };   // sx(0), sy(0)
+    var scale  = { x:118, y:96 };   // пикселей на единицу forward / на ряд
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y + y * scale.y; }
+
+    // ---- литеральные пиксели: только отступы подписей, толщины, шрифт ----
+    var PAD = 8, BARH = 0.30, FS = 13, FSS = 12, LW = 1.4;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,size,fill){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||FS,
+        "dominant-baseline":"middle"});
+      if(fill) t.setAttribute("fill",fill);
+      t.textContent=s; return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H,
+      preserveAspectRatio:"xMidYMid meet",role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    // ---- сетка клеток: вертикали через все полосы ----
+    var gTop = sy(0) - BARH*scale.y, gBot = sy(1) + BARH*scale.y;
+    TICKS.forEach(function(t){
+      svg.appendChild(el("line",{x1:sx(t),y1:gTop,x2:sx(t),y2:gBot,
+        stroke:"var(--grid)","stroke-width":LW,"stroke-dasharray":"3 4",
+        opacity:0.55}));
+      svg.appendChild(txt(sx(t), gBot + PAD*2, String(t), "middle", FSS,
+        "var(--muted)"));
+    });
+    svg.appendChild(txt(sx(TICKS[TICKS.length-1]) + PAD, gBot + PAD*2,
+      "единиц forward", "start", FSS, "var(--muted)"));
+
+    // ---- полосы ----
+    BARS.forEach(function(bar){
+      var yc = sy(bar.y), y0 = yc - BARH*scale.y, hh = 2*BARH*scale.y;
+      // имя полосы слева
+      svg.appendChild(txt(sx(0) - PAD*2, yc, bar.name, "end", FS));
+      bar.cells.forEach(function(c){
+        svg.appendChild(el("rect",{x:sx(c.from), y:y0,
+          width:sx(c.to)-sx(c.from), height:hh,
+          fill:COLOR[c.kind], opacity:0.85,
+          stroke:"var(--bg)","stroke-width":LW*1.5}));
+        svg.appendChild(txt((sx(c.from)+sx(c.to))/2, yc, c.label, "middle",
+          FSS, "var(--bg)"));
+      });
+      // сумма справа от полосы
+      svg.appendChild(txt(sx(bar.total) + PAD*1.5, yc, "= " + bar.total,
+        "start", FS));
+    });
+
+    // ---- лишняя клетка: подпись у хвоста вертикальной связки ----
+    var x3 = sx(3), x4 = sx(4);
+    var yBrace = sy(1) + BARH*scale.y + PAD*4.5;
+    svg.appendChild(el("path",{d:
+        "M"+x3+" "+(sy(1)+BARH*scale.y)+" V"+yBrace+
+        " H"+x4+" V"+(sy(1)+BARH*scale.y),
+      fill:"none",stroke:"var(--rec)","stroke-width":LW}));
+    svg.appendChild(txt(sx(3) - PAD, yBrace + PAD, "+1 клетка", "end", FSS,
+      "var(--rec)"));
+
+    // ---- итоговая дробь: над верхней полосой, отдельная строка ----
+    svg.appendChild(txt(sx(0), sy(0) - BARH*scale.y - PAD*2.2,
+      "4 / 3 \u2212 1 = 33 % ко всему шагу", "start", FS, "var(--rec)"));
+
+    // ---- пояснение: надбавка мерится от 4, не от 1 ----
+    svg.appendChild(txt(sx(0), sy(1) + BARH*scale.y + PAD*9,
+      "одна клетка из четырёх, а не одна из одной", "start", FSS,
+      "var(--muted)"));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail">Схема не построилась. Она должна была '+
+      'показать две полосы, размеченные одинаковыми клетками: без чекпойнта — '+
+      'fwd 1 + bwd 2 = 3; с чекпойнтом — fwd 1 + recompute 1 + bwd 2 = 4. '+
+      'Четвёртая клетка стоит внутри backward-части, а не слева. '+
+      'Надбавка: 4 / 3 − 1 = 33 %.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

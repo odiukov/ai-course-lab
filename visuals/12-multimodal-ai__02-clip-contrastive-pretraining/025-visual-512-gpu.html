@@ -1,0 +1,198 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>512 GPU: строка против клетки</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1b1f27; --mut:#5d6470; --line:#8d95a3;
+    --acc:#1f6feb; --accbg:#dce8fb; --warn:#b3401a; --ok:#1a7f4b;
+    --cell:#eef0f4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --fg:#e7ebf2; --mut:#a2abba; --line:#6f7889;
+      --acc:#6ea8fe; --accbg:#1d3557; --warn:#f0906a; --ok:#63d19b;
+      --cell:#1d222b;
+    }
+  }
+  html,body{margin:0}
+  figure{margin:0;padding:10px 12px 12px;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  figcaption{font-size:15px;font-weight:600;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .h{font-size:14px;font-weight:600;fill:var(--fg)}
+  .n{font-size:13px;fill:var(--mut)}
+  .acc{font-size:13px;font-weight:600;fill:var(--acc)}
+  .warn{font-size:13px;font-weight:600;fill:var(--warn)}
+  .ok{font-size:13px;font-weight:600;fill:var(--ok)}
+  .sm{font-size:11px;fill:var(--mut)}
+  .smy{font-size:11px;font-weight:600;fill:var(--acc)}
+  .lg{font-size:12px;font-style:italic;fill:var(--mut)}
+  .fb{font-size:13px;color:var(--fg);line-height:1.5}
+</style>
+<figure>
+  <figcaption>512 GPU: строка против клетки</figcaption>
+  <div id="wrap">
+    <svg id="s" viewBox="0 0 960 432" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Слева строка матрицы из 32 768 клеток размазана по 512 картам со стрелками all-gather между всеми; справа локальный блок 64 на 64 на одной карте без стрелок."></svg>
+  </div>
+</figure>
+<script>
+(function(){
+try{
+  /* ---- данные схемы (единственные литералы) ---- */
+  var D = {
+    strip:{x0:0.5, pitch:1.05, w:0.96, y0:3.7, y1:4.7, lab:4.28,
+      slots:[{l:"1"},{l:"2"},{l:"3"},{l:"ты",you:true},{l:"…",gap:true},
+             {l:"510"},{l:"511"},{l:"512"}]},
+    arcs:[[3,2,1.0],[3,1,1.9],[3,0,2.8],[3,5,1.0],[3,6,1.9],[3,7,2.8],[1,6,3.6],[0,7,4.3]],
+    head:{len:0.22, half:0.12},
+    divider:{x:9.5, y0:0.15, y1:8.05},
+    card:{x0:12.35, y0:2.70, x1:16.25, y1:6.60},
+    block:{x0:12.65, y0:3.0, x1:15.95, y1:6.3, n:4},
+    leader:{x:4.13, y0:4.72, y1:5.58},
+    labels:[
+      {x:4.70, y:0.50, t:"Строка softmax: 32 768 клеток на 512 картах", a:"middle", c:"h"},
+      {x:4.70, y:1.20, t:"all-gather перед каждым шагом", a:"middle", c:"n"},
+      {x:4.13, y:5.90, t:"твоя карта: 64 подписи", a:"middle", c:"acc"},
+      {x:4.70, y:6.65, t:"остальные 32 704 вектора — на 511 картах", a:"middle", c:"n"},
+      {x:4.70, y:7.45, t:"знаменатель локально не посчитать", a:"middle", c:"warn"},
+      {x:14.30, y:0.50, t:"Клетка (i, j): нужны два вектора", a:"middle", c:"h"},
+      {x:14.30, y:2.40, t:"локальный блок 64 × 64", a:"middle", c:"n"},
+      {x:14.30, y:6.90, t:"оба вектора на твоей карте", a:"middle", c:"n"},
+      {x:14.30, y:7.45, t:"по сети — 0 байт, стрелок нет", a:"middle", c:"ok"},
+      {x:9.50, y:8.40, t:"Softmax обязан видеть строку целиком — вопрос про клетку решается на месте", a:"middle", c:"lg"}
+    ],
+    origin:{x:24, y:10},
+    scale:48
+  };
+
+  /* ---- единственная пара функций перевода ---- */
+  var O = D.origin, K = D.scale;
+  function sx(x){ return O.x + x * K; }
+  function sy(y){ return O.y + y * K; }
+
+  function slotX(i){ return D.strip.x0 + i * D.strip.pitch; }
+  function slotC(i){ return slotX(i) + D.strip.w / 2; }
+
+  function headPts(tip, from){
+    var dx = tip.x - from.x, dy = tip.y - from.y, m = Math.sqrt(dx*dx + dy*dy);
+    var ux = dx/m, uy = dy/m, px = -uy, py = ux;
+    var b = {x: tip.x - ux*D.head.len, y: tip.y - uy*D.head.len};
+    var a1 = {x: b.x + px*D.head.half, y: b.y + py*D.head.half};
+    var a2 = {x: b.x - px*D.head.half, y: b.y - py*D.head.half};
+    return [tip, a1, a2].map(function(p){ return sx(p.x) + "," + sy(p.y); }).join(" ");
+  }
+
+  var o = [];
+
+  /* разделитель панелей */
+  o.push('<line x1="' + sx(D.divider.x) + '" y1="' + sy(D.divider.y0) +
+         '" x2="' + sx(D.divider.x) + '" y2="' + sy(D.divider.y1) +
+         '" stroke="var(--line)" stroke-width="1" stroke-opacity="0.5"/>');
+
+  /* дуги all-gather: обмен между всеми картами */
+  D.arcs.forEach(function(a){
+    var p0 = {x: slotC(a[0]), y: D.strip.y0};
+    var p1 = {x: slotC(a[1]), y: D.strip.y0};
+    var c  = {x: (p0.x + p1.x)/2, y: D.strip.y0 - a[2]};
+    o.push('<path d="M ' + sx(p0.x) + ' ' + sy(p0.y) + ' Q ' + sx(c.x) + ' ' + sy(c.y) +
+           ' ' + sx(p1.x) + ' ' + sy(p1.y) + '" fill="none" stroke="var(--acc)" ' +
+           'stroke-width="1.4" stroke-opacity="0.75"/>');
+    o.push('<polygon points="' + headPts(p1, c) + '" fill="var(--acc)"/>');
+    o.push('<polygon points="' + headPts(p0, c) + '" fill="var(--acc)"/>');
+  });
+
+  /* строка матрицы: 512 карт */
+  D.strip.slots.forEach(function(s, i){
+    if(s.gap){
+      o.push('<text x="' + sx(slotC(i)) + '" y="' + sy(D.strip.lab) +
+             '" text-anchor="middle" class="sm">' + s.l + '</text>');
+      return;
+    }
+    o.push('<rect x="' + sx(slotX(i)) + '" y="' + sy(D.strip.y0) +
+           '" width="' + (sx(D.strip.w) - sx(0)) + '" height="' + (sy(D.strip.y1) - sy(D.strip.y0)) +
+           '" fill="' + (s.you ? 'var(--accbg)' : 'var(--cell)') +
+           '" stroke="' + (s.you ? 'var(--acc)' : 'var(--line)') +
+           '" stroke-width="' + (s.you ? 2 : 1) + '"/>');
+    o.push('<text x="' + sx(slotC(i)) + '" y="' + sy(D.strip.lab) +
+           '" text-anchor="middle" class="' + (s.you ? 'smy' : 'sm') + '">' + s.l + '</text>');
+  });
+
+  /* выноска к твоей карте */
+  o.push('<line x1="' + sx(D.leader.x) + '" y1="' + sy(D.leader.y0) +
+         '" x2="' + sx(D.leader.x) + '" y2="' + sy(D.leader.y1) +
+         '" stroke="var(--acc)" stroke-width="1"/>');
+
+  /* одна карта: локальный блок, стрелок нет */
+  o.push('<rect x="' + sx(D.card.x0) + '" y="' + sy(D.card.y0) +
+         '" width="' + (sx(D.card.x1) - sx(D.card.x0)) + '" height="' + (sy(D.card.y1) - sy(D.card.y0)) +
+         '" fill="none" stroke="var(--line)" stroke-width="1"/>');
+
+  var n = D.block.n;
+  var cw = (D.block.x1 - D.block.x0) / n, ch = (D.block.y1 - D.block.y0) / n;
+  for(var r = 0; r < n; r++){
+    for(var q = 0; q < n; q++){
+      var bx = D.block.x0 + q * cw, by = D.block.y0 + r * ch;
+      o.push('<rect x="' + sx(bx) + '" y="' + sy(by) +
+             '" width="' + (sx(cw) - sx(0)) + '" height="' + (sy(ch) - sy(0)) +
+             '" fill="' + (r === q ? 'var(--accbg)' : 'var(--cell)') +
+             '" stroke="var(--line)" stroke-width="1"/>');
+    }
+  }
+  o.push('<rect x="' + sx(D.block.x0) + '" y="' + sy(D.block.y0) +
+         '" width="' + (sx(D.block.x1) - sx(D.block.x0)) + '" height="' + (sy(D.block.y1) - sy(D.block.y0)) +
+         '" fill="none" stroke="var(--ok)" stroke-width="2"/>');
+
+  /* подписи */
+  D.labels.forEach(function(L){
+    o.push('<text x="' + sx(L.x) + '" y="' + sy(L.y) + '" text-anchor="' + L.a +
+           '" class="' + L.c + '">' + L.t + '</text>');
+  });
+
+  document.getElementById('s').innerHTML = o.join('');
+}catch(e){
+  document.getElementById('wrap').innerHTML =
+    '<p class="fb">Схема должна показать: слева одна строка матрицы похожести — ' +
+    '32 768 клеток, размазанных по 512 картам, со стрелками all-gather между всеми ' +
+    'картами (у тебя локально только 64 подписи, остальные 32 704 вектора — на 511 ' +
+    'других картах, поэтому знаменатель softmax локально не посчитать). Справа — ' +
+    'локальный блок 64 × 64 на одной карте: оба вектора клетки (i, j) рядом, стрелок ' +
+    'нет, по сети 0 байт.</p>';
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Блочно-треугольная маска 9×9</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1c22; --muted:#5d6070; --grid:#c3c6d4;
+    --text-on:#3b6ea8; --img-on:#c0632a; --cross-on:#6a8f45; --off:#e8e9f0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161c; --fg:#e9eaf2; --muted:#9a9db0; --grid:#3a3e4d;
+      --text-on:#5f9fe0; --img-on:#e2914d; --cross-on:#93c165; --off:#22252e;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:8px 10px 10px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:500px;}
+  .fail{color:var(--muted);font-size:13px;line-height:1.45;}
+  text{fill:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  text.muted{fill:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Маска 9×9 для [T, T, &lt;image&gt;, P, P, P, P, &lt;/image&gt;, T]</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы -------------------------------------------------
+    var TOKENS = ["T","T","<image>","P","P","P","P","</image>","T"];
+    var IMG = [4,5,6,7];            // позиции патчей (1-based)
+    var TXT = [1,2,3,8,9];          // текстовые позиции
+    var N = 9;
+
+    function isImg(p){ return IMG.indexOf(p) >= 0; }
+    // категория клетки (строка i смотрит на столбец j), либо null
+    function cell(i,j){
+      if(!isImg(i) && !isImg(j)) return j <= i ? "text" : null;      // лестница
+      if( isImg(i) &&  isImg(j)) return "img";                       // квадрат 4×4
+      if( isImg(i) && !isImg(j)) return j < 4 - 1 ? "cross" : null;  // патч видит текст до <image>
+      if(!isImg(i) &&  isImg(j)) return i > 7 ? "cross" : null;      // текст после </image>
+      return null;
+    }
+
+    // ---- одна система координат --------------------------------------
+    var ORIGIN = {x:150, y:56};   // пиксель точки (0,0) сетки
+    var SCALE  = 30;              // пикселей на одну клетку
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    // ---- размеры холста (литералы) ------------------------------------
+    var VB_W = 700, VB_H = 490;
+
+    var LBL = 8;      // отступ подписи от точки привязки, px
+    var LW  = 1;      // толщина линий
+    var FS  = 12;     // размер шрифта
+
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns,"svg");
+    svg.setAttribute("viewBox","0 0 "+VB_W+" "+VB_H);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","Блочно-треугольная маска внимания 9 на 9");
+
+    function el(tag,attrs,txt){
+      var e = document.createElementNS(ns,tag);
+      for(var k in attrs) e.setAttribute(k, attrs[k]);
+      if(txt !== undefined) e.textContent = txt;
+      svg.appendChild(e); return e;
+    }
+    function bg(){
+      el("rect",{x:0,y:0,width:VB_W,height:VB_H,fill:"var(--bg)"});
+    }
+    bg();
+
+    // ---- клетки --------------------------------------------------------
+    var fillOf = {text:"var(--text-on)", img:"var(--img-on)", cross:"var(--cross-on)"};
+    var count = {text:0, img:0, cross:0};
+
+    for(var i=1;i<=N;i++){
+      for(var j=1;j<=N;j++){
+        var c = cell(i,j);
+        var x = j-1, y = i-1;
+        el("rect",{
+          x:sx(x), y:sy(y),
+          width: sx(x+1)-sx(x), height: sy(y+1)-sy(y),
+          fill: c ? fillOf[c] : "var(--off)",
+          stroke:"var(--grid)", "stroke-width":LW
+        });
+        if(c){
+          count[c]++;
+          el("text",{
+            x:(sx(x)+sx(x+1))/2, y:(sy(y)+sy(y+1))/2,
+            "text-anchor":"middle","dominant-baseline":"central",
+            "font-size":FS-1, fill:"var(--bg)"
+          },"1");
+        }
+      }
+    }
+
+    // ---- подписи строк (слева, anchor=end) ------------------------------
+    for(var r=1;r<=N;r++){
+      el("text",{
+        x:sx(0)-LBL, y:(sy(r-1)+sy(r))/2,
+        "text-anchor":"end","dominant-baseline":"central",
+        "font-size":FS
+      }, r+"  "+TOKENS[r-1]);
+    }
+
+    // ---- подписи столбцов (сверху, anchor=middle) -----------------------
+    for(var q=1;q<=N;q++){
+      el("text",{
+        x:(sx(q-1)+sx(q))/2, y:sy(0)-LBL,
+        "text-anchor":"middle","font-size":FS
+      }, String(q));
+    }
+
+    // ---- оси-названия ---------------------------------------------------
+    el("text",{
+      x:sx(0)-LBL, y:sy(0)-LBL*2.6,
+      "text-anchor":"end","font-size":FS,"class":"muted"
+    },"строка — кто смотрит");
+    el("text",{
+      x:(sx(0)+sx(N))/2, y:sy(0)-LBL*2.6,
+      "text-anchor":"middle","font-size":FS,"class":"muted"
+    },"столбец — на кого");
+
+    // ---- рамка блока патчей 4×4 ----------------------------------------
+    el("rect",{
+      x:sx(3), y:sy(3), width:sx(7)-sx(3), height:sy(7)-sy(3),
+      fill:"none", stroke:"var(--fg)","stroke-width":LW*2
+    });
+    el("text",{
+      x:sx(7)+LBL, y:(sy(3)+sy(7))/2,
+      "text-anchor":"start","dominant-baseline":"central","font-size":FS
+    },"квадрат 4×4 = 16");
+
+    // ---- пометки к пустым зонам -----------------------------------------
+    el("text",{
+      x:sx(N)+LBL, y:(sy(2)+sy(3))/2,
+      "text-anchor":"start","dominant-baseline":"central","font-size":FS,"class":"muted"
+    },"строка 3: ни одного патча");
+    el("text",{
+      x:(sx(8)+sx(9))/2, y:sy(N)+LBL*2.2,
+      "text-anchor":"middle","font-size":FS,"class":"muted"
+    },"столбец 9: патчи не видят");
+
+    // ---- легенда под схемой ---------------------------------------------
+    var legend = [
+      {c:"text",  t:"треугольник по тексту — "+count.text},
+      {c:"img",   t:"блок патчей — "+count.img},
+      {c:"cross", t:"перекрёстки текст↔патчи — "+count.cross}
+    ];
+    var ly = sy(N) + LBL*5.5;
+    var lx = sx(0);
+    for(var k=0;k<legend.length;k++){
+      el("rect",{
+        x:lx, y:ly-FS+2, width:FS, height:FS,
+        fill:fillOf[legend[k].c], stroke:"var(--grid)","stroke-width":LW
+      });
+      el("text",{
+        x:lx+FS+LBL*0.6, y:ly, "text-anchor":"start","font-size":FS
+      }, legend[k].t);
+      lx = sx(0) + (k+1) * SCALE * 5.2;
+    }
+
+    var total = count.text + count.img + count.cross;
+    el("text",{
+      x:sx(0), y:ly + LBL*2.6, "text-anchor":"start","font-size":FS
+    }, "итого "+total+" закрашенных клеток из "+(N*N)+" — остальные нули");
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать сетку маски 9×9 для ' +
+      'последовательности [T, T, &lt;image&gt;, P, P, P, P, &lt;/image&gt;, T]: ' +
+      'строка — кто смотрит, столбец — на кого. По тексту (позиции 1, 2, 3, 8, 9) — ' +
+      'ступенчатый треугольник, 15 клеток. По патчам (4–7) — плотный квадрат 4×4 = 16 единиц: ' +
+      'каждый патч видит все четыре, включая правые. Перекрёстки: каждый патч видит текст 1 и 2 ' +
+      '(8 клеток), строки 8 и 9 видят все четыре патча (8 клеток). Итого 47 из 81, ' +
+      'остальное — нули: строка 3 не видит ни одного патча, ни один патч не видит позицию 9.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

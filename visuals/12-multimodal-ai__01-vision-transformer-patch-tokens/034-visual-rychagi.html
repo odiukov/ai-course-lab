@@ -1,0 +1,169 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Длина последовательности и цена attention</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --mut:#666; --grid:#d8d8d8; --bar:#3b6fd4; --hi:#c8541f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#15181d; --fg:#e8e8e8; --mut:#9aa0a8; --grid:#343a42; --bar:#6f9bef; --hi:#f0894e; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:900px; margin:0 auto; padding:12px; }
+  h2 { font-size:15px; margin:0 0 8px; font-weight:600; }
+  svg { display:block; width:100%; height:auto; max-height:520px; background:var(--bg); }
+  text { fill:var(--fg); font-family:inherit; }
+  .mut { fill:var(--mut); }
+  .fail { color:var(--mut); font-size:13px; line-height:1.5; }
+</style>
+<div class="wrap">
+  <h2>Длина последовательности растёт как квадрат стороны сетки</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById('host');
+  try {
+    // ---- данные схемы (единственные литеральные числа предметной области) ----
+    var DATA = [
+      { res: 224, patch: 16, side: 14, n: 196, label: '224 / патч 16' },
+      { res: 224, patch: 14, side: 16, n: 256, label: '224 / патч 14' },
+      { res: 384, patch: 14, side: 27, n: 729, label: '384 / патч 14' },
+      { res: 448, patch: 14, side: 32, n: 1024, label: '448 / патч 14' }
+    ];
+
+    // ---- холст (литералы: viewBox, отступы подписей, толщины, кегль) ----
+    var VB_W = 900, VB_H = 470;
+    var PAD = 6, FS = 13, FS_S = 12, LW = 1.5;
+
+    // ---- одна система координат: origin + scale ----
+    // x - индекс строки (0..3), y - число токенов
+    var origin = { x: 250, y: 400 };
+    var scale  = { x: 165, y: -0.33 };
+
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y + y * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    function el(name, attrs, txt) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (txt != null) e.textContent = txt;
+      svg.appendChild(e);
+      return e;
+    }
+    function line(x1, y1, x2, y2, stroke, w, dash) {
+      var a = { x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+                stroke: stroke, 'stroke-width': w || LW };
+      if (dash) a['stroke-dasharray'] = dash;
+      return el('line', a);
+    }
+
+    var last = DATA.length - 1;
+    var TOP = DATA[last].n;                 // верх шкалы = максимум данных
+    var TICKS = [0, DATA[0].n, DATA[1].n, DATA[2].n, DATA[3].n];
+    var BW = 0.30;                          // полуширина столбца в единицах x
+
+    // ---- ось Y и засечки ----
+    line(-0.6, 0, -0.6, TOP, 'var(--grid)', LW);
+    TICKS.forEach(function (t) {
+      line(-0.6, t, last + 0.6, t, 'var(--grid)', 1, '3 4');
+      el('text', { x: sx(-0.6) - PAD, y: sy(t) + PAD * 0.7,
+                   'text-anchor': 'end', 'font-size': FS_S, class: 'mut' }, t);
+    });
+    el('text', { x: sx(-0.6) - PAD, y: sy(TOP) - PAD * 3,
+                 'text-anchor': 'end', 'font-size': FS_S, class: 'mut' }, 'токенов');
+
+    // ---- ось X ----
+    line(-0.6, 0, last + 0.6, 0, 'var(--grid)', LW);
+
+    // ---- столбцы + подписи ----
+    DATA.forEach(function (d, i) {
+      var x0 = sx(i - BW), x1 = sx(i + BW);
+      el('rect', { x: x0, y: sy(d.n), width: x1 - x0, height: sy(0) - sy(d.n),
+                   fill: i === 0 ? 'var(--hi)' : 'var(--bar)',
+                   opacity: 0.85, rx: 2 });
+      // число токенов - над столбцом
+      el('text', { x: sx(i), y: sy(d.n) - PAD, 'text-anchor': 'middle',
+                   'font-size': FS, 'font-weight': '600' }, d.n);
+      // конфиг - под осью
+      el('text', { x: sx(i), y: sy(0) + PAD * 3, 'text-anchor': 'middle',
+                   'font-size': FS }, d.label);
+      // сетка - ещё ниже
+      el('text', { x: sx(i), y: sy(0) + PAD * 6, 'text-anchor': 'middle',
+                   'font-size': FS_S, class: 'mut' }, d.side + '×' + d.side);
+    });
+
+    // ---- стрелка «сторона вдвое - токенов вчетверо»: 256 -> 1024 ----
+    var xA = last + 0.85;
+    line(xA, DATA[1].n, xA, DATA[3].n, 'var(--fg)', LW);
+    var head = [
+      [sx(xA), sy(DATA[3].n)],
+      [sx(xA) - PAD, sy(DATA[3].n) + PAD * 1.6],
+      [sx(xA) + PAD, sy(DATA[3].n) + PAD * 1.6]
+    ];
+    el('polygon', { points: head.map(function (p) { return p.join(','); }).join(' '),
+                    fill: 'var(--fg)' });
+    // подпись у хвоста стрелки, справа
+    el('text', { x: sx(xA) + PAD * 2, y: sy(DATA[1].n) - PAD,
+                 'text-anchor': 'start', 'font-size': FS_S }, 'сторона 16 → 32:');
+    el('text', { x: sx(xA) + PAD * 2, y: sy(DATA[1].n) - PAD + FS_S * 1.3,
+                 'text-anchor': 'start', 'font-size': FS_S, class: 'mut' }, 'токенов ×4');
+
+    // ---- пояснение слева: цена attention ~ n^2 ----
+    var xL = -0.75;
+    el('text', { x: sx(xL) - PAD * 12, y: sy(TOP) + FS * 1.2,
+                 'text-anchor': 'start', 'font-size': FS_S, class: 'mut' },
+       'длина n = сторона²  (+CLS)');
+    el('text', { x: sx(xL) - PAD * 12, y: sy(TOP) + FS * 1.2 + FS_S * 1.4,
+                 'text-anchor': 'start', 'font-size': FS_S, class: 'mut' },
+       'цена attention ∝ n²');
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<p class="fail">Схема должна была показать число патч-токенов ' +
+      'для четырёх конфигов: 224 при патче 16 — 196 токенов (сетка 14×14), ' +
+      '224 при патче 14 — 256 (16×16), 384 при патче 14 — 729 (27×27), ' +
+      '448 при патче 14 — 1024 (32×32). Сторона сетки вдвое больше — токенов вчетверо, ' +
+      'а цена attention растёт как квадрат длины.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

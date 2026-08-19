@@ -1,0 +1,180 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Как режется картинка</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#0f172a; --muted:#475569;
+    --grid:#cbd5e1; --frame:#334155;
+    --hi:#d97706; --hiFill:rgba(245,158,11,.35);
+    --r:#ef4444; --g:#22c55e; --b:#3b82f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f172a; --ink:#e2e8f0; --muted:#94a3b8;
+      --grid:#334155; --frame:#94a3b8;
+      --hi:#fbbf24; --hiFill:rgba(251,191,36,.3);
+      --r:#f87171; --g:#4ade80; --b:#60a5fa;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{background:var(--bg);padding:10px 12px 12px}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .lab{fill:var(--ink);font-size:13px}
+  .cap{fill:var(--muted);font-size:12px}
+  .num{fill:var(--muted);font-size:10px}
+  .numhi{fill:var(--hi);font-size:10px;font-weight:700}
+  .err{color:var(--muted);font-size:13px;line-height:1.5}
+</style>
+<div class="wrap">
+  <h2>Как режется картинка: 224 → сетка 14 × 14 патчей по 16</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---- данные схемы (единицы = пиксели картинки) ---- */
+    var D = {
+      img: 224, patch: 16, grid: 14,
+      cube: { x:300, y:12, side:96, cells:16, depth:22 },
+      marks: [ {r:0,c:0,t:'0'}, {r:0,c:13,t:'13',hi:true}, {r:1,c:0,t:'14'} ],
+      hi: { r:0, c:13 },
+      arrow: [[228,8],[264,8],[264,96],[294,96]],
+      head: { len:8, half:5 }
+    };
+    /* ---- единственный перевод координат ---- */
+    var ORIGIN = { x:70, y:56 }, SCALE = 1.35;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    var P = [], C = D.cube, cell = C.side / C.cells;
+    function push(s){ P.push(s); }
+    function line(x1,y1,x2,y2,cls,w){
+      push('<line x1="'+sx(x1)+'" y1="'+sy(y1)+'" x2="'+sx(x2)+'" y2="'+sy(y2)+
+           '" stroke="'+cls+'" stroke-width="'+w+'"/>');
+    }
+    function rect(x,y,w,h,fill,stroke,sw){
+      push('<rect x="'+sx(x)+'" y="'+sy(y)+'" width="'+(sx(x+w)-sx(x))+
+           '" height="'+(sy(y+h)-sy(y))+'" fill="'+fill+'" stroke="'+stroke+
+           '" stroke-width="'+sw+'"/>');
+    }
+    function txt(x,y,dx,dy,anchor,cls,s,rot){
+      var px = sx(x)+dx, py = sy(y)+dy;
+      push('<text x="'+px+'" y="'+py+'" text-anchor="'+anchor+'" class="'+cls+'"'+
+           (rot?' transform="rotate('+rot+' '+px+' '+py+')"':'')+'>'+s+'</text>');
+    }
+
+    /* ---- картинка 224x224 и сетка 14x14 ---- */
+    rect(0,0,D.img,D.img,'none','var(--frame)',1.5);
+    for(var i=1;i<D.grid;i++){
+      line(i*D.patch,0,i*D.patch,D.img,'var(--grid)',1);
+      line(0,i*D.patch,D.img,i*D.patch,'var(--grid)',1);
+    }
+    /* выносимый патч */
+    rect(D.hi.c*D.patch, D.hi.r*D.patch, D.patch, D.patch,
+         'var(--hiFill)','var(--hi)',2);
+    /* номера патчей */
+    D.marks.forEach(function(m){
+      txt(m.c*D.patch + D.patch/2, m.r*D.patch + D.patch/2, 0, 4,
+          'middle', m.hi?'numhi':'num', m.t);
+    });
+
+    /* ---- стрелка выноса ---- */
+    var a = D.arrow, d = '';
+    a.forEach(function(p,k){ d += (k?'L':'M') + sx(p[0]) + ' ' + sy(p[1]) + ' '; });
+    push('<path d="'+d+'" fill="none" stroke="var(--hi)" stroke-width="2"/>');
+    var t2 = a[a.length-1], t1 = a[a.length-2];
+    var vx = t2[0]-t1[0], vy = t2[1]-t1[1], L = Math.sqrt(vx*vx+vy*vy);
+    var ux = vx/L, uy = vy/L;
+    var bx = t2[0]-ux*D.head.len, by = t2[1]-uy*D.head.len;
+    var p1x = bx - uy*D.head.half, p1y = by + ux*D.head.half;
+    var p2x = bx + uy*D.head.half, p2y = by - ux*D.head.half;
+    push('<polygon points="'+sx(t2[0])+','+sy(t2[1])+' '+sx(p1x)+','+sy(p1y)+
+         ' '+sx(p2x)+','+sy(p2y)+'" fill="var(--hi)"/>');
+    txt((a[0][0]+a[1][0])/2, a[0][1], 0, -8, 'middle', 'cap', 'один патч');
+
+    /* ---- куб 16 x 16 x 3: три слоя R, G, B ---- */
+    var layers = [
+      {k:2, col:'var(--b)'},
+      {k:1, col:'var(--g)'},
+      {k:0, col:'var(--r)'}
+    ];
+    layers.forEach(function(L2){
+      var ox = C.x + L2.k*C.depth, oy = C.y - L2.k*C.depth;
+      push('<g opacity="0.85">');
+      rect(ox, oy, C.side, C.side, L2.col, 'var(--frame)', 1);
+      push('</g>');
+    });
+    /* рёбра глубины */
+    [[C.x, C.y],[C.x+C.side, C.y],[C.x+C.side, C.y+C.side]].forEach(function(p){
+      line(p[0], p[1], p[0]+2*C.depth, p[1]-2*C.depth, 'var(--frame)', 1);
+    });
+    /* пиксельная сетка 16 x 16 на передней грани */
+    for(var j=1;j<C.cells;j++){
+      line(C.x+j*cell, C.y, C.x+j*cell, C.y+C.side, 'var(--bg)', 0.7);
+      line(C.x, C.y+j*cell, C.x+C.side, C.y+j*cell, 'var(--bg)', 0.7);
+    }
+
+    /* ---- подписи ---- */
+    txt(D.img/2, D.img, 0, 18, 'middle', 'lab', '224 = 14 × 16 пикселей');
+    txt(D.img/2, D.img, 0, 36, 'middle', 'cap', 'обход: слева направо, затем вниз');
+    txt(0, D.img/2, -10, 0, 'middle', 'lab', '224 пикселя', -90);
+
+    txt(C.x, C.y + cell*4, -8, 4, 'end', 'lab', '16');
+    txt(C.x + C.side/2, C.y + C.side, 0, 16, 'middle', 'lab', '16');
+    txt(C.x + C.side + 2*C.depth, C.y - 2*C.depth, 8, 4, 'start', 'lab', '3');
+    txt(C.x + C.side/2, C.y + C.side, 0, 36, 'middle', 'cap',
+        '16 × 16 × 3 = 768 чисел');
+
+    host.innerHTML =
+      '<svg viewBox="0 0 760 404" role="img" ' +
+      'aria-label="Картинка 224 на 224 разрезана на сетку 14 на 14 патчей по 16 пикселей; ' +
+      'один патч вынесен сбоку как куб 16 на 16 на 3">' +
+      '<rect x="0" y="0" width="760" height="404" fill="var(--bg)"/>' +
+      P.join('') + '</svg>';
+  }catch(e){
+    host.innerHTML = '<p class="err">Схема не построилась. Она должна показывать: ' +
+      'картинку 224 × 224, разрезанную на сетку 14 × 14 неперекрывающихся квадратов ' +
+      'по 16 пикселей (патч 0 — левый верхний, 13 — конец первой полосы, 14 — начало ' +
+      'второй), и один такой квадрат, вынесенный сбоку как куб 16 × 16 × 3 = 768 чисел ' +
+      '(каналы R, G, B).</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

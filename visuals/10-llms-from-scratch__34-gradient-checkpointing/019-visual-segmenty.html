@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Что живёт в памяти при k=4</title>
+<style>
+  :root{ --bg:#ffffff; --fg:#1c2128; --muted:#6b7681; --line:#c2cad2;
+         --keep:#1f6feb; --keepbg:#dbeafe; --live:#b45309; --livebg:#fde9c8;
+         --dead:#9aa4ae; --deadbg:#eef1f4; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1318; --fg:#e6edf3; --muted:#9aa7b4; --line:#3a444f;
+           --keep:#7db3ff; --keepbg:#16304f; --live:#f0b458; --livebg:#4a3413;
+           --dead:#6a747f; --deadbg:#1b2027; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .err{font-size:13px;line-height:1.5;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Что живёт в памяти при k=4: 8 сохранённых входов + окно на 4 слоя</h2>
+  <div id="host"><svg id="d" viewBox="0 0 800 330" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Лента из восьми сегментов: постоянно живут восемь входов, временно — активации четырёх слоёв активного сегмента"></svg></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var SVG = document.getElementById('d');
+    var NS = 'http://www.w3.org/2000/svg';
+
+    /* ---- данные схемы ---- */
+    var SEGMENTS = 8, K = 4, ACTIVE = 1;           /* активный сегмент — второй */
+    var LAYERS = SEGMENTS * K;                      /* 32 слоя */
+    var CELL_W = 1, CELL_H = 1.4;                   /* модельные единицы клетки слоя */
+    var GAP = 0.35;                                 /* зазор между сегментами */
+    var ROW_Y = 0;                                  /* низ ленты слоёв */
+
+    /* ---- одна пара функций перевода ---- */
+    var origin = {x: 34, y: 232};
+    var scale  = 19.6;
+    function sx(x){ return origin.x + x * scale; }
+    function sy(y){ return origin.y - y * scale; }
+
+    /* ---- геометрия сегментов в модельных координатах ---- */
+    function segX0(s){ return s * (K * CELL_W + GAP); }
+    function cellX0(s, i){ return segX0(s) + i * CELL_W; }
+    var TOTAL_W = segX0(SEGMENTS) - GAP;
+
+    /* ---- helpers рисования ---- */
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]); SVG.appendChild(e); return e; }
+    function text(x, y, s, anchor, cls, size){
+      var t = el('text', {x:x, y:y, 'text-anchor':anchor||'middle',
+        'font-size':size||12, fill:'currentColor', class:cls||''});
+      t.textContent = s; return t;
+    }
+
+    var PAD = 5;   /* пиксельный отступ подписи от точки привязки */
+
+    /* ---- лента слоёв ---- */
+    for(var s = 0; s < SEGMENTS; s++){
+      var live = (s === ACTIVE);
+
+      /* клетки слоёв сегмента */
+      for(var i = 0; i < K; i++){
+        var x0 = sx(cellX0(s, i)), x1 = sx(cellX0(s, i) + CELL_W);
+        var yT = sy(ROW_Y + CELL_H), yB = sy(ROW_Y);
+        el('rect', {x:x0, y:yT, width:(x1 - x0), height:(yB - yT),
+          fill: live ? 'var(--livebg)' : 'var(--deadbg)',
+          stroke: live ? 'var(--live)' : 'var(--dead)', 'stroke-width':1.2});
+
+        if(!live){                                   /* перечёркнуто */
+          el('line', {x1:x0, y1:yT, x2:x1, y2:yB, stroke:'var(--dead)', 'stroke-width':1.1});
+          el('line', {x1:x0, y1:yB, x2:x1, y2:yT, stroke:'var(--dead)', 'stroke-width':1.1});
+        }
+      }
+
+      /* сохранённый вход сегмента — маркер под первой клеткой */
+      var kx = sx(cellX0(s, 0) + CELL_W / 2), ky = sy(ROW_Y) + PAD;
+      el('rect', {x:kx - scale * 0.22, y:ky, width:scale * 0.44, height:scale * 0.44,
+        fill:'var(--keepbg)', stroke:'var(--keep)', 'stroke-width':1.4});
+
+      /* короткая метка сегмента */
+      text(sx(segX0(s) + K * CELL_W / 2), sy(ROW_Y + CELL_H) - PAD,
+           'с' + (s + 1), 'middle', '', 11).setAttribute('fill','var(--muted)');
+    }
+
+    /* ---- рамка окна активного сегмента ---- */
+    var wx0 = sx(segX0(ACTIVE)) , wx1 = sx(segX0(ACTIVE) + K * CELL_W);
+    var wyT = sy(ROW_Y + CELL_H + 0.25), wyB = sy(ROW_Y - 0.55);
+    el('rect', {x:wx0 - PAD, y:wyT, width:(wx1 - wx0) + 2 * PAD, height:(wyB - wyT),
+      fill:'none', stroke:'var(--live)', 'stroke-width':1.6, 'stroke-dasharray':'5 4', rx:4});
+
+    /* подпись окна — сверху, по центру, middle */
+    text(sx(segX0(ACTIVE) + K * CELL_W / 2), wyT - PAD,
+         'активный сегмент: 4 × 800 МБ = 3,2 ГБ', 'middle', '', 12)
+      .setAttribute('fill','var(--live)');
+
+    /* стрелка «окно едет дальше» — от хвоста справа от рамки */
+    var ay = sy(ROW_Y + CELL_H / 2);
+    var ax0 = sx(segX0(ACTIVE) + K * CELL_W + 0.12);
+    var ax1 = sx(segX0(ACTIVE + 1) + K * CELL_W * 0.9);
+    el('defs').innerHTML = '';
+    var mk = document.createElementNS(NS,'marker');
+    mk.setAttribute('id','ar'); mk.setAttribute('markerWidth','8');
+    mk.setAttribute('markerHeight','8'); mk.setAttribute('refX','7');
+    mk.setAttribute('refY','3'); mk.setAttribute('orient','auto');
+    var pth = document.createElementNS(NS,'path');
+    pth.setAttribute('d','M0,0 L7,3 L0,6 z'); pth.setAttribute('fill','var(--live)');
+    mk.appendChild(pth); SVG.appendChild(mk);
+    el('line', {x1:ax0, y1:ay, x2:ax1, y2:ay, stroke:'var(--live)',
+      'stroke-width':1.6, 'marker-end':'url(#ar)'});
+    text(ax0 + PAD, ay - PAD, 'окно едет по сегментам', 'start', '', 11)
+      .setAttribute('fill','var(--live)');
+
+    /* ---- подпись строки сохранённых входов: слева, anchor=end ---- */
+    var keepY = sy(ROW_Y) + PAD + scale * 0.22 + 4;
+    text(sx(0) - PAD, keepY, '8 входов', 'end', '', 12)
+      .setAttribute('fill','var(--keep)');
+    text(sx(TOTAL_W) + PAD, keepY, '≈ 0,5 ГБ постоянно', 'start', '', 12)
+      .setAttribute('fill','var(--keep)');
+
+    /* ---- подпись ленты слева ---- */
+    text(sx(0) - PAD, sy(ROW_Y + CELL_H / 2) + 4, '32 слоя', 'end', '', 12)
+      .setAttribute('fill','var(--muted)');
+
+    /* ---- итоговая строка снизу ---- */
+    var botY = sy(ROW_Y - 1.35);
+    text(sx(TOTAL_W / 2), botY,
+      'пик ≈ 0,5 + 3,2 ≈ 3,7 ГБ  против 25,6 ГБ наивно (32 × 800 МБ)',
+      'middle', '', 13).setAttribute('fill','currentColor');
+
+    /* ---- легенда ---- */
+    var legY = sy(ROW_Y - 2.05), lx = sx(1.2);
+    el('rect', {x:lx - scale*0.22, y:legY - scale*0.22, width:scale*0.44, height:scale*0.44,
+      fill:'var(--keepbg)', stroke:'var(--keep)', 'stroke-width':1.4});
+    text(lx + PAD + scale*0.22, legY + 4, 'сохранённый вход сегмента', 'start', '', 11)
+      .setAttribute('fill','var(--muted)');
+
+    var lx2 = sx(9.5);
+    el('rect', {x:lx2 - scale*0.22, y:legY - scale*0.22, width:scale*0.44, height:scale*0.44,
+      fill:'var(--deadbg)', stroke:'var(--dead)', 'stroke-width':1.2});
+    el('line', {x1:lx2 - scale*0.22, y1:legY - scale*0.22, x2:lx2 + scale*0.22, y2:legY + scale*0.22,
+      stroke:'var(--dead)', 'stroke-width':1.1});
+    el('line', {x1:lx2 - scale*0.22, y1:legY + scale*0.22, x2:lx2 + scale*0.22, y2:legY - scale*0.22,
+      stroke:'var(--dead)', 'stroke-width':1.1});
+    text(lx2 + PAD + scale*0.22, legY + 4, 'активаций сейчас нет — пересчитаются', 'start', '', 11)
+      .setAttribute('fill','var(--muted)');
+
+  }catch(e){
+    host.innerHTML = '<p class="err">Схема должна была показать ленту из 32 слоёв, ' +
+      'разбитую на 8 сегментов по k=4. Постоянно в памяти живут только 8 сохранённых ' +
+      'входов сегментов (≈ 0,5 ГБ). Внутри одного активного сегмента временно ' +
+      'материализуются активации 4 слоёв: 4 × 800 МБ = 3,2 ГБ; активации остальных ' +
+      'сегментов не хранятся и пересчитываются по очереди. Пик ≈ 0,5 + 3,2 ≈ 3,7 ГБ ' +
+      'против 25,6 ГБ у наивного варианта (32 × 800 МБ).</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

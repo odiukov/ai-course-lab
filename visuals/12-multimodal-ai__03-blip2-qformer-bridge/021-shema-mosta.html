@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Мост BLIP-2 целиком</title>
+<style>
+  :root{
+    --bg:#fbfbf9; --fg:#1a1a1a; --muted:#5c5c5c;
+    --line:#3a3a3a; --frozen:#8a8f98; --train:#1f6f8b; --accent:#b3541e;
+    --boxbg:#ffffff; --frozenbg:#eef0f2; --trainbg:#e4f1f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#ececec; --muted:#a8adb5;
+      --line:#c6cad0; --frozen:#8f959e; --train:#6fc3dd; --accent:#e08a4c;
+      --boxbg:#1c1f24; --frozenbg:#23272d; --trainbg:#1b2f38;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 10px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;line-height:1.5;color:var(--fg);}
+  text{fill:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Мост от картинки к LLM: где меняется ширина, где длина</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    var W=1060,H=470,NS="http://www.w3.org/2000/svg";
+    var origin={x:70,y:400}, scale={x:9.2,y:9.2};
+    function sx(x){return origin.x+x*scale.x;}
+    function sy(y){return origin.y-y*scale.y;}
+
+    // данные схемы (в единицах схемы)
+    var nodes=[
+      {id:"img",  x:0,  w:11, label:"картинка",           sub:"",                    kind:"src"},
+      {id:"vit",  x:15, w:14, label:"ViT",                sub:"заморожен",           kind:"frozen"},
+      {id:"qf",   x:39, w:19, label:"Q-Former",           sub:"12 слоёв",            kind:"train"},
+      {id:"proj", x:68, w:14, label:"проекция",           sub:"линейная",            kind:"train"},
+      {id:"llm",  x:92, w:14, label:"LLM",                sub:"заморожена",          kind:"frozen"}
+    ];
+    var laneY=22, boxH=11;
+    var arrows=[
+      {from:"img", to:"vit",  tag:"",                    tagSide:"none"},
+      {from:"vit", to:"qf",   tag:"256 патчей × 1408",   tagSide:"up"},
+      {from:"qf",  to:"proj", tag:"32 запроса × 768",    tagSide:"up"},
+      {from:"proj",to:"llm",  tag:"32 токена × 4096",    tagSide:"up"}
+    ];
+    var gates=[
+      {atArrow:1, text:"проём 1: 1408 в 768", note:"внутри cross-attention, 256 в 32"},
+      {atArrow:3, text:"проём 2: 768 в 4096", note:"32 визуальных tokens перед промптом"}
+    ];
+
+    var svg=document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox","0 0 "+W+" "+H);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||13});
+      if(cls)t.setAttribute("fill",cls);
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+    var PAD=7; // пиксельный отступ подписи от точки привязки
+
+    var defs=el("defs",{});
+    var mk=el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"9",refY:"5",
+      markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+    mk.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    var by={};
+    nodes.forEach(function(n){
+      by[n.id]=n;
+      var fill=n.kind==="frozen"?"var(--frozenbg)":(n.kind==="train"?"var(--trainbg)":"var(--boxbg)");
+      var stroke=n.kind==="frozen"?"var(--frozen)":(n.kind==="train"?"var(--train)":"var(--line)");
+      svg.appendChild(el("rect",{
+        x:sx(n.x), y:sy(laneY+boxH), width:sx(n.x+n.w)-sx(n.x), height:sy(laneY)-sy(laneY+boxH),
+        rx:6, fill:fill, stroke:stroke, "stroke-width":1.6
+      }));
+      var cx=sx(n.x+n.w/2);
+      txt(cx, sy(laneY+boxH/2)+1, n.label, "middle", null, 15);
+      if(n.sub) txt(cx, sy(laneY)-PAD, n.sub, "middle", "var(--muted)", 12);
+    });
+
+    // стрелки по коридору
+    arrows.forEach(function(a,i){
+      var f=by[a.from], t=by[a.to];
+      var x1=sx(f.x+f.w), x2=sx(t.x), y=sy(laneY+boxH/2);
+      svg.appendChild(el("line",{x1:x1,y1:y,x2:x2,y2:y,
+        stroke:"var(--line)","stroke-width":2,"marker-end":"url(#ah)"}));
+      if(a.tag){ // подпись у хвоста стрелки, выше линии
+        txt(x1+PAD, sy(laneY+boxH)-PAD, a.tag, "start", null, 13);
+      }
+    });
+
+    // проёмы: вниз от стыка, чтобы не сталкиваться с подписями ширин
+    var gy=[10.5, 3.0];
+    gates.forEach(function(g,i){
+      var a=arrows[g.atArrow], f=by[a.from], t=by[a.to];
+      var xm=(sx(f.x+f.w)+sx(t.x))/2;
+      var yTop=sy(laneY), yEnd=sy(gy[i]+4.5);
+      svg.appendChild(el("line",{x1:xm,y1:yTop,x2:xm,y2:yEnd,
+        stroke:"var(--accent)","stroke-width":1.4,"stroke-dasharray":"4 3"}));
+      txt(xm, sy(gy[i]+2.2), g.text, "middle", "var(--accent)", 13.5);
+      txt(xm, sy(gy[i]), g.note, "middle", "var(--muted)", 12);
+    });
+
+    // коридор одной ширины: 768 держится 12 слоёв
+    var cf=by["qf"];
+    var cy=sy(laneY+boxH)+0;
+    svg.appendChild(el("line",{x1:sx(cf.x),y1:sy(laneY+boxH+3),x2:sx(cf.x+cf.w),y2:sy(laneY+boxH+3),
+      stroke:"var(--train)","stroke-width":1.4}));
+    txt(sx(cf.x+cf.w/2), sy(laneY+boxH+4)-PAD, "768 держится, 32 держатся", "middle", "var(--train)", 12.5);
+
+    // левый и правый края: подписи наружу нужной стороной
+    txt(sx(0), sy(laneY+boxH+3.4), "вход", "start", "var(--muted)", 12);
+    txt(sx(106), sy(laneY+boxH+3.4), "ответ", "end", "var(--muted)", 12);
+
+    // легенда строкой под схемой
+    var ly=1.2, lx=0;
+    function chip(x,fill,stroke,label){
+      svg.appendChild(el("rect",{x:sx(x),y:sy(ly+2.6),width:sx(x+2.4)-sx(x),
+        height:sy(ly)-sy(ly+2.6),rx:3,fill:fill,stroke:stroke,"stroke-width":1.4}));
+      txt(sx(x+2.4)+PAD, sy(ly+0.6), label, "start", "var(--muted)", 12.5);
+      return x;
+    }
+    chip(lx,"var(--frozenbg)","var(--frozen)","заморожено (ViT, LLM)");
+    chip(38,"var(--trainbg)","var(--train)","обучается (Q-Former, проекция)");
+    txt(sx(106), sy(ly+0.6), "длина меняется один раз: 256 в 32", "end", "var(--accent)", 12.5);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема должна была показать путь по мосту: '+
+      'картинка → замороженный ViT (256 патчей по 1408) → Q-Former '+
+      '(32 запроса по 768, 12 слоёв; здесь первый проём 1408 в 768 внутри cross-attention, '+
+      'и здесь же длина падает с 256 до 32) → линейная проекция 768 в 4096 '+
+      '(второй проём) → 32 визуальных tokens перед текстовым промптом → замороженная LLM. '+
+      'Между двумя проёмами коридор одной ширины: 768 и 32 не меняются на 12 слоях.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

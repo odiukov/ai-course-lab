@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пишем linear_project — Blip2 Qformer Bridge</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/">← Blip2 Qformer Bridge</a>
+<span class="counter" data-counter>17 / 40</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-clip-ne-govorit" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/001-clip-ne-govorit/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">CLIP выравнивает, но не говорит</span></a></li>
+<li><a class="toc-link" data-step="002-dva-zamorozhennyh" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/002-dva-zamorozhennyh/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Два замороженных бэкбона и щель между ними</span></a></li>
+<li><a class="toc-link" data-step="003-stykovka-razmernostei" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/003-stykovka-razmernostei/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Линейный слой 1408 в 4096 стыкует размерности, но не длину</span></a></li>
+<li><a class="toc-link" data-step="004-tsena-256-tokenov" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/004-tsena-256-tokenov/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Проверка: сколько tokens съедает батч картинок</span></a></li>
+<li><a class="toc-link" data-step="005-vopros-blip2" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/005-vopros-blip2/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Вопрос BLIP-2: сжать 256 в 32 и не трогать бэкбоны</span></a></li>
+<li><a class="toc-link" data-step="006-uchimye-zaprosy" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/006-uchimye-zaprosy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Обучаемые запросы: 32 постоянных вопроса к картинке</span></a></li>
+<li><a class="toc-link" data-step="007-zaprosy-ne-yarlyki" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/007-zaprosy-ne-yarlyki/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Запросы не делятся по смыслу — они минимизируют лосс</span></a></li>
+<li><a class="toc-link" data-step="008-softmax" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/008-softmax/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Пишем softmax</span></a></li>
+<li><a class="toc-link" data-step="009-q-otsuda-kv-ottuda" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/009-q-otsuda-kv-ottuda/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Cross-attention: Q отсюда, K/V оттуда</span></a></li>
+<li><a class="toc-link" data-step="010-scaled-dot" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/010-scaled-dot/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Пишем scaled_dot_attention</span></a></li>
+<li><a class="toc-link" data-step="011-zachem-delit-na-koren" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/011-zachem-delit-na-koren/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Зачем делить на корень из d</span></a></li>
+<li><a class="toc-link" data-step="012-cross-attention" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/012-cross-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Пишем cross_attention</span></a></li>
+<li><a class="toc-link" data-step="013-forma-matritsy-vnimaniya" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/013-forma-matritsy-vnimaniya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Проверка: форма 32 x 256 и сумма строки</span></a></li>
+<li><a class="toc-link" data-step="014-matritsa-kak-retsept" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/014-matritsa-kak-retsept/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Строка матрицы внимания как рецепт из патчей</span></a></li>
+<li><a class="toc-link" data-step="015-top-patches" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/015-top-patches/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Пишем top_patches_per_query</span></a></li>
+<li><a class="toc-link" data-step="016-proekciya-v-llm" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/016-proekciya-v-llm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Проекционная голова: 768 в размерность эмбеддингов LLM</span></a></li>
+<li><a class="toc-link is-current" data-step="017-linear-project" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/017-linear-project/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Пишем linear_project</span></a></li>
+<li><a class="toc-link" data-step="018-dva-puti-qformera" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/018-dva-puti-qformera/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Два пути Q-Former: запросы и текст с общим self-attention</span></a></li>
+<li><a class="toc-link" data-step="019-inferens-tolko-zaprosy" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/019-inferens-tolko-zaprosy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">На инференсе идут только запросы — ровно 32 вектора</span></a></li>
+<li><a class="toc-link" data-step="020-qformer-forward" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/020-qformer-forward/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Пишем qformer_forward</span></a></li>
+<li><a class="toc-link" data-step="021-shema-mosta" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/021-shema-mosta/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Схема моста целиком</span></a></li>
+<li><a class="toc-link" data-step="022-etap1-tri-lossa" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/022-etap1-tri-lossa/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Этап 1: обучение представлений без LLM</span></a></li>
+<li><a class="toc-link" data-step="023-itc" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/023-itc/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">ITC: contrastive между спуленными запросами и текстовым CLS</span></a></li>
+<li><a class="toc-link" data-step="024-itm" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/024-itm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">ITM: бинарный классификатор и hard-negative</span></a></li>
+<li><a class="toc-link" data-step="025-itg" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/025-itg/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">ITG: причинная генерация текста с опорой на запросы</span></a></li>
+<li><a class="toc-link" data-step="026-kakoy-loss-tekstovyy-put" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/026-kakoy-loss-tekstovyy-put/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Проверка: какому лоссу нужен активный путь текста</span></a></li>
+<li><a class="toc-link" data-step="027-etap2-lm-loss" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/027-etap2-lm-loss/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Этап 2: замороженная LLM и LM loss по склейке</span></a></li>
+<li><a class="toc-link" data-step="028-smena-llm" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/028-smena-llm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Смена LLM переделывает только этап 2</span></a></li>
+<li><a class="toc-link" data-step="029-ekonomika-2-4-procenta" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/029-ekonomika-2-4-procenta/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Экономика параметров: 188M из 8B</span></a></li>
+<li><a class="toc-link" data-step="030-kachestvo-protiv-flamingo" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/030-kachestvo-protiv-flamingo/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Качество: 8B против Flamingo-80B на zero-shot VQA</span></a></li>
+<li><a class="toc-link" data-step="031-instructblip" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/031-instructblip/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">InstructBLIP: запросы, знающие про инструкцию</span></a></li>
+<li><a class="toc-link" data-step="032-minigpt4" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/032-minigpt4/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">MiniGPT-4: только проектор, чужие запросы</span></a></li>
+<li><a class="toc-link" data-step="033-llava-mlp" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/033-llava-mlp/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">LLaVA: MLP-проектор и 576 tokens на картинку</span></a></li>
+<li><a class="toc-link" data-step="034-flamingo-gated" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/034-flamingo-gated/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Flamingo: gated cross-attention на каждом слое</span></a></li>
+<li><a class="toc-link" data-step="035-chetyre-varianta-mosta" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/035-chetyre-varianta-mosta/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Четыре ответа на вопрос «сколько tokens отдать картинке»</span></a></li>
+<li><a class="toc-link" data-step="036-budzhet-tokenov-video" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/036-budzhet-tokenov-video/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Бюджет tokens на видео: 60 кадров, 32 против 576</span></a></li>
+<li><a class="toc-link" data-step="037-visual-token-budget" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/037-visual-token-budget/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Пишем visual_token_budget</span></a></li>
+<li><a class="toc-link" data-step="038-pravilo-vybora-mosta" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/038-pravilo-vybora-mosta/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Правило выбора: бюджет tokens или качество на token</span></a></li>
+<li><a class="toc-link" data-step="039-pick-bridge" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/039-pick-bridge/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Пишем pick_bridge</span></a></li>
+<li><a class="toc-link" data-step="040-itogovaya-proverka" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/040-itogovaya-proverka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Итоговая проверка</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Пишем linear_project</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>У тебя на руках 32 вектора по 768 чисел — ровно то, что выходит из пути запросов после cross-attention из <a href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/012-cross-attention/">шага 12</a>. А замороженная LLM принимает на вход только эмбеддинги длиной 4096. Инструмент ты уже видел в <a href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/003-stykovka-razmernostei/">шаге 3</a>: линейный слой, который меняет размерность, ничего не понимая про смысл. Разница в том, что тогда на входе висели все 256 патчей, а теперь — 32 вектора, и стоят они уже не 8192 tokens контекста, а 1024.</p>
+<p>Напиши <code>linear_project(queries, W, b)</code>. На входе список из 32 списков по 768 чисел, матрица весов <code>W</code> и вектор смещения <code>b</code>. На выходе — список из 32 списков по 4096 чисел.</p>
+<p>Одно выходное число собирается так: берёшь все 768 входных значений вектора, каждое умножаешь на свой вес и складываешь, потом добавляешь смещение для этой выходной координаты.</p>
+<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>y</mi><mi>j</mi></msub><mo>=</mo><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>x</mi><mi>i</mi></msub><msub><mi>W</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>+</mo><msub><mi>b</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">y_j = \sum_{i} x_i W_{ij} + b_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:2.3277em;vertical-align:-1.2777em"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.05em"><span style="top:-1.8723em;margin-left:0em"><span class="pstrut" style="height:3.05em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span style="top:-3.05em"><span class="pstrut" style="height:3.05em"></span><span><span class="mop op-symbol large-op">∑</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.2777em"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span></span></span></span></span>
+<p>Здесь <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mi>i</mi></msub></mrow><annotation encoding="application/x-tex">x_i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span> — <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em"></span><span class="mord mathnormal">i</span></span></span></span>-е число входного вектора, <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>W</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">W_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9694em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.1389em">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span></span></span></span> — вес от входа <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi></mrow><annotation encoding="application/x-tex">i</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6595em"></span><span class="mord mathnormal">i</span></span></span></span> к выходу <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0572em">j</span></span></span></span>, <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>b</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">b_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9805em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal">b</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span></span></span></span> — смещение для выхода <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0572em">j</span></span></span></span>, <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mi>j</mi></msub></mrow><annotation encoding="application/x-tex">y_j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span></span></span></span> — <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>j</mi></mrow><annotation encoding="application/x-tex">j</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.854em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0572em">j</span></span></span></span>-е число результата.</p>
+<p>На что смотреть. Никакого softmax и никаких нелинейностей здесь нет — слой линейный, и всё. Смещение прибавляется один раз к готовой сумме, а не внутри цикла по 768 входам: если оно попало внутрь, каждое число вырастет в 768 раз. Матрица одна и та же для всех 32 запросов — это те самые общие веса из <a href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/016-proekciya-v-llm/">шага 16</a>. И не зашивай 32 в код: функция должна принять и 8 запросов, и 100.</p>
+<p>Проверь себя формой: <code>len(out) == 32</code>, <code>len(out[0]) == 4096</code>. Если получилось наоборот — ты перепутал порядок индексов в <code>W</code>.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь бухгалтерский отчёт: 4096 итоговых строк, и у каждой своя постоянная формула по 768 показателям — свои коэффициенты, всегда одни и те же. Плюс у каждой строки есть фиксированная надбавка, которую ставят один раз в самом конце. Поставишь её при каждом из 768 показателей — и отчёт раздуется в 768 раз, хотя формулы вроде бы верные. Именно так и ломается bias в цикле.</p>
+</blockquote></div>
+
+
+<section class="practice-panel">
+<h2 class="practice-title">Практика: <code>linear_project</code></h2>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
+<div class="practice-actions">
+<button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
+<button type="button" class="nav-button" data-reset>Сбросить</button>
+<button type="button" class="nav-button" data-show-solution>Показать решение</button>
+</div>
+<p class="run-status" data-run-status></p>
+<div data-results></div>
+<pre class="solution" data-solution hidden></pre>
+<script type="application/json" data-exercise>{"slug":"p12-l03-blip2-qformer-bridge","fn":"linear_project","functions":["softmax","scaled_dot_attention","cross_attention","linear_project","qformer_forward","top_patches_per_query","visual_token_budget","pick_bridge"],"urls":{"template":"/ai-course-lab/exercise/p12-l03-blip2-qformer-bridge/template.py","test":"/ai-course-lab/exercise/p12-l03-blip2-qformer-bridge/test.py","solution":"/ai-course-lab/exercise/p12-l03-blip2-qformer-bridge/solution.py"},"assets":{"pyodide":"/ai-course-lab/assets/pyodide/","harness":"/ai-course-lab/assets/harness.py"}}</script>
+</section>
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/016-proekciya-v-llm/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/12-multimodal-ai__03-blip2-qformer-bridge/018-dva-puti-qformera/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"12-multimodal-ai__03-blip2-qformer-bridge","stepId":"017-linear-project","number":17,"plannedCount":40}</script>
+<script src="/ai-course-lab/assets/editor.js"></script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+<script>
+(function () {
+  var node = document.querySelector("[data-exercise]");
+  if (!node) return;
+  var data = JSON.parse(node.textContent || "{}");
+
+  var area = document.querySelector("[data-code]");
+  var runButton = document.querySelector("[data-run]");
+  var resetButton = document.querySelector("[data-reset]");
+  var solutionButton = document.querySelector("[data-show-solution]");
+  var solutionBox = document.querySelector("[data-solution]");
+  var status = document.querySelector("[data-run-status]");
+  var results = document.querySelector("[data-results]");
+  if (!area || !runButton) return;
+
+  var storageKey = "course-exercise:" + data.slug;
+  var template = "";
+  // Полный файл упражнения. В редакторе видна только функция шага, но на
+  // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
+  // сразу, и файл с одной функцией не загрузился бы вовсе.
+  var full = "";
+
+  /**
+   * Делит файл на «до функции», саму функцию и «после».
+   *
+   * Границы ищутся по тексту, а не по номерам строк из сборки: файл живёт в
+   * браузере и уже мог измениться — человек дописал функцию выше, и любые
+   * заранее посчитанные номера уехали бы.
+   */
+  function split(source, fn) {
+    var lines = source.split("\n");
+    var head = new RegExp("^(async\\s+)?def\\s+" + fn + "\\s*\\(");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (head.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    // Конец блока — только НАСТОЯЩЕЕ следующее определение, а не любая строка
+    // с левого края.
+    //
+    // Раньше границей считался левый край как таковой, и обломок вроде
+    // «for x in v))», случайно оставшийся без отступа, оказывался снаружи
+    // блока: замена функции его не трогала, файл навсегда переставал
+    // разбираться, а в редакторе этой строки не видно. Теперь такой мусор
+    // остаётся внутри блока и уходит вместе с ним.
+    var boundary = /^(async\s+def\s|def\s|class\s|@|import\s|from\s|if\s+__name__)/;
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      if (boundary.test(lines[j])) { end = j; break; }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+
+    return {
+      before: lines.slice(0, start).join("\n"),
+      code: lines.slice(start, end).join("\n"),
+      after: lines.slice(end).join("\n"),
+    };
+  }
+
+  function join(source, fn, code) {
+    var parts = split(source, fn);
+    if (!parts) return source;
+    return [parts.before, code, parts.after].join("\n");
+  }
+
+  function save() {
+    full = join(full, data.fn, area.value);
+    try {
+      localStorage.setItem(storageKey, full);
+    } catch (error) {
+      // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
+    }
+  }
+
+  function setCode(text) {
+    area.value = text;
+    // Редактор, если он поднялся, слушает это событие и подхватывает текст.
+    area.dispatchEvent(new Event("course-editor-reset"));
+  }
+
+  function text(url) {
+    return fetch(url).then(function (response) {
+      if (!response.ok) throw new Error("не удалось загрузить " + url);
+      return response.text();
+    });
+  }
+
+  // Заготовка нужна всегда: по ней работает «Сбросить».
+  text(data.urls.template).then(function (source) {
+    template = source;
+    var saved = null;
+    try {
+      saved = localStorage.getItem(storageKey);
+    } catch (error) {
+      saved = null;
+    }
+    full = saved === null ? source : saved;
+
+    var parts = split(full, data.fn);
+    // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
+    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
+    // или чужим кодом.
+    if (!parts) {
+      full = source;
+      parts = split(full, data.fn);
+    }
+    setCode(parts ? parts.code : full);
+    if (window.CourseEditor) window.CourseEditor.mount(area);
+  });
+
+  area.addEventListener("input", save);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (!template) return;
+      if (!window.confirm("Вернуть заготовку этой функции? Написанный код пропадёт.")) return;
+      // Сбрасывается только функция шага: остальное в файле человек писал на
+      // других шагах, и терять это из-за одной кнопки он не подписывался.
+      var fresh = split(template, data.fn);
+      setCode(fresh ? fresh.code : template);
+      save();
+    });
+  }
+
+  if (solutionButton && solutionBox && data.urls.solution) {
+    solutionButton.addEventListener("click", function () {
+      if (!solutionBox.hidden) {
+        solutionBox.hidden = true;
+        solutionButton.textContent = "Показать решение";
+        return;
+      }
+      text(data.urls.solution).then(function (source) {
+        solutionBox.textContent = source;
+        solutionBox.hidden = false;
+        solutionButton.textContent = "Скрыть решение";
+      });
+    });
+  } else if (solutionButton) {
+    solutionButton.hidden = true;
+  }
+
+  var pyodidePromise = null;
+
+  function loadPyodideOnce() {
+    if (pyodidePromise) return pyodidePromise;
+
+    pyodidePromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = data.assets.pyodide + "pyodide.js";
+      script.onload = resolve;
+      script.onerror = function () {
+        reject(new Error("не удалось загрузить Python"));
+      };
+      document.head.appendChild(script);
+    })
+      .then(function () {
+        return window.loadPyodide({ indexURL: data.assets.pyodide });
+      })
+      .then(function (pyodide) {
+        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+          pyodide.FS.mkdirTree("/exercise");
+          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          pyodide.runPython(files[0]);
+          return pyodide;
+        });
+      })
+      .catch(function (error) {
+        // Неудачную загрузку нельзя оставлять в памяти: иначе каждая
+        // следующая попытка мгновенно спотыкается о тот же отказ, и кнопка
+        // «Запустить тесты» перестаёт работать до перезагрузки страницы.
+        pyodidePromise = null;
+        throw error;
+      });
+
+    return pyodidePromise;
+  }
+
+  function render(report) {
+    results.innerHTML = "";
+    if (report.loadError) {
+      // Статус обязан смениться: без этого на экране остаётся «Гоняю тесты…»,
+      // и прогон выглядит зависшим, хотя он давно закончился ошибкой.
+      status.className = "run-status";
+      status.textContent = "Файл упражнения не разобрался — Python остановился на этом месте:";
+
+      var problem = document.createElement("p");
+      problem.className = "run-error";
+      problem.textContent = report.loadError;
+      results.appendChild(problem);
+
+      // Файл не разобрался, а видно в редакторе только одну функцию: ошибка
+      // вполне может сидеть в другой части файла — например, осталась от
+      // прежних правок. Дать выход, а не оставлять человека гадать.
+      var rescue = document.createElement("button");
+      rescue.type = "button";
+      rescue.className = "nav-button";
+      rescue.textContent = "Сбросить весь файл упражнения";
+      rescue.addEventListener("click", function () {
+        if (!template) return;
+        if (!window.confirm("Вернуть всё упражнение к заготовке? Пропадёт код и других шагов.")) {
+          return;
+        }
+        full = template;
+        var fresh = split(full, data.fn);
+        setCode(fresh ? fresh.code : full);
+        save();
+        results.innerHTML = "";
+        status.textContent = "Упражнение сброшено к заготовке.";
+      });
+      results.appendChild(rescue);
+      return;
+    }
+
+    var passed = 0;
+    var list = document.createElement("ul");
+    list.className = "test-list";
+    for (var i = 0; i < report.results.length; i += 1) {
+      var item = report.results[i];
+      if (item.passed) passed += 1;
+      var row = document.createElement("li");
+      row.className = item.passed ? "test is-passed" : "test is-failed";
+      row.textContent = (item.passed ? "✓ " : "✗ ") + item.name + (item.message ? " — " + item.message : "");
+      list.appendChild(row);
+    }
+
+    var total = report.results.length;
+    status.textContent =
+      passed + " из " + total + " зелёные" +
+      (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
+    status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    results.appendChild(list);
+  }
+
+  runButton.addEventListener("click", function () {
+    runButton.disabled = true;
+    status.className = "run-status";
+    status.textContent = "Готовлю Python…";
+
+    loadPyodideOnce()
+      .then(function (pyodide) {
+        status.textContent = "Гоняю тесты…";
+        // В Python уезжает файл целиком, а не то, что в редакторе: тесты
+        // импортируют из него все имена упражнения разом.
+        pyodide.globals.set(
+          "PAYLOAD",
+          JSON.stringify({
+            code: join(full, data.fn, area.value),
+            fn: data.fn,
+            functions: data.functions,
+          })
+        );
+        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+      })
+      .then(render)
+      .catch(function (error) {
+        status.className = "run-status";
+        status.textContent = String(error && error.message ? error.message : error);
+      })
+      .then(function () {
+        runButton.disabled = false;
+      });
+  });
+})();
+</script>
+</body>
+</html>

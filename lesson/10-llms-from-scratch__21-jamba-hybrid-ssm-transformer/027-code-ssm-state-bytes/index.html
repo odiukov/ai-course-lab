@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пишем ssm_state_bytes — Jamba Hybrid Ssm Transformer</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/">← Jamba Hybrid Ssm Transformer</a>
+<span class="counter" data-counter>27 / 48</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-dva-zhelaniya" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/001-dva-zhelaniya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Attention и SSM хотят разного</span></a></li>
+<li><a class="toc-link" data-step="002-cena-kvadrata" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/002-cena-kvadrata/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">65 миллиардов элементов на голову при 256k</span></a></li>
+<li><a class="toc-link" data-step="003-gde-ssm-lomayutsya" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/003-gde-ssm-lomayutsya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Где чистые SSM проигрывают: утечка сжатой истории</span></a></li>
+<li><a class="toc-link" data-step="004-gibrid-kak-lechenie" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/004-gibrid-kak-lechenie/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Очевидное лечение: посадить обоих за один стол</span></a></li>
+<li><a class="toc-link" data-step="005-check-problema" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/005-check-problema/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Проверка: кто платит квадратом, кто теряет детали</span></a></li>
+<li><a class="toc-link" data-step="006-ssm-formula" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/006-ssm-formula/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">SSM на одной странице: h_t = A h_{t-1} + B x_t</span></a></li>
+<li><a class="toc-link" data-step="007-code-ssm-step" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/007-code-ssm-step/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Пишем ssm_step</span></a></li>
+<li><a class="toc-link" data-step="008-postoyannaya-pamyat" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/008-postoyannaya-pamyat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Почему память постоянна и инференс O(1) на токен</span></a></li>
+<li><a class="toc-link" data-step="009-code-ssm-scan" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/009-code-ssm-scan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Пишем ssm_scan</span></a></li>
+<li><a class="toc-link" data-step="010-kacheli-matricy-a" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/010-kacheli-matricy-a/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Качели вокруг матрицы A: S4, Mamba, Mamba-2, Mamba-3</span></a></li>
+<li><a class="toc-link" data-step="011-selektivnost" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/011-selektivnost/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Селективность: A, B, C зависят от данных</span></a></li>
+<li><a class="toc-link" data-step="012-sloy-zamena-attention" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/012-sloy-zamena-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Слой SSM как готовая замена слоя attention</span></a></li>
+<li><a class="toc-link" data-step="013-check-ssm" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/013-check-ssm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Проверка: что нужно для y_t и что растёт с длиной</span></a></li>
+<li><a class="toc-link" data-step="014-dva-chisla-bloka" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/014-dva-chisla-bloka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Блок Jamba задаётся двумя числами: l и e</span></a></li>
+<li><a class="toc-link" data-step="015-visual-blok" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/015-visual-blok/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Схема слоёв блока Jamba</span></a></li>
+<li><a class="toc-link" data-step="016-code-layer-plan" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/016-code-layer-plan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Пишем layer_plan</span></a></li>
+<li><a class="toc-link" data-step="017-arifmetika-32-sloev" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/017-arifmetika-32-sloev/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">32 слоя: 28 Mamba, 4 attention, 16 с MoE</span></a></li>
+<li><a class="toc-link" data-step="018-code-count-layer-types" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/018-code-count-layer-types/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Пишем count_layer_types</span></a></li>
+<li><a class="toc-link" data-step="019-ablyacii-proporcii" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/019-ablyacii-proporcii/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Абляции AI21: 1:1, 1:15 и оптимум 1:7</span></a></li>
+<li><a class="toc-link" data-step="020-kto-za-chto-otvechaet" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/020-kto-za-chto-otvechaet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Attention вспоминает точно, Mamba тянет основную массу</span></a></li>
+<li><a class="toc-link" data-step="021-check-proporciya" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/021-check-proporciya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Проверка: что ломается при 1:15 и при 1:1</span></a></li>
+<li><a class="toc-link" data-step="022-pozicii-besplatno" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/022-pozicii-besplatno/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Рекуррентность знает позицию бесплатно</span></a></li>
+<li><a class="toc-link" data-step="023-rope-v-jamba-15" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/023-rope-v-jamba-15/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Почему Jamba 1.5 вернула RoPE в слои attention</span></a></li>
+<li><a class="toc-link" data-step="024-formula-kv-cache" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/024-formula-kv-cache/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Из чего складывается KV cache: слои, головы, head_dim, длина, байты</span></a></li>
+<li><a class="toc-link" data-step="025-code-kv-cache-bytes" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/025-code-kv-cache-bytes/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Пишем kv_cache_bytes</span></a></li>
+<li><a class="toc-link" data-step="026-sostoyanie-ne-rastet" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/026-sostoyanie-ne-rastet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Состояние SSM: фиксированный размер на слой</span></a></li>
+<li><a class="toc-link is-current" data-step="027-code-ssm-state-bytes" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/027-code-ssm-state-bytes/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Пишем ssm_state_bytes</span></a></li>
+<li><a class="toc-link" data-step="028-visual-gigabajty-protiv-megabajt" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/028-visual-gigabajty-protiv-megabajt/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">8.4 ГБ против 3.7 МБ</span></a></li>
+<li><a class="toc-link" data-step="029-summarnaya-pamyat" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/029-summarnaya-pamyat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Суммарная память формы модели на контексте N</span></a></li>
+<li><a class="toc-link" data-step="030-code-inference-memory" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/030-code-inference-memory/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Пишем inference_memory</span></a></li>
+<li><a class="toc-link" data-step="031-chistyj-transformer-128gb" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/031-chistyj-transformer-128gb/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Чистый трансформер на 32 слоя: 128 ГБ на 256k</span></a></li>
+<li><a class="toc-link" data-step="032-otkuda-8-raz" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/032-otkuda-8-raz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Откуда ровно 8 раз и почему GQA(8) всё равно вдвое хуже</span></a></li>
+<li><a class="toc-link" data-step="033-code-kv-cache-advantage" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/033-code-kv-cache-advantage/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Пишем kv_cache_advantage</span></a></li>
+<li><a class="toc-link" data-step="034-odna-karta-80gb" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/034-odna-karta-80gb/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">«256k на одной карте 80 ГБ» — что это значит буквально</span></a></li>
+<li><a class="toc-link" data-step="035-check-pamyat" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/035-check-pamyat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Проверка: посчитайте KV cache для 1:3 и для чистого SSM</span></a></li>
+<li><a class="toc-link" data-step="036-mamba3-diskretizaciya" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/036-mamba3-diskretizaciya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Mamba-3, нововведение 1: экспоненциально-трапецеидальная дискретизация</span></a></li>
+<li><a class="toc-link" data-step="037-mamba3-kompleksnoe" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/037-mamba3-kompleksnoe/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Mamba-3, нововведение 2: комплексное состояние как RoPE на состоянии</span></a></li>
+<li><a class="toc-link" data-step="038-mamba3-mimo" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/038-mamba3-mimo/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Mamba-3, нововведение 3: MIMO вместо скалярных проекций</span></a></li>
+<li><a class="toc-link" data-step="039-cifry-mamba3" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/039-cifry-mamba3/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">1.8 пункта и вдвое меньшее состояние: что здесь важнее</span></a></li>
+<li><a class="toc-link" data-step="040-check-mamba3" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/040-check-mamba3/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Проверка: какое нововведение чинит какую проблему</span></a></li>
+<li><a class="toc-link" data-step="041-kogda-gibrid-vyigryvaet" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/041-kogda-gibrid-vyigryvaet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">41</span><span class="toc-title">Когда брать гибрид: порог 64k и смешанные задачи</span></a></li>
+<li><a class="toc-link" data-step="042-kogda-gibrid-proigryvaet" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/042-kogda-gibrid-proigryvaet/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">42</span><span class="toc-title">Когда гибрид проигрывает: короткий контекст и attention «все ко всем»</span></a></li>
+<li><a class="toc-link" data-step="043-tablica-raskladki" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/043-tablica-raskladki/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">43</span><span class="toc-title">Расклад 2026: масштабы семейств</span></a></li>
+<li><a class="toc-link" data-step="044-pochemu-ne-vse-na-ssm" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/044-pochemu-ne-vse-na-ssm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">44</span><span class="toc-title">Почему не все перешли на SSM: ниша выбирается проверенным масштабом</span></a></li>
+<li><a class="toc-link" data-step="045-razrezhennost-jamba" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/045-razrezhennost-jamba/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">45</span><span class="toc-title">24% активных против 5.5%: разрежённость только там, где есть эксперты</span></a></li>
+<li><a class="toc-link" data-step="046-propusknaya-sposobnost" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/046-propusknaya-sposobnost/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">46</span><span class="toc-title">Главный вывод калькулятора: сколько запросов влезает разом</span></a></li>
+<li><a class="toc-link" data-step="047-skill-hybrid-picker" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/047-skill-hybrid-picker/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">47</span><span class="toc-title">Собираем hybrid-picker: нагрузка на входе, архитектура на выходе</span></a></li>
+<li><a class="toc-link" data-step="048-quiz" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/048-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">48</span><span class="toc-title">Итоговая проверка: рекуррентность, пропорция 1:7, бюджет памяти и Mamba-3</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Пишем ssm_state_bytes</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты только что написал <code>kv_cache_bytes</code> в <a href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/025-code-kv-cache-bytes/">шаге 25</a> — там пять аргументов, и один из них длина последовательности. Теперь пишем соседнюю функцию для состояния SSM, и происходит странное: тебе некуда деть <code>seq_len</code>.</p>
+<p>Ты садишься за подпись функции и по инерции тянешь тот же список параметров. Слои — есть, у Jamba-1 их 28 из 32. Ширина hidden — 4096. Размер состояния на признак — 16. Байт на элемент — 2 для BF16. А длина?</p>
+<p>Некуда. И это не забывчивость, это ответ из <a href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/026-sostoyanie-ne-rastet/">шага 26</a>: формула на слой вообще не содержит длины, потому что каждый новый токен перезаписывает то же самое состояние. Так что <code>ssm_state_bytes</code> принимает четыре числа, а не пять, — и если тебе хочется добавить пятое, значит, картинка ещё не села.</p>
+<p>Дальше арифметика: посчитай байты на один слой по формуле из <a href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/026-sostoyanie-ne-rastet/">шага 26</a> и умножь на число слоёв Mamba. Проверь на форме Jamba-1: 28 · 4096 · 16 · 2 должно дать примерно 3,7 МБ. Возвращай именно байты, а перевод в мегабайты оставь вызывающему коду — иначе рядом с гигабайтами KV cache легко потерять множитель.</p>
+<p>Две ловушки. Не приписывай двойку «за K и V» — здесь нет пары, состояние одно. И прогони функцию с <code>n_layers=32</code>: так выглядел бы чистый Mamba той же ширины. Число почти не изменится — и это первый намёк, кто на самом деле съедает память в гибриде.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> 28 одинаковых чемоданов в кладовке. Ты можешь перепаковывать их каждый день год подряд — место на полке ты замерил один раз, и оно не выросло. Поэтому в функции нет параметра «сколько раз перепаковывал»: он там просто не на что влияет. Кладовка меряется числом чемоданов и их размером, а не длиной твоей истории поездок.</p>
+</blockquote></div>
+
+
+<section class="practice-panel">
+<h2 class="practice-title">Практика: <code>ssm_state_bytes</code></h2>
+<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
+<div class="practice-actions">
+<button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>
+<button type="button" class="nav-button" data-reset>Сбросить</button>
+<button type="button" class="nav-button" data-show-solution>Показать решение</button>
+</div>
+<p class="run-status" data-run-status></p>
+<div data-results></div>
+<pre class="solution" data-solution hidden></pre>
+<script type="application/json" data-exercise>{"slug":"p10-l21-jamba-hybrid-ssm-transformer","fn":"ssm_state_bytes","functions":["ssm_step","ssm_scan","layer_plan","count_layer_types","kv_cache_bytes","ssm_state_bytes","inference_memory","kv_cache_advantage"],"urls":{"template":"/ai-course-lab/exercise/p10-l21-jamba-hybrid-ssm-transformer/template.py","test":"/ai-course-lab/exercise/p10-l21-jamba-hybrid-ssm-transformer/test.py","solution":"/ai-course-lab/exercise/p10-l21-jamba-hybrid-ssm-transformer/solution.py"},"assets":{"pyodide":"/ai-course-lab/assets/pyodide/","harness":"/ai-course-lab/assets/harness.py"}}</script>
+</section>
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/026-sostoyanie-ne-rastet/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/10-llms-from-scratch__21-jamba-hybrid-ssm-transformer/028-visual-gigabajty-protiv-megabajt/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"10-llms-from-scratch__21-jamba-hybrid-ssm-transformer","stepId":"027-code-ssm-state-bytes","number":27,"plannedCount":48}</script>
+<script src="/ai-course-lab/assets/editor.js"></script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+<script>
+(function () {
+  var node = document.querySelector("[data-exercise]");
+  if (!node) return;
+  var data = JSON.parse(node.textContent || "{}");
+
+  var area = document.querySelector("[data-code]");
+  var runButton = document.querySelector("[data-run]");
+  var resetButton = document.querySelector("[data-reset]");
+  var solutionButton = document.querySelector("[data-show-solution]");
+  var solutionBox = document.querySelector("[data-solution]");
+  var status = document.querySelector("[data-run-status]");
+  var results = document.querySelector("[data-results]");
+  if (!area || !runButton) return;
+
+  var storageKey = "course-exercise:" + data.slug;
+  var template = "";
+  // Полный файл упражнения. В редакторе видна только функция шага, но на
+  // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
+  // сразу, и файл с одной функцией не загрузился бы вовсе.
+  var full = "";
+
+  /**
+   * Делит файл на «до функции», саму функцию и «после».
+   *
+   * Границы ищутся по тексту, а не по номерам строк из сборки: файл живёт в
+   * браузере и уже мог измениться — человек дописал функцию выше, и любые
+   * заранее посчитанные номера уехали бы.
+   */
+  function split(source, fn) {
+    var lines = source.split("\n");
+    var head = new RegExp("^(async\\s+)?def\\s+" + fn + "\\s*\\(");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (head.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    // Конец блока — только НАСТОЯЩЕЕ следующее определение, а не любая строка
+    // с левого края.
+    //
+    // Раньше границей считался левый край как таковой, и обломок вроде
+    // «for x in v))», случайно оставшийся без отступа, оказывался снаружи
+    // блока: замена функции его не трогала, файл навсегда переставал
+    // разбираться, а в редакторе этой строки не видно. Теперь такой мусор
+    // остаётся внутри блока и уходит вместе с ним.
+    var boundary = /^(async\s+def\s|def\s|class\s|@|import\s|from\s|if\s+__name__)/;
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      if (boundary.test(lines[j])) { end = j; break; }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+
+    return {
+      before: lines.slice(0, start).join("\n"),
+      code: lines.slice(start, end).join("\n"),
+      after: lines.slice(end).join("\n"),
+    };
+  }
+
+  function join(source, fn, code) {
+    var parts = split(source, fn);
+    if (!parts) return source;
+    return [parts.before, code, parts.after].join("\n");
+  }
+
+  function save() {
+    full = join(full, data.fn, area.value);
+    try {
+      localStorage.setItem(storageKey, full);
+    } catch (error) {
+      // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
+    }
+  }
+
+  function setCode(text) {
+    area.value = text;
+    // Редактор, если он поднялся, слушает это событие и подхватывает текст.
+    area.dispatchEvent(new Event("course-editor-reset"));
+  }
+
+  function text(url) {
+    return fetch(url).then(function (response) {
+      if (!response.ok) throw new Error("не удалось загрузить " + url);
+      return response.text();
+    });
+  }
+
+  // Заготовка нужна всегда: по ней работает «Сбросить».
+  text(data.urls.template).then(function (source) {
+    template = source;
+    var saved = null;
+    try {
+      saved = localStorage.getItem(storageKey);
+    } catch (error) {
+      saved = null;
+    }
+    full = saved === null ? source : saved;
+
+    var parts = split(full, data.fn);
+    // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
+    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
+    // или чужим кодом.
+    if (!parts) {
+      full = source;
+      parts = split(full, data.fn);
+    }
+    setCode(parts ? parts.code : full);
+    if (window.CourseEditor) window.CourseEditor.mount(area);
+  });
+
+  area.addEventListener("input", save);
+
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (!template) return;
+      if (!window.confirm("Вернуть заготовку этой функции? Написанный код пропадёт.")) return;
+      // Сбрасывается только функция шага: остальное в файле человек писал на
+      // других шагах, и терять это из-за одной кнопки он не подписывался.
+      var fresh = split(template, data.fn);
+      setCode(fresh ? fresh.code : template);
+      save();
+    });
+  }
+
+  if (solutionButton && solutionBox && data.urls.solution) {
+    solutionButton.addEventListener("click", function () {
+      if (!solutionBox.hidden) {
+        solutionBox.hidden = true;
+        solutionButton.textContent = "Показать решение";
+        return;
+      }
+      text(data.urls.solution).then(function (source) {
+        solutionBox.textContent = source;
+        solutionBox.hidden = false;
+        solutionButton.textContent = "Скрыть решение";
+      });
+    });
+  } else if (solutionButton) {
+    solutionButton.hidden = true;
+  }
+
+  var pyodidePromise = null;
+
+  function loadPyodideOnce() {
+    if (pyodidePromise) return pyodidePromise;
+
+    pyodidePromise = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = data.assets.pyodide + "pyodide.js";
+      script.onload = resolve;
+      script.onerror = function () {
+        reject(new Error("не удалось загрузить Python"));
+      };
+      document.head.appendChild(script);
+    })
+      .then(function () {
+        return window.loadPyodide({ indexURL: data.assets.pyodide });
+      })
+      .then(function (pyodide) {
+        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+          pyodide.FS.mkdirTree("/exercise");
+          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          pyodide.runPython(files[0]);
+          return pyodide;
+        });
+      })
+      .catch(function (error) {
+        // Неудачную загрузку нельзя оставлять в памяти: иначе каждая
+        // следующая попытка мгновенно спотыкается о тот же отказ, и кнопка
+        // «Запустить тесты» перестаёт работать до перезагрузки страницы.
+        pyodidePromise = null;
+        throw error;
+      });
+
+    return pyodidePromise;
+  }
+
+  function render(report) {
+    results.innerHTML = "";
+    if (report.loadError) {
+      // Статус обязан смениться: без этого на экране остаётся «Гоняю тесты…»,
+      // и прогон выглядит зависшим, хотя он давно закончился ошибкой.
+      status.className = "run-status";
+      status.textContent = "Файл упражнения не разобрался — Python остановился на этом месте:";
+
+      var problem = document.createElement("p");
+      problem.className = "run-error";
+      problem.textContent = report.loadError;
+      results.appendChild(problem);
+
+      // Файл не разобрался, а видно в редакторе только одну функцию: ошибка
+      // вполне может сидеть в другой части файла — например, осталась от
+      // прежних правок. Дать выход, а не оставлять человека гадать.
+      var rescue = document.createElement("button");
+      rescue.type = "button";
+      rescue.className = "nav-button";
+      rescue.textContent = "Сбросить весь файл упражнения";
+      rescue.addEventListener("click", function () {
+        if (!template) return;
+        if (!window.confirm("Вернуть всё упражнение к заготовке? Пропадёт код и других шагов.")) {
+          return;
+        }
+        full = template;
+        var fresh = split(full, data.fn);
+        setCode(fresh ? fresh.code : full);
+        save();
+        results.innerHTML = "";
+        status.textContent = "Упражнение сброшено к заготовке.";
+      });
+      results.appendChild(rescue);
+      return;
+    }
+
+    var passed = 0;
+    var list = document.createElement("ul");
+    list.className = "test-list";
+    for (var i = 0; i < report.results.length; i += 1) {
+      var item = report.results[i];
+      if (item.passed) passed += 1;
+      var row = document.createElement("li");
+      row.className = item.passed ? "test is-passed" : "test is-failed";
+      row.textContent = (item.passed ? "✓ " : "✗ ") + item.name + (item.message ? " — " + item.message : "");
+      list.appendChild(row);
+    }
+
+    var total = report.results.length;
+    status.textContent =
+      passed + " из " + total + " зелёные" +
+      (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
+    status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    results.appendChild(list);
+  }
+
+  runButton.addEventListener("click", function () {
+    runButton.disabled = true;
+    status.className = "run-status";
+    status.textContent = "Готовлю Python…";
+
+    loadPyodideOnce()
+      .then(function (pyodide) {
+        status.textContent = "Гоняю тесты…";
+        // В Python уезжает файл целиком, а не то, что в редакторе: тесты
+        // импортируют из него все имена упражнения разом.
+        pyodide.globals.set(
+          "PAYLOAD",
+          JSON.stringify({
+            code: join(full, data.fn, area.value),
+            fn: data.fn,
+            functions: data.functions,
+          })
+        );
+        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+      })
+      .then(render)
+      .catch(function (error) {
+        status.className = "run-status";
+        status.textContent = String(error && error.message ? error.message : error);
+      })
+      .then(function () {
+        runButton.disabled = false;
+      });
+  });
+})();
+</script>
+</body>
+</html>

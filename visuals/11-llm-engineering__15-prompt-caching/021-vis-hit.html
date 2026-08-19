@@ -1,0 +1,182 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Стоимость запроса против числа чтений</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2430; --mut:#5d6b7d; --grid:#d7dbe2;
+    --line:#b3541e; --dot:#8c3d12; --floor:#1f7a5a; --base:#3d5a99;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e8edf4; --mut:#9fb0c3; --grid:#2c343f;
+      --line:#f0954a; --dot:#ffc389; --floor:#4fd1a5; --base:#8fb0ff;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:10px 12px 12px}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:456px}
+  .legend{margin:6px 0 0;font-size:12px;color:var(--mut)}
+  .fallback{font-size:13px;color:var(--fg)}
+  text{fill:var(--fg);font:12px system-ui,-apple-system,"Segoe UI",sans-serif}
+  text.mut{fill:var(--mut)}
+  text.floor{fill:var(--floor)}
+  text.base{fill:var(--base)}
+  .ax{stroke:var(--fg);stroke-width:1.4;fill:none}
+  .axhead{fill:var(--fg)}
+  .grid{stroke:var(--grid);stroke-width:1}
+  .curve{stroke:var(--line);stroke-width:2.4;fill:none}
+  .dot{fill:var(--dot)}
+  .dashfloor{stroke:var(--floor);stroke-width:1.4;stroke-dasharray:6 4;fill:none}
+  .dashbase{stroke:var(--base);stroke-width:1.4;stroke-dasharray:6 4;fill:none}
+  .dashbe{stroke:var(--mut);stroke-width:1.2;stroke-dasharray:3 4;fill:none}
+</style>
+<div class="wrap">
+  <h2>Средняя стоимость запроса против числа чтений кэша</h2>
+  <div id="host"></div>
+  <p class="legend" id="lg">0 чтений — 1.25 · 1 — 0.675 · 2 — 0.483 · 3 — 0.388 · 5 — 0.292 · 10 — 0.205 · 50 — 0.122 · пол — 0.1 (цена самого чтения). Безубыточность проходит между первым и вторым чтением.</p>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* --- данные схемы --- */
+    var D = {
+      write: 1.25, read: 0.1,
+      xMax: 12, yMax: 1.3,
+      base: 1.0, breakEven: 1.5,
+      xTicks: [0,1,2,3,5,10],
+      yTicks: [0.1,0.5,1.0],
+      pts: [
+        {n:0,  v:1.25,  t:"1.25",  a:"start",  dx:9,  dy:4},
+        {n:1,  v:0.675, t:"0.675", a:"start",  dx:9,  dy:4},
+        {n:2,  v:0.483, t:"0.483", a:"middle", dx:0,  dy:19},
+        {n:3,  v:0.388, t:"0.388", a:"middle", dx:0,  dy:-11},
+        {n:5,  v:0.292, t:"0.292", a:"middle", dx:0,  dy:-11},
+        {n:10, v:0.205, t:"0.205", a:"middle", dx:0,  dy:-11}
+      ]
+    };
+
+    /* --- одно origin, один scale, одна пара sx/sy --- */
+    var origin = {x:72, y:330};
+    var scale  = {x:49, y:230};
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var W = 760, H = 390, F = 12;
+    var out = [];
+    function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+    function txt(x,y,s,cls,anchor,extra){
+      out.push('<text x="'+x+'" y="'+y+'" text-anchor="'+anchor+'"'
+        + (cls?' class="'+cls+'"':'') + (extra||'') + '>' + esc(s) + '</text>');
+    }
+    function line(x1,y1,x2,y2,cls){
+      out.push('<path class="'+cls+'" d="M '+x1+' '+y1+' L '+x2+' '+y2+'"/>');
+    }
+
+    /* сетка по y */
+    D.yTicks.forEach(function(v){
+      line(sx(0), sy(v), sx(D.xMax), sy(v), 'grid');
+      txt(sx(0) - 8, sy(v) + 4, v.toFixed(v < 1 ? 1 : 1), 'mut', 'end');
+    });
+
+    /* линия обычной цены */
+    line(sx(0), sy(D.base), sx(D.xMax), sy(D.base), 'dashbase');
+    txt(sx(D.xMax), sy(D.base) - 8, 'обычная цена ' + D.base.toFixed(1), 'base', 'end');
+
+    /* пол — цена чтения */
+    line(sx(0), sy(D.read), sx(D.xMax), sy(D.read), 'dashfloor');
+    txt(sx(0.3), sy(D.read) - 8, 'пол ' + D.read.toFixed(1) + ' — ниже не пойдёт', 'floor', 'start');
+
+    /* зона безубыточности */
+    line(sx(D.breakEven), sy(0), sx(D.breakEven), sy(1.05), 'dashbe');
+    txt(sx(D.breakEven), sy(1.12), 'безубыточность', 'mut', 'middle');
+
+    /* оси со наконечниками */
+    line(sx(0), sy(0), sx(D.xMax + 0.2), sy(0), 'ax');
+    line(sx(0), sy(0), sx(0), sy(D.yMax + 0.04), 'ax');
+    out.push('<polygon class="axhead" points="'
+      + sx(D.xMax + 0.25) + ',' + sy(0) + ' '
+      + sx(D.xMax - 0.05) + ',' + sy(0.035) + ' '
+      + sx(D.xMax - 0.05) + ',' + sy(-0.035) + '"/>');
+    out.push('<polygon class="axhead" points="'
+      + sx(0) + ',' + sy(D.yMax + 0.09) + ' '
+      + sx(-0.07) + ',' + sy(D.yMax + 0.01) + ' '
+      + sx(0.07) + ',' + sy(D.yMax + 0.01) + '"/>');
+
+    /* засечки по x */
+    D.xTicks.forEach(function(n){
+      line(sx(n), sy(0), sx(n), sy(-0.025), 'ax');
+      txt(sx(n), sy(0) + 20, n, 'mut', 'middle');
+    });
+
+    /* кривая: (запись + n × чтение) / (n + 1) */
+    var d = '', n;
+    for (n = 0; n <= D.xMax + 0.001; n += 0.25){
+      var v = (D.write + n * D.read) / (n + 1);
+      d += (d ? ' L ' : 'M ') + sx(n) + ' ' + sy(v);
+    }
+    out.push('<path class="curve" d="' + d + '"/>');
+
+    /* точки из текста шага */
+    D.pts.forEach(function(p){
+      out.push('<circle class="dot" cx="' + sx(p.n) + '" cy="' + sy(p.v) + '" r="4"/>');
+      txt(sx(p.n) + p.dx, sy(p.v) + p.dy, p.t, null, p.a);
+    });
+
+    /* подписи осей */
+    txt(sx(6), sy(0) + 42, 'число чтений закэшированного префикса', 'mut', 'middle');
+    txt(sx(-0.94), sy(0.65), 'средняя стоимость запроса, доли обычной цены', 'mut', 'middle',
+      ' transform="rotate(-90 ' + sx(-0.94) + ' ' + sy(0.65) + ')"');
+
+    host.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H
+      + '" preserveAspectRatio="xMidYMid meet" role="img" font-size="' + F
+      + '" aria-label="Кривая средней стоимости запроса при росте числа чтений кэша">'
+      + out.join('') + '</svg>';
+  } catch (e) {
+    host.innerHTML = '<p class="fallback">Схема должна показывать одну падающую кривую: '
+      + 'по горизонтали — число чтений кэша, по вертикали — средняя стоимость запроса '
+      + 'в долях обычной цены. 0 чтений — 1.25 (перерасход), 1 — 0.675, 2 — 0.483, '
+      + '3 — 0.388, 5 — 0.292, 10 — 0.205, 50 — 0.122. Почти вся экономия собирается '
+      + 'на первых трёх чтениях; безубыточность — между первым и вторым чтением; '
+      + 'кривая упирается в пол 0.1 — цену самого чтения.</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Маска cross-attention для чередующегося входа</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1c22; --muted:#5d6470; --grid:#c8ccd4;
+    --open:#2f7d4f; --openbg:#cdead9; --shut:#8a8f99; --shutbg:#e9ebee;
+    --img1:#2b5fd0; --img2:#b0521a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e9ecf1; --muted:#a2a9b6; --grid:#3a4048;
+      --open:#7fd3a2; --openbg:#22503a; --shut:#767c87; --shutbg:#22262c;
+      --img1:#8fb0ff; --img2:#f0a06a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  text{fill:var(--fg);}
+  .muted{fill:var(--muted);}
+  .fail{color:var(--muted);font-size:13px;line-height:1.45;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Маска cross-attention: «(картинка 1)(текст 1)(картинка 2)(текст 2)»</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    var NS = 'http://www.w3.org/2000/svg';
+
+    /* ---------- данные схемы ---------- */
+    // столбцы: два блока визуальных tokens по 64
+    var COLS = [
+      {name:'картинка 1', short:'0–63',   x0:0, x1:64,  cls:'img1'},
+      {name:'картинка 2', short:'64–127', x0:64, x1:128, cls:'img2'}
+    ];
+    // строки: группы текстовых позиций сверху вниз, в порядке последовательности
+    var ROWS = [
+      {label:'текст до картинки 1', tag:'нет номерка', open:null, h:1},
+      {label:'текст 1',             tag:'номерок 1',   open:0,    h:2},
+      {label:'текст 2',             tag:'номерок 2',   open:1,    h:2}
+    ];
+
+    var GRID_W = 128;                       // ширина сетки в единицах данных (визуальные tokens)
+    var GRID_H = ROWS.reduce(function(s,r){return s+r.h;},0);
+
+    /* ---------- одна пара sx/sy ---------- */
+    var origin = {x:210, y:78};             // где лежит точка (0,0) данных
+    var scale  = {x:3.6, y:52};             // пикселей на единицу данных
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    /* ---------- литералы оформления ---------- */
+    var VB_W = 900, VB_H = 430;
+    var PAD = 8, LW = 1.2, FS = 13, FS_SM = 11.5;
+
+    var svg = document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+VB_W+' '+VB_H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); svg.appendChild(e); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=document.createElementNS(NS,'text');
+      t.setAttribute('x',x); t.setAttribute('y',y);
+      t.setAttribute('text-anchor',anchor||'start');
+      t.setAttribute('font-size',size||FS);
+      if(cls) t.setAttribute('class',cls);
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+
+    var bg = el('rect',{x:0,y:0,width:VB_W,height:VB_H});
+    bg.style.fill='var(--bg)';
+
+    /* ---------- заголовки столбцов ---------- */
+    COLS.forEach(function(c){
+      var xa=sx(c.x0), xb=sx(c.x1), xm=sx((c.x0+c.x1)/2);
+      var band=el('rect',{x:xa,y:sy(0)-scale.y*0.62,width:xb-xa,height:scale.y*0.34,rx:3});
+      band.style.fill='var(--'+c.cls+')'; band.style.opacity='0.22';
+      var l1=txt(xm, sy(0)-scale.y*0.72, c.name,'middle',null,FS);
+      l1.style.fill='var(--'+c.cls+')'; l1.setAttribute('font-weight','600');
+      txt(xm, sy(0)-scale.y*0.30, 'столбцы '+c.short,'middle','muted',FS_SM);
+    });
+    txt(sx(GRID_W/2), sy(0)-scale.y*1.10,
+        '128 визуальных tokens после resampler (64 + 64)','middle','muted',FS_SM);
+
+    /* ---------- клетки ---------- */
+    var y = 0;
+    ROWS.forEach(function(r){
+      var yTop=sy(y), yBot=sy(y+r.h), yMid=sy(y+r.h/2);
+      COLS.forEach(function(c,ci){
+        var isOpen = (r.open===ci);
+        var cell=el('rect',{x:sx(c.x0),y:yTop,width:sx(c.x1)-sx(c.x0),
+                            height:yBot-yTop,rx:4,'stroke-width':LW});
+        cell.style.fill  = isOpen ? 'var(--openbg)' : 'var(--shutbg)';
+        cell.style.stroke= isOpen ? 'var(--open)'   : 'var(--shut)';
+        var mark=txt(sx((c.x0+c.x1)/2), yMid+scale.y*0.06,
+                     isOpen?'открыто':'закрыто','middle',null,FS);
+        mark.style.fill = isOpen ? 'var(--open)' : 'var(--shut)';
+        mark.setAttribute('font-weight','600');
+      });
+      // подпись строки слева: text-anchor=end, отступ PAD от левого края сетки
+      var name=txt(sx(0)-PAD, yMid-scale.y*0.04, r.label,'end',null,FS);
+      name.setAttribute('font-weight','600');
+      txt(sx(0)-PAD, yMid+scale.y*0.26, r.tag,'end','muted',FS_SM);
+      y += r.h;
+    });
+
+    /* ---------- рамка сетки и разделитель блоков ---------- */
+    var frame=el('rect',{x:sx(0),y:sy(0),width:sx(GRID_W)-sx(0),
+                         height:sy(GRID_H)-sy(0),'stroke-width':LW*1.6,fill:'none'});
+    frame.style.stroke='var(--grid)';
+    var sep=el('line',{x1:sx(64),y1:sy(0),x2:sx(64),y2:sy(GRID_H),'stroke-width':LW*1.6});
+    sep.style.stroke='var(--grid)';
+
+    /* ---------- стрелка «окно сдвигается вправо на 64 столбца» ---------- */
+    var yArr = sy(GRID_H) + scale.y*0.42;
+    var xTail = sx(32), xHead = sx(96);
+    var arr=el('line',{x1:xTail,y1:yArr,x2:xHead,y2:yArr,'stroke-width':LW*1.6});
+    arr.style.stroke='var(--muted)';
+    var hd=el('polygon',{points:
+      sx(96)+','+yArr+' '+
+      sx(90)+','+(yArr-scale.y*0.10)+' '+
+      sx(90)+','+(yArr+scale.y*0.10)});
+    hd.style.fill='var(--muted)';
+    // подпись у ХВОСТА стрелки, справа от него
+    txt(xTail+PAD, yArr-scale.y*0.18,
+        'новая картинка сдвигает открытое окно на 64 столбца','start','muted',FS_SM);
+
+    /* ---------- ось столбцов: засечки 0 / 64 / 128 ---------- */
+    var yTick = sy(GRID_H) + scale.y*0.14;
+    [0,64,128].forEach(function(v){
+      var t=el('line',{x1:sx(v),y1:sy(GRID_H),x2:sx(v),y2:yTick,'stroke-width':LW});
+      t.style.stroke='var(--grid)';
+      txt(sx(v), yTick+scale.y*0.22, String(v),'middle','muted',FS_SM);
+    });
+
+    /* ---------- легенда ---------- */
+    var yLeg = sy(GRID_H) + scale.y*0.92;
+    txt(sx(0), yLeg,
+        'Ровно один открытый блок в строке — и никогда два. Строка «до картинки 1» пуста целиком: '+
+        'вклад cross-attention аддитивный, значит равен нулю.','start','muted',FS_SM);
+
+    // подпись оси строк — слева, вертикально, anchor=middle по своей оси
+    var rl=document.createElementNS(NS,'text');
+    rl.setAttribute('x', sx(0)-PAD*22);
+    rl.setAttribute('y', sy(GRID_H/2));
+    rl.setAttribute('text-anchor','middle');
+    rl.setAttribute('font-size',FS_SM);
+    rl.setAttribute('class','muted');
+    rl.setAttribute('transform','rotate(-90 '+(sx(0)-PAD*22)+' '+sy(GRID_H/2)+')');
+    rl.textContent='строки — текстовые позиции';
+    svg.appendChild(rl);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема не построилась. Она должна показывать таблицу маски: '+
+      'строки — текстовые позиции, столбцы — 128 визуальных tokens (0–63 от картинки 1, 64–127 от картинки 2). '+
+      'У «текста 1» открыты столбцы 0–63 и закрыты 64–127; у «текста 2» открыты 64–127 и закрыты 0–63; '+
+      'у текста до первой картинки закрыты все 128 столбцов.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
