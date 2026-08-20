@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Две метрики крест-накрест</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280;
+    --grid:#c9cdd4; --head:#eef1f5;
+    --win:#1d7a4c; --winbg:#dff2e6;
+    --lose:#b03a2e; --losebg:#fbe3e0;
+    --mid:#8a6d1f; --midbg:#f6efd8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8eaed; --muted:#9aa3ad;
+      --grid:#3a414b; --head:#1e2430;
+      --win:#5fd39b; --winbg:#173427;
+      --lose:#f08a7c; --losebg:#3a1f1c;
+      --mid:#e0c26a; --midbg:#332b16;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:16px;margin:0 0 6px;font-weight:650;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{padding:10px;border:1px solid var(--grid);border-radius:6px;
+    font-size:14px;line-height:1.45;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Две метрики крест-накрест: победы стоят по диагонали</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные числа-данные) ----
+    var COLS = [
+      {key:'margin', label:'semantic margin', hint:'выше — лучше'},
+      {key:'recon',  label:'reconstruction error', hint:'ниже — лучше'}
+    ];
+    var ROWS = [
+      {label:'SigLIP (смысл)',   margin:'0.38', recon:'0.09',  mk:'win',  rk:'lose'},
+      {label:'VQ (реконструкция)', margin:'0.05', recon:'0.004', mk:'lose', rk:'win'},
+      {label:'Компромисс',       margin:'0.19', recon:'0.03',  mk:'mid',  rk:'mid'}
+    ];
+
+    // ---- холст (литералы: viewBox/размеры) ----
+    var VBW = 760, VBH = 400;
+
+    // ---- одна пара origin/scale и одна пара sx/sy ----
+    var origin = {x:170, y:56};
+    var scale  = 64;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    // сетка в единицах: колонки шириной 3, строки высотой 1
+    var CW = 3, RH = 1;
+    var GRID_W = CW*COLS.length;
+    var GRID_H = RH*ROWS.length;
+
+    // отступы подписи от точки привязки (пиксели — разрешено)
+    var PAD = 6, LINE = 17, FS = 14, FSM = 12, LW = 1.4;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle',
+        'font-size':(size||FS),'font-family':'inherit'});
+      if(cls) t.setAttribute('class',cls);
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+VBW+' '+VBH,
+      preserveAspectRatio:'xMidYMid meet',role:'img'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VBW,height:VBH,fill:'var(--bg)'}));
+
+    var defs = el('defs');
+    var mk = el('marker',{id:'ah',viewBox:'0 0 10 10',refX:'9',refY:'5',
+      markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'});
+    mk.appendChild(el('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'var(--muted)'}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    var COLOR = {win:['var(--winbg)','var(--win)'],
+                 lose:['var(--losebg)','var(--lose)'],
+                 mid:['var(--midbg)','var(--mid)']};
+
+    // ---- шапка колонок ----
+    for(var c=0;c<COLS.length;c++){
+      var x0=sx(c*CW), x1=sx((c+1)*CW), cx=sx(c*CW+CW/2);
+      svg.appendChild(el('rect',{x:x0,y:sy(-RH),width:x1-x0,height:sy(0)-sy(-RH),
+        fill:'var(--head)',stroke:'var(--grid)','stroke-width':LW}));
+      svg.appendChild(txt(cx, sy(-RH)+PAD+FS, COLS[c].label,'middle','',FS));
+      var h=txt(cx, sy(-RH)+PAD+FS+LINE, COLS[c].hint,'middle','',FSM);
+      h.setAttribute('fill','var(--muted)'); svg.appendChild(h);
+    }
+    // угловая ячейка
+    svg.appendChild(el('rect',{x:sx(-CW),y:sy(-RH),width:sx(0)-sx(-CW),
+      height:sy(0)-sy(-RH),fill:'var(--head)',stroke:'var(--grid)','stroke-width':LW}));
+    var cor=txt(sx(0)-PAD, sy(-RH/2)+FSM/2, 'энкодер','end','',FSM);
+    cor.setAttribute('fill','var(--muted)'); svg.appendChild(cor);
+
+    // ---- строки и ячейки ----
+    for(var r=0;r<ROWS.length;r++){
+      var row=ROWS[r], y0=sy(r*RH), y1=sy((r+1)*RH), cy=sy(r*RH+RH/2);
+      svg.appendChild(el('rect',{x:sx(-CW),y:y0,width:sx(0)-sx(-CW),height:y1-y0,
+        fill:'var(--head)',stroke:'var(--grid)','stroke-width':LW}));
+      svg.appendChild(txt(sx(0)-PAD, cy+FS/2-2, row.label,'end','',FS));
+
+      for(var c2=0;c2<COLS.length;c2++){
+        var kind = row[COLS[c2].key==='margin'?'mk':'rk'];
+        var val  = row[COLS[c2].key];
+        var bx=sx(c2*CW), bw=sx((c2+1)*CW)-bx;
+        svg.appendChild(el('rect',{x:bx,y:y0,width:bw,height:y1-y0,
+          fill:COLOR[kind][0],stroke:'var(--grid)','stroke-width':LW}));
+        var v=txt(sx(c2*CW+CW/2), cy+FS/2-1, val,'middle','',
+          kind==='mid'?FS:FS+4);
+        v.setAttribute('fill',COLOR[kind][1]);
+        v.setAttribute('font-weight',kind==='mid'?'500':'700');
+        svg.appendChild(v);
+      }
+    }
+
+    // ---- подсветка диагонали побед ----
+    var diag=[[0,0],[1,1]];
+    for(var d=0; d<diag.length; d++){
+      var c3=diag[d][0], r3=diag[d][1];
+      svg.appendChild(el('rect',{x:sx(c3*CW),y:sy(r3*RH),
+        width:sx((c3+1)*CW)-sx(c3*CW),height:sy((r3+1)*RH)-sy(r3*RH),
+        fill:'none',stroke:'var(--win)','stroke-width':LW*2.4}));
+    }
+    // линия по диагонали: центр (0,0) -> центр (1,1)
+    svg.appendChild(el('line',{x1:sx(0*CW+CW/2),y1:sy(0*RH+RH/2),
+      x2:sx(1*CW+CW/2),y2:sy(1*RH+RH/2),
+      stroke:'var(--win)','stroke-width':LW*1.6,'stroke-dasharray':'6 5'}));
+
+    // подпись диагонали — у хвоста линии, выше строки, справа от центра
+    var dl=txt(sx(0*CW+CW/2)+PAD*2, sy(0)-PAD, 'выигрыш только по диагонали','start','',FSM);
+    dl.setAttribute('fill','var(--win)'); svg.appendChild(dl);
+
+    // ---- стрелка «усреднить» к строке компромисса (подпись у хвоста) ----
+    var ay = sy(2*RH+RH/2);
+    svg.appendChild(el('line',{x1:sx(GRID_W+CW*0.62),y1:ay,
+      x2:sx(GRID_W)+PAD*1.5,y2:ay,
+      stroke:'var(--muted)','stroke-width':LW,'marker-end':'url(#ah)'}));
+    var a1=txt(sx(GRID_W+CW*0.7), ay-PAD, 'среднее','start','',FSM);
+    a1.setAttribute('fill','var(--muted)'); svg.appendChild(a1);
+    var a2=txt(sx(GRID_W+CW*0.7), ay+PAD+FSM, 'по обеим','start','',FSM);
+    a2.setAttribute('fill','var(--muted)'); svg.appendChild(a2);
+
+    // ---- легенда под таблицей ----
+    var ly = sy(GRID_H) + PAD + FS + 8;
+    var items=[['win','сильная сторона'],['lose','провал'],['mid','«средне» = плохо и там, и там']];
+    var lx = sx(-CW);
+    for(var i=0;i<items.length;i++){
+      var box=el('rect',{x:lx,y:ly-FSM,width:FSM,height:FSM,
+        fill:COLOR[items[i][0]][0],stroke:COLOR[items[i][0]][1],'stroke-width':LW});
+      svg.appendChild(box);
+      var lt=txt(lx+FSM+PAD, ly-1, items[i][1],'start','',FSM);
+      lt.setAttribute('fill','var(--muted)'); svg.appendChild(lt);
+      lx += FSM + PAD + items[i][1].length*7 + PAD*4;
+    }
+    var note=txt(sx(-CW), ly+LINE+2,
+      'Колонки не складываются в один балл: margin платит пониманием, ошибка реконструкции — генерацией.',
+      'start','',FSM);
+    note.setAttribute('fill','var(--muted)'); svg.appendChild(note);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она показывает таблицу 2 колонки × 3 строки: ' +
+      'SigLIP — semantic margin 0.38 (сильно), ошибка реконструкции 0.09 (плохо); ' +
+      'VQ — margin 0.05 (плохо), ошибка 0.004 (сильно); компромисс — 0.19 и 0.03 (средне везде). ' +
+      'Победы стоят крест-накрест по диагонали: ни одна строка не выигрывает обе колонки.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

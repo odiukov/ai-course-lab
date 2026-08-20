@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Трасса прогона: три примитива, четвёртый составной, провал, v2</title>
+<style>
+  :root{ --bg:#fbfaf7; --fg:#1b1b1f; --mut:#6a6a72; --line:#3d4a5c; --ok:#2f6f4f; --bad:#b03030; --box:#ffffff; --boxb:#c8cbd2; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14161a; --fg:#eceef2; --mut:#9aa0ab; --line:#8fa3bd; --ok:#6fc292; --bad:#e97a7a; --box:#1e2229; --boxb:#3a4049; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:10px 12px}
+  h2{font-size:15px;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .legend{color:var(--mut);font-size:12px;margin-top:6px}
+  .fail{color:var(--bad);white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Трасса одного прогона: три примитива v1 → составной навык → провал → v2</h2>
+  <div id="host"></div>
+  <div class="legend" id="lg">
+    v1 — первая версия навыка в библиотеке · v2 — переписанный навык после сигнала провала
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные числа кроме холста/шрифтов) ----
+    var PRIM = [
+      {n:'mine_iron',            y:7},
+      {n:'mine_stick',           y:5},
+      {n:'place_crafting_table', y:3}
+    ];
+    var COL = { prim:2, lib:7, search:13, order:19, comp:25, exec:31, loop:31 };
+
+    // ---- одна система координат ----
+    var ORIGIN = {x:150, y:452};      // положение sx(0), sy(0) на холсте
+    var SCALE  = {x:28,  y:44};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y - y*SCALE.y; }
+
+    // ---- пиксельные литералы: холст, отступы подписей, толщины, шрифт ----
+    var W=1000, H=500, PAD=6, LW=1.6, FS=12.5, FSS=11;
+
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('font-size',FS);
+
+    var defs=document.createElementNS(ns,'defs');
+    defs.innerHTML =
+      '<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+      '<path d="M0 0L10 5L0 10z" fill="var(--line)"/></marker>'+
+      '<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+      '<path d="M0 0L10 5L0 10z" fill="var(--bad)"/></marker>';
+    svg.appendChild(defs);
+
+    function el(t,at){ var e=document.createElementNS(ns,t);
+      for(var k in at) e.setAttribute(k,at[k]); svg.appendChild(e); return e; }
+    function txt(px,py,s,anchor,cls){
+      var t=el('text',{x:px,y:py,'text-anchor':anchor||'middle',fill:cls||'var(--fg)'});
+      t.textContent=s; return t;
+    }
+    function box(cx,cy,wx,hy,stroke){
+      el('rect',{x:sx(cx-wx/2),y:sy(cy+hy/2),width:sx(cx+wx/2)-sx(cx-wx/2),
+        height:sy(cy-hy/2)-sy(cy+hy/2),rx:PAD,fill:'var(--box)',
+        stroke:stroke||'var(--boxb)','stroke-width':LW});
+    }
+    function arrow(x1,y1,x2,y2,bad){
+      el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:bad?'var(--bad)':'var(--line)','stroke-width':LW,
+        'marker-end':bad?'url(#ar)':'url(#a)'});
+    }
+
+    // ---- 3 примитива -> make_skill -> библиотека (v1) ----
+    PRIM.forEach(function(p){
+      box(COL.prim,p.y,3.6,1.1);
+      txt(sx(COL.prim),sy(p.y)+PAD*0.7,p.n);
+      arrow(COL.prim+1.9,p.y,COL.lib-1.9,p.y);
+      txt(sx(COL.lib),sy(p.y)+PAD*0.7,'v1','middle','var(--ok)');
+    });
+    txt(sx(COL.prim),sy(PRIM[2].y)-SCALE.y*0.85,'три примитива','middle','var(--mut)');
+    txt(sx((COL.prim+COL.lib)/2),sy(PRIM[1].y)-PAD*2.2,'make_skill','middle','var(--mut)');
+
+    // библиотека: 3 записи v1
+    box(COL.lib,PRIM[1].y,2.0,3.5,'var(--ok)');
+    txt(sx(COL.lib),sy(PRIM[2].y+0.95),'библиотека','middle','var(--mut)');
+    txt(sx(COL.lib),sy(PRIM[2].y+0.95)+FSS*1.15,'3 записи','middle','var(--mut)');
+
+    // ---- задача -> search_skills (top-3) ----
+    var YT = 10;                       // ряд запроса
+    box(COL.prim,YT,4.6,1.15);
+    txt(sx(COL.prim),sy(YT)+PAD*0.7,'задача: железная кирка');
+    arrow(COL.prim+2.4,YT,COL.search-1.7,YT);
+
+    box(COL.search,YT,3.4,1.15);
+    txt(sx(COL.search),sy(YT)+PAD*0.7,'search_skills');
+    // стрелка из библиотеки в поиск, а не из всей библиотеки в промпт
+    arrow(COL.lib+1.1,PRIM[1].y+0.3,COL.search-1.1,YT-0.75);
+    txt(sx(COL.lib)+PAD*1.6,sy(PRIM[1].y+1.3),'top-3','start','var(--mut)');
+
+    // ---- dependency_order -> compose_skill ----
+    arrow(COL.search+1.8,YT,COL.order-2.0,YT);
+    box(COL.order,YT,3.9,1.15);
+    txt(sx(COL.order),sy(YT)+PAD*0.7,'dependency_order');
+    txt(sx(COL.order),sy(YT)-PAD*1.9,'3 кандидата, стол раньше крафта','middle','var(--mut)');
+
+    arrow(COL.order+2.1,YT,COL.comp-1.7,YT);
+    box(COL.comp,YT,3.3,1.15);
+    txt(sx(COL.comp),sy(YT)+PAD*0.7,'compose_skill');
+    txt(sx(COL.comp),sy(YT)+SCALE.y*0.72,'4-й навык:','middle','var(--mut)');
+    txt(sx(COL.comp),sy(YT)+SCALE.y*0.72+FSS*1.2,'4 строки, версии прибиты','middle','var(--mut)');
+
+    // ---- execute_skill: провал ----
+    arrow(COL.comp+1.8,YT,COL.exec-1.9,YT,true);
+    box(COL.exec,YT,3.7,1.15,'var(--bad)');
+    txt(sx(COL.exec),sy(YT)+PAD*0.7,'execute_skill','middle','var(--bad)');
+    txt(sx(COL.exec),sy(YT)-PAD*1.9,'error + стек-трейс','middle','var(--bad)');
+    txt(sx(COL.exec),sy(YT)+SCALE.y*0.72,'self-verification failure:','middle','var(--bad)');
+    txt(sx(COL.exec),sy(YT)+SCALE.y*0.72+FSS*1.2,'код отработал, кирки нет','middle','var(--bad)');
+
+    // петля доработки: вниз, влево, вверх обратно в compose_skill
+    var YL = YT - 2.5;
+    el('path',{d:'M'+sx(COL.exec+1.9)+' '+sy(YT)+
+      ' L'+sx(COL.exec+2.9)+' '+sy(YT)+
+      ' L'+sx(COL.exec+2.9)+' '+sy(YL)+
+      ' L'+sx(COL.comp)+' '+sy(YL)+
+      ' L'+sx(COL.comp)+' '+sy(YT-0.65),
+      fill:'none',stroke:'var(--bad)','stroke-width':LW,
+      'stroke-dasharray':'6 4','marker-end':'url(#ar)'});
+    txt(sx(COL.exec+2.7),sy(YL)-PAD,'сигнал как контекст: перепиши навык','end','var(--bad)');
+
+    // ---- v2 составного навыка в библиотеку ----
+    var YV = YT + 1.6;
+    arrow(COL.comp,YT+0.65,COL.comp,YV-0.55);
+    box(COL.comp,YV,3.3,1.05,'var(--ok)');
+    txt(sx(COL.comp),sy(YV)+PAD*0.6,'составной навык v2','middle','var(--ok)');
+    el('line',{x1:sx(COL.comp-1.7),y1:sy(YV),x2:sx(COL.lib+1.0),y2:sy(YV),
+      stroke:'var(--ok)','stroke-width':LW,'marker-end':'url(#a)'});
+    txt(sx(COL.lib+1.2),sy(YV)-PAD*1.7,'в библиотеку','start','var(--ok)');
+
+    // вывод шага
+    txt(sx(COL.prim-1.7),sy(PRIM[0].y+1.9),
+      'три примитива остались v1 — поумнел только тот слой, что провалился','start','var(--mut)')
+      .setAttribute('font-size',FSS);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна была показать: '+
+      'три примитива (mine_iron, mine_stick, place_crafting_table) проходят make_skill '+
+      'и ложатся в библиотеку как v1 — три записи. Задача «железная кирка» идёт в '+
+      'search_skills, оттуда top-3 кандидата, dependency_order ставит стол раньше крафта, '+
+      'compose_skill пишет 4-й навык из четырёх строк с прибитыми версиями. '+
+      'execute_skill возвращает error со стек-трейсом и self-verification failure '+
+      '(код отработал, кирки нет). Петля доработки возвращает сигнал в compose_skill, '+
+      'и в библиотеке появляется v2 составного навыка — при этом три примитива остаются v1.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

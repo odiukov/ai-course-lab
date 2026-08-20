@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Три вида данных, три бэкенда</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5c6570;
+    --line:#3d4752; --box:#f2f4f7; --stroke:#8a94a0;
+    --a1:#1f6feb; --a2:#0f8a5f; --a3:#b4530a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171a; --fg:#e8ecf1; --muted:#a0a9b4;
+      --line:#c3ccd6; --box:#1f242a; --stroke:#5c6570;
+      --a1:#6fb0ff; --a2:#54d19b; --a3:#f0a55a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);}
+  .wrap{background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:8px 4px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;text-align:center;}
+  svg{display:block;width:100%;max-height:520px;height:auto;}
+  .fail{color:var(--muted);font-size:13px;padding:6px 10px;}
+  text{fill:var(--fg);}
+  text.m{fill:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Одно приложение Mastra — три хранилища под три профиля доступа</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var runtime = { at:[0,3], label:'Приложение Mastra' };
+
+    var lanes = [
+      { key:'u1', tail:[2,5], head:[8,5], box:[8,5],
+        arrow:'Память диалогов', store:'Postgres',
+        note:'строк мало · чтение по id · транзакции', color:'var(--a1)' },
+      { key:'u2', tail:[2,3], head:[8,3], box:[8,3],
+        arrow:'Состояние процессов', store:'своё хранилище',
+        note:'единичные записи · переживают перезапуск', color:'var(--a2)' },
+      { key:'u3', tail:[2,1], head:[8,1], box:[8,1],
+        arrow:'Трассы', store:'ClickHouse',
+        note:'миллионы строк в час · только запись и агрегация', color:'var(--a3)' }
+    ];
+
+    // ---- холст (литералы: размеры) ----
+    var W = 880, H = 400;
+    var PAD = 6;          // отступ подписи от точки привязки, px
+    var LW = 2;           // толщина линий
+    var FS = 13;          // размер шрифта
+
+    // ---- один origin, один scale, одна пара переводчиков ----
+    var origin = { x:150, y:340 };
+    var scale  = { x:78,  y:62  };
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,'font-size':FS,
+        'font-family':'-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif'});
+      if(cls) t.setAttribute('class',cls);
+      if(weight) t.setAttribute('font-weight',weight);
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,
+      preserveAspectRatio:'xMidYMid meet',role:'img'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    // ---- рантайм: одна коробка на все три стрелки ----
+    var rTop = sy(runtime.at[1]+2.1), rBot = sy(runtime.at[1]-2.1);
+    var rL   = sx(runtime.at[0]-1.55), rR = sx(runtime.at[0]);
+    svg.appendChild(el('rect',{x:rL,y:rTop,width:rR-rL,height:rBot-rTop,
+      rx:sx(0.14)-sx(0),fill:'var(--box)',stroke:'var(--stroke)','stroke-width':LW}));
+    svg.appendChild(txt((rL+rR)/2, sy(runtime.at[1])+FS*0.35,
+      runtime.label,'middle',null,'600'));
+
+    // ---- три дорожки ----
+    lanes.forEach(function(L){
+      var x0=sx(L.tail[0]), y0=sy(L.tail[1]);
+      var x1=sx(L.head[0]), y1=sy(L.head[1]);
+
+      // от коробки к хвосту стрелки
+      svg.appendChild(el('line',{x1:rR,y1:sy(runtime.at[1]),x2:x0,y2:y0,
+        stroke:L.color,'stroke-width':LW,fill:'none'}));
+
+      // стрелка
+      var hx = sx(L.head[0]-0.34);
+      svg.appendChild(el('line',{x1:x0,y1:y0,x2:hx,y2:y1,
+        stroke:L.color,'stroke-width':LW}));
+      svg.appendChild(el('polygon',{
+        points:[ sx(L.head[0])+','+sy(L.head[1]),
+                 sx(L.head[0]-0.34)+','+sy(L.head[1]+0.17),
+                 sx(L.head[0]-0.34)+','+sy(L.head[1]-0.17) ].join(' '),
+        fill:L.color}));
+
+      // подпись стрелки — у хвоста, над линией
+      svg.appendChild(txt(x0+PAD, y0-PAD, L.arrow,'start',null,'600'));
+      // характер доступа — под линией, у того же хвоста
+      svg.appendChild(txt(x0+PAD, y0+PAD+FS, L.note,'start','m'));
+
+      // коробка хранилища справа
+      var bT=sy(L.box[1]+0.5), bB=sy(L.box[1]-0.5);
+      var bL=sx(L.box[0]), bR=sx(L.box[0]+1.55);
+      svg.appendChild(el('rect',{x:bL,y:bT,width:bR-bL,height:bB-bT,
+        rx:sx(0.14)-sx(0),fill:'var(--box)',stroke:L.color,'stroke-width':LW}));
+      svg.appendChild(txt((bL+bR)/2, sy(L.box[1])+FS*0.35,
+        L.store,'middle',null,'600'));
+    });
+
+    // ---- вывод внизу, привязан к точке сетки ----
+    svg.appendChild(txt(sx(0.2), sy(-0.55),
+      'Первые две стрелки — «найди эту строку». Третья — «просуммируй столбец за сутки».',
+      'start','m'));
+
+    svg.appendChild(txt(sx(0.2), sy(-1.0),
+      'Склеить в одну базу = выиграть одну задачу из трёх.','start','m'));
+
+    host.appendChild(svg);
+  } catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать: от одного '+
+      'приложения Mastra идут три стрелки в три разных хранилища. '+
+      'Память диалогов (мало строк, чтение по id, транзакции) — в Postgres. '+
+      'Состояние процессов (единичные записи, переживают перезапуск) — в своё '+
+      'хранилище. Трассы (миллионы строк в час, только запись и агрегация) — '+
+      'в ClickHouse. Первые две — «найди эту строку», третья — «просуммируй '+
+      'столбец за сутки»; одна база проиграет по двум задачам из трёх.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

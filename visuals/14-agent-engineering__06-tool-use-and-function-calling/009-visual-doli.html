@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>BFCL V4: раскладка оценки</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1c1e21;
+    --muted: #5c6470;
+    --line: #9aa3ae;
+    --agentic: #2f6fbd;
+    --multi: #4b93da;
+    --live: #b9c2cc;
+    --nonlive: #d8dee5;
+    --hall: #a6aeb8;
+    --ring: #e0762a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --fg: #e8ebef;
+      --muted: #a4adb8;
+      --line: #6e7885;
+      --agentic: #4d8fe0;
+      --multi: #79b0ea;
+      --live: #59626d;
+      --nonlive: #3d444d;
+      --hall: #6b7480;
+      --ring: #f0913f;
+    }
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  .wrap { background: var(--bg); color: var(--fg); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 6px 0 2px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-align: center; }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; margin: 0 auto; }
+  .fail { color: var(--muted); font-size: 13px; line-height: 1.5; padding: 8px 14px; }
+  text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>BFCL V4: где стоят баллы</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById('host');
+  try {
+    // ---- данные схемы -------------------------------------------------
+    var DATA = [
+      { key: 'agentic',  label: 'agentic',      pct: 40, fill: 'var(--agentic)', multi: true  },
+      { key: 'multi',    label: 'multi-turn',   pct: 30, fill: 'var(--multi)',   multi: true  },
+      { key: 'live',     label: 'live',         pct: 10, fill: 'var(--live)',    multi: false },
+      { key: 'nonlive',  label: 'non-live',     pct: 10, fill: 'var(--nonlive)', multi: false },
+      { key: 'hall',     label: 'hallucination',pct: 10, fill: 'var(--hall)',    multi: false }
+    ];
+    var TOTAL = 100;
+    var MULTI_PCT = 70;
+
+    // ---- холст (литералы) ---------------------------------------------
+    var VB_W = 760, VB_H = 400;
+    var LABEL_GAP = 8;      // отступ подписи от точки привязки, px
+    var STROKE = 1.5;
+    var FONT = 13, FONT_SM = 12, FONT_BIG = 15;
+
+    // ---- одно origin, один scale --------------------------------------
+    var ORIGIN = { x: 250, y: 200 };  // центр круга в пикселях
+    var SCALE = 130;                  // пикселей на единицу схемной системы
+    function sx(x) { return ORIGIN.x + x * SCALE; }
+    function sy(y) { return ORIGIN.y - y * SCALE; }
+
+    // всё остальное — в единицах схемы
+    var R = 1;            // радиус круга
+    var R_RING = 1.14;    // радиус дуги подсветки
+    var R_TICK = 1.04;    // старт выноски
+    var R_LAB = 1.22;     // точка привязки подписи сектора
+    var R_MID = 0.62;     // подпись процента внутри сектора
+    var LEG_X = 1.95;     // легенда: левый край текста
+    var LEG_Y0 = 0.92;    // легенда: первая строка
+    var LEG_DY = 0.24;    // шаг строк легенды
+    var LEG_SW = 0.115;   // ширина плашки цвета
+    var LEG_SH = 0.085;
+
+    function ang(pct) { return (pct / TOTAL) * 2 * Math.PI - Math.PI / 2; }
+    function px(a, r) { return { x: sx(Math.cos(a) * r), y: sy(Math.sin(a) * r) }; }
+
+    var ns = 'http://www.w3.org/2000/svg';
+    function el(n, at) {
+      var e = document.createElementNS(ns, n);
+      for (var k in at) e.setAttribute(k, at[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, size, fill, weight) {
+      var t = el('text', {
+        x: x, y: y, 'text-anchor': anchor, 'font-size': size,
+        fill: fill || 'var(--fg)', 'dominant-baseline': 'middle',
+        'font-weight': weight || '400'
+      });
+      t.textContent = s;
+      return t;
+    }
+    function arc(r, from, to, fill, stroke) {
+      var a0 = ang(from), a1 = ang(to);
+      var p0 = px(a0, r), p1 = px(a1, r);
+      var big = (to - from) / TOTAL > 0.5 ? 1 : 0;
+      var rx = sx(r) - sx(0), ry = sy(0) - sy(r);
+      var d = 'M ' + sx(0) + ' ' + sy(0) + ' L ' + p0.x + ' ' + p0.y +
+              ' A ' + rx + ' ' + ry + ' 0 ' + big + ' 1 ' + p1.x + ' ' + p1.y + ' Z';
+      return el('path', { d: d, fill: fill, stroke: stroke, 'stroke-width': STROKE });
+    }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + VB_W + ' ' + VB_H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img'
+    });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: VB_W, height: VB_H, fill: 'var(--bg)' }));
+
+    // ---- сектора ------------------------------------------------------
+    var acc = 0, i, d, seg = [];
+    for (i = 0; i < DATA.length; i++) {
+      d = DATA[i];
+      seg.push({ d: d, from: acc, to: acc + d.pct });
+      acc += d.pct;
+    }
+    for (i = 0; i < seg.length; i++) {
+      svg.appendChild(arc(R, seg[i].from, seg[i].to, seg[i].d.fill, 'var(--bg)'));
+    }
+
+    // ---- дуга подсветки 70% -------------------------------------------
+    var ra = ang(0), rb = ang(MULTI_PCT);
+    var pa = px(ra, R_RING), pb = px(rb, R_RING);
+    var rrx = sx(R_RING) - sx(0), rry = sy(0) - sy(R_RING);
+    svg.appendChild(el('path', {
+      d: 'M ' + pa.x + ' ' + pa.y + ' A ' + rrx + ' ' + rry + ' 0 1 1 ' + pb.x + ' ' + pb.y,
+      fill: 'none', stroke: 'var(--ring)', 'stroke-width': STROKE * 2.4,
+      'stroke-linecap': 'round'
+    }));
+    // засечки на концах дуги
+    [ra, rb].forEach(function (a) {
+      var i0 = px(a, R), i1 = px(a, R_RING);
+      svg.appendChild(el('line', {
+        x1: i0.x, y1: i0.y, x2: i1.x, y2: i1.y,
+        stroke: 'var(--ring)', 'stroke-width': STROKE * 1.4
+      }));
+    });
+    // подпись дуги — сбоку от её середины, справа, anchor start
+    var mid = px(ang(MULTI_PCT / 2), R_RING);
+    svg.appendChild(txt(mid.x + LABEL_GAP * 2, mid.y - LABEL_GAP * 2,
+      'многоходовые 70%', 'start', FONT_BIG, 'var(--ring)', '600'));
+
+    // ---- проценты внутри секторов -------------------------------------
+    for (i = 0; i < seg.length; i++) {
+      var s = seg[i];
+      var pm = px(ang((s.from + s.to) / 2), R_MID);
+      if (s.d.pct >= 30) {
+        svg.appendChild(txt(pm.x, pm.y, s.d.pct + '%', 'middle', FONT_BIG, 'var(--bg)', '600'));
+      }
+    }
+
+    // ---- выноски и подписи секторов -----------------------------------
+    for (i = 0; i < seg.length; i++) {
+      var sg = seg[i];
+      var a = ang((sg.from + sg.to) / 2);
+      var t0 = px(a, R_TICK), t1 = px(a, R_LAB);
+      var right = Math.cos(a) >= 0;
+      var anchor = right ? 'start' : 'end';
+      var dx = right ? LABEL_GAP : -LABEL_GAP;
+      var name = sg.d.label + (sg.d.pct < 30 ? ' — ' + sg.d.pct + '%' : '');
+      if (sg.d.pct >= 30) {
+        svg.appendChild(el('line', {
+          x1: t0.x, y1: t0.y, x2: t1.x, y2: t1.y,
+          stroke: 'var(--line)', 'stroke-width': STROKE
+        }));
+        svg.appendChild(txt(t1.x + dx, t1.y, sg.d.label, anchor, FONT, 'var(--fg)', '600'));
+      } else {
+        // мелкие сектора: выноска наружу, подписи разведены по строкам легенды
+        svg.appendChild(el('line', {
+          x1: t0.x, y1: t0.y, x2: t1.x, y2: t1.y,
+          stroke: 'var(--line)', 'stroke-width': STROKE
+        }));
+        svg.appendChild(txt(t1.x + dx, t1.y, sg.d.pct + '%', anchor, FONT_SM, 'var(--muted)'));
+      }
+      sg.name = name;
+    }
+
+    // ---- легенда справа -----------------------------------------------
+    for (i = 0; i < seg.length; i++) {
+      var y = LEG_Y0 - i * LEG_DY;
+      var sw = sx(LEG_X + LEG_SW) - sx(LEG_X);
+      var sh = sy(y - LEG_SH) - sy(y);
+      svg.appendChild(el('rect', {
+        x: sx(LEG_X), y: sy(y), width: sw, height: sh,
+        fill: seg[i].d.fill, stroke: 'var(--line)', 'stroke-width': STROKE * 0.6
+      }));
+      svg.appendChild(txt(sx(LEG_X + LEG_SW) + LABEL_GAP, sy(y) + sh / 2,
+        seg[i].d.label + ' — ' + seg[i].d.pct + '%', 'start', FONT,
+        seg[i].d.multi ? 'var(--fg)' : 'var(--muted)',
+        seg[i].d.multi ? '600' : '400'));
+    }
+    // пояснение под легендой
+    var yb = LEG_Y0 - DATA.length * LEG_DY - LEG_DY * 0.55;
+    svg.appendChild(txt(sx(LEG_X), sy(yb),
+      'agentic + multi-turn = 70% оценки', 'start', FONT_SM, 'var(--ring)', '600'));
+    svg.appendChild(txt(sx(LEG_X), sy(yb - LEG_DY * 0.72),
+      'одиночный вызов: только non-live, 10%', 'start', FONT_SM, 'var(--muted)'));
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<p class="fail">Схема должна была показать круговую диаграмму BFCL V4: ' +
+      'agentic 40%, multi-turn 30%, live 10%, non-live 10%, hallucination 10%. ' +
+      'Сектора agentic и multi-turn подсвечены вместе как «многоходовые 70%»; ' +
+      'на одиночный вызов остаётся только non-live — 10%.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

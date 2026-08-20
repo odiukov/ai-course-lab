@@ -1,0 +1,179 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Три входных потока LayoutLMv3</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1d2233; --muted:#5b6478;
+    --line:#3f4a63; --box:#ffffff; --boxb:#8892a8;
+    --txt:#2f6f4f; --txtb:#d8ecdf;
+    --bx:#8a5a1a; --bxb:#f3e2c4;
+    --img:#3a4f8a; --imgb:#dbe3f6;
+    --acc:#7a3f8a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161d; --fg:#e8ebf2; --muted:#a3adc2;
+      --line:#a9b4cc; --box:#1c2130; --boxb:#5e6b86;
+      --txt:#8fe0b4; --txtb:#1e3párt;
+      --bx:#e9c188; --bxb:#3a2f1c;
+      --img:#a8bcf0; --imgb:#1e263c;
+      --acc:#d9a6e8;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 12px 12px;
+    font:14px/1.35 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  h3{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto}
+  .fb{display:none;color:var(--muted);font-size:13px}
+  text{font:15px -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;fill:var(--fg)}
+  text.s{font-size:13px;fill:var(--muted)}
+  text.k{font-size:13px}
+  .ln{stroke:var(--line);fill:none}
+  .hd{fill:var(--line)}
+  .bx{fill:var(--box);stroke:var(--boxb)}
+  .qb{fill:var(--imgb);stroke:none}
+  .tb{fill:var(--txtb);stroke:none}
+</style>
+<div class="wrap">
+  <h3>Три потока входа сходятся в одну очередь векторов</h3>
+  <div id="fb" class="fb">Токены OCR (47 слов), bbox по 4 числа и 196 патчей 16×16 складываются
+    в одну очередь из 243 векторов: bbox приклеивается к слову, патч тоже несёт рамку,
+    и всё это идёт в один трансформер.</div>
+  <svg id="d" viewBox="0 0 900 455" role="img"
+       aria-label="Три входных потока LayoutLMv3 сходятся в один трансформер"></svg>
+</div>
+<script>
+(function(){
+try{
+  var DATA = {
+    streams:[
+      {x0:0,y0:3, x1:28,y1:14, cls:"img", lines:["патчи 16×16 из 224×224","196 патчей","у каждого своя рамка"]},
+      {x0:0,y0:19,x1:28,y1:27, cls:"txt", lines:["токены OCR","47 слов"]},
+      {x0:0,y0:31,x1:28,y1:39, cls:"bx",  lines:["bbox: 4 числа","0..1000 на слово"]}
+    ],
+    sum:{x:36,y:29,r:2.4},
+    queue:{x0:48,y0:3,x1:68,y1:39,split:30,bx0:50,bx1:66},
+    tf:{x0:78,y0:15,x1:96,y1:27,lines:["Трансформер","внимание по смыслу","и по месту"]},
+    legend:[
+      "⊕ — рамка не отдельный вход: складывается со словом в один вектор «что + где»",
+      "Общая шкала для всех трёх потоков — координаты на странице"
+    ]
+  };
+
+  var origin = {x:14, y:16}, scale = 9;
+  function sx(x){ return origin.x + x*scale; }
+  function sy(y){ return origin.y + y*scale; }
+
+  var svg = document.getElementById("d"), NS = "http://www.w3.org/2000/svg";
+  function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); svg.appendChild(e); return e; }
+  function rect(x0,y0,x1,y1,cls,r){
+    return el("rect",{x:sx(x0),y:sy(y0),width:sx(x1)-sx(x0),height:sy(y1)-sy(y0),
+                      rx:(r===undefined?4:r),class:cls,"stroke-width":1.5});
+  }
+  function txt(x,y,s,anchor,cls,dx,dy){
+    var t=el("text",{x:sx(x)+(dx||0),y:sy(y)+(dy||0),"text-anchor":anchor,class:cls||""});
+    t.textContent=s; return t;
+  }
+  function arrow(a,b,color){
+    var dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy), ux=dx/L, uy=dy/L;
+    var hl=1.6, hw=0.85, base={x:b.x-ux*hl, y:b.y-uy*hl};
+    el("line",{x1:sx(a.x),y1:sy(a.y),x2:sx(base.x),y2:sy(base.y),class:"ln","stroke-width":1.8});
+    var p1={x:base.x-uy*hw, y:base.y+ux*hw}, p2={x:base.x+uy*hw, y:base.y-ux*hw};
+    el("polygon",{points:[sx(b.x)+","+sy(b.y), sx(p1.x)+","+sy(p1.y), sx(p2.x)+","+sy(p2.y)].join(" "),
+                  class:"hd"});
+  }
+
+  /* три входных блока */
+  DATA.streams.forEach(function(s){
+    rect(s.x0,s.y0,s.x1,s.y1,"bx");
+    s.lines.forEach(function(t,i){
+      txt((s.x0+s.x1)/2, s.y0+3.2+i*3.2, t, "middle", i===0?"":"s");
+    });
+  });
+
+  /* очередь: 243 вектора, две зоны */
+  var q=DATA.queue;
+  rect(q.x0,q.y0,q.x1,q.split,"qb");
+  rect(q.x0,q.split,q.x1,q.y1,"tb");
+  rect(q.x0,q.y0,q.x1,q.y1,"bx");
+  el("line",{x1:sx(q.x0),y1:sy(q.split),x2:sx(q.x1),y2:sy(q.split),class:"ln","stroke-width":1.2});
+  for(var i=0;i<8;i++) rect(q.bx0, 5+i*3, q.bx1, 5+i*3+1.4, "bx", 2);
+  for(var j=0;j<3;j++) rect(q.bx0, 31.3+j*2.4, q.bx1, 31.3+j*2.4+1.4, "bx", 2);
+  txt((q.x0+q.x1)/2, 1, "одна очередь, 243 вектора", "middle", "");
+  txt(q.x1, 16, "196", "start", "s", 6, 0);
+  txt(q.x1, 34.5, "47", "start", "s", 6, 0);
+
+  /* сумматор слово + рамка */
+  var c=DATA.sum;
+  el("circle",{cx:sx(c.x),cy:sy(c.y),r:c.r*scale,class:"bx","stroke-width":1.5});
+  var plus=txt(c.x,c.y,"⊕","middle","",0,0);
+  plus.setAttribute("dominant-baseline","central");
+  plus.setAttribute("font-size","20");
+  txt(c.x, c.y+4.2, "сложение", "middle", "s");
+
+  /* стрелки */
+  function edgeToCircle(a){
+    var dx=c.x-a.x, dy=c.y-a.y, L=Math.hypot(dx,dy);
+    return {x:c.x-dx/L*c.r, y:c.y-dy/L*c.r};
+  }
+  var pA={x:28,y:23}, pB={x:28,y:35};
+  arrow(pA, edgeToCircle(pA));
+  arrow(pB, edgeToCircle(pB));
+  arrow({x:c.x+c.r,y:c.y}, {x:q.x0,y:33.5});
+  arrow({x:28,y:8.5}, {x:q.x0,y:8.5});
+  txt((28+q.x0)/2, 7, "векторы той же длины", "middle", "s");
+  arrow({x:q.x1,y:21}, {x:DATA.tf.x0,y:21});
+
+  /* трансформер */
+  var t=DATA.tf;
+  rect(t.x0,t.y0,t.x1,t.y1,"bx");
+  t.lines.forEach(function(s,i){
+    txt((t.x0+t.x1)/2, t.y0+3.2+i*3.2, s, "middle", i===0?"":"s");
+  });
+
+  /* легенда */
+  DATA.legend.forEach(function(s,i){
+    txt(0, 42.5+i*3, s, "start", "k");
+  });
+}catch(e){
+  var s=document.getElementById("d"); if(s) s.style.display="none";
+  var f=document.getElementById("fb"); if(f) f.style.display="block";
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

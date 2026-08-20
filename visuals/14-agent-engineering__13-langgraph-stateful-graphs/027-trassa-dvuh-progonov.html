@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Трасса: падение на шлюзе и возобновление</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --fg:#1d2026; --mut:#6b7280; --line:#4a5160;
+    --nodef:#ffffff; --nodes:#3f4653; --cp:#a05d00; --stop:#b3261e; --ok:#1f7a4d;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8eaee; --mut:#9aa3b0; --line:#98a2b0;
+      --nodef:#1e2229; --nodes:#8b96a5; --cp:#e0a458; --stop:#ef8078; --ok:#6fcf97;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);
+       font-family:ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif}
+  figure{margin:0;padding:10px 12px 12px;background:var(--bg)}
+  figcaption{font-size:13px;font-weight:600;letter-spacing:.01em;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:460px;background:var(--bg)}
+  #fb{font-size:13px;line-height:1.5;color:var(--fg)}
+  #fb[hidden]{display:none}
+  text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .head{font-size:12.5px;font-weight:700;fill:var(--fg)}
+  .lbl{font-size:12.5px;fill:var(--fg)}
+  .cp{font-size:11.5px;fill:var(--cp)}
+  .note{font-size:11.5px;fill:var(--mut)}
+  .ok{font-size:11.5px;fill:var(--ok)}
+  .stop{font-size:11.5px;fill:var(--stop)}
+  .gap{font-size:11.5px;fill:var(--mut)}
+  rect.node{fill:var(--nodef);stroke:var(--nodes);stroke-width:1.2}
+  rect.box{fill:none;stroke:var(--ok);stroke-width:1.2}
+  line.edge{stroke:var(--line);stroke-width:1.2}
+  line.tick{stroke:var(--line);stroke-width:1}
+  line.div{stroke:var(--mut);stroke-width:1.2}
+  polygon.ah{fill:var(--line);stroke:none}
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>Одна session_id = s-42: прогон обрывается на шлюзе, второй стартует с чекпоинта</figcaption>
+  <svg id="d" viewBox="0 0 880 400" role="img"
+       aria-label="Две трассы одного session_id: первый прогон и возобновление"></svg>
+  <div id="fb" hidden></div>
+</figure>
+<script>
+(function(){
+  var SVG=document.getElementById('d'), FB=document.getElementById('fb');
+  try{
+    var SCALE=34, OX=30, OY=26;
+    var sx=function(v){return OX+v*SCALE;};
+    var sy=function(v){return OY+v*SCALE;};
+
+    var LEFT ={spine:0.9,  x0:1.3,  x1:11.3, tx:1.6};
+    var RIGHT={spine:12.9, x0:13.3, x1:23.3, tx:13.6};
+    var DIV=12.35, CROSS=11.75, HH=0.42;
+
+    var left=[
+      {y:0.3,  k:'head', t:'Прогон 1 — процесс жив'},
+      {y:1.6,  k:'node', t:'1 · classify → {"route": "refund"}'},
+      {y:3.0,  k:'cp',   t:'checkpoint #1, session=s-42'},
+      {y:4.3,  k:'node', t:'2 · refund'},
+      {y:5.7,  k:'cp',   t:'checkpoint #2'},
+      {y:7.0,  k:'node', t:'3 · human gate · awaiting_approval: true'},
+      {y:8.4,  k:'cp',   t:'checkpoint #3'},
+      {y:9.7,  k:'stop', t:'× процесс завершён · human_approval пусто'},
+      {y:10.4, k:'note', t:'в памяти — ничего'}
+    ];
+    var right=[
+      {y:0.3,  k:'head', t:'Прогон 2 — через 2 часа'},
+      {y:1.6,  k:'box',  t:'load_checkpoint("s-42")'},
+      {y:3.0,  k:'ok',   t:'resume(): awaiting_approval → false'},
+      {y:4.3,  k:'ok',   t:'next_node: route = "refund"'},
+      {y:5.7,  k:'node', t:'4 · send'},
+      {y:7.0,  k:'cp',   t:'checkpoint #4'},
+      {y:8.4,  k:'box',  t:'END'},
+      {y:9.7,  k:'note', t:'счётчик продолжается с 4: classify не повторился'}
+    ];
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function put(e,t){if(t!=null)e.textContent=t;SVG.appendChild(e);return e;}
+    var DASH=(sx(0.2)-sx(0))+' '+(sx(0.16)-sx(0));
+
+    function text(x,y,t,cls,anchor,dxpx,dypx){
+      return put(el('text',{x:sx(x)+(dxpx||0),y:sy(y)+(dypx||0),
+        'class':cls,'text-anchor':anchor||'start'}),t);
+    }
+    function rect(x0,y0,x1,y1,cls){
+      var r=el('rect',{x:sx(x0),y:sy(y0),width:sx(x1)-sx(x0),height:sy(y1)-sy(y0),'class':cls});
+      if(cls==='box')r.setAttribute('stroke-dasharray',DASH);
+      return put(r);
+    }
+    function seg(x1,y1,x2,y2,cls,dash){
+      var l=el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),'class':cls});
+      if(dash)l.setAttribute('stroke-dasharray',DASH);
+      return put(l);
+    }
+    function arrow(x1,y1,x2,y2){
+      seg(x1,y1,x2,y2,'edge');
+      var dx=x2-x1, dy=y2-y1, L=Math.hypot(dx,dy)||1;
+      var ux=dx/L, uy=dy/L, px=-uy, py=ux, h=0.3, w=0.13;
+      var bx=x2-ux*h, by=y2-uy*h;
+      var pts=[[bx+px*w,by+py*w],[bx-px*w,by-py*w],[x2,y2]]
+        .map(function(q){return sx(q[0])+','+sy(q[1]);}).join(' ');
+      put(el('polygon',{points:pts,'class':'ah'}));
+    }
+
+    function column(items,c){
+      items.forEach(function(it){
+        if(it.k==='node'||it.k==='box'){
+          rect(c.x0,it.y-HH,c.x1,it.y+HH,it.k);
+          text(c.tx,it.y,it.t,'lbl','start',0,4);
+        }else if(it.k==='head'){
+          text(c.spine,it.y,it.t,'head','start',0,4);
+        }else{
+          text(c.tx,it.y,it.t,it.k,'start',0,4);
+        }
+      });
+      var flow=items.filter(function(i){return i.k!=='head'&&i.k!=='note';});
+      flow.forEach(function(i){seg(c.spine,i.y,c.x0,i.y,'tick');});
+      for(var i=0;i<flow.length-1;i++) arrow(c.spine,flow[i].y,c.spine,flow[i+1].y);
+    }
+
+    column(left,LEFT);
+    column(right,RIGHT);
+
+    seg(DIV,0.1,DIV,10.4,'div',true);
+    var g=text(DIV,5.5,'разрыв 2 часа · процесс мёртв','gap','middle',0,-5);
+    g.setAttribute('transform','rotate(-90 '+sx(DIV)+' '+sy(5.5)+')');
+
+    seg(LEFT.x1,8.4,CROSS,8.4,'edge');
+    seg(CROSS,8.4,CROSS,1.6,'edge');
+    arrow(CROSS,1.6,RIGHT.spine,1.6);
+    text(LEFT.x1,8.9,'s-42 лежит в чекпоинтере','note','end',0,4);
+  }catch(e){
+    SVG.setAttribute('hidden','');
+    FB.hidden=false;
+    FB.textContent='Схема не построилась. Она должна показывать две трассы одного '+
+      'session_id = s-42. Прогон 1: узел 1 classify → route "refund" → checkpoint #1 '+
+      '(session=s-42); узел 2 refund → checkpoint #2; узел 3 human gate ставит '+
+      'awaiting_approval: true → checkpoint #3 — и процесс завершается, human_approval '+
+      'пусто, в памяти не остаётся ничего. Разрыв: 2 часа, процесс мёртв, состояние '+
+      'живёт только в чекпоинтере под ключом s-42. Прогон 2: load_checkpoint("s-42") → '+
+      'resume() снимает awaiting_approval → next_node видит route = "refund" → узел 4 '+
+      'send → checkpoint #4 → END. Счётчик узлов продолжается с 4: classify не повторился.';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

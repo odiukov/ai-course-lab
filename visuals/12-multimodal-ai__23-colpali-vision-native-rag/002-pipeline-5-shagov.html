@@ -1,0 +1,148 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Пять шагов с потерями</title>
+<style>
+  :root{
+    --bg:#fbfbf9; --fg:#1c1c1e; --dim:#5d6068; --line:#3a3f47;
+    --box:#ffffff; --boxline:#2f3540; --loss:#b03030; --lossbg:#fdf0ee;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15181d; --fg:#e9eaee; --dim:#9aa0ab; --line:#a9b0bb;
+      --box:#1e232b; --boxline:#8b93a0; --loss:#f2837a; --lossbg:#2a1e1f;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 12px;
+    font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:492px}
+  text{font:11px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;fill:var(--fg)}
+  .t-dim{fill:var(--dim);font-size:10px}
+  .t-loss{fill:var(--loss);font-size:10px}
+  .t-step{font-size:10px;fill:var(--dim)}
+  .t-hd{font-size:11px;font-weight:600}
+  .box{fill:var(--box);stroke:var(--boxline);stroke-width:1.2}
+  .lossbox{fill:var(--lossbg);stroke:var(--loss);stroke-width:1;stroke-dasharray:3 2}
+  .arr{stroke:var(--line);stroke-width:1.4;fill:none}
+  .head{fill:var(--line)}
+  .drop{stroke:var(--loss);stroke-width:1.1;fill:none;stroke-dasharray:2 2}
+  #fb{color:var(--fg);font-size:13px}
+</style>
+<div class="wrap">
+  <h2>Пять шагов с потерями: дырка в начале едет до конца</h2>
+  <div id="host"><noscript id="fb">Конвейер: PDF → OCR → чанки 300–500 токенов → эмбеддинг bi-encoder (768 чисел) → top-k → LLM. Потери по шагам: график не захвачен, таблица разорвана, колонки сплющены, пометки на рисунке исчезли.</noscript></div>
+</div>
+<script>
+(function(){
+try{
+  // ---- данные схемы ----
+  var STEPS=[
+    {n:"1", t:"OCR / pdftotext",  s:"PDF → текст",            l:"график не прочитан:\nосталось «Q3», числа нет"},
+    {n:"2", t:"Чанкинг",          s:"300–500 токенов",        l:"таблица разорвана:\nстрока без заголовка"},
+    {n:"3", t:"bi-encoder",       s:"чанк → 768 чисел",       l:"колонки сплющены,\nдетали усреднены"},
+    {n:"4", t:"Поиск",            s:"косинус → top-k",        l:"пометки на рисунке\nискать негде"},
+    {n:"5", t:"LLM",              s:"чанки + запрос",         l:"отвечает по тому,\nчто дали"}
+  ];
+  var IN={t:"Страница отчёта",s:"диаграмма «Q3: +18 %»"};
+  var BW=3.1, BH=1.5, GAP=1.05, LANE=0;      // единицы данных
+  var VBW=980, VBH=380, PAD=6, FS=11;        // пиксели/литералы холста
+
+  // ---- одна пара перевода ----
+  var origin={x:22,y:150}, scale={x:52,y:52};
+  function sx(x){return origin.x+x*scale.x;}
+  function sy(y){return origin.y-y*scale.y;}
+
+  var ns="http://www.w3.org/2000/svg";
+  function el(n,a){var e=document.createElementNS(ns,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+  var svg=el("svg",{viewBox:"0 0 "+VBW+" "+VBH,preserveAspectRatio:"xMidYMid meet",role:"img"});
+  svg.appendChild(el("rect",{x:0,y:0,width:VBW,height:VBH,fill:"var(--bg)"}));
+  function box(cls,x,y,w,h){svg.appendChild(el("rect",{"class":cls,x:sx(x),y:sy(y+h),
+    width:sx(x+w)-sx(x),height:sy(y)-sy(y+h),rx:4}));}
+  function txt(s,x,y,cls,anch,dx,dy){
+    var t=el("text",{x:sx(x)+(dx||0),y:sy(y)+(dy||0),"class":cls||"","text-anchor":anch||"middle"});
+    t.appendChild(document.createTextNode(s));svg.appendChild(t);return t;}
+  function multi(s,x,y,cls,anch,dx,dy){
+    var ls=s.split("\n"),i;for(i=0;i<ls.length;i++)txt(ls[i],x,y,cls,anch,dx,(dy||0)+i*(FS+2));}
+  function arrow(x1,y1,x2,y2){
+    var a=sx(x1),b=sy(y1),c=sx(x2),d=sy(y2),ux=c-a,uy=d-b,L=Math.sqrt(ux*ux+uy*uy);
+    ux/=L;uy/=L;var hx=c-ux*7,hy=d-uy*7,px=-uy*3.6,py=ux*3.6;
+    svg.appendChild(el("line",{"class":"arr",x1:a,y1:b,x2:hx,y2:hy}));
+    svg.appendChild(el("polygon",{"class":"head",points:hx+","+hy+" "+(hx+px)+","+(hy+py)+" "+c+","+d+" "+(hx-px)+","+(hy-py)}));
+  }
+
+  // вход
+  var x0=0;
+  box("box",x0,LANE,BW,BH);
+  txt(IN.t,x0+BW/2,LANE+BH,"t-hd","middle",0,FS+4);
+  txt(IN.s,x0+BW/2,LANE+BH,"t-dim","middle",0,2*FS+6);
+  txt("вход",x0+BW/2,LANE+BH,"t-step","middle",0,-6);
+
+  // пять шагов
+  var i,x;
+  for(i=0;i<STEPS.length;i++){
+    x=x0+(i+1)*(BW+GAP);
+    box("box",x,LANE,BW,BH);
+    txt("шаг "+STEPS[i].n,x+BW/2,LANE+BH,"t-step","middle",0,-6);
+    txt(STEPS[i].t,x+BW/2,LANE+BH,"t-hd","middle",0,FS+4);
+    txt(STEPS[i].s,x+BW/2,LANE+BH,"t-dim","middle",0,2*FS+6);
+    arrow(x-GAP,LANE+BH/2,x,LANE+BH/2);
+    // потеря — под шагом, пунктирная выноска вниз
+    svg.appendChild(el("line",{"class":"drop",x1:sx(x+BW/2),y1:sy(LANE),x2:sx(x+BW/2),y2:sy(LANE-0.5)}));
+    box("lossbox",x,LANE-1.72,BW,1.2);
+    multi(STEPS[i].l,x+BW/2,LANE-1.72+1.2,"t-loss","middle",0,FS+3);
+  }
+
+  // выход
+  var xe=x0+6*(BW+GAP);
+  arrow(xe-GAP,LANE+BH/2,xe,LANE+BH/2);
+  txt("ответ",xe,LANE+BH/2,"t-hd","start",PAD,-2);
+  txt("без числа",xe,LANE+BH/2,"t-loss","start",PAD,FS+2);
+
+  // сквозная линия «потеря едет до конца»
+  var yb=LANE-2.15;
+  svg.appendChild(el("line",{"class":"drop",x1:sx(x0+BW+GAP),y1:sy(yb),x2:sx(xe),y2:sy(yb)}));
+  txt("что выброшено на шаге 1, не вернёт ни один следующий",x0+BW+GAP,yb,"t-dim","start",0,FS+6);
+  txt("каждый шаг сделан нормально — они выстроены в цепочку",x0,LANE+BH,"t-dim","start",0,-24);
+
+  document.getElementById("host").appendChild(svg);
+}catch(e){
+  document.getElementById("host").innerHTML='<p id="fb">Схема должна показывать конвейер текстового RAG: страница отчёта с диаграммой «Q3: +18 %» → OCR/pdftotext → чанки 300–500 токенов → эмбеддинг bi-encoder (768 чисел) → косинус и top-k → LLM. Под каждым шагом — что теряется: график не прочитан, таблица разорвана, колонки сплющены, пометки на рисунке исчезли. Потеря на шаге 1 доезжает до ответа.</p>';
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

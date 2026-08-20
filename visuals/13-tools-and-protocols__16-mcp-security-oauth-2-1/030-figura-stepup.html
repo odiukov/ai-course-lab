@@ -1,0 +1,213 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Step-up на двух scope</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#22252b; --mut:#6b7280; --line:#3a4150;
+    --red:#b3312d; --acc:#b4551f; --ok:#1f7a4d; --band:#eceef3; --box:#f2f4f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e7e9ee; --mut:#98a1b0; --line:#c3cad6;
+      --red:#f08a80; --acc:#f0a95e; --ok:#6ed49b; --band:#1c2027; --box:#1e232b;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{padding:10px 12px 14px}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fb{font-size:13px;line-height:1.5;color:var(--fg)}
+  .ln{fill:none;stroke:var(--line);stroke-width:1.4}
+  .life{fill:none;stroke:var(--mut);stroke-width:1;stroke-dasharray:3 4}
+  .req{fill:none;stroke:var(--line);stroke-width:1.6}
+  .req.hd{fill:var(--line);stroke:none}
+  .err{fill:none;stroke:var(--red);stroke-width:1.6;stroke-dasharray:6 4}
+  .err.hd{fill:var(--red);stroke:none;stroke-dasharray:none}
+  .acc{fill:none;stroke:var(--acc);stroke-width:1.6}
+  .acc.hd{fill:var(--acc);stroke:none}
+  .ok{fill:none;stroke:var(--ok);stroke-width:1.6;stroke-dasharray:6 4}
+  .ok.hd{fill:var(--ok);stroke:none;stroke-dasharray:none}
+  .box{fill:var(--box);stroke:var(--line);stroke-width:1.2}
+  .bar1{fill:var(--band);stroke:var(--line);stroke-width:1.2}
+  .bar2{fill:var(--band);stroke:var(--acc);stroke-width:1.6}
+  text{font-family:inherit;fill:var(--fg)}
+  .t-head{font-size:13px;font-weight:600}
+  .t-msg{font-size:12.5px}
+  .t-sub{font-size:11.5px;fill:var(--mut)}
+  .t-err{font-size:12.5px;fill:var(--red)}
+  .t-acc{font-size:12.5px;fill:var(--acc)}
+  .t-ok{font-size:12.5px;fill:var(--ok)}
+  .t-leg{font-size:11.5px;fill:var(--mut)}
+</style>
+<div class="wrap">
+  <h2>Step-up: отказ по scope запускает второй проход</h2>
+  <div id="stage"></div>
+</div>
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  try{
+    var D={
+      canvas:{w:920,h:460},
+      origin:{x:28,y:445},
+      scale:38,
+      lifelines:[
+        {id:'c', x:2,    hw:1.2, label:'Клиент'},
+        {id:'rs',x:12,   hw:2.9, label:'Сервер ресурсов (MCP)'},
+        {id:'as',x:20.6, hw:2.5, label:'Authorization server'}
+      ],
+      head:{top:11.4,bottom:10.5,text:10.82},
+      life:{top:10.5,bottom:2.5},
+      messages:[
+        {from:'c',to:'rs',y:9.9,cls:'req',t:'t-msg',
+         label:'DELETE /notes/42 · токен scope: notes:read'},
+        {from:'rs',to:'c',y:8.9,cls:'err',t:'t-err',
+         label:'403 · WWW-Authenticate: error="insufficient_scope"',
+         sub:'scope="notes:delete", resource — тот же'},
+        {from:'c',to:'as',y:6.5,cls:'acc',t:'t-acc',
+         label:'шаги 2–5 потока authorization code: PKCE, тот же resource, scope: notes:read notes:delete'},
+        {from:'as',to:'c',y:5.4,cls:'acc',t:'t-acc',
+         label:'новый токен · scope: notes:read notes:delete'},
+        {from:'c',to:'rs',y:4.1,cls:'req',t:'t-msg',
+         label:'DELETE /notes/42 · новый токен'},
+        {from:'rs',to:'c',y:3.1,cls:'ok',t:'t-ok',label:'200 OK'}
+      ],
+      loop:{x:0.7,xIn:2,yFrom:8.9,yTo:6.5,ly:7.4,lx:0.9,
+            label:'повтор только шагов 2–5'},
+      barsTitle:{x:2,y:2.05,text:'Токены у клиента после step-up:'},
+      bars:[
+        {x1:2,x2:7,  y:1.45,cls:'bar1',label:'токен 1 · notes:read'},
+        {x1:2,x2:11, y:0.65,cls:'bar2',label:'токен 2 · notes:read notes:delete'}
+      ],
+      legend:{x:2,y:-0.15,
+        text:'Старый токен не отзывается — рядом появляется второй, шире по правам.'},
+      geom:{inset:0.15,ah:0.25,aw:0.13,barH:0.17}
+    };
+
+    var O=D.origin, S=D.scale;
+    function sx(x){ return O.x + x*S; }
+    function sy(y){ return O.y - y*S; }
+
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+D.canvas.w+' '+D.canvas.h);
+    svg.setAttribute('width',D.canvas.w);
+    svg.setAttribute('height',D.canvas.h);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+    var bg=el('rect',{x:0,y:0,width:D.canvas.w,height:D.canvas.h,fill:'var(--bg)'});
+    svg.appendChild(bg);
+
+    var LBL=8, SUB=15, PAD=8;
+
+    function el(n,a){var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e;}
+    function add(n,a){var e=el(n,a); svg.appendChild(e); return e;}
+    function txt(x,y,s,cls,anchor){
+      var e=el('text',{x:x,y:y,'text-anchor':anchor,class:cls});
+      e.appendChild(document.createTextNode(s)); svg.appendChild(e); return e;}
+    function lifeX(id){
+      for(var i=0;i<D.lifelines.length;i++) if(D.lifelines[i].id===id) return D.lifelines[i].x;
+      throw new Error('lifeline '+id);
+    }
+    function arrow(x1,x2,y,cls){
+      var g=D.geom, d=(x2>x1)?1:-1;
+      var a=x1+g.inset*d, b=x2-g.inset*d;
+      add('line',{x1:sx(a),y1:sy(y),x2:sx(b),y2:sy(y),class:cls});
+      add('polygon',{class:cls+' hd',points:
+        sx(b)+','+sy(y)+' '+
+        sx(b-g.ah*d)+','+sy(y+g.aw)+' '+
+        sx(b-g.ah*d)+','+sy(y-g.aw)});
+    }
+
+    /* lifelines + headers */
+    D.lifelines.forEach(function(l){
+      add('rect',{class:'box',x:sx(l.x-l.hw),y:sy(D.head.top),
+        width:sx(l.x+l.hw)-sx(l.x-l.hw),
+        height:sy(D.head.bottom)-sy(D.head.top),rx:4});
+      txt(sx(l.x),sy(D.head.text),l.label,'t-head','middle');
+      add('line',{class:'life',x1:sx(l.x),y1:sy(D.life.top),
+        x2:sx(l.x),y2:sy(D.life.bottom)});
+    });
+
+    /* messages */
+    D.messages.forEach(function(m){
+      var x1=lifeX(m.from), x2=lifeX(m.to), mid=(x1+x2)/2;
+      arrow(x1,x2,m.y,m.cls);
+      txt(sx(mid),sy(m.y)-LBL,m.label,m.t,'middle');
+      if(m.sub) txt(sx(mid),sy(m.y)+SUB,m.sub,'t-sub','middle');
+    });
+
+    /* петля step-up */
+    var L=D.loop;
+    add('path',{class:'acc',d:
+      'M '+sx(L.xIn)+' '+sy(L.yFrom)+
+      ' L '+sx(L.x)+' '+sy(L.yFrom)+
+      ' L '+sx(L.x)+' '+sy(L.yTo)+
+      ' L '+sx(L.xIn-D.geom.ah)+' '+sy(L.yTo)});
+    add('polygon',{class:'acc hd',points:
+      sx(L.xIn)+','+sy(L.yTo)+' '+
+      sx(L.xIn-D.geom.ah)+','+sy(L.yTo+D.geom.aw)+' '+
+      sx(L.xIn-D.geom.ah)+','+sy(L.yTo-D.geom.aw)});
+    txt(sx(L.lx),sy(L.ly),L.label,'t-acc','start');
+
+    /* два токена */
+    txt(sx(D.barsTitle.x),sy(D.barsTitle.y),D.barsTitle.text,'t-sub','start');
+    D.bars.forEach(function(b){
+      add('rect',{class:b.cls,x:sx(b.x1),y:sy(b.y+D.geom.barH),
+        width:sx(b.x2)-sx(b.x1),
+        height:sy(b.y-D.geom.barH)-sy(b.y+D.geom.barH),rx:3});
+      txt(sx(b.x2)+PAD,sy(b.y)+LBL/2,b.label,'t-msg','start');
+    });
+
+    txt(sx(D.legend.x),sy(D.legend.y),D.legend.text,'t-leg','start');
+
+    stage.appendChild(svg);
+  }catch(e){
+    stage.innerHTML='<p class="fb">Схема не построилась. Она должна показывать: '+
+      'клиент с токеном scope <b>notes:read</b> вызывает DELETE /notes/42 → сервер ресурсов '+
+      'отвечает <b>403</b> с WWW-Authenticate: error="insufficient_scope", '+
+      'scope="notes:delete" и тем же resource → стрелка загибается назад, к шагам 2–5 '+
+      'потока authorization code у того же authorization server (PKCE, тот же resource, '+
+      'scope: notes:read notes:delete) → выдан новый токен → повторный DELETE проходит, 200 OK. '+
+      'Внизу две дорожки токенов: узкая (notes:read) остаётся, рядом появляется широкая '+
+      '(notes:read notes:delete).</p>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

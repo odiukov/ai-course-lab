@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Микросекунда на фоне секунды</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --bar: #c9d6e8;
+    --bar-stroke: #5b7fb0;
+    --accent: #d94f3d;
+    --grid: #d8d8d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --fg: #e8e8e8;
+      --muted: #9aa2ad;
+      --bar: #2c3d55;
+      --bar-stroke: #6f9ad0;
+      --accent: #ff7a63;
+      --grid: #333a44;
+    }
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  .wrap {
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 8px 0 4px;
+    box-sizing: border-box;
+  }
+  h2 {
+    font-size: 15px;
+    margin: 0 12px 6px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  .fail { margin: 0 12px 10px; font-size: 13px; color: var(--fg); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Микросекунда на фоне секунды</h2>
+  <div id="slot"></div>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    // ---- данные схемы (в микросекундах) ----
+    var TOTAL = 1000000;      // вызов модели ~ 1 000 000 μs
+    var INIT  = 2;            // инициализация агента 2 μs
+    var RATIO = 500000;       // 1 000 000 / 2
+
+    var bars = [
+      { y: 1, len: TOTAL, label: 'Вызов модели: 1 000 000 μs' },
+      { y: 0, len: INIT,  label: 'Инициализация агента: 2 μs' }
+    ];
+
+    // ---- холст (литералы: только viewBox/размеры) ----
+    var VB_W = 900, VB_H = 400;
+    var PAD_LABEL = 8;      // пиксельный отступ подписи от точки привязки
+    var STROKE = 2;
+    var FS = 14;
+    var FS_SMALL = 12;
+
+    // ---- одна пара origin/scale, одна пара sx/sy ----
+    var origin = { x: 130, y: 300 };
+    var scale  = { x: 660 / TOTAL, y: 78 };
+
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y - y * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(name, attrs) {
+      var n = document.createElementNS(NS, name);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      return n;
+    }
+    function text(x, y, s, anchor, cls, size) {
+      var t = el('text', {
+        x: x, y: y, 'text-anchor': anchor,
+        'font-size': size || FS,
+        fill: cls === 'muted' ? 'var(--muted)' : (cls === 'accent' ? 'var(--accent)' : 'var(--fg)')
+      });
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + VB_W + ' ' + VB_H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img'
+    });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: VB_W, height: VB_H, fill: 'var(--bg)' }));
+
+    var defs = el('defs', {});
+    var mk = el('marker', {
+      id: 'ah', viewBox: '0 0 10 10', refX: '9', refY: '5',
+      markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse'
+    });
+    mk.appendChild(el('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'var(--accent)' }));
+    defs.appendChild(mk);
+    svg.appendChild(defs);
+
+    var BAR_H = sy(0) - sy(0.34);   // высота полосы — тоже через перевод
+
+    // ---- вертикальная линия старта (общий ноль обеих полос) ----
+    svg.appendChild(el('line', {
+      x1: sx(0), y1: sy(-0.55), x2: sx(0), y2: sy(1.6),
+      stroke: 'var(--grid)', 'stroke-width': STROKE
+    }));
+    svg.appendChild(text(sx(0), sy(1.6) - PAD_LABEL, 'старт запроса', 'middle', 'muted', FS_SMALL));
+
+    // ---- полосы ----
+    bars.forEach(function (b) {
+      var w = sx(b.len) - sx(0);
+      var top = sy(b.y) - BAR_H / 2;
+      svg.appendChild(el('rect', {
+        x: sx(0), y: top,
+        width: Math.max(w, 1), height: BAR_H,
+        fill: b.len === INIT ? 'var(--accent)' : 'var(--bar)',
+        stroke: b.len === INIT ? 'var(--accent)' : 'var(--bar-stroke)',
+        'stroke-width': STROKE
+      }));
+      // подпись слева от полосы, якорь end
+      svg.appendChild(text(sx(0) - PAD_LABEL * 2, sy(b.y) + FS / 3, b.label, 'end', '', FS_SMALL));
+    });
+
+    // ---- отметка конца длинной полосы ----
+    svg.appendChild(el('line', {
+      x1: sx(TOTAL), y1: sy(1.6), x2: sx(TOTAL), y2: sy(0.62),
+      stroke: 'var(--grid)', 'stroke-width': STROKE
+    }));
+    svg.appendChild(text(sx(TOTAL), sy(1.6) - PAD_LABEL, '≈ 1 секунда', 'middle', 'muted', FS_SMALL));
+
+    // ---- стрелка к невидимой полосе: подпись у ХВОСТА ----
+    var tailX = sx(TOTAL * 0.42), tailY = sy(-0.62);
+    svg.appendChild(el('path', {
+      d: 'M' + tailX + ',' + tailY + ' L' + sx(0) + ',' + (sy(0) + BAR_H / 2 + PAD_LABEL),
+      stroke: 'var(--accent)', 'stroke-width': STROKE, fill: 'none', 'marker-end': 'url(#ah)'
+    }));
+    svg.appendChild(text(tailX + PAD_LABEL, tailY + FS / 3,
+      '2 μs — это 0,0002 % длины верхней полосы', 'start', 'accent', FS_SMALL));
+
+    // ---- пояснение снизу ----
+    svg.appendChild(text(sx(0), sy(-1.05),
+      '1 000 000 / 2 = ' + RATIO.toLocaleString('ru-RU') +
+      ' — столько раз инициализация помещается в один вызов модели',
+      'start', 'muted', FS_SMALL));
+    svg.appendChild(text(sx(0), sy(-1.05) + FS + PAD_LABEL,
+      'Умножить обе на ' + RATIO.toLocaleString('ru-RU') + ': 1 секунда против 500 000 секунд ≈ шести суток',
+      'start', 'muted', FS_SMALL));
+
+    slot.appendChild(svg);
+  } catch (e) {
+    var d = document.createElement('div');
+    d.className = 'fail';
+    d.textContent = 'Схема должна была показать две полосы одной длины отсчёта: ' +
+      'верхняя — вызов модели, 1 000 000 μs (≈ 1 секунда); нижняя — инициализация агента, 2 μs, ' +
+      'то есть 0,0002 % длины верхней и на экране невидимая. ' +
+      'Инициализация помещается внутрь одного вызова модели 500 000 раз: ' +
+      'умножив обе величины на 500 000, получаем 1 секунду против 500 000 секунд — почти шести суток.';
+    slot.appendChild(d);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

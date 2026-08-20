@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Поток токенов от микрофона до аудио</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1e232b; --muted:#5d6774; --line:#3b4characters;
+    --line:#3b4351; --a:#1f6feb; --b:#b5651d; --c:#2e8b57; --d:#8250df;
+    --grid:#dfdcd4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8eaee; --muted:#9aa4b2; --line:#c2c9d4;
+      --a:#6aa8ff; --b:#e0a35c; --c:#69c48d; --d:#c09bf5; --grid:#2b3038;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;color:var(--muted);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Поток токенов от микрофона до аудио: конвейер вместо очереди</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (единственные литеральные числа кроме холста/шрифта) ----
+    // ось X — миллисекунды, ось Y — номер дорожки (блока конвейера)
+    var STAGES = [
+      {row:0, name:"Микрофон",              lab:"50 мс",         start:0,   dur:50,  color:"var(--a)"},
+      {row:1, name:"Аудиотокенизатор",      lab:"prefill 100 мс",start:50,  dur:100, color:"var(--b)"},
+      {row:2, name:"MIO: первый токен",     lab:"50 мс",         start:150, dur:50,  color:"var(--c)"},
+      {row:3, name:"residual-VQ + декодер", lab:"100–150 мс",    start:200, dur:150, color:"var(--d)"}
+    ];
+    var TICKS = [0,50,100,150,200,250,300,350];
+    var TOTAL_LO = 300, TOTAL_HI = 350;
+    var XMAX = 350, ROWS = 4;
+
+    // ---- один origin, один scale ----
+    var origin = {x:250, y:96};          // пиксели точки (0 мс, дорожка 0)
+    var scale  = {x:1.44, y:74};         // px на мс; px на дорожку
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    // ---- литералы оформления ----
+    var VB_W = 940, VB_H = 470, LW = 2, FS = 13, FS_S = 12, PAD = 8, BAR = 20;
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||FS,fill:cls||"var(--fg)"});
+      t.appendChild(document.createTextNode(s)); return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,preserveAspectRatio:"xMidYMid meet",
+                        role:"img","aria-label":"Конвейер стриминга речи"});
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah",markerWidth:"9",markerHeight:"9",refX:"8",refY:"3",orient:"auto",markerUnits:"strokeWidth"});
+    mk.appendChild(el("path",{d:"M0,0 L8,3 L0,6 z",fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    // фон
+    svg.appendChild(el("rect",{x:0,y:0,width:VB_W,height:VB_H,fill:"var(--bg)"}));
+
+    // ---- сетка засечек по времени ----
+    TICKS.forEach(function(t){
+      svg.appendChild(el("line",{x1:sx(t),y1:sy(-0.45),x2:sx(t),y2:sy(ROWS-0.45),
+        stroke:"var(--grid)","stroke-width":LW/2}));
+      svg.appendChild(txt(sx(t), sy(-0.45)-PAD, t, "middle", "var(--muted)", FS_S));
+    });
+    svg.appendChild(txt(sx(XMAX)+PAD, sy(-0.45)-PAD, "мс", "start", "var(--muted)", FS_S));
+
+    // ---- ось времени (низ) ----
+    svg.appendChild(el("line",{x1:sx(0),y1:sy(ROWS-0.45),x2:sx(XMAX)+PAD*3,y2:sy(ROWS-0.45),
+      stroke:"var(--line)","stroke-width":LW,"marker-end":"url(#ah)"}));
+    svg.appendChild(txt(sx(0), sy(ROWS-0.45)+PAD*3, "время от входа кусочка звука", "start", "var(--muted)", FS_S));
+
+    // ---- полосы конвейера ----
+    STAGES.forEach(function(s){
+      var y = sy(s.row);
+      // подпись блока — слева от полосы, anchor end
+      svg.appendChild(txt(sx(0)-PAD*2, y+FS/3, s.name, "end", "var(--fg)", FS));
+      // сама полоса
+      svg.appendChild(el("rect",{x:sx(s.start), y:y-BAR/2,
+        width:sx(s.start+s.dur)-sx(s.start), height:BAR, rx:4,
+        fill:s.color, opacity:"0.85"}));
+      // длительность — над полосой, по центру
+      svg.appendChild(txt((sx(s.start)+sx(s.start+s.dur))/2, y-BAR/2-PAD/2, s.lab, "middle", "var(--muted)", FS_S));
+      // передача дальше: короткая стрелка вниз от конца полосы
+      if(s.row < ROWS-1){
+        svg.appendChild(el("line",{x1:sx(s.start+s.dur), y1:y+BAR/2,
+          x2:sx(s.start+s.dur), y2:sy(s.row+1)-BAR/2-PAD/2,
+          stroke:"var(--line)","stroke-width":LW,"marker-end":"url(#ah)"}));
+      }
+    });
+
+    // ---- итоговая вилка 300–350 мс ----
+    var yb = sy(ROWS-0.45);
+    [TOTAL_LO, TOTAL_HI].forEach(function(v){
+      svg.appendChild(el("line",{x1:sx(v),y1:sy(ROWS-1)+BAR/2,x2:sx(v),y2:yb,
+        stroke:"var(--line)","stroke-width":LW,"stroke-dasharray":"5 4"}));
+    });
+    svg.appendChild(el("line",{x1:sx(TOTAL_LO),y1:sy(ROWS-0.15),x2:sx(TOTAL_HI),y2:sy(ROWS-0.15),
+      stroke:"var(--line)","stroke-width":LW}));
+    svg.appendChild(txt(sx(TOTAL_LO)-PAD, sy(ROWS-0.15)+FS/3,
+      "итог 300–350 мс до первого байта аудио", "end", "var(--fg)", FS));
+
+    // ---- пояснение про внахлёст (одна строка, внутри полей) ----
+    svg.appendChild(txt(sx(0)-PAD*2, sy(ROWS-0.45)+PAD*3,
+      "полосы одного кусочка; следующие кусочки идут внахлёст, каждые 50 мс", "end", "var(--muted)", FS_S));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема не построилась. Она должна была показать конвейер:'+
+      ' микрофон 50 мс, prefill 100 мс, первый токен 50 мс, residual-VQ плюс декодер 100–150 мс,'+
+      ' итог 300–350 мс до первого байта аудио. Блоки работают внахлёст: пока декодер собирает'+
+      ' кусок 1, трансформер считает кусок 2, токенизатор — кусок 3, микрофон пишет кусок 4.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

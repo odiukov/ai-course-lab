@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Круг из четырёх фаз MCTS</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5b6472;
+    --line:#3b4658; --accent:#b4532a; --soft:#e7ebf1; --node:#f2f5f9;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf2; --muted:#98a3b3;
+      --line:#8b98ab; --accent:#e2925f; --soft:#232833; --node:#1d222b;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:10px 12px 12px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{font-size:13px;line-height:1.5;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Круг из четырёх фаз: select → expand → simulate → backpropagate</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var PHASES = [
+      {id:'select',      t:'1. select',        x:0,  y:6, note:'читает N и Q'},
+      {id:'expand',      t:'2. expand',        x:14, y:6, note:'создаёт узлы'},
+      {id:'simulate',    t:'3. simulate',      x:14, y:0, note:'даёт число'},
+      {id:'backprop',    t:'4. backpropagate', x:0,  y:0, note:'пишет N и Q'}
+    ];
+    // дерево: подписи N и Q — числа из текста шага
+    var NODES = [
+      {id:'root', x:29, y:7,  lab:'корень', n:'N=20', q:null,   side:'up'},
+      {id:'a',    x:25, y:3,  lab:'A',      n:'N=7',  q:'Q=0.6', side:'left'},
+      {id:'b',    x:29, y:3,  lab:'B',      n:'N=2',  q:'Q=0.15',side:'right'},
+      {id:'c',    x:33, y:3,  lab:'C',      n:'N=1',  q:'Q=0.3', side:'right'}
+    ];
+    var EDGES = [['root','a'],['root','b'],['root','c']];
+    var CYCLE = [['select','expand'],['expand','simulate'],
+                 ['simulate','backprop'],['backprop','select']];
+
+    // ---- холст ----
+    var W = 900, H = 340;                 // размеры холста
+    var PAD = 6;                          // пиксельный отступ подписи
+    var SW = 1.6;                         // толщина линий
+    var FS = 13;                          // размер шрифта
+
+    // ---- ОДНА пара функций перевода ----
+    var origin = {x:70, y:H-46}, scale = 20;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y - y*scale; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,'font-size':FS,
+        class:cls||'fg'}); t.textContent=s; return t; }
+    function P(id){ for(var i=0;i<PHASES.length;i++) if(PHASES[i].id===id) return PHASES[i]; }
+    function Nd(id){ for(var i=0;i<NODES.length;i++) if(NODES[i].id===id) return NODES[i]; }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,
+      preserveAspectRatio:'xMidYMid meet',role:'img'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    var defs=el('defs',null);
+    function marker(id,color){
+      var m=el('marker',{id:id,viewBox:'0 0 10 10',refX:'9',refY:'5',
+        markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+      m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:color}));
+      return m;
+    }
+    defs.appendChild(marker('ar','var(--accent)'));
+    defs.appendChild(marker('ag','var(--line)'));
+    svg.appendChild(defs);
+
+    var g=el('g',null); svg.appendChild(g);
+
+    // прямоугольники фаз (углы — через sx/sy)
+    var BW=5.2, BH=1.6;   // в единицах данных
+    PHASES.forEach(function(p){
+      g.appendChild(el('rect',{
+        x:sx(p.x-BW/2), y:sy(p.y+BH/2),
+        width:sx(BW)-sx(0), height:sy(0)-sy(BH),
+        rx:sx(0.4)-sx(0),
+        fill:'var(--soft)', stroke:'var(--line)','stroke-width':SW}));
+      g.appendChild(txt(sx(p.x), sy(p.y)+FS*0.35, p.t,'middle','fg bold'));
+    });
+
+    // стрелки цикла: по сторонам прямоугольника, подпись у хвоста
+    CYCLE.forEach(function(pair){
+      var a=P(pair[0]), b=P(pair[1]);
+      var x1,y1,x2,y2;
+      if(a.y===b.y){                       // горизонталь
+        var dir=(b.x>a.x)?1:-1;
+        x1=a.x+dir*(BW/2+0.4); x2=b.x-dir*(BW/2+0.4); y1=a.y; y2=b.y;
+      }else{                               // вертикаль
+        var dy=(b.y>a.y)?1:-1;
+        x1=a.x; x2=b.x; y1=a.y+dy*(BH/2+0.4); y2=b.y-dy*(BH/2+0.4);
+      }
+      g.appendChild(el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:'var(--accent)','stroke-width':SW,'marker-end':'url(#ar)'}));
+      // подпись — сбоку от середины
+      var mx=(x1+x2)/2, my=(y1+y2)/2;
+      if(a.y===b.y){
+        g.appendChild(txt(sx(mx), sy(my)-PAD-FS*0.2, a.note,'middle','mut'));
+      }else{
+        var left = (a.x < P('expand').x);
+        g.appendChild(txt(sx(mx)+(left?-PAD:PAD), sy(my)+FS*0.35,
+          a.note, left?'end':'start','mut'));
+      }
+    });
+
+    // круг замкнут — пометка у хвоста последней стрелки
+    g.appendChild(txt(sx(P('backprop').x)-BW/2*scale-PAD, sy(P('backprop').y)-scale*1.4,
+      'круг не разомкнуть','end','mut'));
+
+    // ---- дерево справа ----
+    EDGES.forEach(function(e){
+      var a=Nd(e[0]), b=Nd(e[1]);
+      g.appendChild(el('line',{x1:sx(a.x),y1:sy(a.y),x2:sx(b.x),y2:sy(b.y),
+        stroke:'var(--line)','stroke-width':SW}));
+    });
+    NODES.forEach(function(n){
+      g.appendChild(el('circle',{cx:sx(n.x),cy:sy(n.y),r:sx(0.75)-sx(0),
+        fill:'var(--node)',stroke:'var(--line)','stroke-width':SW}));
+      g.appendChild(txt(sx(n.x), sy(n.y)+FS*0.35, n.lab,'middle','fg'));
+      if(n.side==='up'){
+        g.appendChild(txt(sx(n.x), sy(n.y)+scale*0.75+PAD+FS, n.n,'middle','mut'));
+      }else if(n.side==='left'){
+        g.appendChild(txt(sx(n.x)-scale*0.75-PAD, sy(n.y)-PAD, n.n,'end','mut'));
+        g.appendChild(txt(sx(n.x)-scale*0.75-PAD, sy(n.y)+FS+PAD, n.q,'end','mut'));
+      }else{
+        g.appendChild(txt(sx(n.x)+scale*0.75+PAD, sy(n.y)-PAD, n.n,'start','mut'));
+        g.appendChild(txt(sx(n.x)+scale*0.75+PAD, sy(n.y)+FS+PAD, n.q,'start','mut'));
+      }
+    });
+
+    // связь цикла с деревом
+    g.appendChild(el('line',{
+      x1:sx(P('expand').x+BW/2+0.4), y1:sy(P('expand').y+2.2),
+      x2:sx(Nd('root').x-1.2), y2:sy(Nd('root').y),
+      stroke:'var(--line)','stroke-width':SW,'stroke-dasharray':'4 4',
+      'marker-end':'url(#ag)'}));
+    g.appendChild(txt(sx(P('expand').x+BW/2+0.4)+PAD, sy(P('expand').y+2.2)-PAD,
+      'бюджет: 20 итераций','start','mut'));
+
+    // легенда
+    g.appendChild(txt(sx(0)-scale*0.6, sy(-1.4),
+      'N — посещения, Q — средняя оценка. Через 20 кругов: A N=7 Q=0.6, B N=2 Q=0.15.',
+      'start','mut'));
+
+    host.appendChild(svg);
+    var st=document.createElement('style');
+    st.textContent='.fg{fill:var(--fg)}.mut{fill:var(--muted)}.bold{font-weight:600}';
+    document.head.appendChild(st);
+  }catch(err){
+    host.innerHTML='<p class="fail">Схема не построилась. Она должна показывать '+
+      'замкнутый круг четырёх фаз MCTS: select → expand → simulate → backpropagate → '+
+      'снова select. Expand создаёт узлы, simulate даёт число, backpropagate пишет его '+
+      'в N и Q вверх по пути, select на следующем круге читает записанное. Справа — '+
+      'дерево с корнем N=20 и детьми: A с N=7 и Q=0.6, B с N=2 и Q=0.15, C с N=1 и '+
+      'Q=0.3. Бюджет — 20 итераций.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

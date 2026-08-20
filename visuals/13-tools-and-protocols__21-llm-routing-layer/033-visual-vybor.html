@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Таблица выбора шлюза</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5b6673; --line:#c3ccd6;
+    --head:#eef2f7; --hard:#d94f2b; --hardbg:#fdeee9; --soft:#f7f9fb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171b; --fg:#e6ebf1; --muted:#94a1b0; --line:#3a434e;
+      --head:#1f242a; --hard:#ff8a63; --hardbg:#33211b; --soft:#191d22;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 10px 10px;}
+  h1{font-size:15px;margin:0 0 6px;font-weight:600;}
+  .hint{font-size:12px;color:var(--muted);margin:0 0 6px;}
+  svg{width:100%;height:auto;max-height:520px;display:block;background:var(--bg);}
+  .fail{border:1px solid var(--line);padding:10px;font-size:13px;white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Таблица выбора шлюза: ищи жёсткую строку</h1>
+  <p class="hint">Строка «Счёт за токены» — жёсткая: она одна вычёркивает колонку.</p>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    var COLS=["LiteLLM","OpenRouter","Portkey"];
+    var ROWS=[
+      {k:"Код",v:["открытый, Python","managed SaaS","открытый (март 2026) + managed"],hard:false},
+      {k:"Запуск",v:["развернуть прокси самому","зарегистрироваться","любой из двух"],hard:false},
+      {k:"Провайдеров",v:["100+","300+","100+"],hard:false},
+      {k:"Счёт за токены",v:["по твоим ключам","кредиты OpenRouter","по твоим ключам"],hard:true},
+      {k:"Наблюдаемость",v:["OpenTelemetry","дашборд","полный OTel + вычистка PII"],hard:false},
+      {k:"Кому подходит",v:["нужен полный контроль","быстрый прототип","продакшен с комплаенсом"],hard:false}
+    ];
+    var CUT=1; // колонка, которую вычёркивает жёсткая строка
+
+    // ЕДИНАЯ система координат: сетка таблицы в условных единицах.
+    // x: 0 = левый край, 1 = граница подписей строк, далее по 1 на колонку.
+    // y: 0 = верх шапки, 1 = низ шапки, далее по 1 на строку.
+    var ORIGIN={x:16,y:34}, SCALE={x:126,y:46};
+    function sx(x){return ORIGIN.x + x*SCALE.x;}
+    function sy(y){return ORIGIN.y + y*SCALE.y;}
+
+    var NCOL=COLS.length, NROW=ROWS.length;
+    var W=Math.round(sx(1+NCOL)+sx(0)), H=Math.round(sy(1+NROW)+sy(0)-ORIGIN.y*0.5);
+    var PAD=6, FS=13, LW=1;
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"start","font-size":FS});
+      if(cls)t.setAttribute("class",cls);
+      t.appendChild(document.createTextNode(s));return t;
+    }
+    // усечение длинных значений по ширине ячейки
+    function fit(s,maxChars){return s.length>maxChars?s.slice(0,maxChars-1)+"…":s;}
+    var MAXCH=Math.floor((SCALE.x-2*PAD)/(FS*0.5));
+
+    var svg=el("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet",
+      role:"img","aria-label":"Сравнение LiteLLM, OpenRouter и Portkey по шести критериям"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    // фон шапки
+    svg.appendChild(el("rect",{x:sx(0),y:sy(0),width:sx(1+NCOL)-sx(0),height:sy(1)-sy(0),
+      fill:"var(--head)"}));
+    // зебра по строкам
+    for(var r=0;r<NROW;r++){
+      if(ROWS[r].hard){
+        svg.appendChild(el("rect",{x:sx(0),y:sy(1+r),width:sx(1+NCOL)-sx(0),
+          height:sy(2+r)-sy(1+r),fill:"var(--hardbg)"}));
+      }else if(r%2===1){
+        svg.appendChild(el("rect",{x:sx(0),y:sy(1+r),width:sx(1+NCOL)-sx(0),
+          height:sy(2+r)-sy(1+r),fill:"var(--soft)"}));
+      }
+    }
+    // вычеркнутая колонка
+    svg.appendChild(el("rect",{x:sx(1+CUT),y:sy(0),width:sx(2+CUT)-sx(1+CUT),
+      height:sy(1+NROW)-sy(0),fill:"none",stroke:"var(--hard)","stroke-width":2*LW,
+      "stroke-dasharray":"5 4"}));
+
+    // сетка
+    for(var c=0;c<=1+NCOL;c++){
+      svg.appendChild(el("line",{x1:sx(c),y1:sy(0),x2:sx(c),y2:sy(1+NROW),
+        stroke:"var(--line)","stroke-width":LW}));
+    }
+    for(var y=0;y<=1+NROW;y++){
+      svg.appendChild(el("line",{x1:sx(0),y1:sy(y),x2:sx(1+NCOL),y2:sy(y),
+        stroke:"var(--line)","stroke-width":(y===1?2*LW:LW)}));
+    }
+
+    // шапка: подпись слева — anchor start у левого края; колонки — middle
+    var hy=sy(0)+(sy(1)-sy(0))/2+FS*0.35;
+    var h0=txt(sx(0)+PAD,hy,"Что смотрим","start");
+    h0.setAttribute("font-weight","600");h0.setAttribute("fill","var(--muted)");
+    svg.appendChild(h0);
+    for(var c2=0;c2<NCOL;c2++){
+      var th=txt((sx(1+c2)+sx(2+c2))/2,hy,COLS[c2],"middle");
+      th.setAttribute("font-weight","700");
+      th.setAttribute("fill",c2===CUT?"var(--hard)":"var(--fg)");
+      svg.appendChild(th);
+    }
+
+    // строки
+    for(var r2=0;r2<NROW;r2++){
+      var cy=sy(1+r2)+(sy(2+r2)-sy(1+r2))/2+FS*0.35;
+      var tk=txt(sx(1)-PAD,cy,ROWS[r2].k,"end");
+      tk.setAttribute("font-weight",ROWS[r2].hard?"700":"600");
+      tk.setAttribute("fill",ROWS[r2].hard?"var(--hard)":"var(--fg)");
+      svg.appendChild(tk);
+      for(var c3=0;c3<NCOL;c3++){
+        var tv=txt((sx(1+c3)+sx(2+c3))/2,cy,fit(ROWS[r2].v[c3],MAXCH),"middle");
+        tv.setAttribute("fill",c3===CUT?"var(--muted)":"var(--fg)");
+        if(c3===CUT)tv.setAttribute("opacity","0.75");
+        svg.appendChild(tv);
+      }
+    }
+
+    // маркер жёсткой строки: стрелка слева, подпись у хвоста
+    var hardRow=3, my=sy(1+hardRow)+(sy(2+hardRow)-sy(1+hardRow))/2;
+    svg.appendChild(el("line",{x1:sx(0)-PAD*0.5,y1:my,x2:sx(0)-PAD*1.6,y2:my,
+      stroke:"var(--hard)","stroke-width":2*LW}));
+    var ar=el("polygon",{points:
+      sx(0)+","+my+" "+
+      (sx(0)-PAD*1.4)+","+(my-PAD*0.7)+" "+
+      (sx(0)-PAD*1.4)+","+(my+PAD*0.7),fill:"var(--hard)"});
+    svg.appendChild(ar);
+
+    // подпись вычеркивания — под таблицей, у левого края с anchor start
+    var ly=sy(1+NROW)+FS+PAD;
+    var lg=txt(sx(0),ly,"Жёсткая строка вычёркивает колонку целиком — остальные пять строк можно не читать.","start");
+    lg.setAttribute("fill","var(--hard)");lg.setAttribute("font-size",FS-1);
+    svg.appendChild(lg);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема должна была показать таблицу 6×3: '+
+      'строки Код, Запуск, Провайдеров (100+ / 300+ / 100+), Счёт за токены, '+
+      'Наблюдаемость, Кому подходит — по колонкам LiteLLM, OpenRouter, Portkey. '+
+      'Строка «Счёт за токены» выделена как жёсткая: кредиты OpenRouter вычёркивают '+
+      'колонку OpenRouter целиком.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

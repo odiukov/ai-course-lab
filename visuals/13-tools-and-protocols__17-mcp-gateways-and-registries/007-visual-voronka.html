@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Воронка шлюза</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1f26; --muted:#5d6472;
+    --line:#8b93a3; --client:#2f6fb5; --gate:#b5642f; --backend:#2f8a5e;
+    --panel:#eef1f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e7eaf0; --muted:#9aa3b2;
+      --line:#6b7383; --client:#6fa8e0; --gate:#e0a26f; --backend:#6fcf9b;
+      --panel:#1e232b;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .err{padding:10px;font-size:13px;line-height:1.5;color:var(--fg);background:var(--panel);border-radius:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Воронка шлюза: одно горлышко снаружи, тридцать бэкендов внутри</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные схемы (единственные литералы-данные) ----------
+    var D = {
+      clients:  { n: 5000, label: "5000 разработчиков", cfg: "~/.mcp.json — один URL" },
+      gate:     { label: "Шлюз — один адрес",
+                  filters: ["auth", "RBAC", "audit", "rate limit", "policy"] },
+      backends: { n: 30, label: "30 бэкенд-серверов MCP" },
+      clientRows: [0,1,2,3,4],
+      backendRows: [0,1,2,3,4,5],
+      sid: { out: "метка сессии клиента", in: "свой идентификатор для каждого бэкенда" }
+    };
+
+    // ---------- единственная система координат ----------
+    var ORIGIN = {x: 150, y: 40};   // где лежит sx(0), sy(0)
+    var SCALE  = 26;                // пикселей на единицу
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(t, a){ var e=document.createElementNS(NS,t);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||13,
+        fill:"currentColor",class:cls||""}); t.textContent=s; return t; }
+
+    // ---- пиксельные литералы: только холст, отступы подписей, толщины, кегль
+    var VB_W = 1040, VB_H = 470, PAD = 8, PAD2 = 14, LW = 1.6, FS = 13, FS_S = 11.5;
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Пять тысяч клиентов с одним URL, шлюз с пятью фильтрами, тридцать бэкендов"});
+
+    var defs = el("defs");
+    var mk = el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"9",refY:"5",
+      markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+    mk.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    // ---------- геометрия в единицах ----------
+    var CX = 0, GX = 14, BX = 26;          // колонки: клиенты, шлюз, бэкенды
+    var TOP = 1.6;                          // верх содержимого
+    var MID = 7.2;                          // ось воронки
+
+    // ---------- клиенты ----------
+    var gC = el("g",{stroke:"var(--client)",fill:"none","stroke-width":LW});
+    D.clientRows.forEach(function(i){
+      var y = TOP + 1.2 + i*2.1;
+      gC.appendChild(el("rect",{x:sx(CX), y:sy(y), width:sx(4.6)-sx(0),
+        height:sy(1.25)-sy(0), rx:sy(0.28)-sy(0)}));
+    });
+    svg.appendChild(gC);
+
+    D.clientRows.forEach(function(i){
+      var y = TOP + 1.2 + i*2.1;
+      var t = txt(sx(CX+0.35), sy(y+0.85), D.clients.cfg, "start", null, FS_S);
+      t.setAttribute("fill","var(--muted)"); svg.appendChild(t);
+    });
+
+    var tc = txt(sx(CX+2.3), sy(TOP+0.4), D.clients.label, "middle", null, FS);
+    tc.setAttribute("fill","var(--client)"); tc.setAttribute("font-weight","600");
+    svg.appendChild(tc);
+    var tc2 = txt(sx(CX+2.3), sy(TOP+11.4)+PAD2, "одна строка в конфиге на всех", "middle", null, FS_S);
+    tc2.setAttribute("fill","var(--muted)"); svg.appendChild(tc2);
+
+    // ---------- сходящиеся линии: 5000 -> одно горлышко ----------
+    var neckX = GX - 1.2;
+    D.clientRows.forEach(function(i){
+      var y = TOP + 1.2 + i*2.1 + 0.62;
+      svg.appendChild(el("path",{
+        d:"M"+sx(CX+4.6)+","+sy(y)+" L"+sx(GX-3.4)+","+sy(y)+
+          " L"+sx(neckX)+","+sy(MID),
+        stroke:"var(--line)",fill:"none","stroke-width":LW,
+        "marker-end":"url(#ah)"}));
+    });
+    var tn = txt(sx(GX-3.4), sy(MID)-PAD2, "горлышко: один URL", "middle", null, FS_S);
+    tn.setAttribute("fill","var(--muted)"); svg.appendChild(tn);
+
+    // ---------- шлюз ----------
+    var gw = el("g");
+    gw.appendChild(el("rect",{x:sx(GX-1.2), y:sy(TOP+0.9),
+      width:sx(6.4)-sx(0), height:sy(10.2)-sy(0), rx:sy(0.4)-sy(0),
+      fill:"var(--panel)", stroke:"var(--gate)","stroke-width":LW}));
+    svg.appendChild(gw);
+
+    var tg = txt(sx(GX+2), sy(TOP+0.4), D.gate.label, "middle", null, FS);
+    tg.setAttribute("fill","var(--gate)"); tg.setAttribute("font-weight","600");
+    svg.appendChild(tg);
+
+    D.gate.filters.forEach(function(f,i){
+      var y = TOP + 1.8 + i*1.55;
+      svg.appendChild(el("rect",{x:sx(GX-0.6), y:sy(y),
+        width:sx(5.2)-sx(0), height:sy(1.15)-sy(0), rx:sy(0.22)-sy(0),
+        fill:"none", stroke:"var(--gate)","stroke-width":LW}));
+      var t = txt(sx(GX+2), sy(y+0.8), f, "middle", null, FS_S);
+      t.setAttribute("fill","var(--fg)"); svg.appendChild(t);
+    });
+
+    // подпись переписывания идентификаторов — под фильтрами, внутри шлюза
+    var tr = txt(sx(GX+2), sy(TOP+10.1), "подмена идентификатора сессии", "middle", null, FS_S);
+    tr.setAttribute("fill","var(--muted)"); svg.appendChild(tr);
+
+    // ---------- расходящиеся линии: шлюз -> 30 бэкендов ----------
+    var fanX = GX + 5.2;
+    D.backendRows.forEach(function(i){
+      var y = TOP + 0.9 + i*1.75;
+      svg.appendChild(el("path",{
+        d:"M"+sx(fanX)+","+sy(MID)+" L"+sx(BX-2.2)+","+sy(y+0.55)+
+          " L"+sx(BX)+","+sy(y+0.55),
+        stroke:"var(--line)",fill:"none","stroke-width":LW,
+        "marker-end":"url(#ah)"}));
+    });
+
+    // ---------- бэкенды ----------
+    var gB = el("g",{stroke:"var(--backend)",fill:"none","stroke-width":LW});
+    D.backendRows.forEach(function(i){
+      var y = TOP + 0.9 + i*1.75;
+      gB.appendChild(el("rect",{x:sx(BX), y:sy(y), width:sx(4.2)-sx(0),
+        height:sy(1.1)-sy(0), rx:sy(0.24)-sy(0)}));
+    });
+    svg.appendChild(gB);
+
+    D.backendRows.forEach(function(i){
+      var y = TOP + 0.9 + i*1.75;
+      var label = (i < D.backendRows.length-1) ? ("сервер " + (i+1)) : ("… сервер " + D.backends.n);
+      var t = txt(sx(BX+2.1), sy(y+0.73), label, "middle", null, FS_S);
+      t.setAttribute("fill","var(--fg)"); svg.appendChild(t);
+    });
+
+    var tb = txt(sx(BX+2.1), sy(TOP+0.4)-PAD, D.backends.label, "middle", null, FS);
+    tb.setAttribute("fill","var(--backend)"); tb.setAttribute("font-weight","600");
+    svg.appendChild(tb);
+
+    // ---------- легенда идентификаторов: строкой под схемой ----------
+    var ly = TOP + 12.6;
+    var l1 = txt(sx(CX), sy(ly), "снаружи: " + D.sid.out + " — одна на всех", "start", null, FS_S);
+    l1.setAttribute("fill","var(--muted)"); svg.appendChild(l1);
+    var l2 = txt(sx(BX+4.2), sy(ly), "внутри: " + D.sid.in, "end", null, FS_S);
+    l2.setAttribute("fill","var(--muted)"); svg.appendChild(l2);
+    var l3 = txt(sx(GX+2), sy(ly+1.0), "таблица соответствий остаётся в шлюзе — бэкенды не сопоставят метки", "middle", null, FS_S);
+    l3.setAttribute("fill","var(--muted)"); svg.appendChild(l3);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="err">Схема не построилась. Она должна была показать: '+
+      'слева 5000 разработчиков, у каждого в <code>~/.mcp.json</code> одна строка с URL; '+
+      'все линии сходятся в одно горлышко — шлюз с пятью фильтрами (auth, RBAC, audit, rate limit, policy); '+
+      'справа воронка расширяется в 30 бэкенд-серверов MCP. '+
+      'На границе шлюз подменяет идентификатор сессии: наружу одна метка клиента, '+
+      'внутрь — свой идентификатор для каждого бэкенда, таблица соответствий остаётся в шлюзе.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

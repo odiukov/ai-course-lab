@@ -1,0 +1,191 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Круг цикла с одним выходом</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d1c1a; --line:#3b3a37; --accent:#a8341f;
+    --muted:#6b6862; --card:#ffffff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15171a; --fg:#e9e7e2; --line:#b9b6ae; --accent:#f08a6c;
+      --muted:#9a978f; --card:#1c1f23;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:14px 16px}
+  h2{font-size:16px;margin:0 0 8px}
+  .fig{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .cap{color:var(--muted);font-size:13px;margin:8px 2px 0}
+  .fallback{padding:10px 12px;color:var(--fg);font-size:14px}
+  text{fill:var(--fg);font-family:inherit}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .ring{fill:none;stroke:var(--line)}
+  .head{fill:var(--line);stroke:none}
+  .exit{fill:none;stroke:var(--accent)}
+  .headx{fill:var(--accent);stroke:none}
+  .gate{fill:var(--accent);stroke:none}
+  .node{fill:var(--line);stroke:none}
+  .acc{fill:var(--accent)}
+  .small{font-size:13px;fill:var(--muted)}
+</style>
+<div class="wrap">
+  <h2>Кольцо цикла: четыре стрелки и одни ворота</h2>
+  <div class="fig" id="fig">
+    <svg id="svg" viewBox="0 0 700 380" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Кольцо из четырёх стрелок с одной точкой проверки stop_reason и единственным выходом"></svg>
+  </div>
+  <p class="cap">Ворота <span class="mono">stop_reason</span> стоят на самом кольце: <span class="mono">None</span> — едешь дальше, строка (<span class="mono">"finish"</span>, <span class="mono">"budget"</span>) — выходишь. Выход ровно один.</p>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById('svg');
+  try{
+    /* ---- данные схемы (единичные координаты: кольцо радиуса 1) ---- */
+    var D = {
+      r: 1,
+      dot: 0.045,
+      arrow: { len: 0.12, wid: 0.055 },
+      gapDeg: 8,
+      nodes: [
+        { ang: 180, label: 'буфер сообщений',    side: 'left'   },
+        { ang:  90, label: 'модель',             side: 'top'    },
+        { ang:   0, label: 'dispatch_tool',      side: 'right', mono: true },
+        { ang: -90, label: 'format_observation', side: 'bottom',mono: true }
+      ],
+      arcs: [
+        { from: 180, to:  90 },
+        { from:  90, to:   0 },
+        { from:   0, to: -90 },
+        { from: -90, to:-180, label: 'ход +1 · +2 сообщения', labAng: -157.5, labR: 1.22 }
+      ],
+      gate: { ang: -135, half: 0.085, label: 'stop_reason', labR: 0.68 },
+      exit: { ang: -135, r0: 1.08, r1: 1.72, label: 'stop condition', labAng: -147, labR: 1.45 }
+    };
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var ORIGIN = { x: 350, y: 190 };
+    var SCALE  = 130;
+    var LAB = 14;            /* пиксельный отступ подписи от точки привязки */
+
+    function sx(x){ return ORIGIN.x + SCALE * x; }
+    function sy(y){ return ORIGIN.y - SCALE * y; }
+
+    function pt(ang, r){
+      var a = ang * Math.PI / 180;
+      return { x: r * Math.cos(a), y: r * Math.sin(a) };
+    }
+    var RPX = sx(D.r) - sx(0);            /* радиус кольца в пикселях */
+
+    function el(name, attrs, text){
+      var n = document.createElementNS('http://www.w3.org/2000/svg', name);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (text != null) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    }
+    function head(tip, dir, cls){
+      var n = { x: -dir.y, y: dir.x };
+      var b = { x: tip.x - dir.x * D.arrow.len, y: tip.y - dir.y * D.arrow.len };
+      var p = [ tip,
+                { x: b.x + n.x * D.arrow.wid, y: b.y + n.y * D.arrow.wid },
+                { x: b.x - n.x * D.arrow.wid, y: b.y - n.y * D.arrow.wid } ];
+      el('polygon', { points: p.map(function(q){ return sx(q.x) + ',' + sy(q.y); }).join(' '), 'class': cls });
+    }
+    function label(ang, r, txt, anchor, dx, dy, cls){
+      var p = pt(ang, r);
+      el('text', { x: sx(p.x) + dx, y: sy(p.y) + dy, 'text-anchor': anchor,
+                   'dominant-baseline': 'middle', 'font-size': 15, 'class': cls || '' }, txt);
+    }
+
+    /* ---- дуги кольца (обход по убыванию угла = по часовой на экране) ---- */
+    var arrowDeg = D.arrow.len * 180 / Math.PI / D.r;
+    D.arcs.forEach(function(arc){
+      var a1 = arc.from - D.gapDeg;
+      var a2 = arc.to + D.gapDeg;
+      var s = pt(a1, D.r), e = pt(a2 + arrowDeg, D.r), tip = pt(a2, D.r);
+      el('path', { d: 'M ' + sx(s.x) + ' ' + sy(s.y) +
+                     ' A ' + RPX + ' ' + RPX + ' 0 0 1 ' + sx(e.x) + ' ' + sy(e.y),
+                   'class': 'ring', 'stroke-width': 2 });
+      var t = a2 * Math.PI / 180;
+      head(tip, { x: Math.sin(t), y: -Math.cos(t) }, 'head');
+      if (arc.label) label(arc.labAng, arc.labR, arc.label, 'end', -LAB, 0, 'small');
+    });
+
+    /* ---- ворота на кольце ---- */
+    var g = pt(D.gate.ang, D.r), h = D.gate.half;
+    var din = pt(D.gate.ang, D.r - h), dout = pt(D.gate.ang, D.r + h);
+    var tg = D.gate.ang * Math.PI / 180;
+    var t1 = { x: g.x + Math.sin(tg) * h, y: g.y - Math.cos(tg) * h };
+    var t2 = { x: g.x - Math.sin(tg) * h, y: g.y + Math.cos(tg) * h };
+    el('polygon', { points: [din, t1, dout, t2].map(function(q){ return sx(q.x) + ',' + sy(q.y); }).join(' '),
+                    'class': 'gate' });
+    label(D.gate.ang, D.gate.labR, D.gate.label, 'start', LAB, 0, 'acc mono');
+
+    /* ---- единственная стрелка наружу ---- */
+    var e0 = pt(D.exit.ang, D.exit.r0), e1 = pt(D.exit.ang, D.exit.r1 - D.arrow.len);
+    el('line', { x1: sx(e0.x), y1: sy(e0.y), x2: sx(e1.x), y2: sy(e1.y),
+                 'class': 'exit', 'stroke-width': 2.5 });
+    var ta = D.exit.ang * Math.PI / 180;
+    head(pt(D.exit.ang, D.exit.r1), { x: Math.cos(ta), y: Math.sin(ta) }, 'headx');
+    label(D.exit.labAng, D.exit.labR, D.exit.label, 'end', -LAB, 0, 'acc');
+
+    /* ---- точки кольца и их подписи ---- */
+    var RD = sx(D.dot) - sx(0);
+    D.nodes.forEach(function(n){
+      var p = pt(n.ang, D.r);
+      el('circle', { cx: sx(p.x), cy: sy(p.y), r: RD, 'class': 'node' });
+      var anchor = 'middle', dx = 0, dy = 0;
+      if (n.side === 'left')  { anchor = 'end';    dx = -LAB; }
+      if (n.side === 'right') { anchor = 'start';  dx =  LAB; }
+      if (n.side === 'top')   { dy = -LAB; }
+      if (n.side === 'bottom'){ dy =  LAB + 6; }
+      label(n.ang, D.r, n.label, anchor, dx, dy, n.mono ? 'mono' : '');
+    });
+  }catch(err){
+    document.getElementById('fig').innerHTML =
+      '<div class="fallback">Схема должна показывать кольцо: буфер сообщений → модель → ' +
+      'dispatch_tool → format_observation → обратно в буфер (четыре стрелки, замкнутые в круг). ' +
+      'На дуге возврата стоит счётчик: каждый оборот — ход +1 и +2 сообщения в буфере. ' +
+      'На этой же дуге, точкой на самом кольце, стоят ворота stop_reason, и от них наружу ведёт ' +
+      'единственная стрелка с подписью stop condition.</div>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

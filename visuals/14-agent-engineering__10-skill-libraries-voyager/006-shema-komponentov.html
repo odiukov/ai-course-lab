@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Круг из трёх компонентов</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1c2430; --mut:#5c6a7d; --line:#3d4c62;
+  --acc:#b4521f; --box:#ffffff; --boxb:#c2cad6;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#11161c; --fg:#e6ecf3; --mut:#9aa8bb; --line:#8fa4c1;
+    --acc:#e8934a; --box:#1a212a; --boxb:#3a4653;
+  }
+}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:780px;margin:0 auto;padding:12px 14px}
+h2{margin:0 0 6px;font-size:15px;font-weight:600}
+svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+.legend{margin-top:6px;font-size:12px;color:var(--mut)}
+.fallback{font-size:13px;color:var(--fg);border:1px solid var(--boxb);
+  padding:10px;border-radius:6px}
+text{fill:var(--fg)}
+text.mut{fill:var(--mut)}
+text.acc{fill:var(--acc)}
+rect.node{fill:var(--box);stroke:var(--boxb)}
+path.arc{fill:none;stroke:var(--line)}
+polygon.head{fill:var(--line);stroke:none}
+path.fb{fill:none;stroke:var(--acc);stroke-dasharray:6 4}
+polygon.fbhead{fill:var(--acc);stroke:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Круг из трёх компонентов: выход доработки возвращается в библиотеку</h2>
+  <svg id="d" viewBox="0 0 560 385" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Три компонента Voyager по кругу, стрелка успеха из итеративного промптинга обратно в библиотеку навыков"></svg>
+  <div id="fb"></div>
+  <div class="legend">Оборот: curriculum выдаёт задачу · библиотека отдаёт похожее · промптинг доводит код (три захода до рабочей кирки). В библиотеку уезжает только успех — две упавшие версии остаются внутри цикла. Библиотека стала на один навык больше, поэтому следующий оборот шире.</div>
+</div>
+<script>
+(function(){
+  var svg=document.getElementById('d');
+  try{
+    var NS='http://www.w3.org/2000/svg';
+
+    /* ---- данные схемы в единицах круга (радиус = 1) ---- */
+    var DATA={
+      R:1, hw:0.58, hh:0.235, pad:25, samples:36,
+      headLen:0.10, headWid:0.045,
+      nodes:[
+        {a: 90, t:'curriculum',          s:'«что дальше»'},
+        {a:-30, t:'skill library',       s:'«что умею»'},
+        {a:210, t:'iterative prompting', s:'«что если не вышло»'}
+      ],
+      arcLabels:[
+        {r:1.30, anchor:'start',  lines:['задача:','каменная кирка']},
+        {r:1.22, anchor:'middle', lines:['похожее из библиотеки:','mineStone']},
+        {r:1.30, anchor:'end',    lines:['задача закрыта']}
+      ],
+      fb:{ctrl:{x:0,y:0.35}, lab:{x:0,y:0.32},
+           lines:['только успех:','craftStonePickaxe']}
+    };
+
+    /* ---- единственный перевод координат ---- */
+    var origin={x:280,y:180}, scale=130;
+    function sx(x){return origin.x + x*scale;}
+    function sy(y){return origin.y - y*scale;}
+
+    var rad=function(d){return d*Math.PI/180;};
+    var onCircle=function(deg,r){return {x:r*Math.cos(rad(deg)), y:r*Math.sin(rad(deg))};};
+
+    function el(n,at){var e=document.createElementNS(NS,n);
+      for(var k in at) e.setAttribute(k,at[k]); return e;}
+    function txt(px,py,anchor,lines,cls,dy0){
+      var t=el('text',{x:px,y:py,'text-anchor':anchor,'font-size':12});
+      if(cls) t.setAttribute('class',cls);
+      for(var i=0;i<lines.length;i++){
+        var s=el('tspan',{x:px,dy:(i===0?(dy0||0):14)});
+        s.textContent=lines[i]; t.appendChild(s);
+      }
+      svg.appendChild(t); return t;
+    }
+    /* наконечник: вершина и две засечки считаются в единицах, рисуются через sx/sy */
+    function head(p,dir,cls){
+      var L=Math.hypot(dir.x,dir.y)||1, ux=dir.x/L, uy=dir.y/L;
+      var bx=p.x-ux*DATA.headLen, by=p.y-uy*DATA.headLen;
+      var a={x:bx-uy*DATA.headWid, y:by+ux*DATA.headWid};
+      var b={x:bx+uy*DATA.headWid, y:by-ux*DATA.headWid};
+      svg.appendChild(el('polygon',{class:cls,
+        points:[sx(p.x)+','+sy(p.y), sx(a.x)+','+sy(a.y), sx(b.x)+','+sy(b.y)].join(' ')}));
+    }
+    /* обрезка луча из центра блока его же рамкой */
+    function edge(c,dir){
+      var L=Math.hypot(dir.x,dir.y), ux=dir.x/L, uy=dir.y/L;
+      var t=Math.min(Math.abs(ux)>1e-6?DATA.hw/Math.abs(ux):1e9,
+                     Math.abs(uy)>1e-6?DATA.hh/Math.abs(uy):1e9);
+      return {x:c.x+ux*t, y:c.y+uy*t};
+    }
+
+    /* ---- дуги круга: по часовой, каждый шаг на −120° ---- */
+    DATA.nodes.forEach(function(n,i){
+      var a1=n.a-DATA.pad, a2=n.a-120+DATA.pad;
+      var pts=[];
+      for(var k=0;k<=DATA.samples;k++){
+        var a=a1+(a2-a1)*k/DATA.samples, p=onCircle(a,DATA.R);
+        pts.push((k?'L':'M')+sx(p.x)+' '+sy(p.y));
+      }
+      svg.appendChild(el('path',{class:'arc','stroke-width':1.6,d:pts.join(' ')}));
+      var tip=onCircle(a2,DATA.R);
+      head(tip,{x:Math.sin(rad(a2)),y:-Math.cos(rad(a2))},'head');
+
+      var lb=DATA.arcLabels[i], mid=n.a-60, lp=onCircle(mid,lb.r);
+      txt(sx(lp.x), sy(lp.y), lb.anchor, lb.lines, 'mut', 0);
+    });
+
+    /* ---- обратная стрелка: промптинг → библиотека ---- */
+    var Cp=DATA.fb.ctrl;
+    var pc=onCircle(DATA.nodes[2].a,DATA.R), lc=onCircle(DATA.nodes[1].a,DATA.R);
+    var P0=edge(pc,{x:Cp.x-pc.x,y:Cp.y-pc.y});
+    var P1=edge(lc,{x:Cp.x-lc.x,y:Cp.y-lc.y});
+    var fbp=[];
+    for(var k=0;k<=DATA.samples;k++){
+      var u=k/DATA.samples, w=1-u;
+      var x=w*w*P0.x+2*w*u*Cp.x+u*u*P1.x, y=w*w*P0.y+2*w*u*Cp.y+u*u*P1.y;
+      fbp.push((k?'L':'M')+sx(x)+' '+sy(y));
+    }
+    svg.appendChild(el('path',{class:'fb','stroke-width':1.6,d:fbp.join(' ')}));
+    head(P1,{x:P1.x-Cp.x,y:P1.y-Cp.y},'fbhead');
+    txt(sx(DATA.fb.lab.x), sy(DATA.fb.lab.y), 'middle', DATA.fb.lines, 'acc', 0);
+
+    /* ---- блоки поверх линий ---- */
+    DATA.nodes.forEach(function(n){
+      var c=onCircle(n.a,DATA.R);
+      svg.appendChild(el('rect',{class:'node',rx:6,'stroke-width':1.2,
+        x:sx(c.x-DATA.hw), y:sy(c.y+DATA.hh),
+        width:sx(c.x+DATA.hw)-sx(c.x-DATA.hw),
+        height:sy(c.y-DATA.hh)-sy(c.y+DATA.hh)}));
+      txt(sx(c.x), sy(c.y), 'middle', [n.t], '', -2)
+        .setAttribute('font-weight','600');
+      txt(sx(c.x), sy(c.y), 'middle', [n.s], 'mut', 15)
+        .setAttribute('font-size',11);
+    });
+  }catch(e){
+    svg.style.display='none';
+    var f=document.getElementById('fb');
+    f.className='fallback';
+    f.textContent='Схема не построилась. Она должна показывать три блока по кругу: '+
+      'curriculum («что дальше») → skill library («что умею») → iterative prompting '+
+      '(«что если не вышло»), и отдельную стрелку из iterative prompting обратно в '+
+      'skill library — в неё уезжает только удавшийся код (craftStonePickaxe), '+
+      'после чего круг замыкается уже более широким.';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

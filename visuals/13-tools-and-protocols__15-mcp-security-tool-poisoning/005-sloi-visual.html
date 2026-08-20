@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Слои защиты: 0,3⁴</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#18222e; --mut:#5c6b7d; --line:#c8d3df;
+    --grid:#dde5ee; --acc:#c0392b; --node:#8e2b1f;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#11161c; --fg:#e7eef6; --mut:#a2b2c4; --line:#33404e;
+      --grid:#232e3a; --acc:#ff9078; --node:#ffb9a6;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg); color:var(--fg);
+       font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:760px; margin:0 auto; padding:10px 12px 12px}
+  h1{font-size:15px; font-weight:600; margin:0 0 6px}
+  svg{display:block; width:100%; height:auto; max-height:520px; background:var(--bg)}
+  .legend{margin:6px 0 0; font-size:12px; color:var(--mut)}
+  .legend b{color:var(--fg); font-weight:600}
+  .fb{font-size:13px; color:var(--fg); margin:0}
+  text{font-family:inherit}
+  .t-tick{font-size:12px; fill:var(--mut)}
+  .t-name{font-size:13px; fill:var(--fg)}
+  .t-mul{font-size:12px; fill:var(--acc)}
+  .t-out{font-size:13px; font-weight:600; fill:var(--acc)}
+  .ax{stroke:var(--line); fill:none}
+  .gr{stroke:var(--grid); fill:none; stroke-dasharray:4 4}
+  .fl{stroke:var(--acc); fill:none}
+  .hd{fill:var(--acc); stroke:none}
+  .nd{fill:var(--node); stroke:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Четыре слоя защиты: каждый пропускает 30 %</h1>
+  <div id="host"></div>
+  <p class="legend" id="lg">
+    <b>①</b> скан при установке · <b>②</b> хеш-пин на каждом вызове ·
+    <b>③</b> Rule of Two при выдаче прав · <b>④</b> рантайм-детекция перед действием.<br>
+    Каждый слой пропускает 30 % (×0,3) и смотрит в свой момент времени; на выходе 0,3⁴ — меньше 1 %.
+  </p>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---- данные схемы ---- */
+    var DATA = {
+      pass: 0.3,
+      nodesX: [0, 1.4, 2.8, 4.2, 5.6],
+      yMin: -2.4,
+      ticks: [ {v:0, t:'100 %'}, {v:-1, t:'10 %'}, {v:-2, t:'1 %'} ],
+      layers: [
+        {tag:'①', short:'скан'},
+        {tag:'②', short:'хеш-пин'},
+        {tag:'③', short:'Rule of Two'},
+        {tag:'④', short:'рантайм'}
+      ],
+      out: '0,3⁴ = меньше 1 %',
+      dot: 0.045,   // радиус узла, в единицах данных
+      gap: 0.07,    // зазор от узла до наконечника
+      arrow: 0.16,  // длина наконечника
+      wing: 0.07    // полуширина наконечника
+    };
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var origin = {x:110, y:56}, scale = 100;
+    function sx(u){ return origin.x + u * scale; }
+    function sy(u){ return origin.y - u * scale; }
+
+    /* пиксельные отступы подписей от точки привязки */
+    var PAD_TICK = 8, PAD_UP = 30, PAD_MUL = 14, PAD_OUT = 18;
+    var STROKE = 1.6;
+
+    /* остаток потока в узле i = 0,3^i, ось — десятичный логарифм */
+    var P = DATA.nodesX.map(function(x, i){
+      return { x: x, y: Math.log10(Math.pow(DATA.pass, i)) };
+    });
+
+    var s = [];
+
+    /* сетка и подписи уровней */
+    DATA.ticks.forEach(function(tk){
+      s.push('<line class="gr" stroke-width="' + STROKE + '" x1="' + sx(P[0].x) +
+             '" y1="' + sy(tk.v) + '" x2="' + sx(P[P.length-1].x) + '" y2="' + sy(tk.v) + '"/>');
+      s.push('<text class="t-tick" text-anchor="end" x="' + (sx(P[0].x) - PAD_TICK) +
+             '" y="' + (sy(tk.v) + PAD_TICK / 2) + '">' + tk.t + '</text>');
+    });
+
+    /* оси */
+    s.push('<line class="ax" stroke-width="' + STROKE + '" x1="' + sx(0) + '" y1="' + sy(0) +
+           '" x2="' + sx(0) + '" y2="' + sy(DATA.yMin) + '"/>');
+    s.push('<line class="ax" stroke-width="' + STROKE + '" x1="' + sx(0) + '" y1="' + sy(DATA.yMin) +
+           '" x2="' + sx(P[P.length-1].x) + '" y2="' + sy(DATA.yMin) + '"/>');
+
+    /* четыре перехода: линия + наконечник + подписи */
+    for (var i = 0; i < DATA.layers.length; i++){
+      var a = P[i], b = P[i+1];
+      var dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+      var ux = dx / L, uy = dy / L, px = -uy, py = ux;
+
+      var tip  = { x: b.x - ux * DATA.gap,                 y: b.y - uy * DATA.gap };
+      var base = { x: tip.x - ux * DATA.arrow,             y: tip.y - uy * DATA.arrow };
+      var w1   = { x: base.x + px * DATA.wing,             y: base.y + py * DATA.wing };
+      var w2   = { x: base.x - px * DATA.wing,             y: base.y - py * DATA.wing };
+
+      s.push('<line class="fl" stroke-width="' + STROKE * 2 + '" x1="' + sx(a.x) + '" y1="' + sy(a.y) +
+             '" x2="' + sx(base.x) + '" y2="' + sy(base.y) + '"/>');
+      s.push('<polygon class="hd" points="' + sx(tip.x) + ',' + sy(tip.y) + ' ' +
+             sx(w1.x) + ',' + sy(w1.y) + ' ' + sx(w2.x) + ',' + sy(w2.y) + '"/>');
+
+      var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      /* имя слоя — выше линии, множитель — ниже: разные стороны, не сдвиг на пиксели */
+      s.push('<text class="t-name" text-anchor="middle" x="' + sx(mid.x) + '" y="' +
+             (sy(mid.y) - PAD_UP) + '">' + DATA.layers[i].tag + ' ' + DATA.layers[i].short + '</text>');
+      s.push('<text class="t-mul" text-anchor="middle" x="' + sx(mid.x) + '" y="' +
+             (sy(mid.y) + PAD_MUL) + '">×0,3</text>');
+    }
+
+    /* узлы */
+    var R = sx(DATA.dot) - sx(0);
+    P.forEach(function(p){
+      s.push('<circle class="nd" cx="' + sx(p.x) + '" cy="' + sy(p.y) + '" r="' + R + '"/>');
+    });
+
+    /* итог — под последним узлом, якорь end, чтобы не уехать за правый край */
+    var last = P[P.length - 1];
+    s.push('<text class="t-out" text-anchor="end" x="' + (sx(last.x) - PAD_TICK) +
+           '" y="' + (sy(last.y) + PAD_OUT) + '">' + DATA.out + '</text>');
+
+    host.innerHTML = '<svg viewBox="0 0 700 308" preserveAspectRatio="xMidYMid meet" ' +
+      'role="img" aria-label="Четыре слоя, каждый пропускает 30 процентов, на выходе 0,3 в четвёртой степени — меньше 1 процента">' +
+      s.join('') + '</svg>';
+  }catch(e){
+    host.innerHTML = '<p class="fb">Схема должна показывать цепочку из четырёх слоёв: ' +
+      'скан при установке, хеш-пин, Rule of Two, рантайм-детекция. Вход — 100 %, ' +
+      'каждый слой пропускает 30 % (×0,3), на выходе 0,3⁴ — меньше 1 %.</p>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

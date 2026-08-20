@@ -1,0 +1,173 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Разделённые энкодеры</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1b1f27; --line:#59636f;
+    --u:#1f5d9e; --ub:#e6effa; --g:#9a5410; --gb:#fbeedc; --n:#3c4552; --nb:#eaeef4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#11141a; --fg:#e7eaf0; --line:#8d99aa;
+      --u:#7fb4ec; --ub:#182534; --g:#e2a663; --gb:#2f2417; --n:#c4ccd8; --nb:#1c212a;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  figure{margin:0;padding:14px 16px}
+  h2{margin:0 0 2px;font-size:17px}
+  figcaption{margin-top:8px;font-size:13px;color:var(--fg);opacity:.8}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .box{stroke-width:2}
+  .lbl{font-size:15px;text-anchor:middle;dominant-baseline:middle}
+  .edge{fill:none;stroke-width:2}
+  .elbl{font-size:14px;dominant-baseline:middle}
+  .u{--c:var(--u);--b:var(--ub)} .g{--c:var(--g);--b:var(--gb)} .n{--c:var(--n);--b:var(--nb)}
+  .box{fill:var(--b);stroke:var(--c)} .lbl{fill:var(--fg)}
+  .edge{stroke:var(--c)} .head{fill:var(--c)} .elbl{fill:var(--c)}
+  #fb{font-size:14px}
+</style>
+<figure>
+  <h2>Разделённые энкодеры: три появления вместо двух</h2>
+  <svg id="s" viewBox="0 0 1040 458" role="img"
+       aria-label="Картинка идёт либо в SigLIP-SO400m и двухслойный MLP, либо в VQ-токенизатор; обе ветки входят в общее тело трансформера; из тела выходят текст и VQ-токены, токены идут в VQ-декодер и становятся пикселями"></svg>
+  <div id="fb" hidden></div>
+  <figcaption>SigLIP — один раз, на входе понимания. VQ — два раза: на входе генерации и на выходе, через VQ-декодер. Тело трансформера одно и общее для всех трёх маршрутов.</figcaption>
+</figure>
+<script>
+(function(){
+  var svg=document.getElementById("s"), fb=document.getElementById("fb");
+  try{
+    var D={
+      scale:34,
+      origin:{x:14,y:-20},
+      arrow:{len:0.34,half:0.20},
+      nodes:{
+        img :{cx:2.2 ,cy:4.6 ,w:4.0,h:1.6,kind:"n",lines:["Картинка"]},
+        sig :{cx:8.6 ,cy:1.8 ,w:5.0,h:1.6,kind:"u",lines:["SigLIP-SO400m"]},
+        mlp :{cx:14.8,cy:1.8 ,w:4.4,h:1.6,kind:"u",lines:["MLP, 2 слоя"]},
+        vqt :{cx:8.6 ,cy:7.4 ,w:5.0,h:1.6,kind:"g",lines:["VQ-токенизатор"]},
+        body:{cx:21.0,cy:4.6 ,w:5.0,h:4.4,kind:"n",lines:["Тело","трансформера"]},
+        txt :{cx:27.5,cy:1.8 ,w:3.6,h:1.6,kind:"u",lines:["Текст"]},
+        vqk :{cx:27.5,cy:7.4 ,w:4.4,h:1.6,kind:"g",lines:["VQ-токены"]},
+        vqd :{cx:27.5,cy:10.2,w:4.4,h:1.6,kind:"g",lines:["VQ-декодер"]},
+        pix :{cx:27.5,cy:12.8,w:3.6,h:1.6,kind:"g",lines:["Пиксели"]}
+      },
+      edges:[
+        {a:["img","r",0],   b:["sig","l",0],    kind:"u",label:"понимание"},
+        {a:["img","r",0],   b:["vqt","l",0],    kind:"g",label:"генерация"},
+        {a:["sig","r",0],   b:["mlp","l",0],    kind:"u"},
+        {a:["mlp","r",0],   b:["body","l",-1.4],kind:"u"},
+        {a:["vqt","r",0],   b:["body","l",1.4], kind:"g"},
+        {a:["body","r",-1.4],b:["txt","l",0],   kind:"u"},
+        {a:["body","r",1.4],b:["vqk","l",0],    kind:"g"},
+        {a:["vqk","b",0],   b:["vqd","t",0],    kind:"g"},
+        {a:["vqd","b",0],   b:["pix","t",0],    kind:"g"}
+      ]
+    };
+
+    var scale=D.scale, origin=D.origin;
+    function sx(x){return origin.x+x*scale;}
+    function sy(y){return origin.y+y*scale;}
+
+    var PAD=8, LH=18, NS="http://www.w3.org/2000/svg";
+    function mk(tag,at){var e=document.createElementNS(NS,tag);
+      for(var k in at) e.setAttribute(k,at[k]); return e;}
+
+    function port(ref){
+      var n=D.nodes[ref[0]], side=ref[1], t=ref[2];
+      if(side==="r") return {x:n.cx+n.w/2, y:n.cy+t};
+      if(side==="l") return {x:n.cx-n.w/2, y:n.cy+t};
+      if(side==="t") return {x:n.cx+t, y:n.cy-n.h/2};
+      return {x:n.cx+t, y:n.cy+n.h/2};
+    }
+    function route(a,b){
+      if(Math.abs(a.y-b.y)<1e-9||Math.abs(a.x-b.x)<1e-9) return [a,b];
+      var xm=(a.x+b.x)/2;
+      return [a,{x:xm,y:a.y},{x:xm,y:b.y},b];
+    }
+    function head(p,q){
+      var dx=q.x-p.x, dy=q.y-p.y, L=Math.sqrt(dx*dx+dy*dy)||1;
+      dx/=L; dy/=L;
+      var L1=D.arrow.len, H=D.arrow.half;
+      var bx=q.x-dx*L1, by=q.y-dy*L1;
+      var pts=[[q.x,q.y],[bx-dy*H,by+dx*H],[bx+dy*H,by-dx*H]];
+      return pts.map(function(p){return sx(p[0])+","+sy(p[1]);}).join(" ");
+    }
+
+    var gE=mk("g",{}), gN=mk("g",{});
+    svg.appendChild(gE); svg.appendChild(gN);
+
+    D.edges.forEach(function(e){
+      var g=mk("g",{"class":e.kind});
+      var a=port(e.a), b=port(e.b), pts=route(a,b);
+      g.appendChild(mk("polyline",{"class":"edge",
+        points:pts.map(function(p){return sx(p.x)+","+sy(p.y);}).join(" ")}));
+      g.appendChild(mk("polygon",{"class":"head",
+        points:head(pts[pts.length-2],pts[pts.length-1])}));
+      if(e.label){
+        var m={x:pts[1].x, y:(pts[1].y+pts[2].y)/2};
+        var t=mk("text",{"class":"elbl","text-anchor":"end",
+          x:sx(m.x)-PAD, y:sy(m.y)});
+        t.textContent=e.label;
+        g.appendChild(t);
+      }
+      gE.appendChild(g);
+    });
+
+    Object.keys(D.nodes).forEach(function(k){
+      var n=D.nodes[k], g=mk("g",{"class":n.kind});
+      var x0=sx(n.cx-n.w/2), x1=sx(n.cx+n.w/2);
+      var y0=sy(n.cy-n.h/2), y1=sy(n.cy+n.h/2);
+      g.appendChild(mk("rect",{"class":"box",x:x0,y:y0,
+        width:x1-x0,height:y1-y0,rx:8}));
+      n.lines.forEach(function(s,i){
+        var t=mk("text",{"class":"lbl",x:sx(n.cx),
+          y:sy(n.cy)+(i-(n.lines.length-1)/2)*LH});
+        t.textContent=s;
+        g.appendChild(t);
+      });
+      gN.appendChild(g);
+    });
+  }catch(err){
+    svg.setAttribute("hidden","");
+    fb.removeAttribute("hidden");
+    fb.textContent="Схема не построилась. Она должна показывать: картинка входит либо в SigLIP-SO400m и затем в двухслойный MLP (маршрут понимания), либо в VQ-токенизатор (маршрут генерации); обе ветки сходятся в одно общее тело трансформера; из тела выходят текст и VQ-токены, а токены идут в VQ-декодер и превращаются в пиксели. SigLIP встречается один раз, VQ — два.";
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

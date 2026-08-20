@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Два запроса: tools/call и resources/read</title>
+<style>
+  :root{ --bg:#fbfbfa; --fg:#1c1c1a; --mut:#6a6a64; --acc:#1a5fb4; --acc2:#2c7a3f; --dash:#8a6a1a; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#16171a; --fg:#eceef0; --mut:#9aa0a6; --acc:#78aeff; --acc2:#7cd992; --dash:#e0b64c; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:8px 4px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:496px;background:var(--bg);}
+  .t{fill:var(--fg);font-size:12px;}
+  .m{fill:var(--mut);font-size:11px;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  #fb{color:var(--mut);font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Один клик — две строки в логе: <span class="mono">tools/call</span>, затем <span class="mono">resources/read</span></h2>
+  <svg id="s" viewBox="0 0 640 320" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Хост дважды обращается к серверу: tools/call возвращает uri ui://notes/timeline, resources/read возвращает HTML; кэш хоста отменяет второй запрос"></svg>
+  <div id="fb"></div>
+</div>
+<script>
+(function(){
+var svg=document.getElementById("s");
+try{
+  // ---- данные схемы (координаты в единицах схемы) ----
+  var D={
+    lanes:[{id:"host",x:0,label:"ХОСТ"},{id:"srv",x:9,label:"СЕРВЕР"}],
+    laneTop:0, laneBot:-9.2,
+    msgs:[
+      {y:-1.6,dir:1, tag:"1",lab:"tools/call  name: visualize_timeline"},
+      {y:-3.0,dir:-1,tag:"2",lab:"result: uri  ui://notes/timeline",note:"HTML нет ни байта"},
+      {y:-5.2,dir:1, tag:"3",lab:"resources/read  uri: ui://notes/timeline"},
+      {y:-6.6,dir:-1,tag:"4",lab:'mimeType: text/html;profile=mcp-app',note:'text: "<!doctype html>…"'}
+    ],
+    cache:{y:-4.1, x0:-1.4, x1:10.4, lab:"кэш хоста: бандл уже есть — запросы 3 и 4 не поедут"},
+    glue:{yFrom:-3.0,yTo:-5.2,x:4.5,lab:"строка URI совпадает символ в символ"}
+  };
+  // ---- один origin, один scale ----
+  var origin={x:64,y:296}, scale={x:52,y:30};
+  function sx(x){ return origin.x + x*scale.x; }
+  function sy(y){ return origin.y + y*scale.y; }
+
+  var LW=1.6, LWT=1.1, FS=12, FSS=11, PAD=7, HEAD=7;
+  var NS="http://www.w3.org/2000/svg";
+  function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+  function txt(x,y,s,cls,anch,extra){
+    var e=el("text",{x:x,y:y,"class":cls,"text-anchor":anch});
+    if(extra) for(var k in extra) e.setAttribute(k,extra[k]);
+    e.textContent=s; return e;
+  }
+
+  // ---- вертикали жизни хоста и сервера ----
+  D.lanes.forEach(function(L){
+    el("line",{x1:sx(L.x),y1:sy(D.laneTop),x2:sx(L.x),y2:sy(D.laneBot),
+      stroke:"var(--mut)","stroke-width":LWT,"stroke-dasharray":"3 4"});
+    txt(sx(L.x),sy(D.laneTop)+PAD+FS,L.label,"t",L.x<4.5?"start":"end",{"font-weight":"600"});
+  });
+
+  // ---- четыре сообщения ----
+  D.msgs.forEach(function(m){
+    var a=m.dir>0?D.lanes[0].x:D.lanes[1].x, b=m.dir>0?D.lanes[1].x:D.lanes[0].x;
+    var col=m.dir>0?"var(--acc)":"var(--acc2)";
+    var x1=sx(a), x2=sx(b), y=sy(m.y), s=m.dir>0?1:-1;
+    el("line",{x1:x1,y1:y,x2:x2,y2:y,stroke:col,"stroke-width":LW,
+      "stroke-dasharray":m.dir>0?"":"6 4"});
+    el("polygon",{points:[x2,y, x2-s*HEAD,y-HEAD*0.62, x2-s*HEAD,y+HEAD*0.62].join(" "),fill:col});
+    // подпись у хвоста стрелки
+    txt(x1+s*PAD, y-PAD, m.tag+". "+m.lab, "t", m.dir>0?"start":"end", {"class":"t mono"});
+    if(m.note) txt(x1+s*PAD, y+PAD+FSS, m.note, "m", m.dir>0?"start":"end");
+  });
+
+  // ---- клей: URI из ответа 2 попадает в запрос 3 ----
+  el("line",{x1:sx(D.glue.x),y1:sy(D.glue.yFrom)+PAD,x2:sx(D.glue.x),y2:sy(D.glue.yTo)-PAD,
+    stroke:"var(--mut)","stroke-width":LWT,"stroke-dasharray":"2 3"});
+  txt(sx(D.glue.x)+PAD, sy((D.glue.yFrom+D.glue.yTo)/2), D.glue.lab, "m", "start",
+    {"dominant-baseline":"middle"});
+
+  // ---- пунктирная рамка кэша: отменяет запросы 3 и 4 ----
+  var cy=sy(D.cache.y), cx0=sx(D.cache.x0), cx1=sx(D.cache.x1);
+  el("line",{x1:cx0,y1:cy,x2:cx1,y2:cy,stroke:"var(--dash)","stroke-width":LW,
+    "stroke-dasharray":"8 5"});
+  txt(cx0, cy-PAD, D.cache.lab, "m", "start", {fill:"var(--dash)"});
+  // перечёркиваем нижние две стрелки
+  [D.msgs[2],D.msgs[3]].forEach(function(m){
+    var xm=sx((D.lanes[0].x+D.lanes[1].x)/2), y=sy(m.y);
+    el("line",{x1:xm-HEAD,y1:y-HEAD,x2:xm+HEAD,y2:y+HEAD,stroke:"var(--dash)","stroke-width":LW});
+    el("line",{x1:xm-HEAD,y1:y+HEAD,x2:xm+HEAD,y2:y-HEAD,stroke:"var(--dash)","stroke-width":LW});
+  });
+
+  // ---- легенда ----
+  txt(sx(D.cache.x0), sy(D.laneBot)-PAD, "сплошная — запрос хоста · пунктир — ответ сервера · обе стрелки начинает хост", "m", "start");
+}catch(e){
+  svg.remove();
+  document.getElementById("fb").textContent =
+    "Схема должна показывать: 1) хост → сервер tools/call visualize_timeline; "+
+    "2) сервер → хост result с uri ui://notes/timeline (без HTML); "+
+    "3) хост → сервер resources/read с тем же uri; "+
+    "4) сервер → хост mimeType text/html;profile=mcp-app и text с <!doctype html>. "+
+    "Кэш хоста (пунктир) отменяет шаги 3 и 4. Обе стрелки-запроса идут от хоста.";
+}
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

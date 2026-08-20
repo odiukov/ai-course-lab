@@ -1,0 +1,176 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Спектрограмма как нотная запись</title>
+<style>
+  :root{ --bg:#ffffff; --fg:#1b1f2a; --dim:#5c6472; --line:#8a93a6; --plot:#0b0e1c; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12141a; --fg:#e8ebf2; --dim:#a2abbd; --line:#6f7a90; --plot:#0b0e1c; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .ax{stroke:var(--line);}
+  .tx{fill:var(--fg);}
+  .dim{fill:var(--dim);}
+  .in{fill:#fff;stroke:#0b0e1c;stroke-width:3;paint-order:stroke;font-weight:600;}
+  .fail{color:var(--fg);padding:10px;border:1px solid var(--line);border-radius:6px;}
+</style>
+<div class="wrap">
+  <h2>Спектрограмма: 3000 кадров × 80 mel-бинов, яркость = энергия</h2>
+  <svg id="s" viewBox="0 0 880 400" role="img"
+       aria-label="Прямоугольник 3000 кадров на 80 mel-бинов, яркость клетки равна энергии"></svg>
+  <div id="fb"></div>
+</div>
+<script>
+(function(){
+try{
+  /* ---- данные схемы ---- */
+  var FRAMES=3000, BINS=80, COL=25, ROW=2;
+  var SEG=[
+    {a:200,b:700,t:"v",bands:[8,14,22],amp:0.95},
+    {a:760,b:1100,t:"g",amp:0.50},
+    {a:1150,b:1400,t:"f",amp:0.85},
+    {a:1440,b:1620,t:"g",amp:0.45},
+    {a:1650,b:1800,t:"p"},
+    {a:1850,b:2200,t:"g",amp:0.50},
+    {a:2250,b:2600,t:"v",bands:[10,18,28],amp:1.00},
+    {a:2660,b:2900,t:"v",bands:[10,18,28],amp:0.42}
+  ];
+
+  /* ---- один origin, один scale, одна пара sx/sy ---- */
+  var origin={x:110,y:334}, scale={x:0.2,y:4};
+  function sx(f){ return origin.x + f*scale.x; }
+  function sy(b){ return origin.y - b*scale.y; }
+
+  function nz(f,b){ var s=Math.sin(f*12.9898+b*78.233)*43758.5453; return s-Math.floor(s); }
+  function seg(f){ for(var i=0;i<SEG.length;i++){ if(f>=SEG[i].a&&f<SEG[i].b) return SEG[i]; } return null; }
+  function energy(f,b){
+    var s=seg(f), v=0.05+0.07*nz(f,b);
+    if(!s) return v;
+    if(s.t==="p") return 0.03+0.02*nz(f,b);
+    if(s.t==="g") v+=s.amp*Math.exp(-b/18)+0.05;
+    if(s.t==="f") v+=s.amp*(1/(1+Math.exp(-(b-52)/5)))*(0.6+0.4*nz(f,b));
+    if(s.t==="v"){
+      v+=0.18*Math.exp(-b/12);
+      for(var i=0;i<s.bands.length;i++){
+        var d=(b-s.bands[i])/2.3; v+=s.amp*Math.exp(-d*d)*(0.85+0.15*nz(f,b));
+      }
+    }
+    return v>1?1:v;
+  }
+  function mix(a,c,t){ return "rgb("+Math.round(a[0]+(c[0]-a[0])*t)+","+
+    Math.round(a[1]+(c[1]-a[1])*t)+","+Math.round(a[2]+(c[2]-a[2])*t)+")"; }
+  function color(v){
+    var c1=[10,14,40], c2=[46,118,140], c3=[246,233,178];
+    return v<0.5 ? mix(c1,c2,v*2) : mix(c2,c3,(v-0.5)*2);
+  }
+
+  var W=sx(COL)-sx(0), H=sy(0)-sy(ROW), o=[];
+
+  /* фон поля + клетки */
+  o.push('<rect x="'+sx(0)+'" y="'+sy(BINS)+'" width="'+(sx(FRAMES)-sx(0))+
+         '" height="'+(sy(0)-sy(BINS))+'" fill="#0b0e1c"/>');
+  for(var f=0; f<FRAMES; f+=COL){
+    for(var b=0; b<BINS; b+=ROW){
+      o.push('<rect x="'+sx(f).toFixed(1)+'" y="'+sy(b+ROW)+'" width="'+(W+0.4).toFixed(1)+
+             '" height="'+(H+0.4)+'" fill="'+color(energy(f+COL/2,b+ROW/2))+'"/>');
+    }
+  }
+  o.push('<rect class="ax" fill="none" x="'+sx(0)+'" y="'+sy(BINS)+'" width="'+(sx(FRAMES)-sx(0))+
+         '" height="'+(sy(0)-sy(BINS))+'" stroke-width="1"/>');
+
+  /* ось времени: засечки снизу, подписи под ними */
+  var xt=[0,1000,2000,3000];
+  for(var i=0;i<xt.length;i++){
+    o.push('<line class="ax" stroke-width="1" x1="'+sx(xt[i])+'" y1="'+sy(0)+'" x2="'+sx(xt[i])+'" y2="'+sy(-1.5)+'"/>');
+    o.push('<text class="dim" font-size="12" text-anchor="middle" x="'+sx(xt[i])+'" y="'+sy(-4.5)+'">'+xt[i]+'</text>');
+  }
+  o.push('<text class="tx" font-size="12" text-anchor="middle" x="'+sx(1500)+'" y="'+sy(-9)+
+         '">время вправо: 3000 кадров = 30 секунд, 100 кадров в секунду</text>');
+
+  /* ось частоты: засечки слева, подписи слева от них */
+  var yt=[0,20,40,60,80];
+  for(var j=0;j<yt.length;j++){
+    o.push('<line class="ax" stroke-width="1" x1="'+sx(0)+'" y1="'+sy(yt[j])+'" x2="'+sx(-25)+'" y2="'+sy(yt[j])+'"/>');
+    if(yt[j]%40===0)
+      o.push('<text class="dim" font-size="12" text-anchor="end" dominant-baseline="middle" x="'+
+             sx(-45)+'" y="'+sy(yt[j])+'">'+yt[j]+'</text>');
+  }
+  o.push('<text class="tx" font-size="12" text-anchor="middle" transform="rotate(-90 '+
+         sx(-330)+' '+sy(40)+')" x="'+sx(-330)+'" y="'+sy(40)+
+         '">80 mel-бинов: снизу низкие фильтры, сверху высокие</text>');
+
+  /* что видно глазом — подписи внутри поля, разнесены по высоте */
+  var IN=[[450,36,"гласная «а»"],[1275,46,"«с» — шум вверху"],[1725,68,"пауза"],[2425,40,"ударный слог"]];
+  for(var k=0;k<IN.length;k++){
+    o.push('<text class="in" font-size="12" text-anchor="middle" x="'+sx(IN[k][0])+'" y="'+sy(IN[k][1])+'">'+IN[k][2]+'</text>');
+  }
+
+  /* скобка справа: вся картинка = 240 000 чисел против 480 000 сэмплов */
+  o.push('<path class="ax" fill="none" stroke-width="1" d="M'+sx(3010)+' '+sy(80)+' L'+sx(3040)+' '+sy(80)+
+         ' L'+sx(3040)+' '+sy(0)+' L'+sx(3010)+' '+sy(0)+'"/>');
+  var R=[[64,"вся картинка —","dim",12],[56,"240 000 чисел","tx",14],[48,"3000 × 80","dim",12],
+         [32,"вместо","dim",12],[24,"480 000 сэмплов","tx",14],[16,"сырой волны, 30 с","dim",12]];
+  for(var r=0;r<R.length;r++){
+    o.push('<text class="'+R[r][2]+'" font-size="'+R[r][3]+'" text-anchor="start" x="'+sx(3120)+'" y="'+sy(R[r][0])+'">'+R[r][1]+'</text>');
+  }
+
+  /* легенда яркости отдельной строкой под схемой */
+  var gid="g1", gs="";
+  for(var t=0;t<=4;t++) gs+='<stop offset="'+(t*25)+'%" stop-color="'+color(t/4)+'"/>';
+  o.push('<defs><linearGradient id="'+gid+'">'+gs+'</linearGradient></defs>');
+  o.push('<text class="dim" font-size="12" text-anchor="start" x="'+sx(0)+'" y="'+sy(-13)+'">яркость клетки = энергия:</text>');
+  o.push('<text class="dim" font-size="12" text-anchor="end" x="'+sx(1000)+'" y="'+sy(-13)+'">тихо</text>');
+  o.push('<rect x="'+sx(1050)+'" y="'+sy(-12.2)+'" width="'+(sx(1850)-sx(1050))+'" height="'+(sy(-15.2)-sy(-12.2))+'" fill="url(#'+gid+')"/>');
+  o.push('<text class="dim" font-size="12" text-anchor="start" x="'+sx(1900)+'" y="'+sy(-13)+'">громко</text>');
+
+  document.getElementById("s").innerHTML=o.join("");
+}catch(e){
+  document.getElementById("s").remove();
+  document.getElementById("fb").className="fail";
+  document.getElementById("fb").textContent=
+    "Схема не построилась. Она должна показывать прямоугольник 3000 кадров по горизонтали "+
+    "(30 секунд, 100 кадров в секунду) на 80 mel-бинов по вертикали (снизу низкие фильтры, "+
+    "сверху высокие), где яркость клетки — энергия: полосы гласной внизу, светлое пятно «с» "+
+    "вверху, тёмный столбец паузы. Сбоку подпись: вся картинка — 240 000 чисел (3000 × 80) "+
+    "вместо 480 000 сэмплов сырой волны за те же 30 секунд.";
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

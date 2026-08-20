@@ -1,0 +1,202 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Что песочница отрезает</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --ink:#2a2723; --muted:#6b6459;
+    --host:#b9b2a6; --frame:#3d6fb4; --frame-fill:#eef3fa;
+    --cut:#b04a3a; --open:#2f7d4f; --cut-fill:#fdf2f0; --open-fill:#eff7f2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171b; --ink:#e6e3dd; --muted:#9aa2ad;
+      --host:#4a5058; --frame:#6ea8e8; --frame-fill:#1b2430;
+      --cut:#e08070; --open:#6fcf97; --cut-fill:#241a19; --open-fill:#16241d;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{padding:10px 12px 14px}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;max-height:520px;height:auto;background:var(--bg)}
+  .fb{display:none;font-size:13px;line-height:1.5;color:var(--ink)}
+  text{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;fill:var(--ink)}
+  .hd{font-size:15px;font-weight:600}
+  .sm{font-size:13px;fill:var(--muted)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .box-host{fill:none;stroke:var(--host);stroke-width:1.5;stroke-dasharray:6 4}
+  .box-frame{fill:var(--frame-fill);stroke:var(--frame);stroke-width:2}
+  .box-cut{fill:var(--cut-fill);stroke:var(--cut);stroke-width:1.5;stroke-dasharray:5 4}
+  .box-open{fill:var(--open-fill);stroke:var(--open);stroke-width:2}
+  .ln-cut{stroke:var(--cut);stroke-width:2;stroke-dasharray:5 4;stroke-linecap:round}
+  .ln-open{stroke:var(--open);stroke-width:2;stroke-linecap:round}
+  .cross{stroke:var(--cut);stroke-width:2.5;stroke-linecap:round}
+  .hd-open{fill:var(--open)}
+  .t-cut{fill:var(--cut)}
+  .t-open{fill:var(--open)}
+</style>
+<div class="wrap">
+  <h2>Что песочница отрезает у HTML в iframe</h2>
+  <div id="host"></div>
+  <p class="fb" id="fb"></p>
+</div>
+<script>
+(function(){
+  try{
+    /* ---- единственная система координат ---- */
+    var ORIGIN = {x:40, y:26};
+    var SCALE  = 40;
+    function sx(u){ return ORIGIN.x + u * SCALE; }
+    function sy(v){ return ORIGIN.y + v * SCALE; }
+
+    /* ---- данные схемы (в единицах сетки) ---- */
+    var HOST  = {x0:0,   y0:0,   x1:10.2, y1:8.4};
+    var FRAME = {x0:0.5, y0:1.0, x1:9.5,  y1:8.0};
+
+    var INSIDE = [
+      {y:1.7,  s:"iframe · ui://notes/timeline", c:"hd"},
+      {y:2.4,  s:"Осталось внутри:",             c:"sm"},
+      {y:3.05, s:"— разметка, стили, инлайновые скрипты"},
+      {y:3.65, s:"— собственный DOM iframe"},
+      {y:4.25, s:"— данные в бандле: 14 заметок"},
+      {y:4.85, s:"— вычисления и таймеры"},
+      {y:5.9,  s:"Не работает изнутри:",         c:"sm"},
+      {y:6.55, s:"localStorage.getItem(\u0022token\u0022) → пусто", c:"mono"},
+      {y:7.2,  s:"fetch(\u0022https://analytics.example.com\u0022) → ✕", c:"mono"}
+    ];
+
+    var COL = {x0:12.6, x1:20.4, tx:12.9};
+    var CUT = [
+      {y:1.4, lines:["cookies хоста"]},
+      {y:3.2, lines:["localStorage и sessionStorage","origin хоста"]},
+      {y:5.0, lines:["любой сетевой запрос вне","списка разрешённых адресов"]}
+    ];
+    var OPEN = {y:7.2, lines:["connectSrc 'self' — единственный","открытый канал наружу"]};
+
+    var EDGE = FRAME.x1;      /* откуда уходят стрелки */
+    var STOP = 10.8;          /* где обрывается отрезанная стрелка */
+    var XMARK = 11.05;        /* центр крестика */
+    var HEAD = 0.22, HALF = 0.13, CR = 0.22;
+    var LEG_Y = 9.1;
+
+    /* ---- построение ---- */
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]); return e; }
+    function box(b, cls){ return el("rect", {x:sx(b.x0), y:sy(b.y0),
+      width:sx(b.x1)-sx(b.x0), height:sy(b.y1)-sy(b.y0), rx:10, "class":cls}); }
+    function seg(x0,y0,x1,y1,cls){ return el("line",
+      {x1:sx(x0), y1:sy(y0), x2:sx(x1), y2:sy(y1), "class":cls}); }
+    function label(x,y,s,anchor,cls,dx,dy){
+      var t = el("text", {x:sx(x), y:sy(y), "text-anchor":anchor,
+                          dx:(dx||0), dy:(dy||0)});
+      if (cls) t.setAttribute("class", cls);
+      t.textContent = s; return t;
+    }
+    function head(x,y,cls){
+      var p = [sx(x)+","+sy(y),
+               sx(x-HEAD)+","+sy(y-HALF),
+               sx(x-HEAD)+","+sy(y+HALF)].join(" ");
+      return el("polygon", {points:p, "class":cls});
+    }
+    function cross(x,y,g){
+      g.appendChild(seg(x-CR, y-CR, x+CR, y+CR, "cross"));
+      g.appendChild(seg(x-CR, y+CR, x+CR, y-CR, "cross"));
+    }
+
+    var svg = el("svg", {viewBox:"0 0 880 420",
+                         preserveAspectRatio:"xMidYMid meet",
+                         role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:880,height:420,fill:"var(--bg)"}));
+
+    /* окно хоста и iframe */
+    svg.appendChild(box(HOST, "box-host"));
+    svg.appendChild(label(0.35, 0.62, "Окно хоста · его origin, его DOM",
+                          "start", "sm"));
+    svg.appendChild(box(FRAME, "box-frame"));
+    INSIDE.forEach(function(r){
+      svg.appendChild(label(0.9, r.y, r.s, "start", r.c || "", 0, 0));
+    });
+
+    /* отрезанные направления */
+    CUT.forEach(function(c){
+      svg.appendChild(seg(EDGE, c.y, STOP, c.y, "ln-cut"));
+      cross(XMARK, c.y, svg);
+      svg.appendChild(box({x0:COL.x0, y0:c.y-0.75, x1:COL.x1, y1:c.y+0.75},
+                          "box-cut"));
+      c.lines.forEach(function(s, i){
+        var y = c.y - (c.lines.length - 1) * 0.22 + i * 0.45;
+        svg.appendChild(label(COL.tx, y, s, "start", "t-cut", 0, 5));
+      });
+    });
+
+    /* открытый канал */
+    svg.appendChild(seg(EDGE, OPEN.y, COL.x0 - HEAD, OPEN.y, "ln-open"));
+    svg.appendChild(head(COL.x0, OPEN.y, "hd-open"));
+    svg.appendChild(label((EDGE + COL.x0) / 2, OPEN.y, "один канал",
+                          "middle", "sm", 0, -8));
+    svg.appendChild(box({x0:COL.x0, y0:OPEN.y-0.75, x1:COL.x1, y1:OPEN.y+0.75},
+                        "box-open"));
+    OPEN.lines.forEach(function(s, i){
+      var y = OPEN.y - (OPEN.lines.length - 1) * 0.22 + i * 0.45;
+      svg.appendChild(label(COL.tx, y, s, "start", "t-open", 0, 5));
+    });
+
+    /* легенда */
+    svg.appendChild(seg(0, LEG_Y, 0.6, LEG_Y, "ln-cut"));
+    cross(0.8, LEG_Y, svg);
+    svg.appendChild(label(1.05, LEG_Y, "отрезано песочницей",
+                          "start", "sm", 0, 4));
+    svg.appendChild(seg(6.2, LEG_Y, 6.9 - HEAD, LEG_Y, "ln-open"));
+    svg.appendChild(head(6.9, LEG_Y, "hd-open"));
+    svg.appendChild(label(7.05, LEG_Y, "разрешено объявленным CSP",
+                          "start", "sm", 0, 4));
+
+    document.getElementById("host").appendChild(svg);
+  } catch (e) {
+    var fb = document.getElementById("fb");
+    fb.style.display = "block";
+    fb.textContent = "Схема не построилась. Она показывает: внутри окна хоста " +
+      "живёт iframe с ui://notes/timeline; ему остались собственный DOM, " +
+      "разметка, стили, инлайновые скрипты, данные в бандле (14 заметок), " +
+      "вычисления и таймеры. Отрезаны cookies хоста, localStorage и " +
+      "sessionStorage его origin, любой сетевой запрос вне списка " +
+      "разрешённых адресов. Открыт один канал: connectSrc 'self'.";
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>

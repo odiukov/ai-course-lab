@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Один виток цикла</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2430; --muted:#5d6875; --line:#39434f;
+    --gen:#8a5a2b; --out:#1f5f8b; --crit:#9b2f4a; --ref:#2c6e4f; --exit:#6b5d8a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141821; --fg:#e8ecf2; --muted:#9aa6b4; --line:#8b98a8;
+      --gen:#d9a45b; --out:#7cc2ee; --crit:#f08aa2; --ref:#7fd6a5; --exit:#bdaee0;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;}
+  .wrap{background:var(--bg);padding:10px 12px 12px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5;white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Один виток цикла: два вызова, не три</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var NODES = [
+      {id:'gen',  x:0,  y:0, kind:'call', label:'generate',   note:'один раз, на старте', side:'up',   color:'var(--gen)'},
+      {id:'o0',   x:2,  y:0, kind:'data', label:'output_0',   note:'62 слова',            side:'down', color:'var(--out)'},
+      {id:'fb',   x:4,  y:0, kind:'call', label:'feedback',   note:'вызов 1 витка',       side:'up',   color:'var(--crit)'},
+      {id:'c0',   x:6,  y:0, kind:'data', label:'critique_0', note:'на 22 слова длиннее', side:'down', color:'var(--crit)'},
+      {id:'ref',  x:8,  y:0, kind:'call', label:'refine',     note:'вызов 2 витка',       side:'up',   color:'var(--ref)'},
+      {id:'o1',   x:10, y:0, kind:'data', label:'output_1',   note:'38 слов',             side:'down', color:'var(--out)'},
+      {id:'stop', x:10, y:3, kind:'exit', label:'выход',      note:'«no issues» или бюджет', side:'down', color:'var(--exit)'}
+    ];
+    var EDGES = [
+      {a:'gen', b:'o0'}, {a:'o0', b:'fb'}, {a:'fb', b:'c0'}, {a:'c0', b:'ref'}, {a:'ref', b:'o1'},
+      {a:'o1', b:'stop', dashed:true}
+    ];
+    // обратная дуга: output_1 -> feedback (виток 2)
+    var LOOP = {from:'o1', to:'fb', y:-2};
+    // рамка витка
+    var BOX = {x0:3, x1:11, y0:-1, y1:1};
+
+    // ---- одна пара функций перевода ----
+    var origin = {x:70, y:150}, scale = {x:62, y:34};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    // литералы: только отступы подписей, толщина, шрифт
+    var PAD = 9, PAD2 = 16, LW = 1.6, FS = 12.5, FSB = 13;
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,color,size,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,fill:color,'font-size':size,
+        'font-family':'inherit','font-weight':weight||'400'});
+      t.textContent=s; return t;
+    }
+    function N(id){ for(var i=0;i<NODES.length;i++) if(NODES[i].id===id) return NODES[i]; throw new Error('нет узла '+id); }
+
+    var svg = el('svg',{viewBox:'0 0 840 300',preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Цепочка generate, output_0, feedback, critique_0, refine, output_1 и обратная дуга витка'});
+
+    // рамка «виток»
+    svg.appendChild(el('rect',{x:sx(BOX.x0),y:sy(BOX.y0),
+      width:sx(BOX.x1)-sx(BOX.x0), height:sy(BOX.y1)-sy(BOX.y0),
+      rx:sx(BOX.x0+0.2)-sx(BOX.x0), fill:'none', stroke:'var(--muted)',
+      'stroke-width':LW,'stroke-dasharray':'5 5',opacity:'0.55'}));
+    svg.appendChild(txt(sx(BOX.x0)+PAD, sy(BOX.y0)-PAD, 'виток n: 2 вызова, номер +1', 'start','var(--muted)',FS));
+
+    // стрелки цепочки
+    function arrow(p,q,dashed){
+      var ax=sx(p.x), ay=sy(p.y), bx=sx(q.x), by=sy(q.y);
+      var dx=bx-ax, dy=by-ay, L=Math.sqrt(dx*dx+dy*dy), ux=dx/L, uy=dy/L;
+      var gap = sx(0.55)-sx(0), head = sx(0.18)-sx(0);
+      ax+=ux*gap; ay+=uy*gap; bx-=ux*gap; by-=uy*gap;
+      var a={};
+      a.x1=ax;a.y1=ay;a.x2=bx;a.y2=by;a.stroke='var(--line)';a['stroke-width']=LW;
+      if(dashed) a['stroke-dasharray']='4 4';
+      svg.appendChild(el('line',a));
+      var px=-uy, py=ux;
+      svg.appendChild(el('polygon',{points:
+        (bx)+','+(by)+' '+(bx-ux*head*2+px*head)+','+(by-uy*head*2+py*head)+' '+
+        (bx-ux*head*2-px*head)+','+(by-uy*head*2-py*head), fill:'var(--line)'}));
+    }
+    EDGES.forEach(function(e){ arrow(N(e.a),N(e.b),e.dashed); });
+
+    // обратная дуга output_1 -> feedback
+    (function(){
+      var p=N(LOOP.from), q=N(LOOP.to);
+      var head = sx(0.18)-sx(0);
+      var d='M '+sx(p.x)+' '+sy(p.y-0.5)+
+            ' C '+sx(p.x)+' '+sy(LOOP.y)+', '+sx(q.x)+' '+sy(LOOP.y)+', '+sx(q.x)+' '+sy(q.y-0.5);
+      svg.appendChild(el('path',{d:d,fill:'none',stroke:'var(--crit)','stroke-width':LW}));
+      var tipx=sx(q.x), tipy=sy(q.y-0.5);
+      svg.appendChild(el('polygon',{points:
+        tipx+','+tipy+' '+(tipx-head)+','+(tipy-head*2)+' '+(tipx+head)+','+(tipy-head*2),
+        fill:'var(--crit)'}));
+      // подпись у хвоста дуги, справа
+      svg.appendChild(txt(sx(p.x)+PAD, sy(LOOP.y+0.55), 'output_1 идёт в feedback:','start','var(--crit)',FS,'600'));
+      svg.appendChild(txt(sx(p.x)+PAD, sy(LOOP.y+0.55)+PAD2, 'вход витка n+1 — последняя версия','start','var(--muted)',FS));
+    })();
+
+    // узлы
+    NODES.forEach(function(n){
+      var cx=sx(n.x), cy=sy(n.y);
+      var r=sx(0.42)-sx(0);
+      if(n.kind==='call'){
+        svg.appendChild(el('rect',{x:cx-r*1.35,y:cy-r*0.75,width:r*2.7,height:r*1.5,
+          rx:r*0.3, fill:'var(--bg)',stroke:n.color,'stroke-width':LW*1.4}));
+      } else if(n.kind==='data'){
+        svg.appendChild(el('circle',{cx:cx,cy:cy,r:r,fill:'var(--bg)',stroke:n.color,'stroke-width':LW*1.4}));
+      } else {
+        svg.appendChild(el('rect',{x:cx-r*1.35,y:cy-r*0.75,width:r*2.7,height:r*1.5,
+          rx:r*0.75, fill:'var(--bg)',stroke:n.color,'stroke-width':LW,'stroke-dasharray':'4 3'}));
+      }
+      // метка внутри
+      svg.appendChild(txt(cx, cy+PAD*0.42, n.label,'middle',n.color,FSB,'600'));
+      // примечание: чётные — снизу, узлы-вызовы — сверху
+      var up = n.side==='up';
+      svg.appendChild(txt(cx, up ? cy-sy(0.55)+sy(0)-PAD : cy+sy(0.55)-sy(0)+PAD2,
+        n.note,'middle','var(--muted)',FS));
+    });
+
+    // подпись цепочки слева, у края с anchor=start
+    svg.appendChild(txt(sx(-0.9), sy(1.75), 'generate вне витка','start','var(--gen)',FS,'600'));
+    svg.appendChild(txt(sx(-0.9), sy(1.75)+PAD2, 'звучит один раз','start','var(--muted)',FS));
+
+    host.appendChild(svg);
+  }catch(err){
+    var d=document.createElement('div');
+    d.className='fail';
+    d.textContent='Схема не построилась. Она должна была показать: generate → output_0 (62 слова) → '
+      + 'feedback → critique_0 (на 22 слова длиннее лимита) → refine → output_1 (38 слов). '
+      + 'Виток — это два вызова (feedback и refine), а не три: generate звучит один раз, на старте, '
+      + 'и номер витка растёт на 1. Обратная дуга ведёт output_1 назад во feedback: вход следующего '
+      + 'витка — последняя версия, а не исходная. Выход из цикла — когда feedback говорит «no issues» '
+      + 'или кончается бюджет итераций.';
+    host.appendChild(d);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

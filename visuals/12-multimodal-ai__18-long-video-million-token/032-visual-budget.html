@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Бюджет токенов: от минуты до трёх часов</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5c6570; --grid:#d8dee6;
+    --bar:#3f7ad6; --bar2:#8fb4e8;
+    --l128:#c2410c; --l200:#7c3aed; --l1m:#0f766e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --fg:#e8ecf1; --muted:#9aa5b1; --grid:#2c333d;
+      --bar:#5b95e6; --bar2:#2f4f7d;
+      --l128:#f59e6b; --l200:#b48cf5; --l1m:#4dd4bd;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);max-width:100%;}
+  h2{font-size:15px;margin:0;padding:10px 12px 2px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{padding:10px 14px;font-size:13px;line-height:1.5;color:var(--fg);}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Бюджет токенов при 1 FPS и 81 токене на кадр</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var DATA = [
+      {label:"1 мин",  tokens:4860},
+      {label:"15 мин", tokens:72900},
+      {label:"30 мин", tokens:145800},
+      {label:"1 ч",    tokens:291600},
+      {label:"2 ч",    tokens:583200},
+      {label:"3 ч",    tokens:874800}
+    ];
+    var LIMITS = [
+      {label:"128k", value:128000,  color:"var(--l128)"},
+      {label:"200k", value:200000,  color:"var(--l200)"},
+      {label:"1M",   value:1000000, color:"var(--l1m)"}
+    ];
+
+    // ---- холст (литералы: размеры) ----
+    var W = 880, H = 470;
+
+    // ---- одна пара origin/scale ----
+    var ORIGIN = {x:132, y:398};                 // пиксель точки (0,0)
+    var SCALE  = {x:108, y:-0.00034};            // пикселей на 1 единицу данных
+    // домен X: 0..6 (индексы колонок + 0.5 центр), домен Y: токены
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y + y * SCALE.y; }
+
+    // ---- литералы-отступы ----
+    var PAD = 8, PAD2 = 14, LW = 1.6, FS = 12.5, FSS = 11.5;
+
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox","0 0 "+W+" "+H);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+
+    function el(n,a){var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); svg.appendChild(e); return e;}
+    function line(x1,y1,x2,y2,a){
+      var o={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),"stroke-width":LW};
+      for(var k in a) o[k]=a[k]; return el("line",o);}
+    function txt(x,y,dx,dy,s,anchor,fill,size,weight){
+      var t=el("text",{x:sx(x)+dx,y:sy(y)+dy,"text-anchor":anchor,
+        fill:fill||"var(--fg)","font-size":size||FS,
+        "font-weight":weight||"400"});
+      t.textContent=s; return t;}
+
+    el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"});
+
+    var YMAX = 1000000;
+    var N = DATA.length;
+
+    // ---- горизонтальная сетка + подписи оси Y ----
+    var TICKS=[0,200000,400000,600000,800000,1000000];
+    TICKS.forEach(function(v){
+      line(0,v,N,v,{stroke:"var(--grid)","stroke-width":1});
+      var lab = v===0 ? "0" : (v/1000)+"k";
+      txt(0,v,-PAD,4,lab,"end","var(--muted)",FSS);
+    });
+
+    // ---- оси ----
+    line(0,0,N,0,{stroke:"var(--fg)"});
+    line(0,0,0,YMAX,{stroke:"var(--fg)"});
+    txt(0,YMAX,-PAD,-PAD2,"токенов","end","var(--muted)",FSS);
+
+    // ---- колонки ----
+    DATA.forEach(function(d,i){
+      var x0=i+0.18, x1=i+0.82;
+      el("rect",{x:sx(x0),y:sy(d.tokens),width:sx(x1)-sx(x0),
+        height:sy(0)-sy(d.tokens),fill:"var(--bar)",opacity:0.85});
+      // значение над колонкой
+      txt(i+0.5,d.tokens,0,-PAD,d.tokens.toLocaleString("ru-RU"),
+          "middle","var(--fg)",FSS,"600");
+      // подпись длительности под осью
+      txt(i+0.5,0,0,PAD2+6,d.label,"middle","var(--fg)",FS);
+    });
+    txt(N,0,0,PAD2+6+18,"длительность при 1 FPS","end","var(--muted)",FSS);
+
+    // ---- линии контекстов ----
+    LIMITS.forEach(function(L){
+      line(0,L.value,N,L.value,{stroke:L.color,"stroke-width":LW,
+        "stroke-dasharray":"7 5"});
+      // подпись справа от линии, у правого края внутри поля
+      txt(N,L.value,PAD,-PAD+2,L.label,"end",L.color,FSS,"600");
+    });
+
+    // ---- маркер границы 128k: между 15 и 30 мин ----
+    var xb=2;
+    line(xb,0,xb,YMAX*0.30,{stroke:"var(--l128)","stroke-width":LW,
+      "stroke-dasharray":"3 4"});
+    txt(xb,YMAX*0.30,PAD,-PAD,"128k рвётся здесь","start","var(--l128)",FSS);
+
+    host.appendChild(svg);
+
+    var leg=document.createElement("div");
+    leg.className="fallback";
+    leg.innerHTML="Пунктир — пороги контекста: 128k, 200k, 1M токенов. "+
+      "3 ч при 1 FPS (874 800) ещё влезает в 1M; при 2 FPS все числа удваиваются.";
+    host.appendChild(leg);
+  }catch(e){
+    host.innerHTML='<div class="fallback">Схема должна показывать столбцы '+
+      'бюджета токенов при 1 FPS и 81 токене на кадр: 1 мин — 4 860, '+
+      '15 мин — 72 900, 30 мин — 145 800, 1 ч — 291 600, 2 ч — 583 200, '+
+      '3 ч — 874 800, с горизонтальными линиями контекстов 128k, 200k и 1M. '+
+      'Порог 128k пересекается между 15 и 30 минутами.</div>';
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

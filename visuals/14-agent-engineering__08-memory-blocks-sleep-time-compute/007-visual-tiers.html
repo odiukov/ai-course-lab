@@ -1,0 +1,164 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Кто в какой уровень пишет</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --fg:#1d2027; --mut:#5d6472; --line:#3c4椒; --line:#3c4250;
+    --core:#e8eefc; --recall:#eef0ee; --arch:#eaf4ec; --edge:#9aa3b2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8eaee; --mut:#a3abb9; --line:#c3cad6;
+      --core:#1e2739; --recall:#22252a; --arch:#1c2b23; --edge:#5b6474;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:8px 10px 12px}
+  h2{margin:0 0 6px;font-size:16px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .fb{padding:10px;border:1px solid var(--edge);border-radius:6px;color:var(--fg)}
+  .box{fill:var(--bg);stroke:var(--edge)}
+  .band{stroke:var(--edge)}
+  .ln{stroke:var(--line);fill:none}
+  .hd{fill:var(--line);stroke:none}
+  text{fill:var(--fg)}
+  .t-name{font-size:17px;font-weight:600}
+  .t-note,.t-auth{font-size:13px;fill:var(--mut)}
+  .t-w{font-size:14px}
+  .t-a{font-size:13px;fill:var(--mut)}
+  .t-lg{font-size:13px;fill:var(--mut)}
+</style>
+<div class="wrap">
+  <h2>Кто в какой уровень пишет: core и archival — двое, recall — сам лог</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    /* ---- данные схемы + один origin + один scale ---- */
+    var D={
+      scale:44, origin:{x:30,y:25}, head:0.24,
+      bandX:[8.6,19.4], writerX:[0.6,5.6],
+      tiers:[
+        {n:'core',     note:'всегда в промпте',  au:'два автора', y0:1.0, y1:2.4, cls:'core'},
+        {n:'recall',   note:'история ходов',     au:'один автор', y0:3.8, y1:5.2, cls:'recall'},
+        {n:'archival', note:'внешнее хранилище', au:'два автора', y0:7.6, y1:9.0, cls:'arch'}
+      ],
+      writers:[
+        {l:'основной агент',        y0:1.0, y1:2.4},
+        {l:'автологирование ходов', y0:3.8, y1:5.2},
+        {l:'sleep-time агент',      y0:7.6, y1:9.0}
+      ],
+      arrows:[
+        {a:[5.6,1.50], b:[8.50,1.50], lab:'14:03', lp:[7.05,1.50], anc:'middle', dy:-8},
+        {a:[5.6,2.40], b:[8.50,7.85]},
+        {a:[5.6,7.75], b:[8.50,2.35], lab:'14:05', lp:[6.10,6.85], anc:'start',  dy:-8},
+        {a:[5.6,8.30], b:[8.50,8.30]},
+        {a:[5.6,4.50], b:[8.50,4.50], dash:1, lab:'само, каждой репликой',
+         lp:[7.05,4.50], anc:'middle', dy:-9}
+      ],
+      legend:[
+        {p:[0.6,9.80], t:'Сплошная — запись вызовом инструмента; пунктир — автоматический лог.'},
+        {p:[0.6,10.30],t:'14:03 — агент пишет в core; 14:05 — sleep-time агент перезаписывает тот же блок.'}
+      ]
+    };
+    var O=D.origin, K=D.scale;
+    function sx(x){ return O.x + x*K; }
+    function sy(y){ return O.y + y*K; }
+
+    /* ---- геометрия наконечника в данных, координаты — через sx/sy ---- */
+    function head(a,b,s){
+      var dx=b[0]-a[0], dy=b[1]-a[1], L=Math.hypot(dx,dy);
+      var ux=dx/L, uy=dy/L, bx=b[0]-ux*s, by=b[1]-uy*s;
+      var nx=-uy*s*0.5, ny=ux*s*0.5;
+      return {base:[bx,by], pts:[[b[0],b[1]],[bx+nx,by+ny],[bx-nx,by-ny]]};
+    }
+    function pts(list){
+      return list.map(function(p){ return sx(p[0])+','+sy(p[1]); }).join(' ');
+    }
+
+    var s=[];
+    /* полосы уровней */
+    D.tiers.forEach(function(t){
+      s.push('<rect class="band" fill="var(--'+t.cls+')" x="'+sx(D.bandX[0])+'" y="'+sy(t.y0)+
+        '" width="'+(sx(D.bandX[1])-sx(D.bandX[0]))+'" height="'+(sy(t.y1)-sy(t.y0))+
+        '" rx="'+(sx(0.18)-sx(0))+'" stroke-width="1.2"/>');
+      s.push('<text class="t-name" text-anchor="start" x="'+sx(D.bandX[0]+0.4)+'" y="'+sy(t.y0+0.58)+'">'+t.n+'</text>');
+      s.push('<text class="t-note" text-anchor="start" x="'+sx(D.bandX[0]+0.4)+'" y="'+sy(t.y1-0.24)+'">'+t.note+'</text>');
+      s.push('<text class="t-auth" text-anchor="end" x="'+sx(D.bandX[1]-0.35)+'" y="'+sy((t.y0+t.y1)/2+0.14)+'">'+t.au+'</text>');
+    });
+    /* источники записи */
+    D.writers.forEach(function(w){
+      s.push('<rect class="box" x="'+sx(D.writerX[0])+'" y="'+sy(w.y0)+
+        '" width="'+(sx(D.writerX[1])-sx(D.writerX[0]))+'" height="'+(sy(w.y1)-sy(w.y0))+
+        '" rx="'+(sx(0.18)-sx(0))+'" stroke-width="1.2"/>');
+      s.push('<text class="t-w" text-anchor="middle" x="'+sx((D.writerX[0]+D.writerX[1])/2)+
+        '" y="'+sy((w.y0+w.y1)/2+0.14)+'">'+w.l+'</text>');
+    });
+    /* стрелки записи */
+    D.arrows.forEach(function(r){
+      var h=head(r.a,r.b,D.head);
+      s.push('<line class="ln" x1="'+sx(r.a[0])+'" y1="'+sy(r.a[1])+'" x2="'+sx(h.base[0])+
+        '" y2="'+sy(h.base[1])+'" stroke-width="1.8"'+
+        (r.dash?' stroke-dasharray="6 5"':'')+'/>');
+      s.push('<polygon class="hd" points="'+pts(h.pts)+'"/>');
+      if(r.lab){
+        s.push('<text class="t-a" text-anchor="'+r.anc+'" x="'+sx(r.lp[0])+
+          '" y="'+(sy(r.lp[1])+r.dy)+'">'+r.lab+'</text>');
+      }
+    });
+    /* легенда */
+    D.legend.forEach(function(g){
+      s.push('<text class="t-lg" text-anchor="start" x="'+sx(g.p[0])+'" y="'+sy(g.p[1])+'">'+g.t+'</text>');
+    });
+
+    host.innerHTML='<svg viewBox="0 0 920 495" width="920" height="495" '+
+      'preserveAspectRatio="xMidYMid meet" role="img" '+
+      'aria-label="Три полосы core, recall, archival: в core и archival пишут основной агент и sleep-time агент, в recall — только автологирование ходов">'+
+      s.join('')+'</svg>';
+  }catch(e){
+    host.innerHTML='<div class="fb"><b>Схема не построилась.</b> Она должна показывать три полосы — '+
+      'core, recall, archival. В core и archival ведут по две стрелки записи: от основного агента '+
+      '(вызов инструмента, 14:03) и от sleep-time агента (перезапись того же блока, 14:05). '+
+      'В recall ведёт одна пунктирная стрелка — автологирование ходов, без чьего-либо решения: '+
+      'два уровня заполняются намеренно и имеют двух авторов, третий — одного.</div>';
+  }
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>
