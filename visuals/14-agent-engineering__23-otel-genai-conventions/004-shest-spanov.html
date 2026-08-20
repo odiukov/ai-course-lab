@@ -1,0 +1,140 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Один прогон — шесть спанов</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1a1d24; --muted:#5c6470; --grid:#d8dce4;
+    --agent:#5b6bd6; --chat:#2f8f6b; --tool:#c8792a; --gap:#b8402f;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161b; --fg:#e8eaf0; --muted:#9aa3b2; --grid:#2e333d;
+      --agent:#8b98ea; --chat:#4fc294; --tool:#e8a253; --gap:#e2705c;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{background:var(--bg);padding:10px 12px 14px}
+  h2{margin:0 0 8px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fail{color:var(--gap);font-size:13px;margin:8px 0 0}
+  text{fill:var(--fg)}
+  .mut{fill:var(--muted)}
+</style>
+<div class="wrap">
+  <h2>Один прогон агента — шесть спанов</h2>
+  <svg id="d" viewBox="0 0 760 330" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Дерево спанов: invoke_agent 12,4 с, внутри два chat и три tool_call"></svg>
+  <p class="fail" id="err" hidden>Схема: спан invoke_agent 12,4 с; внутри chat 1,9 с, tool_call поиск 0,4 с, chat 2,1 с, tool_call внешний API 6,8 с, tool_call запись 0,3 с. Сумма детей 11,5 с, разница 0,9 с — код агента.</p>
+</div>
+<script>
+(function(){
+try{
+  // ── данные: старт и длительность в секундах, глубина вложенности
+  var SPANS=[
+    {n:"invoke_agent",       k:"agent", d:0, t0:0.0,  dur:12.4, lbl:"12,4 с"},
+    {n:"chat",               k:"chat",  d:1, t0:0.3,  dur:1.9,  lbl:"1,9 с"},
+    {n:"tool_call · поиск",  k:"tool",  d:1, t0:2.4,  dur:0.4,  lbl:"0,4 с"},
+    {n:"chat",               k:"chat",  d:1, t0:3.0,  dur:2.1,  lbl:"2,1 с"},
+    {n:"tool_call · внешний API", k:"tool", d:1, t0:5.3, dur:6.8, lbl:"6,8 с"},
+    {n:"tool_call · запись", k:"tool",  d:1, t0:12.0, dur:0.3,  lbl:"0,3 с"}
+  ];
+  var AXIS=[0,2,4,6,8,10,12];
+
+  // ── единая система координат: x — секунды, y — номер строки
+  var origin={x:250,y:30}, scale={x:38,y:38};
+  function sx(x){return origin.x + x*scale.x;}
+  function sy(y){return origin.y + y*scale.y;}
+
+  var svg=document.getElementById("d"), NS="http://www.w3.org/2000/svg";
+  function el(t,a){var e=document.createElementNS(NS,t);for(var k in a)e.setAttribute(k,a[k]);return e;}
+  function txt(x,y,s,a,cls){var e=el("text",{x:x,y:y,"text-anchor":a,"font-size":12});
+    if(cls)e.setAttribute("class",cls); e.textContent=s; svg.appendChild(e); return e;}
+
+  var PAD=4, BAR=Math.round(scale.y*0.42);
+
+  // ── сетка и ось времени
+  AXIS.forEach(function(t){
+    svg.appendChild(el("line",{x1:sx(t),y1:sy(-0.55),x2:sx(t),y2:sy(SPANS.length-0.35),
+      stroke:"var(--grid)","stroke-width":1}));
+    txt(sx(t),sy(-0.55)-PAD,t+" с","middle","mut");
+  });
+  txt(sx(0)-PAD,sy(-0.55)-PAD,"время","end","mut");
+
+  // ── полоски
+  SPANS.forEach(function(s,i){
+    var y=sy(i), col="var(--"+s.k+")";
+    // связь ребёнка с родителем
+    if(s.d>0){
+      svg.appendChild(el("path",{d:"M "+sx(0.15)+" "+sy(0)+" L "+sx(0.15)+" "+y+" L "+(sx(s.t0)-PAD)+" "+y,
+        fill:"none",stroke:"var(--grid)","stroke-width":1}));
+    }
+    svg.appendChild(el("rect",{x:sx(s.t0),y:y-BAR/2,width:sx(s.t0+s.dur)-sx(s.t0),height:BAR,
+      rx:3,fill:col,"fill-opacity":s.d?0.75:0.9}));
+    // имя спана — слева от холста, с отступом по глубине
+    txt(origin.x-scale.x*0.5+s.d*20-PAD, y+4, s.n, "end");
+    // длительность — справа от полоски
+    txt(sx(s.t0+s.dur)+PAD, y+4, s.lbl, "start");
+  });
+
+  // ── разница родитель/дети: 12,4 − 11,5 = 0,9 с
+  var gy=sy(SPANS.length-0.15), g0=11.5, g1=12.4;
+  svg.appendChild(el("line",{x1:sx(g0),y1:gy,x2:sx(g1),y2:gy,stroke:"var(--gap)","stroke-width":2}));
+  svg.appendChild(el("line",{x1:sx(g0),y1:gy-BAR/3,x2:sx(g0),y2:gy+BAR/3,stroke:"var(--gap)","stroke-width":2}));
+  svg.appendChild(el("line",{x1:sx(g1),y1:gy-BAR/3,x2:sx(g1),y2:gy+BAR/3,stroke:"var(--gap)","stroke-width":2}));
+  // хвост указателя слева, подпись у хвоста
+  svg.appendChild(el("line",{x1:sx(8.2),y1:sy(SPANS.length+0.35),x2:sx(g0)-PAD,y2:gy+PAD,
+    stroke:"var(--gap)","stroke-width":1}));
+  var t=txt(sx(8.2)-PAD, sy(SPANS.length+0.35)+4, "0,9 с — код агента (сумма детей 11,5 с)","end");
+  t.setAttribute("fill","var(--gap)");
+
+  // ── легенда: одна строка под схемой
+  var ly=sy(SPANS.length+1.3), lx=[0,2.9,6.0], keys=["agent","chat","tool"],
+      names=["спан агента","спаны модели","спаны инструментов"];
+  keys.forEach(function(k,i){
+    svg.appendChild(el("rect",{x:sx(lx[i]),y:ly-BAR/2,width:sx(0.45)-sx(0),height:BAR,rx:2,
+      fill:"var(--"+k+")","fill-opacity":0.85}));
+    txt(sx(lx[i]+0.45)+PAD, ly+4, names[i], "start", "mut");
+  });
+}catch(e){
+  document.getElementById("d").hidden=true;
+  document.getElementById("err").hidden=false;
+}
+})();
+</script>
+</html>
+
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script>
