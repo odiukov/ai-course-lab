@@ -229,6 +229,10 @@ async function main(): Promise<void> {
   write("index.html", renderIndexPage(phases, { basePath }));
   write("assets/site.css", buildSiteCss());
   write("assets/harness.py", fs.readFileSync(path.join(root, "src", "site-python", "harness.py"), "utf8"));
+  write(
+    "assets/favicon.svg",
+    fs.readFileSync(path.join(root, "src", "site-assets", "favicon.svg"), "utf8"),
+  );
   // Без .nojekyll Pages прогоняет вывод через Jekyll и выбрасывает всё, что
   // начинается с подчёркивания.
   write(".nojekyll", "");

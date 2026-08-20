@@ -15,6 +15,9 @@ import type { ExerciseUrls } from "./exercise";
 import type { LessonBlock, LessonModel } from "./lesson-page";
 import { encodeQuizPayload } from "./quiz";
 
+/** Имя курса: заголовок вкладки и шапка главной. */
+export const SITE_TITLE = "AI Lab";
+
 export interface NextLesson {
   slug: string;
   title: string;
@@ -68,6 +71,7 @@ function htmlDocument(options: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${options.basePath}/assets/favicon.svg">
 <link rel="stylesheet" href="${options.basePath}/assets/katex/katex.min.css">
 <link rel="stylesheet" href="${options.basePath}/assets/site.css">
 </head>
@@ -112,6 +116,10 @@ ${questions}
  *
  * `data-step` — якорь для скрипта прогресса: по нему он расставляет галочки
  * прочитанного, не зная ничего про разметку вокруг.
+ *
+ * На узком экране колонки нет, и полсотни шагов оттеснили бы сам текст за край
+ * экрана — там оглавление свёрнуто под кнопку. Раскрывает его чекбокс, а не
+ * скрипт: состояние нужно с первого кадра, иначе список успевал бы мигнуть.
  */
 function renderToc(model: LessonModel, currentId: string | null, options: RenderOptions): string {
   const items = model.blocks
@@ -121,9 +129,13 @@ function renderToc(model: LessonModel, currentId: string | null, options: Render
     })
     .join("\n");
 
-  return `<nav class="toc" aria-label="Шаги урока"><ol>
+  return `<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
 ${items}
-</ol></nav>`;
+</ol></nav>
+</div>`;
 }
 
 /**
@@ -267,6 +279,8 @@ ${onward}
 <script type="application/json" data-lesson>${lessonData}</script>`;
 
   return htmlDocument({
+    // Во вкладке шага имени курса нет: шаг и урок уже не помещаются, третьей
+    // части никто не увидит.
     title: `${block.step.title} — ${model.title}`,
     basePath: options.basePath,
     body: page,
@@ -314,7 +328,7 @@ ${items}
 <script type="application/json" data-lesson>${lessonData}</script>`;
 
   return htmlDocument({
-    title: model.title,
+    title: `${model.title} — ${SITE_TITLE}`,
     basePath: options.basePath,
     body: page,
     scripts: [LESSON_INDEX_SCRIPT],
@@ -352,9 +366,9 @@ ${lessons}
     .join("\n");
 
   return htmlDocument({
-    title: "Курс",
+    title: SITE_TITLE,
     basePath: options.basePath,
-    body: `<header class="index-header"><h1>Курс</h1></header>\n${sections}`,
+    body: `<header class="index-header"><h1>${SITE_TITLE}</h1></header>\n${sections}`,
     scripts: [CATALOG_SCRIPT],
   });
 }
