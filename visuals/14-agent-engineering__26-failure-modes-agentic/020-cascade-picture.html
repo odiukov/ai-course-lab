@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как одна ошибка расходится по цепочке</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #526078;
+      --line: #64748b;
+      --api-fill: #e8f1ff;
+      --api-stroke: #3971b8;
+      --error-fill: #ffe9e6;
+      --error-stroke: #c24136;
+      --warning-fill: #fff2cc;
+      --warning-stroke: #a16207;
+      --false-fill: #fee2e2;
+      --false-stroke: #b42318;
+      --brace: #7c3aed;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101522;
+        --panel: #171e2e;
+        --text: #eef3ff;
+        --muted: #b7c2d8;
+        --line: #94a3b8;
+        --api-fill: #172d4c;
+        --api-stroke: #78aef2;
+        --error-fill: #48231f;
+        --error-stroke: #ff9288;
+        --warning-fill: #3d3118;
+        --warning-stroke: #f2c35b;
+        --false-fill: #481f25;
+        --false-stroke: #ff8d96;
+        --brace: #c5a5ff;
+      }
+    }
+
+    html,
+    body {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      margin: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      background: var(--bg);
+      width: 100%;
+    }
+
+    .diagram-title {
+      color: var(--text);
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+    }
+
+    .flow-line,
+    .arrow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+      stroke: none;
+    }
+
+    .source-box {
+      fill: var(--error-fill);
+      stroke: var(--error-stroke);
+      stroke-width: 2.5;
+    }
+
+    .api-box {
+      fill: var(--api-fill);
+      stroke: var(--api-stroke);
+      stroke-width: 2;
+    }
+
+    .refusal-box {
+      fill: var(--warning-fill);
+      stroke: var(--warning-stroke);
+      stroke-width: 2;
+    }
+
+    .false-box {
+      fill: var(--false-fill);
+      stroke: var(--false-stroke);
+      stroke-width: 2.5;
+    }
+
+    .brace {
+      fill: none;
+      stroke: var(--brace);
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .brace-label {
+      fill: var(--brace);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .node-title {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .node-detail {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .source-detail {
+      fill: var(--error-stroke);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .refusal-detail {
+      fill: var(--warning-stroke);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .false-title {
+      fill: var(--false-stroke);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .annotation {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .annotation-strong {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .step-tag {
+      fill: var(--error-stroke);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      color: var(--text);
+      background: var(--panel);
+      font-size: 17px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram" aria-labelledby="page-title">
+    <div class="diagram-title" id="page-title">Как одна ошибка расходится по цепочке</div>
+
+    <svg
+      id="cascade"
+      viewBox="0 0 1200 410"
+      width="1200"
+      height="410"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Каскад из четырёх API-вызовов после выдуманного SKU</title>
+      <desc id="svg-description">
+        Ошибка на шаге N передаёт выдуманный SKU четырём последующим API-вызовам.
+        Скобка отмечает радиус каскада 4. Последний сервис отвечает 400, но агент
+        вместо остановки сообщает о ложном успехе.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать, как один выдуманный SKU на шаге N запускает
+      четыре API-вызова, а ответ 400 превращается в ложное сообщение «готово».
+    </p>
+  </main>
+
+  <script>
+    const diagramData = [
+      { x: 48, y: 54 },
+      92,
+      {
+        zero: 0,
+        half: 2,
+        lineGap: 22,
+        detailGap: 24,
+        corner: 0.1,
+        arrowHead: 0.12,
+        arrowWing: 0.08,
+        nodeY: 1.62,
+        nodeHeight: 1.12,
+        source: {
+          x: 1.28,
+          width: 2.32,
+          title: "Ошибка на шаге N",
+          detail: "выдуманный SKU"
+        },
+        calls: [
+          {
+            x: 3.65,
+            width: 1.72,
+            title: "API: склад",
+            detail: "создаёт резерв",
+            boxClass: "api-box",
+            detailClass: "node-detail"
+          },
+          {
+            x: 5.62,
+            width: 1.72,
+            title: "API: заказ",
+            detail: "создаёт заказ",
+            boxClass: "api-box",
+            detailClass: "node-detail"
+          },
+          {
+            x: 7.59,
+            width: 1.72,
+            title: "API: оплата",
+            detail: "списывает деньги",
+            boxClass: "api-box",
+            detailClass: "node-detail"
+          },
+          {
+            x: 9.56,
+            width: 1.72,
+            title: "API: доставка",
+            detail: "ответ 400",
+            boxClass: "refusal-box",
+            detailClass: "refusal-detail"
+          }
+        ],
+        brace: {
+          startX: 2.79,
+          endX: 10.42,
+          y: 0.18,
+          drop: 0.24,
+          hook: 0.22,
+          labelX: 6.605,
+          labelY: -0.02,
+          label: "радиус каскада = 4"
+        },
+        falseResult: {
+          x: 9.56,
+          y: 3.02,
+          width: 2.24,
+          height: 0.62,
+          title: "ложное «готово»"
+        },
+        notes: [
+          {
+            x: 0.12,
+            y: 3.47,
+            anchor: "start",
+            first: "Первичная ошибка — одна.",
+            second: "Остальные шаги наследуют испорченный SKU."
+          },
+          {
+            x: 11.74,
+            y: 3.47,
+            anchor: "end",
+            first: "Отказ 400 должен остановить цепочку.",
+            second: "Здесь агент выдумывает успех."
+          }
+        ],
+        labels: {
+          stepX: 0.12,
+          stepY: 0.69,
+          stepText: "шаг N: источник ошибки"
+        }
+      }
+    ];
+
+    const [origin, scale, spec] = diagramData;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("cascade");
+      const plot = document.getElementById("plot");
+      const namespace = svg.namespaceURI;
+
+      const make = (name, attributes, text) => {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, String(value));
+        }
+        if (text !== undefined) {
+          element.textContent = text;
+        }
+        return element;
+      };
+
+      const lengthX = value => sx(value) - sx(spec.zero);
+      const lengthY = value => sy(value) - sy(spec.zero);
+      const point = value => `${sx(value.x)} ${sy(value.y)}`;
+
+      const roundedBox = (centerX, centerY, width, height, className) => {
+        const box = make("rect", {
+          x: sx(centerX - width / spec.half),
+          y: sy(centerY - height / spec.half),
+          width: lengthX(width),
+          height: lengthY(height),
+          rx: lengthX(spec.corner),
+          ry: lengthY(spec.corner),
+          class: className
+        });
+        plot.appendChild(box);
+      };
+
+      const twoLineText = (
+        x,
+        y,
+        title,
+        detail,
+        titleClass,
+        detailClass,
+        anchor
+      ) => {
+        const text = make("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor
+        });
+
+        const titleSpan = make("tspan", {
+          x: sx(x),
+          class: titleClass
+        }, title);
+
+        const detailSpan = make("tspan", {
+          x: sx(x),
+          dy: spec.detailGap,
+          class: detailClass
+        }, detail);
+
+        text.appendChild(titleSpan);
+        text.appendChild(detailSpan);
+        plot.appendChild(text);
+      };
+
+      const horizontalArrow = (fromX, toX, y) => {
+        plot.appendChild(make("line", {
+          x1: sx(fromX),
+          y1: sy(y),
+          x2: sx(toX),
+          y2: sy(y),
+          class: "arrow"
+        }));
+
+        const head = [
+          { x: toX, y },
+          {
+            x: toX - spec.arrowHead,
+            y: y - spec.arrowWing
+          },
+          {
+            x: toX - spec.arrowHead,
+            y: y + spec.arrowWing
+          }
+        ];
+
+        plot.appendChild(make("polygon", {
+          points: head.map(point).join(" "),
+          class: "arrow-head"
+        }));
+      };
+
+      const verticalArrow = (x, fromY, toY) => {
+        plot.appendChild(make("line", {
+          x1: sx(x),
+          y1: sy(fromY),
+          x2: sx(x),
+          y2: sy(toY),
+          class: "arrow"
+        }));
+
+        const head = [
+          { x, y: toY },
+          {
+            x: x - spec.arrowWing,
+            y: toY - spec.arrowHead
+          },
+          {
+            x: x + spec.arrowWing,
+            y: toY - spec.arrowHead
+          }
+        ];
+
+        plot.appendChild(make("polygon", {
+          points: head.map(point).join(" "),
+          class: "arrow-head"
+        }));
+      };
+
+      const sourceLeft = spec.source.x - spec.source.width / spec.half;
+      const sourceRight = spec.source.x + spec.source.width / spec.half;
+      const nodeTop = spec.nodeY - spec.nodeHeight / spec.half;
+      const nodeBottom = spec.nodeY + spec.nodeHeight / spec.half;
+
+      plot.appendChild(make("text", {
+        x: sx(spec.labels.stepX),
+        y: sy(spec.labels.stepY),
+        "text-anchor": "start",
+        class: "step-tag"
+      }, spec.labels.stepText));
+
+      roundedBox(
+        spec.source.x,
+        spec.nodeY,
+        spec.source.width,
+        spec.nodeHeight,
+        "source-box"
+      );
+
+      twoLineText(
+        spec.source.x,
+        spec.nodeY - spec.corner,
+        spec.source.title,
+        spec.source.detail,
+        "node-title",
+        "source-detail",
+        "middle"
+      );
+
+      let previousRight = sourceRight;
+
+      for (const call of spec.calls) {
+        const callLeft = call.x - call.width / spec.half;
+        const callRight = call.x + call.width / spec.half;
+
+        horizontalArrow(previousRight, callLeft, spec.nodeY);
+        roundedBox(
+          call.x,
+          spec.nodeY,
+          call.width,
+          spec.nodeHeight,
+          call.boxClass
+        );
+
+        twoLineText(
+          call.x,
+          spec.nodeY - spec.corner,
+          call.title,
+          call.detail,
+          "node-title",
+          call.detailClass,
+          "middle"
+        );
+
+        previousRight = callRight;
+      }
+
+      const brace = spec.brace;
+      const braceMiddle = (brace.startX + brace.endX) / spec.half;
+      const braceLower = brace.y + brace.drop;
+      const bracePoint = brace.y + brace.drop + brace.drop;
+
+      const bracePath = [
+        `M ${sx(brace.startX)} ${sy(brace.y)}`,
+        `Q ${sx(brace.startX)} ${sy(braceLower)} ${sx(brace.startX + brace.hook)} ${sy(braceLower)}`,
+        `L ${sx(braceMiddle - brace.hook)} ${sy(braceLower)}`,
+        `Q ${sx(braceMiddle)} ${sy(braceLower)} ${sx(braceMiddle)} ${sy(bracePoint)}`,
+        `Q ${sx(braceMiddle)} ${sy(braceLower)} ${sx(braceMiddle + brace.hook)} ${sy(braceLower)}`,
+        `L ${sx(brace.endX - brace.hook)} ${sy(braceLower)}`,
+        `Q ${sx(brace.endX)} ${sy(braceLower)} ${sx(brace.endX)} ${sy(brace.y)}`
+      ].join(" ");
+
+      plot.appendChild(make("path", {
+        d: bracePath,
+        class: "brace"
+      }));
+
+      plot.appendChild(make("text", {
+        x: sx(brace.labelX),
+        y: sy(brace.labelY),
+        "text-anchor": "middle",
+        class: "brace-label"
+      }, brace.label));
+
+      const falseResult = spec.falseResult;
+      const falseTop = falseResult.y - falseResult.height / spec.half;
+
+      verticalArrow(
+        falseResult.x,
+        nodeBottom,
+        falseTop
+      );
+
+      roundedBox(
+        falseResult.x,
+        falseResult.y,
+        falseResult.width,
+        falseResult.height,
+        "false-box"
+      );
+
+      plot.appendChild(make("text", {
+        x: sx(falseResult.x),
+        y: sy(falseResult.y + spec.corner),
+        "text-anchor": "middle",
+        class: "false-title"
+      }, falseResult.title));
+
+      for (const note of spec.notes) {
+        const text = make("text", {
+          x: sx(note.x),
+          y: sy(note.y),
+          "text-anchor": note.anchor
+        });
+
+        text.appendChild(make("tspan", {
+          x: sx(note.x),
+          class: "annotation-strong"
+        }, note.first));
+
+        text.appendChild(make("tspan", {
+          x: sx(note.x),
+          dy: spec.lineGap,
+          class: "annotation"
+        }, note.second));
+
+        plot.appendChild(text);
+      }
+
+      plot.appendChild(make("line", {
+        x1: sx(sourceLeft),
+        y1: sy(nodeTop),
+        x2: sx(sourceLeft),
+        y2: sy(nodeTop),
+        class: "flow-line"
+      }));
+    } catch (error) {
+      document.getElementById("cascade").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

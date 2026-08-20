@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Поток PVE и цена дополнительной проверки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --panel-soft: #eef3f9;
+      --text: #172033;
+      --muted: #536078;
+      --line: #8290a8;
+      --model: #2f6fed;
+      --model-soft: #e8f0ff;
+      --validator: #8a55d6;
+      --validator-soft: #f1eaff;
+      --approve: #16845b;
+      --approve-soft: #e5f6ef;
+      --reject: #c54848;
+      --reject-soft: #fdecec;
+      --cost: #c27712;
+      --cost-soft: #fff2d6;
+      --shadow: #d8deea;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111723;
+        --panel: #192231;
+        --panel-soft: #202c3e;
+        --text: #eef3fb;
+        --muted: #aebbd0;
+        --line: #718099;
+        --model: #77a6ff;
+        --model-soft: #1c3155;
+        --validator: #c09aff;
+        --validator-soft: #352750;
+        --approve: #66d6a8;
+        --approve-soft: #173d32;
+        --reject: #ff8e8e;
+        --reject-soft: #492527;
+        --cost: #ffc264;
+        --cost-soft: #493719;
+        --shadow: #0b1019;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .heading {
+      margin: unset;
+      padding: 12px 18px 8px;
+      font-size: 21px;
+      line-height: 1.2;
+      font-weight: 750;
+      background: var(--page);
+    }
+
+    .diagram {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--page);
+    }
+
+    .surface {
+      fill: var(--panel);
+      stroke: var(--shadow);
+      stroke-width: 2;
+    }
+
+    .model-box {
+      fill: var(--model-soft);
+      stroke: var(--model);
+      stroke-width: 3;
+    }
+
+    .validator-box {
+      fill: var(--validator-soft);
+      stroke: var(--validator);
+      stroke-width: 3;
+    }
+
+    .executor-box {
+      fill: var(--approve-soft);
+      stroke: var(--approve);
+      stroke-width: 3;
+    }
+
+    .cost-panel {
+      fill: var(--panel-soft);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .cost-box {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .surcharge-box {
+      fill: var(--cost-soft);
+      stroke: var(--cost);
+      stroke-width: 3;
+    }
+
+    .flow-model {
+      fill: none;
+      stroke: var(--model);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .flow-approve {
+      fill: none;
+      stroke: var(--approve);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .flow-reject {
+      fill: none;
+      stroke: var(--reject);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .head-model {
+      fill: var(--model);
+    }
+
+    .head-approve {
+      fill: var(--approve);
+    }
+
+    .head-reject {
+      fill: var(--reject);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 18px;
+    }
+
+    .box-title {
+      font-size: 22px;
+      font-weight: 750;
+    }
+
+    .box-copy {
+      font-size: 17px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .flow-label {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .approved {
+      fill: var(--approve);
+    }
+
+    .rejected {
+      fill: var(--reject);
+    }
+
+    .candidate {
+      fill: var(--model);
+    }
+
+    .cost-title {
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .cost-value {
+      font-size: 23px;
+      font-weight: 800;
+    }
+
+    .operator {
+      fill: var(--muted);
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .surcharge {
+      fill: var(--cost);
+      font-size: 28px;
+      font-weight: 850;
+    }
+
+    .fallback {
+      font-size: 19px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <h1 class="heading">Поток PVE и цена дополнительной проверки</h1>
+
+  <svg
+    id="diagram"
+    class="diagram"
+    viewBox="0 0 1200 450"
+    width="1200"
+    height="450"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Поток PVE и стоимость проверки</title>
+    <desc id="svg-desc">Основная модель предлагает вызов на списание 240 евро. Валидатор за 3 единицы либо разрешает передать его исполнителю, либо возвращает отказ модели. Стоимость одного кандидата возрастает со 100 до 103 единиц, то есть на 3 процента.</desc>
+    <g id="scene"></g>
+  </svg>
+
+  <script>
+    const DATA = [{
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      canvas: [[0, 0], [1200, 0], [1200, 450], [0, 450]],
+      model: [[35, 48], [310, 48], [310, 224], [35, 224]],
+      validator: [[445, 48], [690, 48], [690, 224], [445, 224]],
+      executor: [[790, 48], [1065, 48], [1065, 224], [790, 224]],
+      candidateLine: [[310, 136], [435, 136]],
+      candidateHead: [[435, 136], [421, 127], [421, 145]],
+      approveLine: [[700, 136], [780, 136]],
+      approveHead: [[780, 136], [766, 127], [766, 145]],
+      rejectLine: [[568, 224], [568, 286], [173, 286], [173, 234]],
+      rejectHead: [[173, 224], [163, 240], [183, 240]],
+      costPanel: [[24, 310], [1176, 310], [1176, 438], [24, 438]],
+      mainCost: [[42, 352], [290, 352], [290, 420], [42, 420]],
+      checkCost: [[350, 352], [585, 352], [585, 420], [350, 420]],
+      totalCost: [[645, 352], [895, 352], [895, 420], [645, 420]],
+      surcharge: [[950, 344], [1158, 344], [1158, 424], [950, 424]],
+      labels: {
+        model: [173, 91],
+        modelLineA: [173, 128],
+        modelLineB: [173, 158],
+        modelLineC: [173, 190],
+        validator: [568, 86],
+        validatorLineA: [568, 122],
+        validatorLineB: [568, 153],
+        validatorLineC: [568, 190],
+        executor: [928, 91],
+        executorLineA: [928, 129],
+        executorLineB: [928, 159],
+        executorLineC: [928, 190],
+        candidateA: [322, 112],
+        candidateB: [322, 169],
+        approveA: [710, 111],
+        approveB: [710, 169],
+        reject: [370, 274],
+        rejectHint: [584, 258],
+        costTitle: [42, 334],
+        mainValue: [166, 382],
+        mainLabel: [166, 407],
+        plus: [320, 393],
+        checkValue: [468, 382],
+        checkLabel: [468, 407],
+        equals: [615, 393],
+        totalValue: [770, 382],
+        totalLabel: [770, 407],
+        surchargeValue: [1054, 380],
+        surchargeLabel: [1054, 407],
+        fallbackA: [600, 204],
+        fallbackB: [600, 238]
+      }
+    }];
+
+    const [cfg] = DATA;
+    const origin = cfg.origin;
+    const scale = cfg.scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const NS = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+
+      const node = (name, attrs, content) => {
+        const element = document.createElementNS(NS, name);
+        Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+        if (content !== undefined) element.textContent = content;
+        return element;
+      };
+
+      const polygonPath = points => {
+        const [first, ...rest] = points;
+        return [
+          `M ${sx(first[0])} ${sy(first[1])}`,
+          ...rest.map(point => `L ${sx(point[0])} ${sy(point[1])}`),
+          "Z"
+        ].join(" ");
+      };
+
+      const linePath = points => {
+        const [first, ...rest] = points;
+        return [
+          `M ${sx(first[0])} ${sy(first[1])}`,
+          ...rest.map(point => `L ${sx(point[0])} ${sy(point[1])}`)
+        ].join(" ");
+      };
+
+      const shape = (points, className) => {
+        const element = node("path", {
+          d: polygonPath(points),
+          class: className
+        });
+        scene.appendChild(element);
+        return element;
+      };
+
+      const arrow = (points, head, lineClass, headClass) => {
+        scene.appendChild(node("path", {
+          d: linePath(points),
+          class: lineClass
+        }));
+        scene.appendChild(node("path", {
+          d: polygonPath(head),
+          class: headClass
+        }));
+      };
+
+      const label = (point, content, className, anchor) => {
+        const element = node("text", {
+          x: sx(point[0]),
+          y: sy(point[1]),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content);
+        scene.appendChild(element);
+        return element;
+      };
+
+      shape(cfg.canvas, "surface");
+      shape(cfg.model, "model-box");
+      shape(cfg.validator, "validator-box");
+      shape(cfg.executor, "executor-box");
+
+      arrow(cfg.candidateLine, cfg.candidateHead, "flow-model", "head-model");
+      arrow(cfg.approveLine, cfg.approveHead, "flow-approve", "head-approve");
+      arrow(cfg.rejectLine, cfg.rejectHead, "flow-reject", "head-reject");
+
+      label(cfg.labels.model, "Основная модель", "box-title", "middle");
+      label(cfg.labels.modelLineA, "выбирает сайт", "box-copy", "middle");
+      label(cfg.labels.modelLineB, "и предлагает вызов", "box-copy", "middle");
+      label(cfg.labels.modelLineC, "сама не исполняет", "small", "middle");
+
+      label(cfg.labels.validator, "Валидатор", "box-title", "middle");
+      label(cfg.labels.validatorLineA, "проверяет кандидата", "box-copy", "middle");
+      label(cfg.labels.validatorLineB, "одобрить / отклонить", "flow-label", "middle");
+      label(cfg.labels.validatorLineC, "проверка: 3 ед.", "small", "middle");
+
+      label(cfg.labels.executor, "Исполнитель", "box-title", "middle");
+      label(cfg.labels.executorLineA, "видит только", "box-copy", "middle");
+      label(cfg.labels.executorLineB, "одобренное действие", "box-copy", "middle");
+      label(cfg.labels.executorLineC, "и запускает его", "small", "middle");
+
+      label(cfg.labels.candidateA, "Кандидат", "flow-label candidate", "start");
+      label(cfg.labels.candidateB, "списать 240 €", "small", "start");
+      label(cfg.labels.approveA, "Одобрено", "flow-label approved", "start");
+      label(cfg.labels.approveB, "передать исполнителю", "small", "start");
+      label(cfg.labels.reject, "Отклонено: ищи другой путь", "flow-label rejected", "middle");
+      label(cfg.labels.rejectHint, "исполнитель вызов не получает", "small", "start");
+
+      shape(cfg.costPanel, "cost-panel");
+      shape(cfg.mainCost, "cost-box");
+      shape(cfg.checkCost, "cost-box");
+      shape(cfg.totalCost, "cost-box");
+      shape(cfg.surcharge, "surcharge-box");
+
+      label(cfg.labels.costTitle, "Цена одного кандидатного вызова", "cost-title", "start");
+      label(cfg.labels.mainValue, "100 ед.", "cost-value", "middle");
+      label(cfg.labels.mainLabel, "основной вызов", "small", "middle");
+      label(cfg.labels.plus, "+", "operator", "middle");
+      label(cfg.labels.checkValue, "3 ед.", "cost-value", "middle");
+      label(cfg.labels.checkLabel, "валидатор", "small", "middle");
+      label(cfg.labels.equals, "=", "operator", "middle");
+      label(cfg.labels.totalValue, "103 ед.", "cost-value", "middle");
+      label(cfg.labels.totalLabel, "итого", "small", "middle");
+      label(cfg.labels.surchargeValue, "+3%", "surcharge", "middle");
+      label(cfg.labels.surchargeLabel, "надбавка за защиту", "small", "middle");
+    } catch (error) {
+      const NS = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+      scene.replaceChildren();
+
+      const fallback = (point, content) => {
+        const text = document.createElementNS(NS, "text");
+        text.setAttribute("x", sx(point[0]));
+        text.setAttribute("y", sy(point[1]));
+        text.setAttribute("class", "fallback");
+        text.setAttribute("text-anchor", "middle");
+        text.textContent = content;
+        scene.appendChild(text);
+      };
+
+      fallback(cfg.labels.fallbackA, "Основная модель предлагает вызов, а валидатор решает, передавать ли его исполнителю.");
+      fallback(cfg.labels.fallbackB, "Проверка стоит 3 единицы: 100 превращаются в 103, надбавка — 3%.");
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
