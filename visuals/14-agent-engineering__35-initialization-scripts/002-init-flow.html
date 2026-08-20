@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь от старта сессии до допуска агента</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #536078;
+    --line: #75829a;
+    --blue: #e8f1ff;
+    --blue-line: #3877d1;
+    --probe: #f1f5fb;
+    --report: #f2ecff;
+    --report-line: #7955bd;
+    --decision: #fff4cc;
+    --decision-line: #b77a00;
+    --good: #e4f7eb;
+    --good-line: #21864b;
+    --bad: #ffebeb;
+    --bad-line: #c84646;
+    --label-bg: #f7f9fc;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2c;
+      --ink: #edf3ff;
+      --muted: #b4c0d4;
+      --line: #8694aa;
+      --blue: #172c49;
+      --blue-line: #65a5ff;
+      --probe: #202a39;
+      --report: #2c2141;
+      --report-line: #ae8be8;
+      --decision: #3a3018;
+      --decision-line: #e8b64d;
+      --good: #173625;
+      --good-line: #59c981;
+      --bad: #3d2024;
+      --bad-line: #f17878;
+      --label-bg: #111722;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  .frame {
+    max-width: 1100px;
+    margin: auto;
+    background: var(--page);
+  }
+
+  h1 {
+    margin: auto;
+    font-size: 20px;
+    text-align: center;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--line);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow {
+    fill: var(--line);
+  }
+
+  .start-shape,
+  .init-shape {
+    fill: var(--blue);
+    stroke: var(--blue-line);
+  }
+
+  .probe-shell {
+    fill: var(--panel);
+    stroke: var(--blue-line);
+  }
+
+  .probe-chip {
+    fill: var(--probe);
+    stroke: var(--line);
+  }
+
+  .report-shape {
+    fill: var(--report);
+    stroke: var(--report-line);
+  }
+
+  .decision-shape {
+    fill: var(--decision);
+    stroke: var(--decision-line);
+  }
+
+  .good-shape {
+    fill: var(--good);
+    stroke: var(--good-line);
+  }
+
+  .bad-shape {
+    fill: var(--bad);
+    stroke: var(--bad-line);
+  }
+
+  .node-title,
+  .node-small,
+  .probe-label,
+  .branch-label {
+    dominant-baseline: middle;
+    pointer-events: none;
+  }
+
+  .node-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .node-small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .probe-label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .branch-label {
+    font-size: 15px;
+    font-weight: bold;
+    paint-order: stroke;
+    stroke: var(--label-bg);
+    stroke-linejoin: round;
+  }
+
+  .branch-yes {
+    fill: var(--good-line);
+  }
+
+  .branch-no {
+    fill: var(--bad-line);
+  }
+
+  .icon-good {
+    fill: none;
+    stroke: var(--good-line);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .icon-bad {
+    fill: none;
+    stroke: var(--bad-line);
+    stroke-linecap: round;
+  }
+
+  #fallback {
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1 id="diagram-heading">Путь от старта сессии до допуска агента</h1>
+  <svg id="diagram" viewBox="0 0 1100 440" width="1100" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-heading diagram-description">
+    <title>Проверка среды перед допуском агента</title>
+    <desc id="diagram-description">
+      Старт сессии запускает init_agent.py, затем пять проб и создание
+      init_report.json. Решение healthy пропускает агента в цикл только при
+      исправной среде; иначе запуск останавливается и причина передаётся человеку.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+  <div id="fallback" hidden>
+    Схема должна была показать: старт сессии → init_agent.py → 5 проб →
+    init_report.json → healthy? → либо допуск в Agent Loop, либо остановка
+    и передача причины человеку.
+  </div>
+  <noscript>
+    Схема: старт сессии → init_agent.py → 5 проб → init_report.json →
+    healthy? → Agent Loop при ответе «да»; остановка и человек при ответе «нет».
+  </noscript>
+</main>
+
+<script>
+const diagramData = Object.freeze({
+  frame: {
+    origin: [50, 3],
+    scale: [1, 1],
+    zero: 0
+  },
+  rects: [
+    ["start-shape", [385, 4, 615, 46], 21],
+    ["init-shape", [350, 64, 650, 108], 12],
+    ["probe-shell", [155, 126, 845, 210], 14],
+    ["probe-chip", [175, 160, 295, 196], 9],
+    ["probe-chip", [305, 160, 425, 196], 9],
+    ["probe-chip", [435, 160, 555, 196], 9],
+    ["probe-chip", [565, 160, 685, 196], 9],
+    ["probe-chip", [695, 160, 825, 196], 9],
+    ["report-shape", [350, 228, 650, 272], 12],
+    ["bad-shape", [65, 392, 350, 432], 12],
+    ["good-shape", [650, 392, 935, 432], 12]
+  ],
+  polygons: [
+    ["decision-shape", [[500, 290], [590, 332], [500, 374], [410, 332]]]
+  ],
+  connectors: [
+    [[500, 46], [500, 64]],
+    [[500, 108], [500, 126]],
+    [[500, 210], [500, 228]],
+    [[500, 272], [500, 290]],
+    [[444, 358], [280, 392]],
+    [[556, 358], [720, 392]]
+  ],
+  arrows: [
+    [[500, 64], [493, 55], [507, 55]],
+    [[500, 126], [493, 117], [507, 117]],
+    [[500, 228], [493, 219], [507, 219]],
+    [[500, 290], [493, 281], [507, 281]],
+    [[280, 392], [291, 379], [295, 391]],
+    [[720, 392], [705, 391], [709, 379]]
+  ],
+  texts: [
+    ["node-title", [500, 25], "Старт сессии", "middle"],
+    ["node-title", [500, 86], "init_agent.py", "middle"],
+    ["node-small", [500, 143], "5 ПРОБ · проверка перед допуском", "middle"],
+    ["probe-label", [235, 179], "рантайм", "middle"],
+    ["probe-label", [365, 179], "зависимости", "middle"],
+    ["probe-label", [495, 179], "пути", "middle"],
+    ["probe-label", [625, 179], "окружение", "middle"],
+    ["probe-label", [760, 179], "тесты", "middle"],
+    ["node-title", [500, 250], "init_report.json", "middle"],
+    ["node-title", [500, 324], "healthy?", "middle"],
+    ["node-small", [500, 344], "среда исправна?", "middle"],
+    ["node-title", [205, 405], "Остановка", "middle"],
+    ["node-small", [205, 421], "причина показывается человеку", "middle"],
+    ["node-title", [790, 405], "Цикл агента · Agent Loop", "middle"],
+    ["node-small", [790, 421], "допуск к задаче", "middle"]
+  ],
+  branchLabels: [
+    ["branch-label branch-no", [430, 367], "нет", "end", "left"],
+    ["branch-label branch-yes", [570, 367], "да", "start", "right"]
+  ],
+  goodIcon: [
+    [[674, 411], [682, 419], [698, 401]]
+  ],
+  badIcon: [
+    [[92, 402], [108, 422]],
+    [[108, 402], [92, 422]]
+  ]
+});
+
+const {
+  origin: [originX, originY],
+  scale: [scaleX, scaleY]
+} = diagramData.frame;
+
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const labelPadding = 10;
+const strokeWidth = 2;
+const fontSize = 15;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  function make(name, attributes, content) {
+    const element = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+    if (content !== undefined) element.textContent = content;
+    return element;
+  }
+
+  function points(value) {
+    return value.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  }
+
+  for (const path of diagramData.connectors) {
+    drawing.appendChild(make("polyline", {
+      class: "connector",
+      points: points(path),
+      "stroke-width": strokeWidth
+    }));
+  }
+
+  for (const arrow of diagramData.arrows) {
+    drawing.appendChild(make("polygon", {
+      class: "arrow",
+      points: points(arrow)
+    }));
+  }
+
+  for (const [className, [x1, y1, x2, y2], radius] of diagramData.rects) {
+    drawing.appendChild(make("rect", {
+      class: className,
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1),
+      rx: sx(x1 + radius) - sx(x1),
+      ry: sy(y1 + radius) - sy(y1),
+      "stroke-width": strokeWidth,
+      "vector-effect": "non-scaling-stroke"
+    }));
+  }
+
+  for (const [className, vertices] of diagramData.polygons) {
+    drawing.appendChild(make("polygon", {
+      class: className,
+      points: points(vertices),
+      "stroke-width": strokeWidth,
+      "vector-effect": "non-scaling-stroke"
+    }));
+  }
+
+  for (const [className, [x, y], content, anchor] of diagramData.texts) {
+    drawing.appendChild(make("text", {
+      class: className,
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor
+    }, content));
+  }
+
+  for (const [className, [x, y], content, anchor, side] of diagramData.branchLabels) {
+    const offset = side === "left" ? -labelPadding : labelPadding;
+    drawing.appendChild(make("text", {
+      class: className,
+      x: sx(x),
+      y: sy(y),
+      dx: offset,
+      "font-size": fontSize,
+      "text-anchor": anchor
+    }, content));
+  }
+
+  for (const iconPath of diagramData.goodIcon) {
+    drawing.appendChild(make("polyline", {
+      class: "icon-good",
+      points: points(iconPath),
+      "stroke-width": strokeWidth
+    }));
+  }
+
+  for (const iconPath of diagramData.badIcon) {
+    drawing.appendChild(make("polyline", {
+      class: "icon-bad",
+      points: points(iconPath),
+      "stroke-width": strokeWidth
+    }));
+  }
+
+  const coordinateOrigin = Object.freeze({
+    x: sx(diagramData.frame.zero),
+    y: sy(diagramData.frame.zero)
+  });
+
+  if (!Number.isFinite(coordinateOrigin.x) || !Number.isFinite(coordinateOrigin.y)) {
+    throw new Error("Некорректное преобразование координат");
+  }
+
+  fallback.hidden = true;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

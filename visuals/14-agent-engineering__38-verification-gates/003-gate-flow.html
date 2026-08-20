@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Четыре входа, один вердикт и две дороги</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --panel-soft: #eef4ff;
+      --panel-gate: #fff7dd;
+      --panel-pass: #e9f8ef;
+      --panel-stop: #fff0ef;
+      --ink: #172033;
+      --muted: #526078;
+      --line: #62718c;
+      --blue: #2367d1;
+      --amber: #a96600;
+      --green: #18794e;
+      --red: #bd3434;
+      --guide: #d5deec;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101521;
+        --panel: #182131;
+        --panel-soft: #172a48;
+        --panel-gate: #382d17;
+        --panel-pass: #153526;
+        --panel-stop: #3b2023;
+        --ink: #edf3ff;
+        --muted: #afbdd3;
+        --line: #93a3bd;
+        --blue: #78aaff;
+        --amber: #f1b94f;
+        --green: #64d69b;
+        --red: #ff8a88;
+        --guide: #334158;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .title {
+      font-size: 20px;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--page);
+    }
+
+    .stage {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.08em;
+    }
+
+    .node {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .input-node {
+      fill: var(--panel-soft);
+      stroke: var(--blue);
+    }
+
+    .gate-node {
+      fill: var(--panel-gate);
+      stroke: var(--amber);
+      stroke-width: 3px;
+    }
+
+    .report-node {
+      fill: var(--panel-soft);
+      stroke: var(--blue);
+      stroke-width: 3px;
+    }
+
+    .decision-node {
+      fill: var(--panel);
+      stroke: var(--blue);
+      stroke-width: 3px;
+    }
+
+    .pass-node {
+      fill: var(--panel-pass);
+      stroke: var(--green);
+      stroke-width: 3px;
+    }
+
+    .stop-node {
+      fill: var(--panel-stop);
+      stroke: var(--red);
+      stroke-width: 3px;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2.5px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .flow-main {
+      stroke: var(--blue);
+      stroke-width: 3px;
+    }
+
+    .flow-pass {
+      stroke: var(--green);
+      stroke-width: 3px;
+    }
+
+    .flow-stop {
+      stroke: var(--red);
+      stroke-width: 3px;
+    }
+
+    .arrow {
+      fill: var(--line);
+    }
+
+    .arrow-main {
+      fill: var(--blue);
+    }
+
+    .arrow-pass {
+      fill: var(--green);
+    }
+
+    .arrow-stop {
+      fill: var(--red);
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .file-label {
+      fill: var(--ink);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px;
+    }
+
+    .detail {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .branch-pass {
+      fill: var(--green);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .branch-stop {
+      fill: var(--red);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      color: var(--red);
+      font-size: 16px;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="title" id="diagram-title">
+    Четыре входа, один вердикт и две дороги
+  </div>
+
+  <svg id="diagram"
+       width="960"
+       height="470"
+       viewBox="0 0 960 500"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Четыре независимых артефакта сходятся в verify_agent.py. Гейт создаёт
+      один verification_report.json. Проверка passed: true направляет работу
+      либо к агенту-ревьюеру, либо человеку для разбора проблемы.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+
+  <p class="fallback" id="fallback" hidden>
+    Схема должна была показать, как Diff, scope_report.json, rule_report.json
+    и feedback_record.jsonl сходятся в verify_agent.py, образуют единый
+    verification_report.json и расходятся по двум веткам: «да» — к
+    агенту-ревьюеру, «нет» — к человеку.
+  </p>
+
+  <script>
+    const DATA = Object.freeze({
+      zero: 0,
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      geometry: {
+        radius: 10,
+        arrowLength: 12,
+        arrowHalfWidth: 6
+      },
+      stages: [
+        { text: "ЧЕТЫРЕ ВХОДА", x: 145, y: 28, anchor: "middle" },
+        { text: "ОДИН ДЕТЕРМИНИРОВАННЫЙ ГЕЙТ", x: 460, y: 78, anchor: "middle" },
+        { text: "ОДИН ВЕРДИКТ", x: 760, y: 118, anchor: "middle" },
+        { text: "ТОЛЬКО ДВЕ ДОРОГИ", x: 660, y: 400, anchor: "middle" }
+      ],
+      rectangles: [
+        {
+          x: 30, y: 52, w: 225, h: 48, kind: "input-node",
+          lines: [{ text: "Diff", y: 82, kind: "file-label" }]
+        },
+        {
+          x: 30, y: 117, w: 225, h: 48, kind: "input-node",
+          lines: [{ text: "scope_report.json", y: 147, kind: "file-label" }]
+        },
+        {
+          x: 30, y: 182, w: 225, h: 48, kind: "input-node",
+          lines: [{ text: "rule_report.json", y: 212, kind: "file-label" }]
+        },
+        {
+          x: 30, y: 247, w: 225, h: 48, kind: "input-node",
+          lines: [{ text: "feedback_record.jsonl", y: 277, kind: "file-label" }]
+        },
+        {
+          x: 365, y: 104, w: 190, h: 192, kind: "gate-node",
+          lines: [
+            { text: "verify_agent.py", y: 181, kind: "file-label" },
+            { text: "сводит свидетельства", y: 207, kind: "detail" },
+            { text: "в единый результат", y: 228, kind: "detail" }
+          ]
+        },
+        {
+          x: 635, y: 145, w: 250, h: 100, kind: "report-node",
+          lines: [
+            { text: "verification_report.json", y: 188, kind: "file-label" },
+            { text: "единый источник истины", y: 216, kind: "detail" }
+          ]
+        },
+        {
+          x: 390, y: 415, w: 240, h: 70, kind: "pass-node",
+          lines: [
+            { text: "Агент-ревьюер", y: 445, kind: "label" },
+            { text: "содержательное ревью", y: 469, kind: "detail" }
+          ]
+        },
+        {
+          x: 680, y: 415, w: 250, h: 70, kind: "stop-node",
+          lines: [
+            { text: "Человек", y: 442, kind: "label" },
+            { text: "готовность запрещена", y: 462, kind: "detail" },
+            { text: "проблема показана", y: 479, kind: "detail" }
+          ]
+        }
+      ],
+      diamond: {
+        points: [
+          { x: 760, y: 300 },
+          { x: 835, y: 345 },
+          { x: 760, y: 390 },
+          { x: 685, y: 345 }
+        ],
+        lines: [
+          { text: "passed:", x: 760, y: 341, kind: "file-label" },
+          { text: "true?", x: 760, y: 363, kind: "file-label" }
+        ]
+      },
+      flows: [
+        {
+          kind: "flow", arrow: "arrow",
+          points: [
+            { x: 255, y: 76 }, { x: 285, y: 76 },
+            { x: 285, y: 132 }, { x: 365, y: 132 }
+          ]
+        },
+        {
+          kind: "flow", arrow: "arrow",
+          points: [
+            { x: 255, y: 141 }, { x: 305, y: 141 },
+            { x: 305, y: 174 }, { x: 365, y: 174 }
+          ]
+        },
+        {
+          kind: "flow", arrow: "arrow",
+          points: [
+            { x: 255, y: 206 }, { x: 325, y: 206 },
+            { x: 325, y: 222 }, { x: 365, y: 222 }
+          ]
+        },
+        {
+          kind: "flow", arrow: "arrow",
+          points: [
+            { x: 255, y: 271 }, { x: 345, y: 271 },
+            { x: 345, y: 264 }, { x: 365, y: 264 }
+          ]
+        },
+        {
+          kind: "flow flow-main", arrow: "arrow-main",
+          points: [{ x: 555, y: 200 }, { x: 635, y: 195 }]
+        },
+        {
+          kind: "flow flow-main", arrow: "arrow-main",
+          points: [{ x: 760, y: 245 }, { x: 760, y: 300 }]
+        },
+        {
+          kind: "flow flow-pass", arrow: "arrow-pass",
+          points: [
+            { x: 685, y: 345 }, { x: 580, y: 345 },
+            { x: 580, y: 415 }
+          ]
+        },
+        {
+          kind: "flow flow-stop", arrow: "arrow-stop",
+          points: [
+            { x: 835, y: 345 }, { x: 880, y: 345 },
+            { x: 880, y: 415 }
+          ]
+        }
+      ],
+      branchLabels: [
+        { text: "да", x: 665, y: 332, anchor: "end", kind: "branch-pass" },
+        { text: "нет", x: 851, y: 332, anchor: "start", kind: "branch-stop" }
+      ]
+    });
+
+    const origin = DATA.origin;
+    const scale = DATA.scale;
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, className) => {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        if (className) element.setAttribute("class", className);
+        return element;
+      };
+
+      const pointString = points =>
+        points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+      const addText = item => {
+        const text = make("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          "text-anchor": item.anchor || "middle"
+        }, item.kind);
+        text.textContent = item.text;
+        drawing.appendChild(text);
+      };
+
+      const addArrow = flow => {
+        const points = flow.points;
+        const tip = points.at(-DATA.geometry.scale);
+        const before = points.at(-DATA.geometry.arrowHalfWidth);
+        const dx = tip.x - before.x;
+        const dy = tip.y - before.y;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = tip.x - ux * DATA.geometry.arrowLength;
+        const baseY = tip.y - uy * DATA.geometry.arrowLength;
+        const px = -uy * DATA.geometry.arrowHalfWidth;
+        const py = ux * DATA.geometry.arrowHalfWidth;
+        const head = [
+          { x: tip.x, y: tip.y },
+          { x: baseX + px, y: baseY + py },
+          { x: baseX - px, y: baseY - py }
+        ];
+        drawing.appendChild(make("polygon", {
+          points: pointString(head)
+        }, flow.arrow));
+      };
+
+      DATA.geometry.scale = DATA.scale.x;
+
+      for (const flow of DATA.flows) {
+        drawing.appendChild(make("polyline", {
+          points: pointString(flow.points)
+        }, flow.kind));
+        addArrow(flow);
+      }
+
+      for (const node of DATA.rectangles) {
+        drawing.appendChild(make("rect", {
+          x: sx(node.x),
+          y: sy(node.y),
+          width: sx(node.x + node.w) - sx(node.x),
+          height: sy(node.y + node.h) - sy(node.y),
+          rx: sx(DATA.geometry.radius) - sx(DATA.zero),
+          ry: sy(DATA.geometry.radius) - sy(DATA.zero)
+        }, `node ${node.kind}`));
+
+        for (const line of node.lines) {
+          addText({
+            text: line.text,
+            x: node.x + node.w / DATA.scale.x / DATA.geometry.arrowHalfWidth
+              * DATA.geometry.arrowHalfWidth / DATA.geometry.arrowHalfWidth,
+            y: line.y,
+            anchor: "middle",
+            kind: line.kind
+          });
+        }
+      }
+
+      drawing.appendChild(make("polygon", {
+        points: pointString(DATA.diamond.points)
+      }, "decision-node"));
+
+      for (const line of DATA.diamond.lines) addText(line);
+      for (const stage of DATA.stages) {
+        addText({ ...stage, kind: "stage" });
+      }
+      for (const label of DATA.branchLabels) addText(label);
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

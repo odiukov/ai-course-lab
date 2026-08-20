@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Три слоя оценки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f3f6fa;
+      --canvas: #ffffff;
+      --ink: #172033;
+      --muted: #5b667b;
+      --quiet: #edf1f6;
+      --quiet-stroke: #c8d0dc;
+
+      --online: #c65a18;
+      --online-fill: #fff2e7;
+      --online-chip: #fffaf6;
+
+      --offline: #7651c7;
+      --offline-fill: #f5efff;
+      --offline-chip: #fbf8ff;
+
+      --benchmark: #176fa6;
+      --benchmark-fill: #eaf7ff;
+      --benchmark-chip: #f6fbff;
+
+      --badge-text: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --canvas: #171c27;
+        --ink: #f2f5fb;
+        --muted: #b7c0d0;
+        --quiet: #222a38;
+        --quiet-stroke: #566175;
+
+        --online: #ff9a5c;
+        --online-fill: #352217;
+        --online-chip: #2b211c;
+
+        --offline: #b99aff;
+        --offline-fill: #292139;
+        --offline-chip: #252030;
+
+        --benchmark: #72c8ff;
+        --benchmark-fill: #162b3a;
+        --benchmark-chip: #192733;
+
+        --badge-text: #111722;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+    }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      color: var(--ink);
+    }
+
+    figure {
+      margin: unset;
+      background: var(--canvas);
+    }
+
+    figcaption {
+      box-sizing: border-box;
+      padding: 18px 24px 10px;
+      background: var(--canvas);
+      color: var(--ink);
+      font-size: 26px;
+      font-weight: bold;
+    }
+
+    #stage {
+      box-sizing: border-box;
+      width: 100%;
+      background: var(--canvas);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--canvas);
+      text-rendering: geometricPrecision;
+    }
+
+    text {
+      font-family: inherit;
+    }
+
+    .canvas {
+      fill: var(--canvas);
+    }
+
+    .layer {
+      stroke-width: 2px;
+    }
+
+    .layer.online {
+      fill: var(--online-fill);
+      stroke: var(--online);
+    }
+
+    .layer.offline {
+      fill: var(--offline-fill);
+      stroke: var(--offline);
+    }
+
+    .layer.benchmark {
+      fill: var(--benchmark-fill);
+      stroke: var(--benchmark);
+    }
+
+    .badge.online {
+      fill: var(--online);
+    }
+
+    .badge.offline {
+      fill: var(--offline);
+    }
+
+    .badge.benchmark {
+      fill: var(--benchmark);
+    }
+
+    .badge-text {
+      fill: var(--badge-text);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .layer-title {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .layer-title.online {
+      fill: var(--online);
+    }
+
+    .layer-title.offline {
+      fill: var(--offline);
+    }
+
+    .layer-title.benchmark {
+      fill: var(--benchmark);
+    }
+
+    .layer-subtitle {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .chip {
+      stroke-width: 1.5px;
+    }
+
+    .chip.online {
+      fill: var(--online-chip);
+      stroke: var(--online);
+    }
+
+    .chip.offline {
+      fill: var(--offline-chip);
+      stroke: var(--offline);
+    }
+
+    .chip-text {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .footer {
+      fill: var(--quiet);
+      stroke: var(--quiet-stroke);
+      stroke-width: 1px;
+    }
+
+    .footer-text {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .direction {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .arrowhead {
+      fill: var(--muted);
+    }
+
+    .fallback {
+      box-sizing: border-box;
+      padding: 24px;
+      background: var(--canvas);
+      color: var(--ink);
+      font-size: 17px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-heading">
+    <figcaption id="diagram-heading">Три слоя оценки</figcaption>
+    <div id="stage">
+      <noscript>
+        Статические бенчмарки проверяют общую способность модели,
+        собственные офлайн-оценки — её работу в форме продукта,
+        а онлайн-оценки — поведение в работающем продакшене.
+      </noscript>
+    </div>
+  </figure>
+
+  <script>
+    const data = Object.freeze([
+      ["canvas", 1200, 420],
+      ["background", 0, 0, 1200, 420],
+      ["layers",
+        ["online", 40, 26, 1120, 320, 28,
+          76, 61, 18, 67, "3",
+          110, 57, "ОНЛАЙН-ОЦЕНКИ",
+          110, 78, "работающий продакшен"],
+        ["offline", 170, 86, 860, 206, 24,
+          206, 117, 16, 123, "2",
+          236, 113, "СОБСТВЕННЫЕ ОФЛАЙН-ОЦЕНКИ",
+          236, 134, "тестовая копия продукта"],
+        ["benchmark", 330, 145, 540, 96, 18,
+          366, 176, 15, 182, "1",
+          396, 174, "СТАТИЧЕСКИЕ БЕНЧМАРКИ",
+          396, 207, "общая способность • сравнение моделей • гейты регрессий"]
+      ],
+      ["chips",
+        ["offline", 235, 252, 170, 27, 13, 320, 270, "LLM-судья"],
+        ["offline", 422, 252, 180, 27, 13, 512, 270, "исполнение"],
+        ["offline", 619, 252, 206, 27, 13, 722, 270, "траектория действий"],
+        ["online", 185, 307, 180, 25, 12, 275, 324, "реплеи сессий"],
+        ["online", 382, 307, 270, 25, 12, 517, 324, "срабатывания ограничений"],
+        ["online", 669, 307, 346, 25, 12, 842, 324,
+          "стоимость и задержка каждого шага"]
+      ],
+      ["footer",
+        40, 364, 1120, 40, 18,
+        66, 389, "Чем ближе к реальному продукту",
+        438, 384, 558, 384,
+        [[558, 384], [546, 377], [546, 391]],
+        586, 389, "тем точнее контекст — и тем позже и дороже сигнал"
+      ]
+    ]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const stage = document.getElementById("stage");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    try {
+      const [canvasData, backgroundData, layersData, chipsData, footerData] = data;
+      const [, canvasWidth, canvasHeight] = canvasData;
+      const [, backgroundX, backgroundY, backgroundWidth, backgroundHeight] =
+        backgroundData;
+      const [, ...layers] = layersData;
+      const [, ...chips] = chipsData;
+
+      const svg = document.createElementNS(namespace, "svg");
+      svg.setAttribute("width", sx(canvasWidth) - sx(0));
+      svg.setAttribute("height", sy(canvasHeight) - sy(0));
+      svg.setAttribute(
+        "viewBox",
+        [
+          sx(0),
+          sy(0),
+          sx(canvasWidth) - sx(0),
+          sy(canvasHeight) - sy(0)
+        ].join(" ")
+      );
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-labelledby", "svg-title svg-description");
+
+      function element(name, attributes, parent) {
+        const node = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, value);
+        }
+        (parent || svg).appendChild(node);
+        return node;
+      }
+
+      function rectangle(parent, x, y, width, height, radius, className) {
+        return element("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(width) - sx(0),
+          height: sy(height) - sy(0),
+          rx: sx(radius) - sx(0),
+          ry: sy(radius) - sy(0),
+          class: className
+        }, parent);
+      }
+
+      function circle(parent, x, y, radius, className) {
+        return element("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(0),
+          class: className
+        }, parent);
+      }
+
+      function text(parent, x, y, value, className, anchor) {
+        const node = element("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        }, parent);
+        node.textContent = value;
+        return node;
+      }
+
+      function line(parent, xStart, yStart, xEnd, yEnd, className) {
+        return element("line", {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          class: className
+        }, parent);
+      }
+
+      function polygon(parent, points, className) {
+        const value = points
+          .map(([x, y]) => [sx(x), sy(y)].join(","))
+          .join(" ");
+        return element("polygon", {
+          points: value,
+          class: className
+        }, parent);
+      }
+
+      const title = element("title", { id: "svg-title" }, svg);
+      title.textContent = "Три вложенных слоя оценки";
+
+      const description = element("desc", { id: "svg-description" }, svg);
+      description.textContent =
+        "Внутренний слой — статические бенчмарки общей способности. " +
+        "Средний — собственные офлайн-оценки в тестовой копии продукта. " +
+        "Внешний — онлайн-оценки работающего продакшена.";
+
+      rectangle(
+        svg,
+        backgroundX,
+        backgroundY,
+        backgroundWidth,
+        backgroundHeight,
+        backgroundY,
+        "canvas"
+      );
+
+      function drawLayer(specification) {
+        const [
+          tone,
+          x,
+          y,
+          width,
+          height,
+          radius,
+          badgeX,
+          badgeY,
+          badgeRadius,
+          badgeTextY,
+          number,
+          titleX,
+          titleY,
+          titleValue,
+          subtitleX,
+          subtitleY,
+          subtitleValue
+        ] = specification;
+
+        const group = element("g", {
+          "aria-label": titleValue
+        }, svg);
+
+        rectangle(
+          group,
+          x,
+          y,
+          width,
+          height,
+          radius,
+          "layer " + tone
+        );
+        circle(
+          group,
+          badgeX,
+          badgeY,
+          badgeRadius,
+          "badge " + tone
+        );
+        text(
+          group,
+          badgeX,
+          badgeTextY,
+          number,
+          "badge-text",
+          "middle"
+        );
+        text(
+          group,
+          titleX,
+          titleY,
+          titleValue,
+          "layer-title " + tone,
+          "start"
+        );
+        text(
+          group,
+          subtitleX,
+          subtitleY,
+          subtitleValue,
+          "layer-subtitle",
+          "start"
+        );
+      }
+
+      layers.forEach(drawLayer);
+
+      function drawChip(specification) {
+        const [
+          tone,
+          x,
+          y,
+          width,
+          height,
+          radius,
+          textX,
+          textY,
+          value
+        ] = specification;
+
+        const group = element("g", {
+          "aria-label": value
+        }, svg);
+
+        rectangle(
+          group,
+          x,
+          y,
+          width,
+          height,
+          radius,
+          "chip " + tone
+        );
+        text(
+          group,
+          textX,
+          textY,
+          value,
+          "chip-text",
+          "middle"
+        );
+      }
+
+      chips.forEach(drawChip);
+
+      const [
+        ,
+        footerX,
+        footerY,
+        footerWidth,
+        footerHeight,
+        footerRadius,
+        leftTextX,
+        leftTextY,
+        leftText,
+        arrowStartX,
+        arrowStartY,
+        arrowEndX,
+        arrowEndY,
+        arrowPoints,
+        rightTextX,
+        rightTextY,
+        rightText
+      ] = footerData;
+
+      const footerGroup = element("g", {
+        "aria-label":
+          "Чем ближе оценка к реальному продукту, тем точнее контекст, " +
+          "но тем позже и дороже сигнал"
+      }, svg);
+
+      rectangle(
+        footerGroup,
+        footerX,
+        footerY,
+        footerWidth,
+        footerHeight,
+        footerRadius,
+        "footer"
+      );
+      text(
+        footerGroup,
+        leftTextX,
+        leftTextY,
+        leftText,
+        "footer-text",
+        "start"
+      );
+      line(
+        footerGroup,
+        arrowStartX,
+        arrowStartY,
+        arrowEndX,
+        arrowEndY,
+        "direction"
+      );
+      polygon(
+        footerGroup,
+        arrowPoints,
+        "arrowhead"
+      );
+      text(
+        footerGroup,
+        rightTextX,
+        rightTextY,
+        rightText,
+        "footer-text",
+        "start"
+      );
+
+      stage.replaceChildren(svg);
+    } catch (error) {
+      stage.className = "fallback";
+      stage.textContent =
+        "Схема должна была показать три вложенных слоя: статические " +
+        "бенчмарки для общей способности, собственные офлайн-оценки " +
+        "для продукта и онлайн-оценки работающего продакшена.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

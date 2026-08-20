@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Одна задача, два пайплайна, пять проверок</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f4f7fb;
+    --ink: #172033;
+    --muted: #5c667a;
+    --panel: #ffffff;
+    --soft: #e8edf5;
+    --grid: #c4cddd;
+    --task: #e8eefc;
+    --task-stroke: #6279b8;
+    --prompt: #d96c53;
+    --prompt-soft: #fff0eb;
+    --bench: #23866f;
+    --bench-soft: #e5f5f0;
+    --trace: #778196;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #edf2fa;
+      --muted: #adb8ca;
+      --panel: #1b2432;
+      --soft: #273244;
+      --grid: #46536a;
+      --task: #263754;
+      --task-stroke: #91a8e7;
+      --prompt: #f08b70;
+      --prompt-soft: #442c2a;
+      --bench: #59c5a7;
+      --bench-soft: #1d3c37;
+      --trace: #8f9db3;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure-title {
+    background: var(--page);
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 460px;
+    background: var(--page);
+  }
+
+  .task-box {
+    fill: var(--task);
+    stroke: var(--task-stroke);
+    stroke-width: 2;
+  }
+
+  .prompt-box {
+    fill: var(--prompt-soft);
+    stroke: var(--prompt);
+    stroke-width: 2;
+  }
+
+  .bench-box {
+    fill: var(--bench-soft);
+    stroke: var(--bench);
+    stroke-width: 2;
+  }
+
+  .matrix-box {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 2;
+  }
+
+  .header-fill {
+    fill: var(--soft);
+  }
+
+  .separator {
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .branch {
+    fill: none;
+    stroke: var(--trace);
+    stroke-width: 2;
+  }
+
+  .prompt-line {
+    fill: none;
+    stroke: var(--prompt);
+    stroke-width: 2;
+  }
+
+  .bench-line {
+    fill: none;
+    stroke: var(--bench);
+    stroke-width: 2;
+  }
+
+  .prompt-head {
+    fill: var(--prompt);
+  }
+
+  .bench-head {
+    fill: var(--bench);
+  }
+
+  .branch-head,
+  .split-dot {
+    fill: var(--trace);
+  }
+
+  .prompt-dot {
+    fill: var(--panel);
+    stroke: var(--prompt);
+    stroke-width: 2;
+  }
+
+  .bench-dot {
+    fill: var(--bench);
+    stroke: var(--bench);
+    stroke-width: 2;
+  }
+
+  .eyebrow {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .subtitle {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .matrix-title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .column-title {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .row-prompt {
+    fill: var(--prompt);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .row-bench {
+    fill: var(--bench);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .result {
+    fill: var(--ink);
+    font-size: 11px;
+  }
+
+  .caption {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .fallback {
+    color: var(--ink);
+    background: var(--page);
+    font-size: 15px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="figure-title">Одна задача · два пайплайна · пять проверок</div>
+<svg id="diagram" width="1120" height="460" viewBox="0 0 1120 460"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-description">
+  <title id="svg-title">Одна задача расходится на два пайплайна и измеряется пятью одинаковыми проверками</title>
+  <desc id="svg-description">Валидация signup выполняется только по промпту и с верстаком. Следы обоих прогонов сопоставляются по запуску тестов, приёмке, границам файлов, передаче контекста и оценке ревьюера.</desc>
+</svg>
+<div id="fallback" class="fallback" hidden>
+  Схема должна была показать одну задачу «валидация /signup», два пайплайна и пять одинаковых проверок результатов.
+</div>
+
+<script>
+const diagramData = [{
+  zero: 0,
+  origin: { x: 24, y: 12 },
+  scale: { x: 1, y: 1 },
+  radius: { box: 12, dot: 6, split: 4 },
+  task: {
+    box: [180, 8, 712, 54],
+    labels: [
+      { text: "ОДНА ЗАДАЧА", x: 536, y: 27, className: "eyebrow", anchor: "middle" },
+      { text: "Валидация /signup и тест нового поведения", x: 536, y: 49, className: "title", anchor: "middle" }
+    ]
+  },
+  pipelines: [
+    {
+      kind: "prompt",
+      box: [20, 100, 470, 72],
+      labels: [
+        { text: "ТОЛЬКО ПРОМПТ", x: 255, y: 124, className: "eyebrow", anchor: "middle" },
+        { text: "Правка → уверенное «Готово»", x: 255, y: 149, className: "title", anchor: "middle" }
+      ]
+    },
+    {
+      kind: "bench",
+      box: [570, 100, 470, 72],
+      labels: [
+        { text: "ПРОГОН С ВЕРСТАКОМ", x: 805, y: 124, className: "eyebrow", anchor: "middle" },
+        { text: "Правка → проверка → передача контекста", x: 805, y: 149, className: "title", anchor: "middle" }
+      ]
+    }
+  ],
+  split: {
+    stem: [[536, 62], [536, 78]],
+    point: [536, 78],
+    prompt: [[536, 78], [255, 78], [255, 100]],
+    promptHead: [[255, 100], [247, 89], [263, 89]],
+    bench: [[536, 78], [805, 78], [805, 100]],
+    benchHead: [[805, 100], [797, 89], [813, 89]]
+  },
+  matrix: {
+    box: [120, 198, 820, 210],
+    header: [120, 198, 820, 72],
+    heading: { text: "ОДИНАКОВЫЕ ПЯТЬ ИЗМЕРЕНИЙ", x: 530, y: 217, className: "matrix-title", anchor: "middle" },
+    horizontal: [[120, 270], [940, 270], [120, 339], [940, 339]],
+    verticals: [
+      [[284, 224], [284, 408]],
+      [[448, 224], [448, 408]],
+      [[612, 224], [612, 408]],
+      [[776, 224], [776, 408]]
+    ],
+    columns: [
+      {
+        center: 202,
+        labels: [
+          { text: "Тесты", x: 202, y: 240, className: "column-title", anchor: "middle" },
+          { text: "реально запущены", x: 202, y: 257, className: "column-title", anchor: "middle" }
+        ],
+        prompt: "заявлено",
+        bench: "есть лог тестов"
+      },
+      {
+        center: 366,
+        labels: [
+          { text: "Приёмка", x: 366, y: 240, className: "column-title", anchor: "middle" },
+          { text: "доказана", x: 366, y: 257, className: "column-title", anchor: "middle" }
+        ],
+        prompt: "не доказано",
+        bench: "есть тест цели"
+      },
+      {
+        center: 530,
+        labels: [
+          { text: "Лишние файлы", x: 530, y: 240, className: "column-title", anchor: "middle" },
+          { text: "не затронуты", x: 530, y: 257, className: "column-title", anchor: "middle" }
+        ],
+        prompt: "не проверено",
+        bench: "проверены границы"
+      },
+      {
+        center: 694,
+        labels: [
+          { text: "Контекст", x: 694, y: 240, className: "column-title", anchor: "middle" },
+          { text: "передан", x: 694, y: 257, className: "column-title", anchor: "middle" }
+        ],
+        prompt: "только «Готово»",
+        bench: "контекст передан"
+      },
+      {
+        center: 858,
+        labels: [
+          { text: "Ревьюер", x: 858, y: 240, className: "column-title", anchor: "middle" },
+          { text: "дал оценку", x: 858, y: 257, className: "column-title", anchor: "middle" }
+        ],
+        prompt: "нет оценки",
+        bench: "оценка сохранена"
+      }
+    ],
+    promptRow: {
+      y: 304,
+      line: [[142, 304], [918, 304]],
+      label: [
+        { text: "ТОЛЬКО", x: 102, y: 283, className: "row-prompt", anchor: "end" },
+        { text: "ПРОМПТ", x: 102, y: 298, className: "row-prompt", anchor: "end" }
+      ],
+      resultY: 327
+    },
+    benchRow: {
+      y: 373,
+      line: [[142, 373], [918, 373]],
+      label: [
+        { text: "С", x: 958, y: 352, className: "row-bench", anchor: "start" },
+        { text: "ВЕРСТАКОМ", x: 958, y: 367, className: "row-bench", anchor: "start" }
+      ],
+      resultY: 396
+    }
+  },
+  resultConnectors: {
+    prompt: [[255, 172], [90, 187], [90, 304], [120, 304]],
+    promptHead: [[120, 304], [109, 296], [109, 312]],
+    bench: [[805, 172], [970, 187], [970, 373], [940, 373]],
+    benchHead: [[940, 373], [951, 365], [951, 381]]
+  },
+  caption: {
+    text: "Полный ряд отметок показывает не только победителя, но и механизм разницы.",
+    x: 530,
+    y: 435,
+    className: "caption",
+    anchor: "middle"
+  }
+}];
+
+const [spec] = diagramData;
+const origin = spec.origin;
+const scale = spec.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const element = (name, attributes, className) => {
+    const item = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => item.setAttribute(key, value));
+    if (className) item.setAttribute("class", className);
+    svg.appendChild(item);
+    return item;
+  };
+
+  const rectangle = (box, className) => {
+    const [x, y, width, height] = box;
+    return element("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(spec.radius.box) - sx(spec.zero),
+      ry: sy(spec.radius.box) - sy(spec.zero)
+    }, className);
+  };
+
+  const polyline = (points, className) => element("polyline", {
+    points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")
+  }, className);
+
+  const polygon = (points, className) => element("polygon", {
+    points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")
+  }, className);
+
+  const line = (points, className) => {
+    const [[startX, startY], [endX, endY]] = points;
+    return element("line", {
+      x1: sx(startX),
+      y1: sy(startY),
+      x2: sx(endX),
+      y2: sy(endY)
+    }, className);
+  };
+
+  const circle = (x, y, radius, className) => element("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(radius) - sx(spec.zero)
+  }, className);
+
+  const text = item => {
+    const label = element("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      "text-anchor": item.anchor
+    }, item.className);
+    label.textContent = item.text;
+    return label;
+  };
+
+  polyline(spec.split.stem, "branch");
+  polyline(spec.split.prompt, "branch");
+  polygon(spec.split.promptHead, "branch-head");
+  polyline(spec.split.bench, "branch");
+  polygon(spec.split.benchHead, "branch-head");
+  circle(spec.split.point.x, spec.split.point.y, spec.radius.split, "split-dot");
+
+  polyline(spec.resultConnectors.prompt, "prompt-line");
+  polygon(spec.resultConnectors.promptHead, "prompt-head");
+  polyline(spec.resultConnectors.bench, "bench-line");
+  polygon(spec.resultConnectors.benchHead, "bench-head");
+
+  rectangle(spec.matrix.box, "matrix-box");
+  const [headerX, headerY, headerWidth, headerHeight] = spec.matrix.header;
+  element("rect", {
+    x: sx(headerX),
+    y: sy(headerY),
+    width: sx(headerX + headerWidth) - sx(headerX),
+    height: sy(headerY + headerHeight) - sy(headerY)
+  }, "header-fill");
+
+  spec.matrix.horizontal.forEach(points => line(points, "separator"));
+  spec.matrix.verticals.forEach(points => line(points, "separator"));
+  text(spec.matrix.heading);
+
+  line(spec.matrix.promptRow.line, "prompt-line");
+  line(spec.matrix.benchRow.line, "bench-line");
+
+  spec.matrix.columns.forEach(column => {
+    column.labels.forEach(text);
+    circle(column.center, spec.matrix.promptRow.y, spec.radius.dot, "prompt-dot");
+    circle(column.center, spec.matrix.benchRow.y, spec.radius.dot, "bench-dot");
+    text({
+      text: column.prompt,
+      x: column.center,
+      y: spec.matrix.promptRow.resultY,
+      className: "result",
+      anchor: "middle"
+    });
+    text({
+      text: column.bench,
+      x: column.center,
+      y: spec.matrix.benchRow.resultY,
+      className: "result",
+      anchor: "middle"
+    });
+  });
+
+  spec.matrix.promptRow.label.forEach(text);
+  spec.matrix.benchRow.label.forEach(text);
+
+  rectangle(spec.task.box, "task-box");
+  spec.task.labels.forEach(text);
+
+  spec.pipelines.forEach(pipeline => {
+    rectangle(pipeline.box, pipeline.kind === "prompt" ? "prompt-box" : "bench-box");
+    pipeline.labels.forEach(text);
+  });
+
+  text(spec.caption);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
