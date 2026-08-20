@@ -3,7 +3,11 @@ import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
 import { validatePlan, writeLessonPlan, type LessonPlan } from "../content/lesson-plan";
 import { repoRelative } from "../content/paths";
-import { formatPhaseOutlines, type LessonOutline } from "../content/phase-outlines";
+import {
+  formatCourseContext,
+  type LessonOutline,
+  type PhaseDigest,
+} from "../content/phase-outlines";
 import { stepMetaSchema } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
 import type { WrittenFunction } from "../source/written-functions";
@@ -137,6 +141,11 @@ export async function generateLessonPlan(opts: {
    * только свой урок и заново разбирает то, что сосед уже объяснил.
    */
   outlines?: LessonOutline[];
+  /**
+   * Названия уроков пройденных фаз. Без них урок фазы 6 не знает, что Фурье
+   * уже разобран в фазе 1, и выводит его заново.
+   */
+  previousPhases?: PhaseDigest[];
   onEvent?: (event: AgentEvent) => void;
 }): Promise<LessonPlan> {
   const { contentDir, source, deps } = opts;
@@ -146,7 +155,7 @@ export async function generateLessonPlan(opts: {
   const functionCount = source.exercise?.functions.length ?? 0;
   const budget = stepBudget(countWords(source.text), functionCount);
   const base = renderPrompt("plan-lesson", {
-    other_lessons: formatPhaseOutlines(opts.outlines ?? []),
+    other_lessons: formatCourseContext(opts.outlines ?? [], opts.previousPhases ?? []),
     step_budget: String(budget),
     lesson_title: source.ref.title,
     source_text: source.text,

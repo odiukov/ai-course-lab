@@ -3,7 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LessonPlan } from "./lesson-plan";
-import { formatPhaseOutlines, readPhaseOutlines } from "./phase-outlines";
+import {
+  formatCourseContext,
+  formatPhaseOutlines,
+  readPhaseOutlines,
+  readPreviousPhases,
+} from "./phase-outlines";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "outlines-"));
@@ -66,6 +71,76 @@ describe("readPhaseOutlines", () => {
 
   it("не падает, когда каталога контента ещё нет", () => {
     expect(readPhaseOutlines(path.join(tmpDir(), "нет"), "01-math__01-alpha")).toEqual([]);
+  });
+});
+
+describe("readPreviousPhases", () => {
+  it("берёт фазы с меньшим номером и сортирует их по порядку курса", () => {
+    const contentDir = tmpDir();
+    writePlan(contentDir, "03-dl__01-perceptron", "Perceptron", ["Нейрон"]);
+    writePlan(contentDir, "01-math__20-fourier", "Fourier Transform", ["Спектр"]);
+    writePlan(contentDir, "02-ml__05-svm", "SVM", ["Зазор"]);
+
+    const phases = readPreviousPhases(contentDir, "03-dl__01-perceptron");
+
+    expect(phases.map((phase) => phase.number)).toEqual([1, 2]);
+    expect(phases[0].title).toBe("Math");
+    expect(phases[0].lessons).toEqual([{ number: 20, title: "Fourier Transform" }]);
+  });
+
+  // Своя фаза приезжает отдельно и подробно, шагами: попади она ещё и сюда,
+  // планировщик увидел бы соседей дважды.
+  it("не берёт свою фазу и фазы после неё", () => {
+    const contentDir = tmpDir();
+    writePlan(contentDir, "02-ml__01-alpha", "Alpha", ["Регрессия"]);
+    writePlan(contentDir, "02-ml__02-beta", "Beta", ["Классификация"]);
+    writePlan(contentDir, "03-dl__01-gamma", "Gamma", ["Нейрон"]);
+
+    expect(readPreviousPhases(contentDir, "02-ml__01-alpha")).toEqual([]);
+  });
+
+  it("пропускает урок без плана и не падает без каталога контента", () => {
+    const contentDir = tmpDir();
+    writePlan(contentDir, "01-math__01-alpha", "Alpha", ["Вектор"]);
+    fs.mkdirSync(path.join(contentDir, "lessons", "01-math__02-beta"), { recursive: true });
+
+    const phases = readPreviousPhases(contentDir, "02-ml__01-delta");
+
+    expect(phases).toHaveLength(1);
+    expect(phases[0].lessons.map((lesson) => lesson.number)).toEqual([1]);
+    expect(readPreviousPhases(path.join(tmpDir(), "нет"), "02-ml__01-delta")).toEqual([]);
+  });
+});
+
+describe("formatCourseContext", () => {
+  it("своя фаза идёт шагами, пройденные — только названиями уроков", () => {
+    const text = formatCourseContext(
+      [
+        {
+          slug: "06-speech__01-alpha",
+          number: 1,
+          title: "Audio Fundamentals",
+          steps: [{ title: "Звук как волна", type: "theory" }],
+        },
+      ],
+      [
+        {
+          number: 1,
+          title: "Math",
+          lessons: [{ number: 20, title: "Fourier Transform" }],
+        },
+      ],
+    );
+
+    expect(text).toContain("Урок 1. Audio Fundamentals");
+    expect(text).toContain("  - Звук как волна");
+    expect(text).toContain("Фаза 1. Math");
+    expect(text).toContain("20. Fourier Transform");
+  });
+
+  it("без пройденных фаз печатает только свою", () => {
+    const text = formatCourseContext([], []);
+    expect(text).toMatch(/нет/);
   });
 });
 
