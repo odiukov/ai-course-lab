@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Три измеримых сигнала приближения к порогу</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --surface: #f8f7f3;
+      --surface-head: #efede6;
+      --ink: #20252b;
+      --muted: #626a73;
+      --axis: #c8cbd0;
+      --opus: #3276a8;
+      --opus-fill: #f8f7f3;
+      --next: #238663;
+      --threshold: #bd7427;
+      --line-thin: 1px;
+      --line-axis: 4px;
+      --line-emphasis: 6px;
+      --line-gap: 3px;
+      --font-title: 22px;
+      --font-subtitle: 15px;
+      --font-label: 14px;
+      --font-small: 12px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: unset;
+      background: var(--surface);
+      color: var(--ink);
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 960px;
+      margin-inline: auto;
+      overflow: hidden;
+      background: var(--surface);
+      border: var(--line-thin) solid var(--axis);
+      border-radius: var(--font-title);
+    }
+
+    .figure-header {
+      padding: var(--font-title);
+      background: var(--surface-head);
+      border-bottom: var(--line-thin) solid var(--axis);
+    }
+
+    .figure-header h1 {
+      margin: unset;
+      font-size: var(--font-title);
+      font-weight: bold;
+    }
+
+    .figure-header p {
+      margin: var(--font-subtitle) unset unset;
+      max-width: 960px;
+      color: var(--muted);
+      font-size: var(--font-subtitle);
+    }
+
+    .chart {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 384px;
+      background: var(--surface);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: var(--line-axis);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .opus-progress {
+      stroke: var(--opus);
+      stroke-width: var(--line-emphasis);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .distance {
+      stroke: var(--threshold);
+      stroke-width: var(--line-gap);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .next-progress {
+      stroke: var(--next);
+      stroke-width: var(--line-emphasis);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .threshold-mark {
+      stroke: var(--threshold);
+      stroke-width: var(--line-gap);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .opus-marker {
+      fill: var(--opus-fill);
+      stroke: var(--opus);
+      stroke-width: var(--line-gap);
+      vector-effect: non-scaling-stroke;
+    }
+
+    .next-marker {
+      fill: var(--next);
+      stroke: var(--surface);
+      stroke-width: var(--line-thin);
+      vector-effect: non-scaling-stroke;
+    }
+
+    .metric-title {
+      fill: var(--ink);
+      font-size: var(--font-label);
+      font-weight: bold;
+    }
+
+    .metric-note,
+    .legend-text,
+    .footer-note {
+      fill: var(--muted);
+      font-size: var(--font-small);
+    }
+
+    .opus-text {
+      fill: var(--opus);
+      font-size: var(--font-label);
+      font-weight: bold;
+    }
+
+    .next-text {
+      fill: var(--next);
+      font-size: var(--font-label);
+      font-weight: bold;
+    }
+
+    .threshold-text {
+      fill: var(--threshold);
+      font-size: var(--font-small);
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: var(--font-label);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #171a1f;
+        --surface-head: #20242a;
+        --ink: #f0f2f4;
+        --muted: #abb2bb;
+        --axis: #4c535d;
+        --opus: #72b8e8;
+        --opus-fill: #171a1f;
+        --next: #66d4a6;
+        --threshold: #efae62;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <header class="figure-header">
+      <h1 id="diagram-title">Три измеримых сигнала приближения к порогу</h1>
+      <p>Одной общей «готовности» нет: каждая шкала замечает отдельную сторону исследовательской работы.</p>
+    </header>
+
+    <svg
+      id="chart"
+      class="chart"
+      viewBox="0 0 960 384"
+      width="960"
+      height="384"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">
+        Три шкалы сравнивают Claude Opus 4.6 и синтетическую next-gen модель
+        с порогами автоматизации R&amp;D-задач, METR-горизонта и качества AAR.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const data = [
+      {
+        kind: "layout",
+        zero: 0,
+        axisStart: 4.9,
+        axisEnd: 14.25,
+        labelX: 0.5,
+        titleRise: 0.14,
+        noteDrop: 0.2,
+        thresholdRise: 0.43,
+        valueDrop: 0.5,
+        tickHalf: 0.27,
+        markerRadius: 0.105,
+        diamondHalf: 0.13,
+        dash: 0.12,
+        dashGap: 0.09,
+        labelOffset: 8,
+        legendY: 5.15,
+        legendOpusX: 4.95,
+        legendOpusTextX: 5.25,
+        legendNextX: 7.65,
+        legendNextTextX: 7.95,
+        legendThresholdX: 10.3,
+        legendThresholdTextX: 10.62,
+        legendMarkHalf: 0.18,
+        footerX: 9.55,
+        footerY: 5.72,
+        fallbackX: 0.7
+      },
+      {
+        kind: "metric",
+        title: "Автоматизация R&D-задач",
+        note: "доля разных задач",
+        y: 0.85,
+        min: 0,
+        max: 0.65,
+        opus: 0.30,
+        threshold: 0.50,
+        next: 0.55,
+        opusLabel: "Opus 4.6 · 0,30",
+        thresholdLabel: "порог · 0,50",
+        nextLabel: "next-gen · 0,55",
+        fallbackY: 1.45
+      },
+      {
+        kind: "metric",
+        title: "METR-горизонт",
+        note: "часы автономной работы",
+        y: 2.35,
+        min: 0,
+        max: 56,
+        opus: 14,
+        threshold: 40,
+        next: 48,
+        opusLabel: "Opus 4.6 · 14 ч",
+        thresholdLabel: "порог · 40 ч",
+        nextLabel: "next-gen · 48 ч",
+        fallbackY: 2.85
+      },
+      {
+        kind: "metric",
+        title: "AAR выше baseline",
+        note: "доля выше человеческого уровня",
+        y: 3.85,
+        min: 0,
+        max: 0.52,
+        opus: 0.35,
+        threshold: 0.40,
+        next: 0.45,
+        opusLabel: "Opus 4.6 · 0,35",
+        thresholdLabel: "порог · 0,40",
+        nextLabel: "next-gen · 0,45",
+        fallbackY: 4.25
+      }
+    ];
+
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 64, y: 64 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("chart");
+    const namespace = "http://www.w3.org/2000/svg";
+    const layout = data.find(item => item.kind === "layout");
+    const metrics = data.filter(item => item.kind === "metric");
+
+    function make(tag, attributes, className, content) {
+      const node = document.createElementNS(namespace, tag);
+
+      Object.entries(attributes).forEach(([name, value]) => {
+        node.setAttribute(name, value);
+      });
+
+      if (className) {
+        node.setAttribute("class", className);
+      }
+
+      if (content) {
+        node.textContent = content;
+      }
+
+      return node;
+    }
+
+    function addLine(group, xStart, yStart, xEnd, yEnd, className) {
+      group.appendChild(make("line", {
+        x1: sx(xStart),
+        y1: sy(yStart),
+        x2: sx(xEnd),
+        y2: sy(yEnd)
+      }, className));
+    }
+
+    function addText(group, x, y, anchor, className, content, pixelShift) {
+      group.appendChild(make("text", {
+        x: sx(x) + pixelShift,
+        y: sy(y),
+        "text-anchor": anchor
+      }, className, content));
+    }
+
+    function valueX(metric, value) {
+      const share = (value - metric.min) / (metric.max - metric.min);
+      return layout.axisStart + share * (layout.axisEnd - layout.axisStart);
+    }
+
+    function addDiamond(group, x, y, half, className) {
+      const path = [
+        "M", sx(x), sy(y - half),
+        "L", sx(x + half), sy(y),
+        "L", sx(x), sy(y + half),
+        "L", sx(x - half), sy(y),
+        "Z"
+      ].join(" ");
+
+      group.appendChild(make("path", { d: path }, className));
+    }
+
+    function drawMetric(metric) {
+      const group = make("g", {
+        "aria-label": [
+          metric.title,
+          metric.opusLabel,
+          metric.thresholdLabel,
+          metric.nextLabel
+        ].join("; ")
+      });
+
+      const opusX = valueX(metric, metric.opus);
+      const thresholdX = valueX(metric, metric.threshold);
+      const nextX = valueX(metric, metric.next);
+
+      addText(
+        group,
+        layout.labelX,
+        metric.y - layout.titleRise,
+        "start",
+        "metric-title",
+        metric.title,
+        layout.zero
+      );
+
+      addText(
+        group,
+        layout.labelX,
+        metric.y + layout.noteDrop,
+        "start",
+        "metric-note",
+        metric.note,
+        layout.zero
+      );
+
+      addLine(
+        group,
+        layout.axisStart,
+        metric.y,
+        layout.axisEnd,
+        metric.y,
+        "axis"
+      );
+
+      addLine(
+        group,
+        layout.axisStart,
+        metric.y,
+        opusX,
+        metric.y,
+        "opus-progress"
+      );
+
+      const distance = make("line", {
+        x1: sx(opusX),
+        y1: sy(metric.y),
+        x2: sx(thresholdX),
+        y2: sy(metric.y),
+        "stroke-dasharray": [
+          sx(layout.dash) - sx(layout.zero),
+          sx(layout.dashGap) - sx(layout.zero)
+        ].join(" ")
+      }, "distance");
+      group.appendChild(distance);
+
+      addLine(
+        group,
+        thresholdX,
+        metric.y,
+        nextX,
+        metric.y,
+        "next-progress"
+      );
+
+      addLine(
+        group,
+        thresholdX,
+        metric.y - layout.tickHalf,
+        thresholdX,
+        metric.y + layout.tickHalf,
+        "threshold-mark"
+      );
+
+      group.appendChild(make("circle", {
+        cx: sx(opusX),
+        cy: sy(metric.y),
+        r: sx(layout.markerRadius) - sx(layout.zero)
+      }, "opus-marker"));
+
+      addDiamond(
+        group,
+        nextX,
+        metric.y,
+        layout.diamondHalf,
+        "next-marker"
+      );
+
+      addText(
+        group,
+        thresholdX,
+        metric.y - layout.thresholdRise,
+        "middle",
+        "threshold-text",
+        metric.thresholdLabel,
+        layout.zero
+      );
+
+      addText(
+        group,
+        opusX,
+        metric.y + layout.valueDrop,
+        "end",
+        "opus-text",
+        metric.opusLabel,
+        -layout.labelOffset
+      );
+
+      addText(
+        group,
+        nextX,
+        metric.y + layout.valueDrop,
+        "end",
+        "next-text",
+        metric.nextLabel,
+        -layout.labelOffset
+      );
+
+      svg.appendChild(group);
+    }
+
+    function drawLegend() {
+      const group = make("g", { "aria-label": "Условные обозначения" });
+
+      group.appendChild(make("circle", {
+        cx: sx(layout.legendOpusX),
+        cy: sy(layout.legendY),
+        r: sx(layout.markerRadius) - sx(layout.zero)
+      }, "opus-marker"));
+
+      addText(
+        group,
+        layout.legendOpusTextX,
+        layout.legendY,
+        "start",
+        "legend-text",
+        "Opus 4.6",
+        layout.zero
+      );
+
+      addDiamond(
+        group,
+        layout.legendNextX,
+        layout.legendY,
+        layout.diamondHalf,
+        "next-marker"
+      );
+
+      addText(
+        group,
+        layout.legendNextTextX,
+        layout.legendY,
+        "start",
+        "legend-text",
+        "next-gen",
+        layout.zero
+      );
+
+      addLine(
+        group,
+        layout.legendThresholdX,
+        layout.legendY - layout.legendMarkHalf,
+        layout.legendThresholdX,
+        layout.legendY + layout.legendMarkHalf,
+        "threshold-mark"
+      );
+
+      addText(
+        group,
+        layout.legendThresholdTextX,
+        layout.legendY,
+        "start",
+        "legend-text",
+        "контрольный порог",
+        layout.zero
+      );
+
+      addText(
+        group,
+        layout.footerX,
+        layout.footerY,
+        "middle",
+        "footer-note",
+        "Чем правее отметка, тем сильнее сигнал.",
+        layout.zero
+      );
+
+      svg.appendChild(group);
+    }
+
+    try {
+      metrics.forEach(drawMetric);
+      drawLegend();
+    } catch (error) {
+      svg.replaceChildren();
+
+      metrics.forEach(metric => {
+        addText(
+          svg,
+          layout.fallbackX,
+          metric.fallbackY,
+          "start",
+          "fallback",
+          [
+            metric.title,
+            metric.opusLabel,
+            metric.thresholdLabel,
+            metric.nextLabel
+          ].join(" — "),
+          layout.zero
+        );
+      });
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

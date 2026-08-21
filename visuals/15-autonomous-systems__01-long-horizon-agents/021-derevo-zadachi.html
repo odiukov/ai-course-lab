@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как задача разрастается в траекторию</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --ink: #172033;
+    --muted: #536078;
+    --card: #ffffff;
+    --card-stroke: #9aabc6;
+    --tree: #8795aa;
+    --dependency: #2878c8;
+    --tool: #dbe9f8;
+    --tool-stroke: #6f98c4;
+    --drift: #d27a16;
+    --drift-fill: #fff2d8;
+    --loop: #9b55c5;
+    --loop-fill: #f4e7ff;
+    --risk: #c64040;
+    --risk-fill: #ffe4e4;
+    --root: #e6f0ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --ink: #eef3fb;
+      --muted: #aebbd0;
+      --card: #1b2534;
+      --card-stroke: #667995;
+      --tree: #75849a;
+      --dependency: #65aef3;
+      --tool: #253b54;
+      --tool-stroke: #73a3d2;
+      --drift: #f1ab4f;
+      --drift-fill: #3b2b17;
+      --loop: #cf8df3;
+      --loop-fill: #352340;
+      --risk: #ff7979;
+      --risk-fill: #422326;
+      --root: #213b5d;
+    }
+  }
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 {
+    margin-block: 0;
+    font-size: 19px;
+    font-weight: 700;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--bg);
+  }
+  .edge, .arrow, .bus {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .edge {
+    stroke: var(--tree);
+    stroke-width: 1.5px;
+  }
+  .dependency {
+    stroke: var(--dependency);
+    stroke-width: 2px;
+  }
+  .drift-line {
+    stroke: var(--drift);
+    stroke-width: 2px;
+  }
+  .loop-line {
+    stroke: var(--loop);
+    stroke-width: 2px;
+  }
+  .risk-line {
+    stroke: var(--risk);
+    stroke-width: 2.5px;
+  }
+  .node {
+    fill: var(--card);
+    stroke: var(--card-stroke);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+  .root {
+    fill: var(--root);
+    stroke: var(--dependency);
+    stroke-width: 2px;
+  }
+  .drift {
+    fill: var(--drift-fill);
+    stroke: var(--drift);
+    stroke-width: 2px;
+  }
+  .loop {
+    fill: var(--loop-fill);
+    stroke: var(--loop);
+    stroke-width: 1.5px;
+  }
+  .risk {
+    fill: var(--risk-fill);
+    stroke: var(--risk);
+    stroke-width: 2px;
+  }
+  .label {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  .small {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+  }
+  .tool {
+    fill: var(--tool);
+    stroke: var(--tool-stroke);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  .fallback {
+    color: var(--risk);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<h1 id="diagram-title">Как одна задача разрастается в траекторию</h1>
+<svg id="diagram" width="1200" height="470" viewBox="0 0 1200 470"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="diagram-title diagram-desc">
+  <desc id="diagram-desc">Дерево подготовки эпизода подкаста: подзадачи, сотни вызовов инструментов, дрейф, цикл исправлений и дорогостоящая ошибка публикации.</desc>
+</svg>
+<p id="fallback" class="fallback" hidden>Схема должна была показать, как одна задача распадается на дерево подзадач и сотни вызовов инструментов, где возникают дрейф, цикл и дорогостоящая ошибка.</p>
+<script>
+const data = [
+  {
+    origin: {x: 15, y: 10},
+    scale: {x: 10, y: 10},
+    zero: 0, one: 1, two: 2, half: .5,
+    radius: .7, arrow: .8, wing: .45,
+    dash: .7, gap: .5
+  },
+  [
+    {id:"root", x:42, y:1, w:32, h:6, kind:"root",
+      lines:[{text:"Подготовить и выпустить",dy:-.7},{text:"эпизод подкаста",dy:.9}]},
+    {id:"topic", x:1, y:12, w:14, h:6,
+      lines:[{text:"Выбрать",dy:-.7},{text:"тему",dy:.9}]},
+    {id:"sources", x:17, y:12, w:14, h:6,
+      lines:[{text:"Найти",dy:-.7},{text:"источники",dy:.9}]},
+    {id:"plan", x:33, y:12, w:14, h:6,
+      lines:[{text:"Составить",dy:-.7},{text:"план",dy:.9}]},
+    {id:"draft", x:49, y:12, w:14, h:6,
+      lines:[{text:"Написать",dy:-.7},{text:"текст",dy:.9}]},
+    {id:"facts", x:65, y:12, w:14, h:6,
+      lines:[{text:"Проверить",dy:-.7},{text:"факты",dy:.9}]},
+    {id:"description", x:81, y:12, w:16, h:6,
+      lines:[{text:"Подготовить",dy:-.7},{text:"описание",dy:.9}]},
+    {id:"publish", x:99, y:12, w:16, h:6,
+      lines:[{text:"Опубликовать",dy:-.7},{text:"выпуск",dy:.9}]},
+    {id:"primary", x:38, y:25, w:18, h:6,
+      lines:[{text:"Найти",dy:-.7},{text:"первоисточник",dy:.9}]},
+    {id:"compare", x:61, y:25, w:20, h:6,
+      lines:[{text:"Сопоставить",dy:-.7},{text:"утверждение",dy:.9}]},
+    {id:"correct", x:86, y:25, w:18, h:6,
+      lines:[{text:"Исправить",dy:-.7},{text:"расхождения",dy:.9}]},
+    {id:"drift", x:1, y:24, w:28, h:7, kind:"drift",
+      lines:[{text:"ДРЕЙФ",dy:-1.5,badge:true},{text:"поиск уходит",dy:.2},{text:"в смежную тему",dy:1.7}]},
+    {id:"risk", x:106, y:24, w:10, h:8, kind:"risk",
+      lines:[{text:"ДОРОГАЯ",dy:-2.1,badge:true},{text:"ОШИБКА",dy:-.7,badge:true},{text:"неверный",dy:.9},{text:"факт вышел",dy:2.3}]},
+    {id:"loop", x:88, y:20, w:10, h:3, kind:"loop",
+      lines:[{text:"ЦИКЛ",dy:.2,badge:true}]}
+  ],
+  [
+    {kind:"tree", points:[{x:58,y:7},{x:58,y:10}]},
+    {kind:"tree", points:[{x:8,y:10},{x:107,y:10}]},
+    {kind:"tree", points:[{x:8,y:10},{x:8,y:12}]},
+    {kind:"tree", points:[{x:24,y:10},{x:24,y:12}]},
+    {kind:"tree", points:[{x:40,y:10},{x:40,y:12}]},
+    {kind:"tree", points:[{x:56,y:10},{x:56,y:12}]},
+    {kind:"tree", points:[{x:72,y:10},{x:72,y:12}]},
+    {kind:"tree", points:[{x:89,y:10},{x:89,y:12}]},
+    {kind:"tree", points:[{x:107,y:10},{x:107,y:12}]},
+    {kind:"tree", points:[{x:72,y:18},{x:72,y:22},{x:47,y:22},{x:47,y:25}]},
+    {kind:"tree", points:[{x:72,y:22},{x:71,y:22},{x:71,y:25}]},
+    {kind:"tree", points:[{x:72,y:22},{x:95,y:22},{x:95,y:25}]},
+    {kind:"dependency", arrow:true, points:[{x:63,y:15},{x:65,y:15}]},
+    {kind:"dependency", arrow:true, points:[{x:79,y:15},{x:81,y:15}]},
+    {kind:"dependency", arrow:true, points:[{x:97,y:15},{x:99,y:15}]},
+    {kind:"drift-line", dashed:true, arrow:true,
+      points:[{x:24,y:18},{x:24,y:21},{x:15,y:21},{x:15,y:24}]},
+    {kind:"loop-line", arrow:true,
+      points:[{x:95,y:25},{x:95,y:23},{x:84,y:23},{x:84,y:20},{x:56,y:20},{x:56,y:18}]},
+    {kind:"risk-line", arrow:true,
+      points:[{x:81,y:28},{x:106,y:28}]},
+    {kind:"risk-line", arrow:true,
+      points:[{x:111,y:24},{x:111,y:20},{x:107,y:20},{x:107,y:18}]}
+  ],
+  [
+    {x:39, y:34, cols:6, rows:3, gapX:2.7, gapY:2.1, r:.45},
+    {x:62, y:34, cols:7, rows:3, gapX:2.7, gapY:2.1, r:.45},
+    {x:87, y:34, cols:5, rows:3, gapX:2.7, gapY:2.1, r:.45}
+  ],
+  [
+    {x:18, y:43.5, kind:"tree", text:"дерево подзадач"},
+    {x:51, y:43.5, kind:"dependency", text:"зависимость"},
+    {x:78, y:43.5, kind:"tool", text:"сотни вызовов инструментов"},
+    {x:112, y:43.5, kind:"risk-line", text:"ошибка проходит дальше", anchor:"end"}
+  ]
+];
+
+const [meta, nodes, edges, clouds, legend] = data;
+const origin = meta.origin;
+const scale = meta.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const add = (tag, attrs, parent = svg) => {
+    const element = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([name, value]) => element.setAttribute(name, value));
+    parent.appendChild(element);
+    return element;
+  };
+
+  const drawPath = edge => {
+    let d = "";
+    edge.points.forEach((point, index) => {
+      d += `${index ? " L" : "M"} ${sx(point.x)} ${sy(point.y)}`;
+    });
+    const path = add("path", {d, class:`edge ${edge.kind}`});
+    if (edge.dashed) {
+      path.setAttribute(
+        "stroke-dasharray",
+        `${sx(meta.dash)-sx(meta.zero)} ${sx(meta.gap)-sx(meta.zero)}`
+      );
+    }
+    if (edge.arrow) {
+      const [a, b] = edge.points.slice(-meta.two);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const length = Math.hypot(dx, dy);
+      const ux = dx / length;
+      const uy = dy / length;
+      const baseX = b.x - ux * meta.arrow;
+      const baseY = b.y - uy * meta.arrow;
+      const left = {
+        x: baseX - uy * meta.wing,
+        y: baseY + ux * meta.wing
+      };
+      const right = {
+        x: baseX + uy * meta.wing,
+        y: baseY - ux * meta.wing
+      };
+      add("polygon", {
+        points:`${sx(b.x)},${sy(b.y)} ${sx(left.x)},${sy(left.y)} ${sx(right.x)},${sy(right.y)}`,
+        fill:`var(--${edge.kind === "dependency" ? "dependency" :
+          edge.kind === "drift-line" ? "drift" :
+          edge.kind === "loop-line" ? "loop" : "risk"})`
+      });
+    }
+  };
+
+  edges.forEach(drawPath);
+
+  nodes.forEach(node => {
+    const group = add("g", {class:"node-group"});
+    add("rect", {
+      x:sx(node.x),
+      y:sy(node.y),
+      width:sx(node.w)-sx(meta.zero),
+      height:sy(node.h)-sy(meta.zero),
+      rx:sx(meta.radius)-sx(meta.zero),
+      class:`node ${node.kind || ""}`
+    }, group);
+
+    node.lines.forEach(line => {
+      const text = add("text", {
+        x:sx(node.x + node.w * meta.half),
+        y:sy(node.y + node.h * meta.half + line.dy),
+        "text-anchor":"middle",
+        "dominant-baseline":"middle",
+        class:`label ${line.badge ? "badge" : ""}`
+      }, group);
+      text.textContent = line.text;
+    });
+  });
+
+  clouds.forEach(cloud => {
+    for (let row = meta.zero; row < cloud.rows; row += meta.one) {
+      for (let col = meta.zero; col < cloud.cols; col += meta.one) {
+        add("circle", {
+          cx:sx(cloud.x + col * cloud.gapX),
+          cy:sy(cloud.y + row * cloud.gapY),
+          r:sx(cloud.r)-sx(meta.zero),
+          class:"tool"
+        });
+      }
+    }
+  });
+
+  legend.forEach(item => {
+    const left = item.x - meta.two;
+    const right = item.x;
+    if (item.kind === "tool") {
+      add("circle", {
+        cx:sx(left),
+        cy:sy(item.y),
+        r:sx(meta.half)-sx(meta.zero),
+        class:"tool"
+      });
+    } else {
+      add("line", {
+        x1:sx(left-meta.one),
+        y1:sy(item.y),
+        x2:sx(right),
+        y2:sy(item.y),
+        class:`edge ${item.kind}`
+      });
+    }
+    const label = add("text", {
+      x:sx(item.x + meta.one),
+      y:sy(item.y),
+      "text-anchor":item.anchor || "start",
+      "dominant-baseline":"middle",
+      class:"small"
+    });
+    label.textContent = item.text;
+  });
+
+  const cloudLabel = add("text", {
+    x:sx(72),
+    y:sy(41.2),
+    "text-anchor":"middle",
+    "dominant-baseline":"middle",
+    class:"label"
+  });
+  cloudLabel.textContent = "сотни вызовов инструментов";
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

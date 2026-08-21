@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кривая успеха от минутных до восьмичасовых задач</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ee;
+      --panel: #fffdf8;
+      --ink: #242a31;
+      --muted: #65707b;
+      --axis: #46515c;
+      --grid: #d8d3ca;
+      --guide: #a7afb5;
+      --curve: #176f72;
+      --curve-fill: #dcefee;
+      --point: #d26343;
+      --focus: #8b4d9e;
+      --badge: #f2eaf5;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #171b20;
+        --panel: #20262c;
+        --ink: #edf1f3;
+        --muted: #aab3bb;
+        --axis: #c2cbd2;
+        --grid: #3b444c;
+        --guide: #68737c;
+        --curve: #73d0cb;
+        --curve-fill: #243f40;
+        --point: #f09170;
+        --focus: #d3a2df;
+        --badge: #3c3042;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--panel);
+      padding: 14px 16px 8px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 20px;
+      line-height: 1.25;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    #fallback {
+      margin: 18px 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+      overflow: visible;
+    }
+
+    .axis,
+    .tick,
+    .grid,
+    .guide,
+    .curve,
+    .threshold-mark {
+      vector-effect: non-scaling-stroke;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 1.7;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1.4;
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1.2;
+    }
+
+    .curve-area {
+      fill: var(--curve-fill);
+    }
+
+    .curve {
+      stroke: var(--curve);
+      stroke-width: 4;
+    }
+
+    .threshold-mark {
+      fill: var(--panel);
+      stroke: var(--point);
+      stroke-width: 2.5;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .tick-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .axis-label {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .scale-note {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .curve-label {
+      fill: var(--curve);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .focus-label {
+      fill: var(--focus);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .focus-back {
+      fill: var(--badge);
+      stroke: var(--focus);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Кривая успеха: от минутных до восьмичасовых задач</h1>
+    <p id="fallback">
+      Схема должна показать, как вероятность успеха плавно снижается на
+      логарифмической оси времени и пересекает уровни 90%, 50% и 10%.
+    </p>
+
+    <svg
+      id="chart"
+      viewBox="0 0 820 455"
+      width="820"
+      height="455"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Кривая успеха на логарифмической оси времени</title>
+      <desc id="svg-desc">
+        Убывающая логистическая кривая с отметками одна минута, десять минут,
+        один час и восемь часов. Показаны пересечения уровней успеха десять,
+        пятьдесят и девяносто процентов.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const data = [{
+      zero: 0,
+      one: 1,
+      origin: { x: 130, y: 352 },
+      scale: { x: 218, y: 278 },
+      domain: { xMin: 0, xMax: 3, yMin: 0, yMax: 1 },
+      curve: {
+        xMin: 0,
+        xMax: 3,
+        midpoint: 1.7781512504,
+        steepness: 3,
+        samples: 96
+      },
+      timeTicks: [
+        { x: 0, label: "1 минута", anchor: "start", dx: 4, dy: 27 },
+        { x: 1, label: "10 минут", anchor: "middle", dx: 0, dy: 27 },
+        { x: 1.7781512504, label: "1 час", anchor: "middle", dx: 0, dy: 27 },
+        { x: 2.6812412374, label: "8 часов", anchor: "middle", dx: 0, dy: 27 }
+      ],
+      levels: [
+        { y: 0.9, label: "90%", dx: -16, dy: 5 },
+        { y: 0.5, label: "50%", dx: -16, dy: 5 },
+        { y: 0.1, label: "10%", dx: -16, dy: 5 }
+      ],
+      tickLength: 0.026,
+      guideDash: "5 6",
+      markRadius: 6,
+      curveLabel: {
+        x: 0.48,
+        y: 0.925,
+        text: "общая доля успехов",
+        dx: 0,
+        dy: -17
+      },
+      focus: {
+        text: "горизонт 50%",
+        dx: 18,
+        dy: -19,
+        boxLeft: -8,
+        boxTop: -17,
+        boxRight: 118,
+        boxBottom: 7,
+        corner: 7
+      },
+      yAxisLabel: {
+        x: 0,
+        y: 1,
+        text: "Вероятность успеха",
+        dx: 0,
+        dy: -23
+      },
+      xAxisLabel: {
+        x: 1.5,
+        y: 0,
+        text: "Время эксперта",
+        dx: 0,
+        dy: 61
+      },
+      scaleNote: {
+        x: 1.5,
+        y: 0,
+        text: "логарифмическая шкала",
+        dx: 0,
+        dy: 82
+      }
+    }];
+
+    const [diagram] = data;
+    const origin = Object.freeze({
+      x: diagram.origin.x,
+      y: diagram.origin.y
+    });
+    const scale = Object.freeze({
+      x: diagram.scale.x,
+      y: diagram.scale.y
+    });
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y - y * scale.y;
+    }
+
+    try {
+      const svgNS = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+
+      function element(name, attributes, className, content) {
+        const node = document.createElementNS(svgNS, name);
+
+        if (className) {
+          node.setAttribute("class", className);
+        }
+
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, String(value));
+        }
+
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+
+        return node;
+      }
+
+      function line(x1, y1, x2, y2, className, dash) {
+        const node = element("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2)
+        }, className);
+
+        if (dash) {
+          node.setAttribute("stroke-dasharray", dash);
+        }
+
+        drawing.appendChild(node);
+        return node;
+      }
+
+      function label(spec, className, anchor) {
+        const node = element("text", {
+          x: sx(spec.x) + spec.dx,
+          y: sy(spec.y) + spec.dy,
+          "text-anchor": anchor,
+          "dominant-baseline": "alphabetic"
+        }, className, spec.text ?? spec.label);
+
+        drawing.appendChild(node);
+        return node;
+      }
+
+      function probability(x) {
+        return diagram.one / (
+          diagram.one +
+          Math.exp(diagram.curve.steepness * (
+            x - diagram.curve.midpoint
+          ))
+        );
+      }
+
+      function crossing(y) {
+        return diagram.curve.midpoint +
+          Math.log(diagram.one / y - diagram.one) /
+          diagram.curve.steepness;
+      }
+
+      for (const level of diagram.levels) {
+        const x = crossing(level.y);
+
+        line(
+          diagram.domain.xMin,
+          level.y,
+          x,
+          level.y,
+          "grid",
+          diagram.guideDash
+        );
+
+        line(
+          x,
+          diagram.domain.yMin,
+          x,
+          level.y,
+          "guide",
+          diagram.guideDash
+        );
+      }
+
+      const curvePoints = [];
+      const curveSpan = diagram.curve.xMax - diagram.curve.xMin;
+
+      for (
+        let sample = diagram.zero;
+        sample <= diagram.curve.samples;
+        sample += diagram.one
+      ) {
+        const fraction = sample / diagram.curve.samples;
+        const x = diagram.curve.xMin + curveSpan * fraction;
+        curvePoints.push({ x, y: probability(x) });
+      }
+
+      const curvePath = curvePoints.map((point, index) => {
+        const command = index === diagram.zero ? "M" : "L";
+        return `${command} ${sx(point.x)} ${sy(point.y)}`;
+      }).join(" ");
+
+      const areaPath = [
+        curvePath,
+        `L ${sx(diagram.curve.xMax)} ${sy(diagram.domain.yMin)}`,
+        `L ${sx(diagram.curve.xMin)} ${sy(diagram.domain.yMin)}`,
+        "Z"
+      ].join(" ");
+
+      drawing.appendChild(element("path", {
+        d: areaPath
+      }, "curve-area"));
+
+      line(
+        diagram.domain.xMin,
+        diagram.domain.yMin,
+        diagram.domain.xMax,
+        diagram.domain.yMin,
+        "axis"
+      );
+
+      line(
+        diagram.domain.xMin,
+        diagram.domain.yMin,
+        diagram.domain.xMin,
+        diagram.domain.yMax,
+        "axis"
+      );
+
+      for (const tick of diagram.timeTicks) {
+        line(
+          tick.x,
+          diagram.domain.yMin - diagram.tickLength,
+          tick.x,
+          diagram.domain.yMin + diagram.tickLength,
+          "tick"
+        );
+
+        label(
+          {
+            x: tick.x,
+            y: diagram.domain.yMin,
+            text: tick.label,
+            dx: tick.dx,
+            dy: tick.dy
+          },
+          "tick-label",
+          tick.anchor
+        );
+      }
+
+      for (const level of diagram.levels) {
+        line(
+          diagram.domain.xMin - diagram.tickLength,
+          level.y,
+          diagram.domain.xMin + diagram.tickLength,
+          level.y,
+          "tick"
+        );
+
+        label(
+          {
+            x: diagram.domain.xMin,
+            y: level.y,
+            text: level.label,
+            dx: level.dx,
+            dy: level.dy
+          },
+          "tick-label",
+          "end"
+        );
+      }
+
+      drawing.appendChild(element("path", {
+        d: curvePath
+      }, "curve"));
+
+      for (const level of diagram.levels) {
+        const x = crossing(level.y);
+        drawing.appendChild(element("circle", {
+          cx: sx(x),
+          cy: sy(level.y),
+          r: diagram.markRadius
+        }, "threshold-mark"));
+      }
+
+      label(
+        diagram.curveLabel,
+        "curve-label",
+        "middle"
+      );
+
+      label(
+        diagram.yAxisLabel,
+        "axis-label",
+        "start"
+      );
+
+      label(
+        diagram.xAxisLabel,
+        "axis-label",
+        "middle"
+      );
+
+      label(
+        diagram.scaleNote,
+        "scale-note",
+        "middle"
+      );
+
+      const focusX = crossing(diagram.levels.find(
+        level => level.label === "50%"
+      ).y);
+      const focusY = diagram.levels.find(
+        level => level.label === "50%"
+      ).y;
+
+      drawing.appendChild(element("rect", {
+        x: sx(focusX) + diagram.focus.dx + diagram.focus.boxLeft,
+        y: sy(focusY) + diagram.focus.dy + diagram.focus.boxTop,
+        width: diagram.focus.boxRight - diagram.focus.boxLeft,
+        height: diagram.focus.boxBottom - diagram.focus.boxTop,
+        rx: diagram.focus.corner,
+        ry: diagram.focus.corner
+      }, "focus-back"));
+
+      label(
+        {
+          x: focusX,
+          y: focusY,
+          text: diagram.focus.text,
+          dx: diagram.focus.dx,
+          dy: diagram.focus.dy
+        },
+        "focus-label",
+        "start"
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      fallback.hidden = false;
+      fallback.textContent =
+        "Схема должна показать убывающую логистическую кривую над " +
+        "логарифмической осью времени с отметками 1 минута, 10 минут, " +
+        "1 час и 8 часов и пересечениями уровней успеха 10%, 50% и 90%.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

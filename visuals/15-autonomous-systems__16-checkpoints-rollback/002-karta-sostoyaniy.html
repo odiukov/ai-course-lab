@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь действия через сохранённые состояния</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #8a96aa;
+    --route: #3867d6;
+    --route-soft: #dce7ff;
+    --state: #f4f7ff;
+    --checkpoint: #2056c9;
+    --effect: #eef8f2;
+    --effect-line: #238453;
+    --danger: #c7353d;
+    --danger-soft: #fff0f1;
+    --rollback: #fff6e8;
+    --rollback-line: #b86912;
+    --border: #cbd3df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2c;
+      --ink: #eef3fb;
+      --muted: #aeb9ca;
+      --line: #718097;
+      --route: #77a0ff;
+      --route-soft: #26395e;
+      --state: #1d293d;
+      --checkpoint: #8aadff;
+      --effect: #183228;
+      --effect-line: #65c895;
+      --danger: #ff747c;
+      --danger-soft: #3b2228;
+      --rollback: #382b1d;
+      --rollback-line: #f0aa55;
+      --border: #3a475a;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    background: var(--panel);
+    border: 2px solid var(--border);
+  }
+
+  .figure__title {
+    margin: 0;
+    padding: 14px 18px 10px;
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--panel);
+  }
+
+  .state-box {
+    fill: var(--state);
+    stroke: var(--border);
+    stroke-width: 2;
+  }
+
+  .effect-box {
+    fill: var(--effect);
+    stroke: var(--effect-line);
+    stroke-width: 2;
+  }
+
+  .rollback-box {
+    fill: var(--rollback);
+    stroke: var(--rollback-line);
+    stroke-width: 2;
+  }
+
+  .main-route,
+  .effect-route,
+  .rollback-route,
+  .danger-route {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .main-route {
+    stroke: var(--route);
+    stroke-width: 3;
+  }
+
+  .effect-route {
+    stroke: var(--effect-line);
+    stroke-width: 3;
+  }
+
+  .rollback-route {
+    stroke: var(--rollback-line);
+    stroke-width: 2.5;
+  }
+
+  .danger-route {
+    stroke: var(--danger);
+    stroke-width: 3;
+  }
+
+  .arrow-main {
+    fill: var(--route);
+  }
+
+  .arrow-effect {
+    fill: var(--effect-line);
+  }
+
+  .arrow-rollback {
+    fill: var(--rollback-line);
+  }
+
+  .checkpoint {
+    fill: var(--checkpoint);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .failure-mark {
+    fill: var(--danger-soft);
+    stroke: var(--danger);
+    stroke-width: 2.5;
+  }
+
+  .failure-bolt {
+    fill: var(--danger);
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .eyebrow {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .state-label {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .state-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .effect-label,
+  .rollback-label {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .route-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .danger-label {
+    fill: var(--danger);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<main class="figure" aria-labelledby="diagram-title">
+  <h1 class="figure__title" id="diagram-title">Путь действия через сохранённые состояния</h1>
+  <svg id="diagram" viewBox="0 0 1040 450" width="1040" height="450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Цепочка от предложенного действия до фиксации результата, сбой после внешнего эффекта и ветка отката">
+  </svg>
+</main>
+
+<script>
+const data = [
+  {
+    origin: [40, 20],
+    scale: [1, 1],
+    dash: [8, 7],
+    labelPad: 8,
+    stroke: 3,
+    font: 16,
+    fallback: [20, 210],
+    caption: [0, 20],
+    failureDiamond: [[760, 172], [782, 194], [760, 216], [738, 194]],
+    failureBolt: [[764, 178], [751, 194], [759, 194], [754, 209], [770, 190], [762, 190]],
+    failureText: [650, 248],
+    branchText: [600, 265],
+    compensationText: [405, 390]
+  },
+  {
+    kind: "state",
+    id: "proposed",
+    box: [0, 50, 150, 130],
+    label: "предложено",
+    labelAt: [75, 83],
+    note: "намерение",
+    noteAt: [75, 108],
+    checkpoint: [[75, 123], [82, 130], [75, 137], [68, 130]]
+  },
+  {
+    kind: "state",
+    id: "approved",
+    box: [190, 50, 340, 130],
+    label: "одобрено",
+    labelAt: [265, 83],
+    note: "чекпоинт",
+    noteAt: [265, 108],
+    checkpoint: [[265, 123], [272, 130], [265, 137], [258, 130]]
+  },
+  {
+    kind: "state",
+    id: "inflight",
+    box: [380, 50, 530, 130],
+    label: "выполняется",
+    labelAt: [455, 83],
+    note: "чекпоинт",
+    noteAt: [455, 108],
+    checkpoint: [[455, 123], [462, 130], [455, 137], [448, 130]]
+  },
+  {
+    kind: "state",
+    id: "verified",
+    box: [620, 50, 770, 130],
+    label: "проверено",
+    labelAt: [695, 83],
+    note: "чекпоинт",
+    noteAt: [695, 108],
+    checkpoint: [[695, 123], [702, 130], [695, 137], [688, 130]]
+  },
+  {
+    kind: "state",
+    id: "committed",
+    box: [810, 50, 960, 130],
+    label: "зафиксировано",
+    labelAt: [885, 83],
+    note: "результат сохранён",
+    noteAt: [885, 108],
+    checkpoint: [[885, 123], [892, 130], [885, 137], [878, 130]]
+  },
+  {
+    kind: "box",
+    id: "effect",
+    className: "effect-box",
+    box: [390, 180, 650, 240],
+    eyebrow: "ВНЕШНЕЕ ДЕЙСТВИЕ",
+    eyebrowAt: [520, 201],
+    label: "остаток: 12 → 9",
+    labelAt: [520, 226]
+  },
+  {
+    kind: "box",
+    id: "rollback",
+    className: "rollback-box",
+    box: [545, 290, 695, 350],
+    eyebrow: "ПРОВЕРКА НЕ ПРОЙДЕНА",
+    eyebrowAt: [620, 310],
+    label: "откат",
+    labelAt: [620, 336]
+  },
+  {
+    kind: "route",
+    className: "main-route",
+    arrowClass: "arrow-main",
+    points: [[150, 90], [190, 90]],
+    head: [[190, 90], [176, 82], [176, 98]]
+  },
+  {
+    kind: "route",
+    className: "main-route",
+    arrowClass: "arrow-main",
+    points: [[340, 90], [380, 90]],
+    head: [[380, 90], [366, 82], [366, 98]]
+  },
+  {
+    kind: "route",
+    className: "main-route",
+    arrowClass: "arrow-main",
+    points: [[530, 90], [620, 90]],
+    head: [[620, 90], [606, 82], [606, 98]]
+  },
+  {
+    kind: "route",
+    className: "main-route",
+    arrowClass: "arrow-main",
+    points: [[770, 90], [810, 90]],
+    head: [[810, 90], [796, 82], [796, 98]]
+  },
+  {
+    kind: "route",
+    className: "effect-route",
+    arrowClass: "arrow-effect",
+    points: [[455, 137], [455, 180]],
+    head: [[455, 180], [447, 166], [463, 166]]
+  },
+  {
+    kind: "route",
+    className: "effect-route",
+    arrowClass: "arrow-effect",
+    points: [[650, 195], [674, 169], [695, 137]],
+    head: [[695, 137], [681, 145], [694, 153]]
+  },
+  {
+    kind: "route",
+    className: "danger-route",
+    points: [[650, 210], [738, 194]],
+    dashed: true
+  },
+  {
+    kind: "route",
+    className: "rollback-route",
+    arrowClass: "arrow-rollback",
+    points: [[695, 137], [695, 260], [620, 260], [620, 290]],
+    head: [[620, 290], [612, 276], [628, 276]]
+  },
+  {
+    kind: "route",
+    className: "rollback-route",
+    arrowClass: "arrow-rollback",
+    points: [[545, 335], [500, 375], [265, 375], [265, 137]],
+    head: [[265, 137], [257, 151], [273, 151]],
+    dashed: true
+  }
+];
+
+const [meta, ...items] = data;
+const [originX, originY] = meta.origin;
+const [scaleX, scaleY] = meta.scale;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function make(name, attributes, content) {
+    const node = document.createElementNS(ns, name);
+    Object.entries(attributes || {}).forEach(([key, value]) => {
+      node.setAttribute(key, value);
+    });
+    if (content !== undefined) node.textContent = content;
+    return node;
+  }
+
+  function pointList(points) {
+    return points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  }
+
+  function boxPath(bounds) {
+    const [left, top, right, bottom] = bounds;
+    return [
+      `M ${sx(left)} ${sy(top)}`,
+      `L ${sx(right)} ${sy(top)}`,
+      `L ${sx(right)} ${sy(bottom)}`,
+      `L ${sx(left)} ${sy(bottom)}`,
+      "Z"
+    ].join(" ");
+  }
+
+  function routePath(points) {
+    return points.map(([x, y], position) => {
+      const command = position === points.keys().next().value ? "M" : "L";
+      return `${command} ${sx(x)} ${sy(y)}`;
+    }).join(" ");
+  }
+
+  function addText(parent, at, text, className, anchor) {
+    const [x, y] = at;
+    parent.appendChild(make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, text));
+  }
+
+  addText(svg, meta.caption, "ОДОБРЕНИЕ ЗАПУСКАЕТ МАРШРУТ, А НЕ ЗАВЕРШАЕТ ЕГО",
+    "eyebrow", "start");
+
+  const routesLayer = make("g", { "aria-hidden": "true" });
+  const boxesLayer = make("g", { "aria-hidden": "true" });
+  const marksLayer = make("g", { "aria-hidden": "true" });
+  const labelsLayer = make("g", { "aria-hidden": "true" });
+
+  svg.appendChild(routesLayer);
+  svg.appendChild(boxesLayer);
+  svg.appendChild(marksLayer);
+  svg.appendChild(labelsLayer);
+
+  items.filter(item => item.kind === "route").forEach(route => {
+    const attributes = {
+      d: routePath(route.points),
+      class: route.className
+    };
+    if (route.dashed) {
+      attributes["stroke-dasharray"] = meta.dash.join(" ");
+    }
+    routesLayer.appendChild(make("path", attributes));
+    if (route.head) {
+      routesLayer.appendChild(make("polygon", {
+        points: pointList(route.head),
+        class: route.arrowClass
+      }));
+    }
+  });
+
+  items.filter(item => item.kind === "state").forEach(state => {
+    boxesLayer.appendChild(make("path", {
+      d: boxPath(state.box),
+      class: "state-box"
+    }));
+    marksLayer.appendChild(make("polygon", {
+      points: pointList(state.checkpoint),
+      class: "checkpoint"
+    }));
+    addText(labelsLayer, state.labelAt, state.label, "state-label", "middle");
+    addText(labelsLayer, state.noteAt, state.note, "state-note", "middle");
+  });
+
+  items.filter(item => item.kind === "box").forEach(item => {
+    boxesLayer.appendChild(make("path", {
+      d: boxPath(item.box),
+      class: item.className
+    }));
+    addText(labelsLayer, item.eyebrowAt, item.eyebrow, "eyebrow", "middle");
+    addText(labelsLayer, item.labelAt, item.label,
+      item.id === "rollback" ? "rollback-label" : "effect-label", "middle");
+  });
+
+  marksLayer.appendChild(make("polygon", {
+    points: pointList(meta.failureDiamond),
+    class: "failure-mark"
+  }));
+  marksLayer.appendChild(make("polygon", {
+    points: pointList(meta.failureBolt),
+    class: "failure-bolt"
+  }));
+
+  addText(labelsLayer, meta.failureText,
+    "сбой после внешнего действия", "danger-label", "start");
+  addText(labelsLayer, meta.branchText,
+    "результат не подтверждён", "route-label", "end");
+  addText(labelsLayer, meta.compensationText,
+    "компенсация: восстановить 9 → 12", "route-label", "middle");
+
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+  const fallback = document.createElementNS(ns, "text");
+  fallback.setAttribute("x", sx(meta.fallback[Symbol.iterator]().next().value));
+  const [, fallbackY] = meta.fallback;
+  fallback.setAttribute("y", sy(fallbackY));
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = "Схема: предложено → одобрено → выполняется → проверено → зафиксировано; при сбое запускается откат.";
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

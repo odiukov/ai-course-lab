@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как журнал восстанавливает прогон</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f5ef;
+    --panel: #ffffff;
+    --panel-soft: #f1efe8;
+    --ink: #202421;
+    --muted: #626a65;
+    --line: #909991;
+    --boundary: #747c77;
+    --done: #18794e;
+    --done-soft: #dff3e8;
+    --done-ink: #125f3e;
+    --run: #b35b00;
+    --run-soft: #fff0d5;
+    --run-ink: #874500;
+    --log: #3759a6;
+    --log-soft: #e8edfb;
+    --log-ink: #294584;
+    --shadow: #d8d5cc;
+    --fallback: #8b2f2f;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #171a18;
+      --panel: #222724;
+      --panel-soft: #1d211f;
+      --ink: #f0f3f1;
+      --muted: #aab3ad;
+      --line: #707a74;
+      --boundary: #9ba59f;
+      --done: #66d19e;
+      --done-soft: #183a2b;
+      --done-ink: #9ae7bd;
+      --run: #ffb458;
+      --run-soft: #432d17;
+      --run-ink: #ffd198;
+      --log: #91aaff;
+      --log-soft: #242f50;
+      --log-ink: #bdcaff;
+      --shadow: #101311;
+      --fallback: #ffb4ab;
+    }
+  }
+
+  html {
+    background: var(--page);
+  }
+
+  body {
+    box-sizing: border-box;
+    max-width: 960px;
+    padding: 10px;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  h1 {
+    font-size: 20px;
+    font-weight: 720;
+    line-height: 1.2;
+  }
+
+  #mount {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 1px;
+    background: var(--page);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    overflow: visible;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .panel-shadow {
+    fill: var(--shadow);
+    opacity: .45;
+  }
+
+  .log-card {
+    fill: var(--log-soft);
+    stroke: var(--log);
+    stroke-width: 1.5px;
+  }
+
+  .activity-done {
+    fill: var(--done-soft);
+    stroke: var(--done);
+    stroke-width: 2px;
+  }
+
+  .activity-run {
+    fill: var(--run-soft);
+    stroke: var(--run);
+    stroke-width: 2px;
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .journal-arrow {
+    fill: none;
+    stroke: var(--log);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .run-arrow {
+    fill: none;
+    stroke: var(--run);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrow-log {
+    fill: var(--log);
+  }
+
+  .arrow-flow {
+    fill: var(--line);
+  }
+
+  .arrow-run {
+    fill: var(--run);
+  }
+
+  .boundary {
+    stroke: var(--boundary);
+    stroke-width: 2px;
+    stroke-dasharray: 8px 7px;
+  }
+
+  .node-done {
+    fill: var(--done);
+    stroke: var(--page);
+    stroke-width: 3px;
+  }
+
+  .node-run {
+    fill: var(--run);
+    stroke: var(--page);
+    stroke-width: 3px;
+  }
+
+  .check {
+    fill: none;
+    stroke: var(--page);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .play {
+    fill: var(--page);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .section-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: 760;
+    letter-spacing: .08em;
+  }
+
+  .activity-title {
+    font-size: 15px;
+    font-weight: 760;
+  }
+
+  .activity-detail {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .saved-result {
+    fill: var(--done-ink);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .real-result {
+    fill: var(--run-ink);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .log-title {
+    fill: var(--log-ink);
+    font-size: 13px;
+    font-weight: 720;
+  }
+
+  .log-detail {
+    fill: var(--log-ink);
+    font-size: 13px;
+  }
+
+  .arrow-label {
+    fill: var(--log-ink);
+    font-size: 12px;
+    font-weight: 680;
+  }
+
+  .boundary-label {
+    fill: var(--boundary);
+    font-size: 12px;
+    font-weight: 720;
+  }
+
+  .legend {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .fallback {
+    box-sizing: border-box;
+    padding: 16px;
+    color: var(--fallback);
+    font-size: 15px;
+    border: 2px solid currentColor;
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<h1>Как журнал восстанавливает прогон</h1>
+<div id="mount" aria-live="polite">
+  <noscript>Схема должна показать: две завершённые activity возвращают сохранённые результаты из журнала, а третья после перезапуска выполняется реально.</noscript>
+</div>
+
+<script>
+"use strict";
+
+const DATA = {
+  canvas: { width: 960, height: 430 },
+  frame: { x1: 18, y1: 12, x2: 942, y2: 420, radius: 12, shadow: 5 },
+  headings: {
+    replay: { x: 48, y: 43 },
+    journal: { x: 710, y: 43 }
+  },
+  flow: {
+    x: 150,
+    firstY: 94,
+    secondY: 184,
+    thirdY: 334,
+    nodeRadius: 19,
+    lineA: { x1: 150, y1: 113, x2: 150, y2: 165 },
+    lineB: { x1: 150, y1: 203, x2: 150, y2: 315 },
+    head: { length: 11, half: 6 }
+  },
+  activities: [
+    {
+      kind: "done",
+      box: { x1: 190, y1: 60, x2: 560, y2: 128, radius: 9 },
+      node: { x: 150, y: 94 },
+      title: { x: 214, y: 85, text: "ПЕРВАЯ ACTIVITY" },
+      detail: { x: 214, y: 109, text: "replay возвращает результат «42»" }
+    },
+    {
+      kind: "done",
+      box: { x1: 190, y1: 150, x2: 560, y2: 218, radius: 9 },
+      node: { x: 150, y: 184 },
+      title: { x: 214, y: 175, text: "ВТОРАЯ ACTIVITY" },
+      detail: { x: 214, y: 199, text: "replay возвращает сохранённый результат" }
+    },
+    {
+      kind: "run",
+      box: { x1: 190, y1: 292, x2: 760, y2: 376, radius: 9 },
+      node: { x: 150, y: 334 },
+      title: { x: 214, y: 324, text: "ТРЕТЬЯ ACTIVITY" },
+      detail: { x: 214, y: 350, text: "после перезапуска выполняется реально" },
+      badge: { x1: 782, y1: 307, x2: 916, y2: 361, radius: 8 },
+      badgeTop: { x: 849, y: 329, text: "РЕАЛЬНЫЙ" },
+      badgeBottom: { x: 849, y: 348, text: "ЗАПУСК" }
+    }
+  ],
+  logs: [
+    {
+      box: { x1: 710, y1: 63, x2: 916, y2: 123, radius: 8 },
+      title: { x: 728, y: 86, text: "ACTIVITY ЗАВЕРШЕНА" },
+      detail: { x: 728, y: 108, text: "выход: «42»" },
+      arrow: { x1: 700, y1: 94, x2: 570, y2: 94 },
+      label: { x: 635, y: 82, text: "подставляет" }
+    },
+    {
+      box: { x1: 710, y1: 153, x2: 916, y2: 213, radius: 8 },
+      title: { x: 728, y: 176, text: "ACTIVITY ЗАВЕРШЕНА" },
+      detail: { x: 728, y: 198, text: "выход сохранён" },
+      arrow: { x1: 700, y1: 184, x2: 570, y2: 184 },
+      label: { x: 635, y: 172, text: "подставляет" }
+    }
+  ],
+  boundary: {
+    x1: 48,
+    y1: 252,
+    x2: 916,
+    y2: 252,
+    above: { x: 190, y: 242, text: "ПОДТВЕРЖДЁННОЕ ПРОШЛОЕ" },
+    name: { x: 916, y: 242, text: "ГРАНИЦА REPLAY" },
+    below: { x: 190, y: 275, text: "ЕЩЁ ПРЕДСТОИТ ВЫПОЛНИТЬ" }
+  },
+  runArrow: {
+    x1: 770,
+    y1: 334,
+    x2: 780,
+    y2: 334,
+    head: { length: 8, half: 5 }
+  },
+  check: {
+    left:  { x: 141, y: 94 },
+    joint: { x: 147, y: 100 },
+    right: { x: 159, y: 87 }
+  },
+  play: [
+    { x: 144, y: 324 },
+    { x: 144, y: 344 },
+    { x: 160, y: 334 }
+  ],
+  legend: {
+    doneDot: { x: 190, y: 404, radius: 5 },
+    doneText: { x: 204, y: 409, text: "из журнала — без повторного действия" },
+    runDot: { x: 565, y: 404, radius: 5 },
+    runText: { x: 579, y: 409, text: "нет завершения — выполнить" }
+  }
+};
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 1, y: 1 };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const mount = document.getElementById("mount");
+
+  const make = (name, attributes, className) => {
+    const node = document.createElementNS(NS, name);
+    Object.entries(attributes || {}).forEach(([key, value]) => {
+      node.setAttribute(key, String(value));
+    });
+    if (className) node.setAttribute("class", className);
+    return node;
+  };
+
+  const add = (parent, node) => {
+    parent.appendChild(node);
+    return node;
+  };
+
+  const rect = (parent, box, className) => add(parent, make("rect", {
+    x: sx(box.x1),
+    y: sy(box.y1),
+    width: sx(box.x2) - sx(box.x1),
+    height: sy(box.y2) - sy(box.y1),
+    rx: sx(box.radius) - sx(0),
+    ry: sy(box.radius) - sy(0)
+  }, className));
+
+  const line = (parent, segment, className) => add(parent, make("line", {
+    x1: sx(segment.x1),
+    y1: sy(segment.y1),
+    x2: sx(segment.x2),
+    y2: sy(segment.y2)
+  }, className));
+
+  const circle = (parent, point, radius, className) => add(parent, make("circle", {
+    cx: sx(point.x),
+    cy: sy(point.y),
+    r: sx(radius) - sx(0)
+  }, className));
+
+  const text = (parent, spec, className, anchor) => {
+    const node = make("text", {
+      x: sx(spec.x),
+      y: sy(spec.y),
+      "text-anchor": anchor || "start"
+    }, className);
+    node.textContent = spec.text;
+    return add(parent, node);
+  };
+
+  const points = values => values
+    .map(point => `${sx(point.x)},${sy(point.y)}`)
+    .join(" ");
+
+  const arrow = (parent, segment, head, lineClass, headClass) => {
+    line(parent, segment, lineClass);
+    const dx = segment.x2 - segment.x1;
+    const dy = segment.y2 - segment.y1;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = segment.x2 - ux * head.length;
+    const baseY = segment.y2 - uy * head.length;
+    const polygon = [
+      { x: segment.x2, y: segment.y2 },
+      { x: baseX - uy * head.half, y: baseY + ux * head.half },
+      { x: baseX + uy * head.half, y: baseY - ux * head.half }
+    ];
+    add(parent, make("polygon", { points: points(polygon) }, headClass));
+  };
+
+  const svg = make("svg", {
+    viewBox: `${sx(0)} ${sy(0)} ${DATA.canvas.width} ${DATA.canvas.height}`,
+    width: DATA.canvas.width,
+    height: DATA.canvas.height,
+    preserveAspectRatio: "xMidYMid meet",
+    role: "img",
+    "aria-labelledby": "diagram-title diagram-desc"
+  });
+
+  const title = add(svg, make("title", { id: "diagram-title" }));
+  title.textContent = "Replay трёх activity по журналу";
+
+  const desc = add(svg, make("desc", { id: "diagram-desc" }));
+  desc.textContent = "Первые две activity завершены и при replay получают сохранённые результаты. За границей подтверждённой истории третья activity запускается реально.";
+
+  const shadowBox = {
+    x1: DATA.frame.x1 + DATA.frame.shadow,
+    y1: DATA.frame.y1 + DATA.frame.shadow,
+    x2: DATA.frame.x2 + DATA.frame.shadow,
+    y2: DATA.frame.y2 + DATA.frame.shadow,
+    radius: DATA.frame.radius
+  };
+
+  rect(svg, shadowBox, "panel-shadow");
+  rect(svg, DATA.frame, "panel");
+
+  text(svg, DATA.headings.replay, "section-label", "start");
+  text(svg, DATA.headings.journal, "section-label", "start");
+
+  line(svg, DATA.flow.lineA, "flow-line");
+  arrow(svg, DATA.flow.lineB, DATA.flow.head, "flow-line", "arrow-flow");
+
+  DATA.activities.forEach(activity => {
+    const activityClass = activity.kind === "done"
+      ? "activity-done"
+      : "activity-run";
+    const nodeClass = activity.kind === "done"
+      ? "node-done"
+      : "node-run";
+
+    rect(svg, activity.box, activityClass);
+    circle(svg, activity.node, DATA.flow.nodeRadius, nodeClass);
+    text(svg, activity.title, "activity-title", "start");
+    text(
+      svg,
+      activity.detail,
+      activity.kind === "done" ? "saved-result" : "real-result",
+      "start"
+    );
+
+    if (activity.badge) {
+      rect(svg, activity.badge, "activity-run");
+      text(svg, activity.badgeTop, "real-result", "middle");
+      text(svg, activity.badgeBottom, "real-result", "middle");
+    }
+  });
+
+  DATA.logs.forEach(entry => {
+    rect(svg, entry.box, "log-card");
+    text(svg, entry.title, "log-title", "start");
+    text(svg, entry.detail, "log-detail", "start");
+    arrow(
+      svg,
+      entry.arrow,
+      DATA.flow.head,
+      "journal-arrow",
+      "arrow-log"
+    );
+    text(svg, entry.label, "arrow-label", "middle");
+  });
+
+  line(svg, DATA.boundary, "boundary");
+  text(svg, DATA.boundary.above, "section-label", "start");
+  text(svg, DATA.boundary.name, "boundary-label", "end");
+  text(svg, DATA.boundary.below, "section-label", "start");
+
+  arrow(
+    svg,
+    DATA.runArrow,
+    DATA.runArrow.head,
+    "run-arrow",
+    "arrow-run"
+  );
+
+  add(svg, make("polyline", {
+    points: points([
+      DATA.check.left,
+      DATA.check.joint,
+      DATA.check.right
+    ])
+  }, "check"));
+
+  const secondCheck = DATA.check;
+  const firstToSecond = DATA.flow.secondY - DATA.flow.firstY;
+  add(svg, make("polyline", {
+    points: points([
+      { x: secondCheck.left.x, y: secondCheck.left.y + firstToSecond },
+      { x: secondCheck.joint.x, y: secondCheck.joint.y + firstToSecond },
+      { x: secondCheck.right.x, y: secondCheck.right.y + firstToSecond }
+    ])
+  }, "check"));
+
+  add(svg, make("polygon", { points: points(DATA.play) }, "play"));
+
+  circle(
+    svg,
+    DATA.legend.doneDot,
+    DATA.legend.doneDot.radius,
+    "node-done"
+  );
+  text(svg, DATA.legend.doneText, "legend", "start");
+
+  circle(
+    svg,
+    DATA.legend.runDot,
+    DATA.legend.runDot.radius,
+    "node-run"
+  );
+  text(svg, DATA.legend.runText, "legend", "start");
+
+  mount.replaceChildren(svg);
+} catch (error) {
+  const mount = document.getElementById("mount");
+  const fallback = document.createElement("div");
+  fallback.className = "fallback";
+  fallback.textContent =
+    "Схема должна была показать: первые две activity при replay возвращают сохранённые результаты из журнала, а третья после перезапуска выполняется реально.";
+  mount.replaceChildren(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

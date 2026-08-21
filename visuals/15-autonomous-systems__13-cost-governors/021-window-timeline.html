@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как разные временные окна обнаруживают одну траекторию расходов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #596579;
+    --axis: #7b8799;
+    --grid: #d9e0ea;
+    --curve: #1769d2;
+    --curve-soft: #dcecff;
+    --alert: #d44141;
+    --alert-soft: #ffe4e1;
+    --window-a: #e6f1ff;
+    --window-b: #e9f7f0;
+    --window-c: #fff3d7;
+    --window-d: #f2eaff;
+    --window-stroke-a: #4385d5;
+    --window-stroke-b: #3b9169;
+    --window-stroke-c: #b47a16;
+    --window-stroke-d: #7652b5;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 12px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0 auto;
+    max-width: 1200px;
+    background: var(--panel);
+    border: 1px solid var(--grid);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: 0;
+    padding: 15px 18px 8px;
+    font-size: 21px;
+    font-weight: bold;
+  }
+
+  .subtitle {
+    margin: 0;
+    padding: 0 18px 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--panel);
+  }
+
+  text {
+    font-family: inherit;
+    fill: var(--text);
+  }
+
+  .axis { stroke: var(--axis); }
+  .grid { stroke: var(--grid); }
+  .curve { stroke: var(--curve); fill: none; }
+  .call { fill: var(--curve); }
+  .threshold { stroke: var(--alert); }
+  .threshold-fill { fill: var(--alert); }
+  .window-fill { fill: var(--curve-soft); }
+  .note { fill: var(--muted); }
+  .strong { font-weight: bold; }
+  .leader { stroke: var(--axis); fill: none; }
+  .arrow { fill: var(--axis); }
+
+  #fallback {
+    margin: 12px 18px 18px;
+    padding: 14px;
+    border: 1px solid var(--alert);
+    color: var(--text);
+    background: var(--alert-soft);
+    font-size: 15px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10141d;
+      --panel: #171d28;
+      --text: #edf2fb;
+      --muted: #aeb9ca;
+      --axis: #7f8da2;
+      --grid: #303a49;
+      --curve: #67aaff;
+      --curve-soft: #183452;
+      --alert: #ff7770;
+      --alert-soft: #482321;
+      --window-a: #1d3856;
+      --window-b: #1c3b30;
+      --window-c: #463717;
+      --window-d: #35264e;
+      --window-stroke-a: #70adf4;
+      --window-stroke-b: #67c594;
+      --window-stroke-c: #e6b352;
+      --window-stroke-d: #b295ef;
+    }
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Одна траектория расходов — четыре временных окна</h1>
+  <p class="subtitle">Вызов стоит $0.40 и повторяется каждые 5 секунд</p>
+  <svg id="chart" viewBox="0 0 1200 500" width="1200" height="500"
+       role="img" aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">
+      Расходы растут на 40 центов каждые пять секунд. За десять минут
+      накапливается 48 долларов, а порог 50 долларов достигается на
+      125-м вызове через 10 минут 25 секунд. Ниже показаны десятиминутное,
+      часовое, дневное и месячное окна наблюдения.
+    </desc>
+  </svg>
+  <div id="fallback" hidden>
+    Схема должна была показать одну траекторию: вызов по $0.40 каждые
+    5 секунд, $48 за 10 минут и достижение порога $50 на 125-м вызове
+    через 10 минут 25 секунд; рядом — часовой, дневной и месячный лимиты.
+  </div>
+</figure>
+
+<script>
+const data = [{
+  origin: { x: 78, y: 344 },
+  scale: { x: 1.36, y: 5.08 },
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  half: 0.5,
+  interval: 5,
+  cost: 0.40,
+  checkpointTime: 600,
+  checkpointCalls: 120,
+  checkpointCost: 48,
+  thresholdTime: 625,
+  thresholdCalls: 125,
+  thresholdCost: 50,
+  axisEnd: 650,
+  graphTop: 58,
+  windowTop: 53,
+  labelTop: 56,
+  callRadius: 1.15,
+  pointRadius: 3.3,
+  arrowLength: 8,
+  arrowHalf: 3,
+  tickHalf: 1.7,
+  padSmall: 6,
+  pad: 9,
+  padLarge: 18,
+  lineThin: 1,
+  lineNormal: 2,
+  lineStrong: 3,
+  fontSmall: 12,
+  fontNormal: 14,
+  fontMedium: 15,
+  fontLarge: 17,
+  opacityWindow: 0.34,
+  opacityCall: 0.62,
+  cardY: -27,
+  cardHeight: 16,
+  cardTextY: -17.3,
+  cardSubY: -21.2,
+  cardTitleY: -15.7,
+  cardGap: 8,
+  cards: [
+    {
+      x: 0, width: 146, fill: "var(--window-a)",
+      stroke: "var(--window-stroke-a)",
+      title: "10-минутный лимит", sub: "$50 · реагирует первым"
+    },
+    {
+      x: 154, width: 146, fill: "var(--window-b)",
+      stroke: "var(--window-stroke-b)",
+      title: "Часовой лимит", sub: "темп до $288/час"
+    },
+    {
+      x: 308, width: 146, fill: "var(--window-c)",
+      stroke: "var(--window-stroke-c)",
+      title: "Дневной лимит", sub: "видит устойчивый темп"
+    },
+    {
+      x: 462, width: 163, fill: "var(--window-d)",
+      stroke: "var(--window-stroke-d)",
+      title: "Месячный лимит", sub: "бюджет $1200"
+    }
+  ],
+  yTicks: [
+    { value: 0, label: "$0" },
+    { value: 48, label: "$48" },
+    { value: 50, label: "$50" }
+  ],
+  xTicks: [
+    { value: 0, label: "старт", anchor: "start", dx: 0 },
+    { value: 600, label: "10:00", anchor: "end", dx: -8 },
+    { value: 625, label: "10:25", anchor: "start", dx: 8 }
+  ],
+  callNote: {
+    tail: { x: 244, y: 40 },
+    bend: { x: 278, y: 35 },
+    head: { x: 315, y: 25.2 }
+  }
+}];
+
+const D = data.find(Boolean);
+const origin = D.origin;
+const scale = D.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y - y * scale.y;
+
+try {
+  const svg = document.getElementById("chart");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes, parent = svg) => {
+    const element = document.createElementNS(ns, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      element.setAttribute(key, String(value));
+    });
+    parent.appendChild(element);
+    return element;
+  };
+
+  const text = (value, x, y, options = {}) => {
+    const element = make("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": options.anchor || "start",
+      dx: options.dx || D.zero,
+      dy: options.dy || D.zero,
+      "font-size": options.size || D.fontNormal,
+      class: options.className || ""
+    });
+    element.textContent = value;
+    return element;
+  };
+
+  const line = (x1, y1, x2, y2, options = {}) => make("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: options.className || "",
+    stroke: options.stroke || "",
+    "stroke-width": options.width || D.lineNormal,
+    "stroke-linecap": options.cap || "round"
+  });
+
+  const rect = (x, y, width, height, options = {}) => make("rect", {
+    x: sx(x),
+    y: sy(y + height),
+    width: Math.abs(sx(x + width) - sx(x)),
+    height: Math.abs(sy(y + height) - sy(y)),
+    fill: options.fill || "none",
+    stroke: options.stroke || "none",
+    "stroke-width": options.lineWidth || D.lineThin,
+    opacity: options.opacity === undefined ? D.one : options.opacity
+  });
+
+  const circle = (x, y, radius, options = {}) => make("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: Math.abs(sx(radius) - sx(D.zero)),
+    class: options.className || "",
+    fill: options.fill || "",
+    opacity: options.opacity === undefined ? D.one : options.opacity
+  });
+
+  const arrowHead = (tailX, tailY, headX, headY) => {
+    const angle = Math.atan2(headY - tailY, headX - tailX);
+    const backX = headX - D.arrowLength * Math.cos(angle);
+    const backY = headY - D.arrowLength * Math.sin(angle);
+    const leftX = backX + D.arrowHalf * Math.sin(angle);
+    const leftY = backY - D.arrowHalf * Math.cos(angle);
+    const rightX = backX - D.arrowHalf * Math.sin(angle);
+    const rightY = backY + D.arrowHalf * Math.cos(angle);
+    make("polygon", {
+      points: [
+        `${sx(headX)},${sy(headY)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      class: "arrow"
+    });
+  };
+
+  rect(D.zero, D.zero, D.checkpointTime, D.windowTop, {
+    fill: "var(--window-a)",
+    opacity: D.opacityWindow
+  });
+
+  text("последние 10 минут", D.checkpointTime / D.two, D.labelTop, {
+    anchor: "middle",
+    size: D.fontSmall,
+    className: "note strong"
+  });
+
+  D.yTicks.forEach(tick => {
+    line(D.zero, tick.value, D.axisEnd, tick.value, {
+      className: tick.value === D.thresholdCost ? "threshold" : "grid",
+      width: tick.value === D.thresholdCost ? D.lineNormal : D.lineThin
+    });
+    line(-D.tickHalf, tick.value, D.tickHalf, tick.value, {
+      className: "axis",
+      width: D.lineNormal
+    });
+    text(tick.label, D.zero, tick.value, {
+      anchor: "end",
+      dx: -D.pad,
+      dy: D.padSmall,
+      size: D.fontSmall,
+      className: tick.value === D.thresholdCost ? "strong" : "note"
+    });
+  });
+
+  line(D.zero, D.zero, D.axisEnd, D.zero, {
+    className: "axis",
+    width: D.lineNormal
+  });
+  line(D.zero, D.zero, D.zero, D.graphTop, {
+    className: "axis",
+    width: D.lineNormal
+  });
+
+  D.xTicks.forEach(tick => {
+    line(tick.value, -D.tickHalf, tick.value, D.tickHalf, {
+      className: "axis",
+      width: D.lineNormal
+    });
+    text(tick.label, tick.value, D.zero, {
+      anchor: tick.anchor,
+      dx: tick.dx,
+      dy: D.padLarge,
+      size: D.fontSmall,
+      className: "note"
+    });
+  });
+
+  let pathData = `M ${sx(D.zero)} ${sy(D.zero)}`;
+  let elapsed = D.interval;
+  let previousCost = D.zero;
+
+  while (elapsed <= D.thresholdTime) {
+    const currentCost = elapsed / D.interval * D.cost;
+    pathData += ` L ${sx(elapsed)} ${sy(previousCost)}`;
+    pathData += ` L ${sx(elapsed)} ${sy(currentCost)}`;
+    circle(elapsed, currentCost, D.callRadius, {
+      className: "call",
+      opacity: D.opacityCall
+    });
+    previousCost = currentCost;
+    elapsed += D.interval;
+  }
+
+  make("path", {
+    d: pathData,
+    class: "curve",
+    "stroke-width": D.lineStrong,
+    "stroke-linejoin": "round",
+    "stroke-linecap": "round"
+  });
+
+  circle(D.checkpointTime, D.checkpointCost, D.pointRadius, {
+    fill: "var(--curve)"
+  });
+  circle(D.thresholdTime, D.thresholdCost, D.pointRadius, {
+    className: "threshold-fill"
+  });
+
+  text("120 вызовов · $48 за 10 минут", D.checkpointTime, D.checkpointCost, {
+    anchor: "end",
+    dx: -D.pad,
+    dy: D.padLarge,
+    size: D.fontMedium,
+    className: "strong"
+  });
+
+  text("$50 · 125-й вызов", D.thresholdTime, D.thresholdCost, {
+    anchor: "start",
+    dx: D.pad,
+    dy: -D.pad,
+    size: D.fontLarge,
+    className: "strong"
+  });
+  text("через 10 минут 25 секунд", D.thresholdTime, D.thresholdCost, {
+    anchor: "start",
+    dx: D.pad,
+    dy: D.padLarge,
+    size: D.fontNormal,
+    className: "note"
+  });
+
+  const note = D.callNote;
+  line(note.tail.x, note.tail.y, note.bend.x, note.bend.y, {
+    className: "leader",
+    width: D.lineThin
+  });
+  line(note.bend.x, note.bend.y, note.head.x, note.head.y, {
+    className: "leader",
+    width: D.lineThin
+  });
+  arrowHead(note.bend.x, note.bend.y, note.head.x, note.head.y);
+  text("$0.40 каждые 5 секунд", note.tail.x, note.tail.y, {
+    anchor: "end",
+    dx: -D.pad,
+    dy: D.padSmall,
+    size: D.fontNormal,
+    className: "strong"
+  });
+
+  line(D.zero, -D.cardGap, D.axisEnd, -D.cardGap, {
+    className: "grid",
+    width: D.lineThin
+  });
+  text("Та же траектория, разная дальность зрения", D.zero, -D.cardGap, {
+    anchor: "start",
+    dy: -D.pad,
+    size: D.fontNormal,
+    className: "note strong"
+  });
+
+  D.cards.forEach(card => {
+    rect(card.x, D.cardY, card.width, D.cardHeight, {
+      fill: card.fill,
+      stroke: card.stroke,
+      lineWidth: D.lineNormal
+    });
+    text(card.title, card.x + card.width / D.two, D.cardTitleY, {
+      anchor: "middle",
+      size: D.fontNormal,
+      className: "strong"
+    });
+    text(card.sub, card.x + card.width / D.two, D.cardSubY, {
+      anchor: "middle",
+      size: D.fontSmall,
+      className: "note"
+    });
+  });
+} catch (error) {
+  document.getElementById("chart").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

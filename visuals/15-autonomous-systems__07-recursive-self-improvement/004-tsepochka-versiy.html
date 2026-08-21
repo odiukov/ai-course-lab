@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Где цепочка версий становится рекурсивной</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --panel: ghostwhite;
+    --panel-recursive: honeydew;
+    --ink: black;
+    --muted: slategray;
+    --line: steelblue;
+    --recursive: seagreen;
+    --human: darkorange;
+    --human-soft: moccasin;
+    --system-soft: palegreen;
+    --boundary: crimson;
+    --border: lightgray;
+    --node: white;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    margin: unset;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .diagram {
+    width: 100%;
+    margin: auto;
+    overflow: hidden;
+    background: var(--page);
+    border: solid 1px var(--border);
+  }
+
+  .heading {
+    padding: 14px 20px;
+    background: var(--page);
+    border-bottom: solid 1px var(--border);
+    font-size: 21px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+  }
+
+  .panel.recursive-panel {
+    fill: var(--panel-recursive);
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .panel-note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .node {
+    fill: var(--node);
+    stroke: var(--line);
+    stroke-width: 3px;
+  }
+
+  .recursive-node {
+    stroke: var(--recursive);
+  }
+
+  .node-label {
+    fill: var(--ink);
+    font-size: 21px;
+    font-weight: bold;
+  }
+
+  .arrow-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .arrow-line.recursive-arrow {
+    stroke: var(--recursive);
+  }
+
+  .arrow-head {
+    fill: var(--line);
+  }
+
+  .arrow-head.recursive-arrow {
+    fill: var(--recursive);
+  }
+
+  .author-human {
+    fill: var(--human-soft);
+    stroke: var(--human);
+    stroke-width: 1.5px;
+  }
+
+  .author-system {
+    fill: var(--system-soft);
+    stroke: var(--recursive);
+    stroke-width: 1.5px;
+  }
+
+  .author-text {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .change-text {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  .boundary {
+    fill: none;
+    stroke: var(--boundary);
+    stroke-width: 2px;
+  }
+
+  .boundary-label {
+    fill: var(--boundary);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .footer-rule {
+    stroke: var(--border);
+    stroke-width: 1px;
+  }
+
+  .footer-text {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --panel: darkslategray;
+      --panel-recursive: darkgreen;
+      --ink: white;
+      --muted: lightsteelblue;
+      --line: lightskyblue;
+      --recursive: mediumspringgreen;
+      --human: gold;
+      --human-soft: saddlebrown;
+      --system-soft: seagreen;
+      --boundary: lightcoral;
+      --border: slategray;
+      --node: midnightblue;
+    }
+  }
+</style>
+</head>
+<body>
+<figure class="diagram">
+  <figcaption class="heading">Где цепочка версий становится рекурсивной</figcaption>
+  <svg
+    id="version-chain"
+    viewBox="0 0 980 390"
+    width="980"
+    height="390"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="svg-title svg-description"
+  >
+    <title id="svg-title">Сравнение последовательного и рекурсивного улучшения</title>
+    <desc id="svg-description">
+      Две цепочки S₁, S₂, S₃. В первой обе правки предлагает человек.
+      Во второй правку для S₃ предлагает система S₂, и здесь начинается рекурсия.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = [{
+  origin: [0, 0],
+  scale: [1, 1],
+  canvas: [980, 390],
+  zero: 0,
+  geometry: {
+    panelRadius: 16,
+    nodeRadius: 38,
+    arrowHeadLength: 14,
+    arrowHeadHalfHeight: 10,
+    chipHeight: 26,
+    chipRadius: 13,
+    chipTextDrop: 4,
+    annotationGap: 10,
+    boundaryRadius: 14,
+    dash: 7,
+    dashGap: 6
+  },
+  panels: [
+    {
+      kind: "panel",
+      bounds: [24, 16, 956, 156],
+      title: {
+        anchor: [48, 44],
+        offset: [0, 0],
+        text: "Последовательное улучшение",
+        side: "start"
+      },
+      note: {
+        anchor: [48, 67],
+        offset: [0, 0],
+        text: "Обе следующие версии задуманы человеком",
+        side: "start"
+      }
+    },
+    {
+      kind: "panel recursive-panel",
+      bounds: [24, 170, 956, 338],
+      title: {
+        anchor: [48, 198],
+        offset: [0, 0],
+        text: "Рекурсивная цепочка",
+        side: "start"
+      },
+      note: {
+        anchor: [48, 221],
+        offset: [0, 0],
+        text: "Текущая система становится автором следующей правки",
+        side: "start"
+      }
+    }
+  ],
+  upperNodes: [
+    { point: [150, 111], label: "S₁", recursive: false },
+    { point: [490, 111], label: "S₂", recursive: false },
+    { point: [830, 111], label: "S₃", recursive: false }
+  ],
+  lowerNodes: [
+    { point: [150, 276], label: "S₁", recursive: false },
+    { point: [490, 276], label: "S₂", recursive: true },
+    { point: [830, 276], label: "S₃", recursive: true }
+  ],
+  upperArrows: [
+    {
+      line: [198, 111, 442, 111],
+      head: [[442, 111], [428, 101], [428, 121]],
+      annotation: {
+        anchor: [208, 77],
+        offset: [0, 0],
+        chipWidth: 82,
+        author: "ЧЕЛОВЕК",
+        change: "предлагает правку для S₂",
+        tone: "author-human"
+      },
+      recursive: false
+    },
+    {
+      line: [538, 111, 782, 111],
+      head: [[782, 111], [768, 101], [768, 121]],
+      annotation: {
+        anchor: [548, 77],
+        offset: [0, 0],
+        chipWidth: 82,
+        author: "ЧЕЛОВЕК",
+        change: "предлагает правку для S₃",
+        tone: "author-human"
+      },
+      recursive: false
+    }
+  ],
+  lowerArrows: [
+    {
+      line: [198, 276, 442, 276],
+      head: [[442, 276], [428, 266], [428, 286]],
+      annotation: {
+        anchor: [208, 242],
+        offset: [0, 0],
+        chipWidth: 82,
+        author: "ЧЕЛОВЕК",
+        change: "предлагает правку для S₂",
+        tone: "author-human"
+      },
+      recursive: false
+    },
+    {
+      line: [538, 276, 782, 276],
+      head: [[782, 276], [768, 266], [768, 286]],
+      annotation: {
+        anchor: [558, 318],
+        offset: [0, 0],
+        chipWidth: 48,
+        author: "S₂",
+        change: "предлагает правку для S₃",
+        tone: "author-system"
+      },
+      recursive: true
+    }
+  ],
+  boundary: {
+    bounds: [526, 230, 798, 327],
+    label: {
+      anchor: [542, 246],
+      offset: [0, 0],
+      text: "ГРАНИЦА РЕКУРСИИ",
+      side: "start"
+    }
+  },
+  footer: {
+    rule: [24, 354, 956, 354],
+    label: {
+      anchor: [490, 378],
+      offset: [0, 0],
+      text: "Важно не какая это версия, а кто предложил следующую правку",
+      side: "middle"
+    }
+  },
+  fallback: [
+    {
+      anchor: [60, 205],
+      offset: [0, 0],
+      text: "Схема должна была показать две цепочки S₁ → S₂ → S₃:",
+      side: "start"
+    },
+    {
+      anchor: [60, 235],
+      offset: [0, 0],
+      text: "в первой обе правки предлагает человек;",
+      side: "start"
+    },
+    {
+      anchor: [60, 265],
+      offset: [0, 0],
+      text: "во второй правку для S₃ предлагает система S₂.",
+      side: "start"
+    }
+  ]
+}];
+
+const [model] = DATA;
+const origin = model.origin;
+const scale = model.scale;
+const [originX, originY] = origin;
+const [scaleX, scaleY] = scale;
+const sx = x => originX + x * scaleX;
+const sy = y => originY + y * scaleY;
+
+try {
+  const namespace = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+  const fragment = document.createDocumentFragment();
+  const {
+    panelRadius,
+    nodeRadius,
+    chipHeight,
+    chipRadius,
+    chipTextDrop,
+    annotationGap,
+    boundaryRadius,
+    dash,
+    dashGap
+  } = model.geometry;
+  const zero = model.zero;
+
+  const make = (name, attributes, content) => {
+    const item = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      item.setAttribute(key, String(value));
+    }
+    if (content !== undefined) {
+      item.textContent = content;
+    }
+    return item;
+  };
+
+  const addText = (parent, definition, className) => {
+    const {
+      anchor: [anchorX, anchorY],
+      offset: [offsetX, offsetY],
+      text,
+      side
+    } = definition;
+    parent.appendChild(make("text", {
+      x: sx(anchorX + offsetX),
+      y: sy(anchorY + offsetY),
+      "text-anchor": side,
+      class: className
+    }, text));
+  };
+
+  const addPanel = definition => {
+    const {
+      kind,
+      bounds: [left, top, right, bottom],
+      title,
+      note
+    } = definition;
+    const group = make("g", {});
+    group.appendChild(make("rect", {
+      x: sx(left),
+      y: sy(top),
+      width: sx(right) - sx(left),
+      height: sy(bottom) - sy(top),
+      rx: sx(panelRadius) - sx(zero),
+      ry: sy(panelRadius) - sy(zero),
+      class: kind
+    }));
+    addText(group, title, "panel-title");
+    addText(group, note, "panel-note");
+    fragment.appendChild(group);
+  };
+
+  const addNode = definition => {
+    const { point: [x, y], label, recursive } = definition;
+    const group = make("g", {
+      "aria-label": `Версия ${label}`
+    });
+    group.appendChild(make("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(nodeRadius) - sx(zero),
+      class: recursive ? "node recursive-node" : "node"
+    }));
+    group.appendChild(make("text", {
+      x: sx(x),
+      y: sy(y + chipTextDrop),
+      "text-anchor": "middle",
+      class: "node-label"
+    }, label));
+    fragment.appendChild(group);
+  };
+
+  const addAnnotation = (parent, definition) => {
+    const {
+      anchor: [anchorX, anchorY],
+      offset: [offsetX, offsetY],
+      chipWidth,
+      author,
+      change,
+      tone
+    } = definition;
+    const x = anchorX + offsetX;
+    const y = anchorY + offsetY;
+    parent.appendChild(make("rect", {
+      x: sx(x),
+      y: sy(y - chipHeight + chipTextDrop),
+      width: sx(x + chipWidth) - sx(x),
+      height: sy(y + chipTextDrop) - sy(y - chipHeight + chipTextDrop),
+      rx: sx(chipRadius) - sx(zero),
+      ry: sy(chipRadius) - sy(zero),
+      class: tone
+    }));
+    parent.appendChild(make("text", {
+      x: sx(x + chipWidth - chipRadius),
+      y: sy(y),
+      "text-anchor": "middle",
+      class: "author-text"
+    }, author));
+    parent.appendChild(make("text", {
+      x: sx(x + chipWidth + annotationGap),
+      y: sy(y),
+      "text-anchor": "start",
+      class: "change-text"
+    }, change));
+  };
+
+  const addArrow = definition => {
+    const {
+      line: [startX, startY, endX, endY],
+      head,
+      annotation,
+      recursive
+    } = definition;
+    const arrowClass = recursive
+      ? "arrow-line recursive-arrow"
+      : "arrow-line";
+    const headClass = recursive
+      ? "arrow-head recursive-arrow"
+      : "arrow-head";
+    const group = make("g", {});
+    group.appendChild(make("line", {
+      x1: sx(startX),
+      y1: sy(startY),
+      x2: sx(endX),
+      y2: sy(endY),
+      class: arrowClass
+    }));
+    const points = head
+      .map(([x, y]) => `${sx(x)},${sy(y)}`)
+      .join(" ");
+    group.appendChild(make("polygon", {
+      points,
+      class: headClass
+    }));
+    addAnnotation(group, annotation);
+    fragment.appendChild(group);
+  };
+
+  for (const panel of model.panels) {
+    addPanel(panel);
+  }
+
+  for (const arrow of model.upperArrows) {
+    addArrow(arrow);
+  }
+
+  for (const arrow of model.lowerArrows) {
+    addArrow(arrow);
+  }
+
+  const {
+    bounds: [boundaryLeft, boundaryTop, boundaryRight, boundaryBottom],
+    label: boundaryLabel
+  } = model.boundary;
+  const boundaryGroup = make("g", {});
+  boundaryGroup.appendChild(make("rect", {
+    x: sx(boundaryLeft),
+    y: sy(boundaryTop),
+    width: sx(boundaryRight) - sx(boundaryLeft),
+    height: sy(boundaryBottom) - sy(boundaryTop),
+    rx: sx(boundaryRadius) - sx(zero),
+    ry: sy(boundaryRadius) - sy(zero),
+    "stroke-dasharray":
+      `${sx(dash) - sx(zero)} ${sx(dashGap) - sx(zero)}`,
+    class: "boundary"
+  }));
+  addText(boundaryGroup, boundaryLabel, "boundary-label");
+  fragment.appendChild(boundaryGroup);
+
+  for (const node of model.upperNodes) {
+    addNode(node);
+  }
+
+  for (const node of model.lowerNodes) {
+    addNode(node);
+  }
+
+  const {
+    rule: [ruleStartX, ruleStartY, ruleEndX, ruleEndY],
+    label: footerLabel
+  } = model.footer;
+  fragment.appendChild(make("line", {
+    x1: sx(ruleStartX),
+    y1: sy(ruleStartY),
+    x2: sx(ruleEndX),
+    y2: sy(ruleEndY),
+    class: "footer-rule"
+  }));
+  addText(fragment, footerLabel, "footer-text");
+
+  root.appendChild(fragment);
+} catch (error) {
+  const root = document.getElementById("drawing");
+  const namespace = "http://www.w3.org/2000/svg";
+  root.replaceChildren();
+
+  for (const definition of model.fallback) {
+    const {
+      anchor: [anchorX, anchorY],
+      offset: [offsetX, offsetY],
+      text,
+      side
+    } = definition;
+    const line = document.createElementNS(namespace, "text");
+    line.setAttribute("x", String(sx(anchorX + offsetX)));
+    line.setAttribute("y", String(sy(anchorY + offsetY)));
+    line.setAttribute("text-anchor", side);
+    line.setAttribute("class", "fallback");
+    line.textContent = text;
+    root.appendChild(line);
+  }
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
