@@ -59,19 +59,19 @@ def test_dot_is_symmetric():
 
 
 # ------------------------------------------------------- cosine_similarity
-def test_cosine_same_direction_is_one():
+def test_cosine_similarity_same_direction_is_one():
     assert cosine_similarity([1, 0], [1, 0]) == APPROX(1.0)
 
 
-def test_cosine_perpendicular_is_zero():
+def test_cosine_similarity_perpendicular_is_zero():
     assert cosine_similarity([1, 0], [0, 1]) == APPROX(0.0)
 
 
-def test_cosine_opposite_is_minus_one():
+def test_cosine_similarity_opposite_is_minus_one():
     assert cosine_similarity([1, 0], [-1, 0]) == APPROX(-1.0)
 
 
-def test_cosine_ignores_length():
+def test_cosine_similarity_ignores_length():
     """Главное свойство: удлинил вектор — косинус не изменился."""
     short = cosine_similarity([1, 2, 3], [4, 5, 6])
     long = cosine_similarity([100, 200, 300], [4, 5, 6])
@@ -79,20 +79,20 @@ def test_cosine_ignores_length():
 
 
 # ----------------------------------------------------------- angle_between
-def test_angle_perpendicular():
+def test_angle_between_perpendicular():
     assert angle_between([1, 0], [0, 1]) == ANGLE(90.0)
 
 
-def test_angle_diagonal():
+def test_angle_between_diagonal():
     assert angle_between([1, 0], [1, 1]) == ANGLE(45.0)
 
 
-def test_angle_same_vector_is_zero():
+def test_angle_between_same_vector_is_zero():
     """Ловушка на округление: косинус выйдет 1.0000000002, acos от такого падает."""
     assert angle_between([1, 2, 3], [1, 2, 3]) == ANGLE(0.0)
 
 
-def test_angle_opposite_is_180():
+def test_angle_between_opposite_is_180():
     assert angle_between([1, 1], [-1, -1]) == ANGLE(180.0)
 
 
@@ -144,19 +144,19 @@ def test_matvec_rank_one_collides():
 
 
 # -------------------------------------------------------- is_invertible_2x2
-def test_invertible_rotation():
+def test_is_invertible_2x2_rotation():
     assert is_invertible_2x2([[0, -1], [1, 0]]) is True
 
 
-def test_not_invertible_rank_one():
+def test_is_invertible_2x2_rejects_rank_one():
     assert is_invertible_2x2([[1, 2], [2, 4]]) is False
 
 
-def test_not_invertible_zero_matrix():
+def test_is_invertible_2x2_rejects_zero_matrix():
     assert is_invertible_2x2([[0, 0], [0, 0]]) is False
 
 
-def test_invertible_handles_floats_near_zero():
+def test_is_invertible_2x2_handles_floats_near_zero():
     """Определитель = 1e-15, то есть по сути ноль. Не сравнивай с нулём напрямую."""
     assert is_invertible_2x2([[1.0, 2.0], [2.0, 4.0 + 1e-15]]) is False
 

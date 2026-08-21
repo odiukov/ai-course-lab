@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Опрос состояния и SSE</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #667085;
+    --line: #8691a5;
+    --poll: #d35f3f;
+    --poll-soft: #fff0ea;
+    --sse: #087f78;
+    --sse-soft: #e8f7f4;
+    --accent: #3157b7;
+    --accent-soft: #edf2ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .diagram {
+    width: 100%;
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 10px 18px 4px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .subtitle {
+    margin: 0;
+    padding: 0 18px 8px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .entity {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+
+  .poll-panel {
+    fill: var(--poll-soft);
+    stroke: var(--poll);
+    stroke-width: 1.5;
+  }
+
+  .sse-panel {
+    fill: var(--sse-soft);
+    stroke: var(--sse);
+    stroke-width: 1.5;
+  }
+
+  .lifeline, .divider {
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .request {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+
+  .response {
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .poll-line {
+    stroke: var(--poll);
+    stroke-width: 2.5;
+  }
+
+  .sse-line {
+    stroke: var(--sse);
+    stroke-width: 3;
+  }
+
+  .head-request { fill: var(--accent); }
+  .head-response { fill: var(--line); }
+  .head-poll { fill: var(--poll); }
+  .head-sse { fill: var(--sse); }
+  .event { fill: var(--sse); stroke: var(--panel); stroke-width: 2; }
+
+  text {
+    fill: var(--text);
+    font-size: 14px;
+  }
+
+  .section {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .entity-label, .panel-title {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .poll-text { fill: var(--poll); }
+  .sse-text { fill: var(--sse); }
+  .strong { font-weight: 700; }
+
+  #fallback {
+    padding: 18px;
+    color: var(--text);
+    background: var(--panel);
+    font-size: 15px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #192230;
+      --text: #edf2f7;
+      --muted: #aab5c4;
+      --line: #68768a;
+      --poll: #ff9274;
+      --poll-soft: #35221f;
+      --sse: #55d6c8;
+      --sse-soft: #16312f;
+      --accent: #8eabff;
+      --accent-soft: #202d4d;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="diagram">
+  <h1>Опрос состояния и SSE</h1>
+  <p class="subtitle">Короткая задача требует нескольких HTTP-обменов; на длинной задаче различие становится особенно заметным.</p>
+  <svg id="canvas" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Сравнение polling и Server-Sent Events</title>
+    <desc id="svgDesc">Сверху показаны четыре HTTP-обращения короткой задачи. Снизу сравниваются 720 опросов за час и одна SSE-подписка.</desc>
+  </svg>
+  <div id="fallback" hidden>Схема должна была показать четыре HTTP-обращения короткой задачи, а затем сравнить 720 опросов раз в 5 секунд за 1 час с одной SSE-подпиской.</div>
+</main>
+
+<script>
+const data = {
+  ns: "http://www.w3.org/2000/svg",
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  directions: { right: "right", left: "left" },
+  metrics: {
+    headLength: 10,
+    headHalf: 5,
+    eventRadius: 6
+  },
+  rectangles: [
+    { x: 52, y: 34, w: 210, h: 30, className: "entity" },
+    { x: 938, y: 34, w: 210, h: 30, className: "entity" },
+    { x: 38, y: 309, w: 544, h: 108, className: "poll-panel" },
+    { x: 618, y: 309, w: 544, h: 108, className: "sse-panel" }
+  ],
+  lines: [
+    { x1: 157, y1: 64, x2: 157, y2: 267, className: "lifeline" },
+    { x1: 1043, y1: 64, x2: 1043, y2: 267, className: "lifeline" },
+    { x1: 38, y1: 281, x2: 1162, y2: 281, className: "divider" },
+    { x1: 84, y1: 378, x2: 536, y2: 378, className: "response" },
+    { x1: 664, y1: 378, x2: 1116, y2: 378, className: "response" }
+  ],
+  arrows: [
+    { x1: 157, y1: 88, x2: 1043, y2: 88, dir: "right", lineClass: "request", headClass: "head-request" },
+    { x1: 1043, y1: 108, x2: 157, y2: 108, dir: "left", lineClass: "response", headClass: "head-response" },
+    { x1: 157, y1: 139, x2: 1043, y2: 139, dir: "right", lineClass: "request", headClass: "head-request" },
+    { x1: 1043, y1: 159, x2: 157, y2: 159, dir: "left", lineClass: "response", headClass: "head-response" },
+    { x1: 157, y1: 190, x2: 1043, y2: 190, dir: "right", lineClass: "request", headClass: "head-request" },
+    { x1: 1043, y1: 210, x2: 157, y2: 210, dir: "left", lineClass: "response", headClass: "head-response" },
+    { x1: 157, y1: 241, x2: 1043, y2: 241, dir: "right", lineClass: "request", headClass: "head-request" },
+    { x1: 1043, y1: 261, x2: 157, y2: 261, dir: "left", lineClass: "response", headClass: "head-response" },
+
+    { x1: 91, y1: 359, x2: 151, y2: 359, dir: "right", lineClass: "poll-line", headClass: "head-poll" },
+    { x1: 174, y1: 359, x2: 234, y2: 359, dir: "right", lineClass: "poll-line", headClass: "head-poll" },
+    { x1: 257, y1: 359, x2: 317, y2: 359, dir: "right", lineClass: "poll-line", headClass: "head-poll" },
+    { x1: 400, y1: 359, x2: 460, y2: 359, dir: "right", lineClass: "poll-line", headClass: "head-poll" },
+    { x1: 483, y1: 359, x2: 543, y2: 359, dir: "right", lineClass: "poll-line", headClass: "head-poll" },
+
+    { x1: 671, y1: 359, x2: 1109, y2: 359, dir: "right", lineClass: "sse-line", headClass: "head-sse" }
+  ],
+  events: [
+    { x: 812, y: 359 },
+    { x: 931, y: 359 },
+    { x: 1051, y: 359 }
+  ],
+  texts: [
+    { x: 600, y: 20, text: "Короткая задача · 4 HTTP-обращения", anchor: "middle", className: "section" },
+    { x: 157, y: 54, text: "Клиент", anchor: "middle", className: "entity-label" },
+    { x: 1043, y: 54, text: "Сервер агента", anchor: "middle", className: "entity-label" },
+
+    { x: 178, y: 82, text: "GET /.well-known/agent.json", anchor: "start", className: "strong" },
+    { x: 1022, y: 104, text: "Agent Card JSON", anchor: "end", className: "small" },
+
+    { x: 178, y: 133, text: "POST /tasks {skill, input}", anchor: "start", className: "strong" },
+    { x: 1022, y: 155, text: "201 · task_id · state=submitted", anchor: "end", className: "small" },
+
+    { x: 178, y: 184, text: "GET /tasks/{id}", anchor: "start", className: "strong" },
+    { x: 1022, y: 206, text: "state=working", anchor: "end", className: "small" },
+
+    { x: 178, y: 235, text: "GET /tasks/{id}", anchor: "start", className: "strong" },
+    { x: 1022, y: 257, text: "state=completed · artifacts", anchor: "end", className: "small" },
+
+    { x: 600, y: 300, text: "Длинная задача · 1 час", anchor: "middle", className: "section" },
+
+    { x: 58, y: 330, text: "POLLING", anchor: "start", className: "panel-title poll-text" },
+    { x: 562, y: 330, text: "каждые 5 секунд", anchor: "end", className: "small" },
+    { x: 91, y: 351, text: "GET", anchor: "start", className: "small poll-text" },
+    { x: 371, y: 363, text: "…", anchor: "middle", className: "section poll-text" },
+    { x: 84, y: 397, text: "начало", anchor: "start", className: "small" },
+    { x: 536, y: 397, text: "готово", anchor: "end", className: "small" },
+    { x: 310, y: 410, text: "720 отдельных проверок состояния", anchor: "middle", className: "strong poll-text" },
+
+    { x: 638, y: 330, text: "SSE", anchor: "start", className: "panel-title sse-text" },
+    { x: 1142, y: 330, text: "одно открытое HTTP-соединение", anchor: "end", className: "small" },
+    { x: 671, y: 351, text: "1 подписка: GET /tasks/{id}/events", anchor: "start", className: "strong sse-text" },
+    { x: 664, y: 397, text: "подписка", anchor: "start", className: "small" },
+    { x: 1116, y: 397, text: "готово", anchor: "end", className: "small" },
+    { x: 890, y: 410, text: "сервер сообщает только об изменениях", anchor: "middle", className: "strong sse-text" },
+
+    { x: 600, y: 435, text: "SSE не ускоряет задачу — оно убирает повторяющийся вопрос «уже готово?»", anchor: "middle", className: "small" }
+  ]
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("canvas");
+  const fallback = document.getElementById("fallback");
+
+  const element = (name, attributes) => {
+    const node = document.createElementNS(data.ns, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    return node;
+  };
+
+  data.rectangles.forEach(item => {
+    svg.appendChild(element("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.w),
+      height: sy(item.h),
+      class: item.className
+    }));
+  });
+
+  data.lines.forEach(item => {
+    svg.appendChild(element("line", {
+      x1: sx(item.x1),
+      y1: sy(item.y1),
+      x2: sx(item.x2),
+      y2: sy(item.y2),
+      class: item.className
+    }));
+  });
+
+  data.arrows.forEach(item => {
+    svg.appendChild(element("line", {
+      x1: sx(item.x1),
+      y1: sy(item.y1),
+      x2: sx(item.x2),
+      y2: sy(item.y2),
+      class: item.lineClass
+    }));
+
+    const tipX = item.x2;
+    const baseX = item.dir === data.directions.right
+      ? item.x2 - data.metrics.headLength
+      : item.x2 + data.metrics.headLength;
+
+    const points = [
+      [sx(tipX), sy(item.y2)],
+      [sx(baseX), sy(item.y2 - data.metrics.headHalf)],
+      [sx(baseX), sy(item.y2 + data.metrics.headHalf)]
+    ].map(point => point.join(",")).join(" ");
+
+    svg.appendChild(element("polygon", {
+      points,
+      class: item.headClass
+    }));
+  });
+
+  data.events.forEach(item => {
+    svg.appendChild(element("circle", {
+      cx: sx(item.x),
+      cy: sy(item.y),
+      r: sx(data.metrics.eventRadius),
+      class: "event"
+    }));
+  });
+
+  data.texts.forEach(item => {
+    const node = element("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      "text-anchor": item.anchor,
+      class: item.className
+    });
+    node.textContent = item.text;
+    svg.appendChild(node);
+  });
+
+  fallback.hidden = true;
+} catch (error) {
+  const canvas = document.getElementById("canvas");
+  const fallback = document.getElementById("fallback");
+  if (canvas) canvas.hidden = true;
+  if (fallback) fallback.hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разделение механизма предложения и языкового рассказчика</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #eef2f8;
+    --ink: #172033;
+    --muted: #5d687b;
+    --line: #8793a7;
+    --accent: #315bd6;
+    --accent-soft: #e6edff;
+    --narrator: #7a43bd;
+    --narrator-soft: #f1e8fc;
+    --private: #a65317;
+    --private-soft: #fff0df;
+    --public: #08785f;
+    --public-soft: #e1f5ef;
+    --danger: #b43434;
+    --rule: #d6dce7;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111622;
+      --panel: #1a2231;
+      --panel-soft: #222c3d;
+      --ink: #edf2ff;
+      --muted: #aab5c8;
+      --line: #8190aa;
+      --accent: #8eabff;
+      --accent-soft: #26365f;
+      --narrator: #d0a5ff;
+      --narrator-soft: #3a2851;
+      --private: #ffb36e;
+      --private-soft: #472f20;
+      --public: #73ddc2;
+      --public-soft: #173e38;
+      --danger: #ff8d8d;
+      --rule: #364154;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    overflow: hidden;
+  }
+
+  .figure-title {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .canvas {
+    display: block;
+    width: 1200px;
+    height: auto;
+    max-width: 100%;
+    max-height: 520px;
+    background: var(--bg);
+  }
+
+  .fallback {
+    padding: 18px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 15px;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+
+  svg text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .card {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .state-card {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+  }
+
+  .generator-card {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+  }
+
+  .narrator-card {
+    fill: var(--narrator-soft);
+    stroke: var(--narrator);
+  }
+
+  .message-card {
+    fill: var(--public-soft);
+    stroke: var(--public);
+  }
+
+  .private-card {
+    fill: var(--private-soft);
+    stroke: var(--private);
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .flow-head {
+    fill: var(--line);
+  }
+
+  .private-flow {
+    fill: none;
+    stroke: var(--private);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .private-head {
+    fill: var(--private);
+  }
+
+  .boundary {
+    fill: none;
+    stroke: var(--rule);
+    stroke-width: 2;
+  }
+
+  .blocked {
+    fill: var(--bg);
+    stroke: var(--danger);
+    stroke-width: 2;
+  }
+
+  .price-pill {
+    fill: var(--accent);
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+
+  .footer-band {
+    fill: var(--panel);
+    stroke: var(--rule);
+    stroke-width: 1;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .title-text {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .body-text {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .small-text {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .quote-text {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .boundary-text {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .private-text {
+    fill: var(--private);
+  }
+
+  .danger-text {
+    fill: var(--danger);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .price-label {
+    fill: #ffffff;
+    font-size: 10px;
+    font-weight: bold;
+  }
+
+  .price-number {
+    fill: #ffffff;
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .footer-text {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .lock-body,
+  .lock-ring {
+    fill: none;
+    stroke: var(--private);
+    stroke-width: 2;
+  }
+</style>
+</head>
+<body>
+<section class="figure" aria-labelledby="diagram-title">
+  <div class="figure-title" id="diagram-title">
+    Разделение механизма предложения и языкового рассказчика
+  </div>
+
+  <div class="fallback" id="fallback">
+    Схема показывает поток: состояние переговоров → детерминированный
+    генератор → цена 84 → LLM-рассказчик → публичное сообщение. Приватная
+    резервная цена доступна механизму, но не попадает в сообщение.
+  </div>
+
+  <svg
+    id="diagram"
+    class="canvas"
+    width="1200"
+    height="440"
+    viewBox="0 0 1200 440"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description"
+    hidden>
+    <desc id="diagram-description">
+      Детерминированный генератор выбирает цену 84 на основе состояния
+      переговоров и приватной резервной цены. Языковой рассказчик получает
+      готовое число, меняет только формулировку и создаёт публичную реплику.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+</section>
+
+<script>
+const diagramData = Object.freeze({
+  zero: 0,
+  origin: { x: 22, y: 25 },
+  scale: 9,
+  radius: 1.2,
+  arrowHead: 1.15,
+  dash: 0.75,
+  dashGap: 0.6,
+  defaultStep: 2.5,
+  boundary: { x: 63.5, y1: 3.8, y2: 40.3 },
+  nodes: [
+    {
+      id: "state",
+      className: "card state-card",
+      x1: 2, y1: 8, x2: 22, y2: 24,
+      rows: [
+        { text: ["СОСТОЯНИЕ"], x: 12, y: 11.2, anchor: "middle", className: "eyebrow" },
+        { text: ["Переговоры сейчас"], x: 12, y: 14.5, anchor: "middle", className: "title-text" },
+        { text: ["история ходов"], x: 12, y: 18.2, anchor: "middle", className: "body-text" },
+        { text: ["правила и контекст"], x: 12, y: 21.1, anchor: "middle", className: "body-text" }
+      ]
+    },
+    {
+      id: "generator",
+      className: "card generator-card",
+      x1: 30, y1: 6, x2: 57, y2: 26,
+      rows: [
+        { text: ["ДЕТЕРМИНИРОВАННЫЙ"], x: 43.5, y: 9.2, anchor: "middle", className: "eyebrow" },
+        { text: ["Генератор предложений"], x: 43.5, y: 12.3, anchor: "middle", className: "title-text" },
+        { text: ["проверяет принятие"], x: 43.5, y: 16, anchor: "middle", className: "body-text" },
+        { text: ["рассчитывает уступку"], x: 43.5, y: 19, anchor: "middle", className: "body-text" },
+        { text: ["фиксирует число"], x: 43.5, y: 22, anchor: "middle", className: "body-text" }
+      ]
+    },
+    {
+      id: "narrator",
+      className: "card narrator-card",
+      x1: 69, y1: 6, x2: 96, y2: 26,
+      rows: [
+        { text: ["LLM-РАССКАЗЧИК"], x: 82.5, y: 9.2, anchor: "middle", className: "eyebrow" },
+        { text: ["Получает готовое: 84"], x: 82.5, y: 12.8, anchor: "middle", className: "title-text" },
+        { text: ["выбирает тон"], x: 82.5, y: 16.4, anchor: "middle", className: "body-text" },
+        { text: ["аргументы и слова"], x: 82.5, y: 19.3, anchor: "middle", className: "body-text" },
+        { text: ["число не меняет"], x: 82.5, y: 22.5, anchor: "middle", className: "eyebrow" }
+      ]
+    },
+    {
+      id: "message",
+      className: "card message-card",
+      x1: 104, y1: 8, x2: 129, y2: 24,
+      rows: [
+        { text: ["ПУБЛИЧНОЕ СООБЩЕНИЕ"], x: 116.5, y: 11.2, anchor: "middle", className: "eyebrow" },
+        {
+          text: ["«Я могу немного", "уступить и", "предложить 84»"],
+          x: 116.5, y: 14.6, anchor: "middle",
+          className: "quote-text", step: 2.8
+        }
+      ]
+    },
+    {
+      id: "private",
+      className: "card private-card",
+      x1: 29, y1: 30.5, x2: 57, y2: 38.5,
+      rows: [
+        { text: ["ПРИВАТНО"], x: 36.5, y: 33.3, anchor: "start", className: "eyebrow private-text" },
+        { text: ["резервная цена"], x: 36.5, y: 36.5, anchor: "start", className: "title-text private-text" }
+      ]
+    }
+  ],
+  arrows: [
+    { x1: 22, y1: 16, x2: 30, y2: 16 },
+    { x1: 57, y1: 16, x2: 69, y2: 16 },
+    { x1: 96, y1: 16, x2: 104, y2: 16 }
+  ],
+  privateArrow: { x1: 43.5, y1: 30.5, x2: 43.5, y2: 26 },
+  blockedLine: { x1: 57, y1: 35, x2: 63.5, y2: 35 },
+  stop: { x: 63.5, y: 35, r: 1.45 },
+  price: {
+    x1: 59.1, y1: 11.7, x2: 67.9, y2: 18.1,
+    label: { text: ["ГОТОВАЯ ЦЕНА"], x: 63.5, y: 14, anchor: "middle", className: "price-label" },
+    number: { text: ["84"], x: 63.5, y: 17.2, anchor: "middle", className: "price-number" }
+  },
+  boundaryLabel: {
+    text: ["ГРАНИЦА РОЛЕЙ"], x: 63.5, y: 3.1,
+    anchor: "middle", className: "boundary-text"
+  },
+  blockedLabel: {
+    text: ["секрет не проходит"], x: 62.1, y: 40,
+    anchor: "end", className: "danger-text"
+  },
+  footer: {
+    x1: 21, y1: 41.2, x2: 110, y2: 45,
+    row: {
+      text: ["Механизм выбирает число  •  рассказчик выбирает слова"],
+      x: 65.5, y: 43.7, anchor: "middle", className: "footer-text"
+    }
+  },
+  lock: {
+    ring: { x: 33.2, y: 33.8, r: 1.35 },
+    body: { x1: 31.7, y1: 33.8, x2: 34.7, y2: 37.1, r: 0.45 }
+  }
+});
+
+const origin = Object.freeze(diagramData.origin);
+const scale = diagramData.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("diagram");
+  const layer = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+
+  const element = (name, attributes, className) => {
+    const item = document.createElementNS(NS, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      item.setAttribute(key, String(value));
+    });
+    if (className) item.setAttribute("class", className);
+    return item;
+  };
+
+  const add = item => layer.appendChild(item);
+
+  const makeBox = (shape, className) => element("rect", {
+    x: sx(shape.x1),
+    y: sy(shape.y1),
+    width: sx(shape.x2) - sx(shape.x1),
+    height: sy(shape.y2) - sy(shape.y1),
+    rx: sx(shape.r ?? diagramData.radius) - sx(diagramData.zero),
+    ry: sy(shape.r ?? diagramData.radius) - sy(diagramData.zero)
+  }, className);
+
+  const makeLine = (shape, className) => element("line", {
+    x1: sx(shape.x1),
+    y1: sy(shape.y1),
+    x2: sx(shape.x2),
+    y2: sy(shape.y2)
+  }, className);
+
+  const makeCircle = (shape, className) => element("circle", {
+    cx: sx(shape.x),
+    cy: sy(shape.y),
+    r: sx(shape.r) - sx(diagramData.zero)
+  }, className);
+
+  const makePolygon = (points, className) => element("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+  }, className);
+
+  const makeText = row => {
+    const text = element("text", {
+      x: sx(row.x),
+      y: sy(row.y),
+      "text-anchor": row.anchor
+    }, row.className);
+
+    row.text.forEach((content, index) => {
+      const tspan = element("tspan", {
+        x: sx(row.x),
+        y: sy(row.y + index * (row.step ?? diagramData.defaultStep))
+      });
+      tspan.textContent = content;
+      text.appendChild(tspan);
+    });
+    return text;
+  };
+
+  const addHorizontalArrow = arrow => {
+    add(makeLine(arrow, "flow"));
+    add(makePolygon([
+      { x: arrow.x2, y: arrow.y2 },
+      { x: arrow.x2 - diagramData.arrowHead, y: arrow.y2 - diagramData.arrowHead },
+      { x: arrow.x2 - diagramData.arrowHead, y: arrow.y2 + diagramData.arrowHead }
+    ], "flow-head"));
+  };
+
+  const addUpArrow = arrow => {
+    const shaft = makeLine(arrow, "private-flow");
+    shaft.setAttribute(
+      "stroke-dasharray",
+      `${sx(diagramData.dash) - sx(diagramData.zero)} ${sx(diagramData.dashGap) - sx(diagramData.zero)}`
+    );
+    add(shaft);
+    add(makePolygon([
+      { x: arrow.x2, y: arrow.y2 },
+      { x: arrow.x2 - diagramData.arrowHead, y: arrow.y2 + diagramData.arrowHead },
+      { x: arrow.x2 + diagramData.arrowHead, y: arrow.y2 + diagramData.arrowHead }
+    ], "private-head"));
+  };
+
+  const boundary = makeLine({
+    x1: diagramData.boundary.x,
+    y1: diagramData.boundary.y1,
+    x2: diagramData.boundary.x,
+    y2: diagramData.boundary.y2
+  }, "boundary");
+
+  boundary.setAttribute(
+    "stroke-dasharray",
+    `${sx(diagramData.dash) - sx(diagramData.zero)} ${sx(diagramData.dashGap) - sx(diagramData.zero)}`
+  );
+
+  add(boundary);
+  add(makeText(diagramData.boundaryLabel));
+
+  diagramData.arrows.forEach(addHorizontalArrow);
+  addUpArrow(diagramData.privateArrow);
+
+  const blockedLine = makeLine(diagramData.blockedLine, "private-flow");
+  blockedLine.setAttribute(
+    "stroke-dasharray",
+    `${sx(diagramData.dash) - sx(diagramData.zero)} ${sx(diagramData.dashGap) - sx(diagramData.zero)}`
+  );
+  add(blockedLine);
+
+  diagramData.nodes.forEach(node => {
+    add(makeBox(node, node.className));
+    node.rows.forEach(row => add(makeText(row)));
+  });
+
+  add(makeCircle(diagramData.lock.ring, "lock-ring"));
+  add(makeBox(diagramData.lock.body, "lock-body"));
+
+  add(makeCircle(diagramData.stop, "blocked"));
+  add(makeText(diagramData.blockedLabel));
+
+  add(makeBox(diagramData.price, "price-pill"));
+  add(makeText(diagramData.price.label));
+  add(makeText(diagramData.price.number));
+
+  add(makeBox(diagramData.footer, "footer-band"));
+  add(makeText(diagramData.footer.row));
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать: состояние переговоров поступает в детерминированный генератор, тот фиксирует цену 84, а LLM-рассказчик превращает готовое число в публичную реплику. Приватная резервная цена остаётся вне сообщения.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

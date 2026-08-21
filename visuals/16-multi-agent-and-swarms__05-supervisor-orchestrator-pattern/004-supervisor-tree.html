@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дерево supervisor и трёх воркеров</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #eeeae2;
+    --bg: #fbfaf6;
+    --ink: #20232b;
+    --muted: #626875;
+    --border: #c9c5bb;
+    --supervisor: #fff1c9;
+    --worker: #ffffff;
+    --down: #6846c7;
+    --down-soft: #eee8ff;
+    --up: #08786f;
+    --up-soft: #ddf4ef;
+    --rule: #ddd8cd;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #15171b;
+      --bg: #1c1f25;
+      --ink: #f3f1eb;
+      --muted: #b7bbc5;
+      --border: #4c515d;
+      --supervisor: #3c321f;
+      --worker: #272b33;
+      --down: #b9a3ff;
+      --down-soft: #30294a;
+      --up: #70d9c8;
+      --up-soft: #193d39;
+      --rule: #464b55;
+    }
+  }
+
+  html,
+  body {
+    margin: initial;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: initial;
+    max-width: 1040px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  figcaption {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--bg);
+  }
+
+  .frame {
+    fill: var(--bg);
+  }
+
+  .supervisor-box {
+    fill: var(--supervisor);
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+
+  .worker-box {
+    fill: var(--worker);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .rule {
+    stroke: var(--rule);
+    stroke-width: 1px;
+  }
+
+  .down-route {
+    fill: none;
+    stroke: var(--down);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .up-route {
+    fill: none;
+    stroke: var(--up);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .down-head {
+    fill: var(--down);
+  }
+
+  .up-head {
+    fill: var(--up);
+  }
+
+  text {
+    fill: var(--ink);
+  }
+
+  .question {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .node-title {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    font-size: 14px;
+  }
+
+  .task {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .context {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .result {
+    fill: var(--up);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .down-label {
+    fill: var(--down);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .up-label {
+    fill: var(--up);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .footer {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    padding: 18px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Дерево supervisor и трёх воркеров</figcaption>
+  <svg id="diagram" width="1040" height="480" role="img"
+       aria-label="Ведущий агент передаёт три независимых задания трём воркерам и получает три короткие выжимки"></svg>
+  <p id="fallback" class="fallback" hidden>
+    Схема должна была показать ведущего агента, который делегирует изучение спроса,
+    конкурентов и рисков трём независимым воркерам со свежими контекстами, а затем
+    получает от них три короткие выжимки для общего синтеза.
+  </p>
+</figure>
+
+<script>
+const data = [
+  {
+    kind: "frame",
+    x: 0, y: 0, width: 1040, height: 480
+  },
+  {
+    kind: "arrow-head",
+    half: 7, depth: 10
+  },
+  {
+    kind: "question",
+    text: "«Стоит ли компании выходить на новый рынок?»",
+    at: { x: 520, y: 27 },
+    anchor: "middle",
+    className: "question"
+  },
+  {
+    kind: "node",
+    role: "supervisor",
+    box: { x: 316, y: 52, width: 408, height: 116, radius: 14 },
+    className: "supervisor-box",
+    texts: [
+      {
+        text: "Ведущий агент · supervisor",
+        at: { x: 520, y: 83 },
+        anchor: "middle",
+        className: "node-title"
+      },
+      {
+        text: "держит общий план и делит вопрос на части",
+        at: { x: 520, y: 112 },
+        anchor: "middle",
+        className: "node-copy"
+      },
+      {
+        text: "сопоставляет выжимки → собирает единый ответ",
+        at: { x: 520, y: 141 },
+        anchor: "middle",
+        className: "node-copy"
+      }
+    ]
+  },
+  {
+    kind: "branch",
+    down: [
+      { x: 392, y: 168 },
+      { x: 392, y: 210 },
+      { x: 170, y: 210 },
+      { x: 170, y: 324 }
+    ],
+    up: [
+      { x: 206, y: 324 },
+      { x: 206, y: 238 },
+      { x: 412, y: 238 },
+      { x: 412, y: 176 }
+    ],
+    downLabel: {
+      text: "задание ↓",
+      at: { x: 170, y: 278 },
+      offset: { x: -12, y: 0 },
+      anchor: "end",
+      className: "down-label"
+    },
+    upLabel: {
+      text: "↑ выжимка",
+      at: { x: 206, y: 278 },
+      offset: { x: 12, y: 0 },
+      anchor: "start",
+      className: "up-label"
+    }
+  },
+  {
+    kind: "branch",
+    down: [
+      { x: 510, y: 168 },
+      { x: 510, y: 324 }
+    ],
+    up: [
+      { x: 546, y: 324 },
+      { x: 546, y: 176 }
+    ],
+    downLabel: {
+      text: "задание ↓",
+      at: { x: 510, y: 278 },
+      offset: { x: -12, y: 0 },
+      anchor: "end",
+      className: "down-label"
+    },
+    upLabel: {
+      text: "↑ выжимка",
+      at: { x: 546, y: 278 },
+      offset: { x: 12, y: 0 },
+      anchor: "start",
+      className: "up-label"
+    }
+  },
+  {
+    kind: "branch",
+    down: [
+      { x: 648, y: 168 },
+      { x: 648, y: 210 },
+      { x: 852, y: 210 },
+      { x: 852, y: 324 }
+    ],
+    up: [
+      { x: 888, y: 324 },
+      { x: 888, y: 238 },
+      { x: 668, y: 238 },
+      { x: 668, y: 176 }
+    ],
+    downLabel: {
+      text: "задание ↓",
+      at: { x: 852, y: 278 },
+      offset: { x: -12, y: 0 },
+      anchor: "end",
+      className: "down-label"
+    },
+    upLabel: {
+      text: "↑ выжимка",
+      at: { x: 888, y: 278 },
+      offset: { x: 12, y: 0 },
+      anchor: "start",
+      className: "up-label"
+    }
+  },
+  {
+    kind: "label",
+    text: "handoff → конкретная часть вопроса",
+    at: { x: 52, y: 191 },
+    anchor: "start",
+    className: "note"
+  },
+  {
+    kind: "label",
+    text: "обратно → короткий результат",
+    at: { x: 988, y: 191 },
+    anchor: "end",
+    className: "note"
+  },
+  {
+    kind: "node",
+    role: "worker",
+    box: { x: 52, y: 334, width: 272, height: 118, radius: 12 },
+    rule: { x1: 72, y1: 402, x2: 304, y2: 402 },
+    className: "worker-box",
+    texts: [
+      {
+        text: "Воркер 1",
+        at: { x: 188, y: 361 },
+        anchor: "middle",
+        className: "node-title"
+      },
+      {
+        text: "Изучает спрос",
+        at: { x: 188, y: 388 },
+        anchor: "middle",
+        className: "task"
+      },
+      {
+        text: "свежий контекст",
+        at: { x: 188, y: 424 },
+        anchor: "middle",
+        className: "context"
+      },
+      {
+        text: "возвращает короткую выжимку",
+        at: { x: 188, y: 444 },
+        anchor: "middle",
+        className: "result"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    role: "worker",
+    box: { x: 384, y: 334, width: 272, height: 118, radius: 12 },
+    rule: { x1: 404, y1: 402, x2: 636, y2: 402 },
+    className: "worker-box",
+    texts: [
+      {
+        text: "Воркер 2",
+        at: { x: 520, y: 361 },
+        anchor: "middle",
+        className: "node-title"
+      },
+      {
+        text: "Изучает конкурентов",
+        at: { x: 520, y: 388 },
+        anchor: "middle",
+        className: "task"
+      },
+      {
+        text: "свежий контекст",
+        at: { x: 520, y: 424 },
+        anchor: "middle",
+        className: "context"
+      },
+      {
+        text: "возвращает короткую выжимку",
+        at: { x: 520, y: 444 },
+        anchor: "middle",
+        className: "result"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    role: "worker",
+    box: { x: 716, y: 334, width: 272, height: 118, radius: 12 },
+    rule: { x1: 736, y1: 402, x2: 968, y2: 402 },
+    className: "worker-box",
+    texts: [
+      {
+        text: "Воркер 3",
+        at: { x: 852, y: 361 },
+        anchor: "middle",
+        className: "node-title"
+      },
+      {
+        text: "Изучает риски",
+        at: { x: 852, y: 388 },
+        anchor: "middle",
+        className: "task"
+      },
+      {
+        text: "свежий контекст",
+        at: { x: 852, y: 424 },
+        anchor: "middle",
+        className: "context"
+      },
+      {
+        text: "возвращает короткую выжимку",
+        at: { x: 852, y: 444 },
+        anchor: "middle",
+        className: "result"
+      }
+    ]
+  },
+  {
+    kind: "label",
+    text: "Между воркерами нет боковых связей: каждый исследует свою часть независимо",
+    at: { x: 520, y: 474 },
+    anchor: "middle",
+    className: "footer"
+  }
+];
+
+const origin = [0, 0];
+const scale = 1;
+const sx = x => origin[0] + x * scale;
+const sy = y => origin[1] + y * scale;
+
+const svg = document.getElementById("diagram");
+const fallback = document.getElementById("fallback");
+const namespace = "http://www.w3.org/2000/svg";
+
+function element(tag, attributes, text) {
+  const node = document.createElementNS(namespace, tag);
+  Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+  if (text !== undefined) node.textContent = text;
+  svg.appendChild(node);
+  return node;
+}
+
+function drawText(label) {
+  const attributes = {
+    x: sx(label.at.x),
+    y: sy(label.at.y),
+    "text-anchor": label.anchor,
+    class: label.className
+  };
+  if (label.offset) {
+    attributes.dx = label.offset.x + "px";
+    attributes.dy = label.offset.y + "px";
+  }
+  element("text", attributes, label.text);
+}
+
+function drawRoute(points, className) {
+  const [first, ...rest] = points;
+  const commands = [
+    "M " + sx(first.x) + " " + sy(first.y),
+    ...rest.map(point => "L " + sx(point.x) + " " + sy(point.y))
+  ];
+  element("path", { d: commands.join(" "), class: className });
+}
+
+function drawHead(tip, direction, className, shape) {
+  const baseY = direction === "down"
+    ? tip.y - shape.depth
+    : tip.y + shape.depth;
+  const points = [
+    sx(tip.x - shape.half) + "," + sy(baseY),
+    sx(tip.x) + "," + sy(tip.y),
+    sx(tip.x + shape.half) + "," + sy(baseY)
+  ];
+  element("polygon", { points: points.join(" "), class: className });
+}
+
+try {
+  const frame = data.find(item => item.kind === "frame");
+  const head = data.find(item => item.kind === "arrow-head");
+
+  svg.setAttribute(
+    "viewBox",
+    [
+      sx(frame.x),
+      sy(frame.y),
+      sx(frame.x + frame.width) - sx(frame.x),
+      sy(frame.y + frame.height) - sy(frame.y)
+    ].join(" ")
+  );
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  element("rect", {
+    x: sx(frame.x),
+    y: sy(frame.y),
+    width: sx(frame.x + frame.width) - sx(frame.x),
+    height: sy(frame.y + frame.height) - sy(frame.y),
+    class: "frame"
+  });
+
+  data.filter(item => item.kind === "branch").forEach(branch => {
+    drawRoute(branch.down, "down-route");
+    drawRoute(branch.up, "up-route");
+    drawHead(branch.down.at(-1), "down", "down-head", head);
+    drawHead(branch.up.at(-1), "up", "up-head", head);
+  });
+
+  data.filter(item => item.kind === "node").forEach(node => {
+    element("rect", {
+      x: sx(node.box.x),
+      y: sy(node.box.y),
+      width: sx(node.box.x + node.box.width) - sx(node.box.x),
+      height: sy(node.box.y + node.box.height) - sy(node.box.y),
+      rx: sx(node.box.radius) - sx(frame.x),
+      class: node.className
+    });
+
+    if (node.rule) {
+      element("line", {
+        x1: sx(node.rule.x1),
+        y1: sy(node.rule.y1),
+        x2: sx(node.rule.x2),
+        y2: sy(node.rule.y2),
+        class: "rule"
+      });
+    }
+
+    node.texts.forEach(drawText);
+  });
+
+  data.filter(item => item.kind === "question").forEach(drawText);
+  data.filter(item => item.kind === "label").forEach(drawText);
+
+  data.filter(item => item.kind === "branch").forEach(branch => {
+    drawText(branch.downLabel);
+    drawText(branch.upLabel);
+  });
+} catch (error) {
+  svg.hidden = true;
+  fallback.hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

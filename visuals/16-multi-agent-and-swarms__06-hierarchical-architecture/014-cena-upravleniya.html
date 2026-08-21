@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сколько иерархия тратит на управление</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f1f3f9;
+      --border: #cbd2e2;
+      --text: #1c2434;
+      --muted: #5d687c;
+      --manager: #7657d6;
+      --manager-soft: #ece7ff;
+      --manager-text: #3f287f;
+      --worker: #25896a;
+      --worker-soft: #def5eb;
+      --worker-text: #145b47;
+      --line: #7b8496;
+      --track: #e5e8f0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --surface: #181e29;
+        --surface-soft: #202735;
+        --border: #3b4558;
+        --text: #f1f4fa;
+        --muted: #abb5c7;
+        --manager: #a78bfa;
+        --manager-soft: #302657;
+        --manager-text: #e7ddff;
+        --worker: #56c6a3;
+        --worker-soft: #173d34;
+        --worker-text: #c8f7e8;
+        --line: #7f8a9e;
+        --track: #2b3341;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      background: var(--page);
+    }
+
+    .figure__title {
+      margin: 0;
+      padding: 12px 18px 8px;
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 750;
+      text-align: center;
+    }
+
+    .figure__subtitle {
+      margin: 0;
+      padding: 0 18px 10px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.3;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--page);
+    }
+
+    .panel {
+      fill: var(--surface);
+      stroke: var(--border);
+      stroke-width: 2px;
+    }
+
+    .panel-head {
+      fill: var(--surface-soft);
+    }
+
+    .divider {
+      stroke: var(--border);
+      stroke-width: 2px;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .manager-node {
+      fill: var(--manager-soft);
+      stroke: var(--manager);
+      stroke-width: 2px;
+    }
+
+    .worker-node {
+      fill: var(--worker-soft);
+      stroke: var(--worker);
+      stroke-width: 2px;
+    }
+
+    .token-manager {
+      fill: var(--manager);
+      stroke: var(--surface);
+      stroke-width: 2px;
+    }
+
+    .token-worker {
+      fill: var(--worker);
+      stroke: var(--surface);
+      stroke-width: 2px;
+    }
+
+    .token-track {
+      fill: var(--track);
+    }
+
+    .panel-title {
+      fill: var(--text);
+      font-size: 18px;
+      font-weight: 750;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .panel-note {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 550;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .node-label {
+      font-size: 14px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .manager-label {
+      fill: var(--manager-text);
+    }
+
+    .worker-label {
+      fill: var(--worker-text);
+    }
+
+    .role-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      dominant-baseline: middle;
+    }
+
+    .role-manager {
+      fill: var(--manager-text);
+    }
+
+    .role-worker {
+      fill: var(--worker-text);
+    }
+
+    .formula {
+      fill: var(--text);
+      font-size: 25px;
+      font-weight: 800;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .conclusion {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 650;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-title">
+    <h1 class="figure__title" id="diagram-title">Сколько иерархия тратит на управление</h1>
+    <p class="figure__subtitle">Фиолетовые узлы только управляют, зелёные выполняют части задачи</p>
+
+    <svg id="diagram"
+         viewBox="0 0 1200 430"
+         width="1200"
+         height="430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Сравнение доли управляющих узлов в двух иерархиях</title>
+      <desc id="svg-desc">В дереве из трёх менеджеров и пяти воркеров управление занимает три из восьми вызовов, или 37,5 процента. В учебном демо из трёх менеджеров и трёх воркеров управление занимает три из шести вызовов, или 50 процентов.</desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = Object.freeze([
+      {
+        x: 24, y: 8, w: 564, h: 408,
+        title: "Дерево из шага",
+        note: "3 менеджера · 5 воркеров",
+        formula: "3 / 8 = 37,5%",
+        conclusion: "37,5% узлов только управляют",
+        nodes: [
+          ["manager", 306, 86, "Главный"],
+          ["manager", 174, 164, "Менеджер A"],
+          ["manager", 438, 164, "Менеджер B"],
+          ["worker", 78, 252, "W1"],
+          ["worker", 150, 252, "W2"],
+          ["worker", 222, 252, "W3"],
+          ["worker", 402, 252, "W4"],
+          ["worker", 474, 252, "W5"]
+        ],
+        links: [
+          [306, 109, 306, 127],
+          [174, 127, 438, 127],
+          [174, 127, 174, 141],
+          [438, 127, 438, 141],
+          [174, 187, 174, 211],
+          [78, 211, 222, 211],
+          [78, 211, 78, 229],
+          [150, 211, 150, 229],
+          [222, 211, 222, 229],
+          [438, 187, 438, 211],
+          [402, 211, 474, 211],
+          [402, 211, 402, 229],
+          [474, 211, 474, 229]
+        ],
+        tokens: [
+          ["manager", 146, 320],
+          ["manager", 174, 320],
+          ["manager", 202, 320],
+          ["worker", 230, 320],
+          ["worker", 258, 320],
+          ["worker", 286, 320],
+          ["worker", 314, 320],
+          ["worker", 342, 320]
+        ],
+        legend: [
+          ["manager", 50, 320, "Управление: 3", "end"],
+          ["worker", 438, 320, "Работа: 5", "start"]
+        ],
+        formulaPoint: [306, 362],
+        conclusionPoint: [306, 394]
+      },
+      {
+        x: 612, y: 8, w: 564, h: 408,
+        title: "Учебное демо",
+        note: "3 менеджера · 3 воркера",
+        formula: "3 / 6 = 50%",
+        conclusion: "Половина узлов только управляет",
+        nodes: [
+          ["manager", 894, 86, "Главный"],
+          ["manager", 762, 164, "Менеджер A"],
+          ["manager", 1026, 164, "Менеджер B"],
+          ["worker", 738, 252, "W1"],
+          ["worker", 894, 252, "W2"],
+          ["worker", 1050, 252, "W3"]
+        ],
+        links: [
+          [894, 109, 894, 127],
+          [762, 127, 1026, 127],
+          [762, 127, 762, 141],
+          [1026, 127, 1026, 141],
+          [762, 187, 762, 211],
+          [738, 211, 894, 211],
+          [738, 211, 738, 229],
+          [894, 211, 894, 229],
+          [1026, 187, 1026, 229],
+          [1050, 211, 1050, 229],
+          [1026, 211, 1050, 211]
+        ],
+        tokens: [
+          ["manager", 750, 320],
+          ["manager", 778, 320],
+          ["manager", 806, 320],
+          ["worker", 834, 320],
+          ["worker", 862, 320],
+          ["worker", 890, 320]
+        ],
+        legend: [
+          ["manager", 662, 320, "Управление: 3", "end"],
+          ["worker", 986, 320, "Работа: 3", "start"]
+        ],
+        formulaPoint: [894, 362],
+        conclusionPoint: [894, 394]
+      }
+    ]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const drawing = document.getElementById("drawing");
+    const labelPadding = 10;
+    const nodeWidth = 112;
+    const nodeHeight = 46;
+    const nodeRadius = 10;
+    const tokenRadius = 11;
+    const panelRadius = 16;
+    const headerHeight = 58;
+    const tokenTrackHeight = 30;
+    const tokenTrackWidthLeft = 224;
+    const tokenTrackWidthRight = 168;
+
+    function element(name, attributes, text) {
+      const node = document.createElementNS(SVG_NS, name);
+      Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function rectangle(parent, x, y, width, height, radius, className) {
+      parent.appendChild(element("rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(width) - sx(origin.x),
+        height: sy(height) - sy(origin.y),
+        rx: sx(radius) - sx(origin.x),
+        ry: sy(radius) - sy(origin.y),
+        class: className
+      }));
+    }
+
+    function line(parent, points, className) {
+      parent.appendChild(element("line", {
+        x1: sx(points[0]),
+        y1: sy(points[1]),
+        x2: sx(points[2]),
+        y2: sy(points[3]),
+        class: className
+      }));
+    }
+
+    function text(parent, x, y, value, className, anchor) {
+      const attributes = {
+        x: sx(x),
+        y: sy(y),
+        class: className
+      };
+      if (anchor) attributes["text-anchor"] = anchor;
+      parent.appendChild(element("text", attributes, value));
+    }
+
+    function drawPanel(panel, panelIndex) {
+      const group = element("g", {
+        "aria-label": panel.title
+      });
+
+      rectangle(group, panel.x, panel.y, panel.w, panel.h, panelRadius, "panel");
+      rectangle(
+        group,
+        panel.x,
+        panel.y,
+        panel.w,
+        headerHeight,
+        panelRadius,
+        "panel-head"
+      );
+      line(
+        group,
+        [panel.x, panel.y + headerHeight, panel.x + panel.w, panel.y + headerHeight],
+        "divider"
+      );
+
+      text(
+        group,
+        panel.x + panel.w / scale.x / (scale.x + scale.x),
+        panel.y + 24,
+        panel.title,
+        "panel-title"
+      );
+      text(
+        group,
+        panel.x + panel.w / scale.x / (scale.x + scale.x),
+        panel.y + 45,
+        panel.note,
+        "panel-note"
+      );
+
+      panel.links.forEach(link => line(group, link, "connector"));
+
+      panel.nodes.forEach(node => {
+        const [kind, x, y, label] = node;
+        rectangle(
+          group,
+          x - nodeWidth / (scale.x + scale.x),
+          y - nodeHeight / (scale.y + scale.y),
+          nodeWidth,
+          nodeHeight,
+          nodeRadius,
+          kind === "manager" ? "manager-node" : "worker-node"
+        );
+        text(
+          group,
+          x,
+          y,
+          label,
+          kind === "manager"
+            ? "node-label manager-label"
+            : "node-label worker-label"
+        );
+      });
+
+      const firstToken = panel.tokens[0];
+      const lastToken = panel.tokens[panel.tokens.length - scale.x];
+      const trackWidth = panelIndex === origin.x
+        ? tokenTrackWidthLeft
+        : tokenTrackWidthRight;
+
+      rectangle(
+        group,
+        firstToken[1] - tokenRadius - labelPadding,
+        firstToken[2] - tokenTrackHeight / (scale.y + scale.y),
+        trackWidth,
+        tokenTrackHeight,
+        tokenTrackHeight / (scale.y + scale.y),
+        "token-track"
+      );
+
+      panel.tokens.forEach(token => {
+        group.appendChild(element("circle", {
+          cx: sx(token[1]),
+          cy: sy(token[2]),
+          r: sx(tokenRadius) - sx(origin.x),
+          class: token[0] === "manager" ? "token-manager" : "token-worker"
+        }));
+      });
+
+      panel.legend.forEach(item => {
+        const [kind, x, y, label, anchor] = item;
+        text(
+          group,
+          x,
+          y,
+          label,
+          kind === "manager"
+            ? "role-label role-manager"
+            : "role-label role-worker",
+          anchor
+        );
+      });
+
+      text(
+        group,
+        panel.formulaPoint[0],
+        panel.formulaPoint[1],
+        panel.formula,
+        "formula"
+      );
+      text(
+        group,
+        panel.conclusionPoint[0],
+        panel.conclusionPoint[1],
+        panel.conclusion,
+        "conclusion"
+      );
+
+      drawing.appendChild(group);
+    }
+
+    try {
+      DATA.forEach((panel, index) => drawPanel(panel, index));
+    } catch (error) {
+      drawing.replaceChildren();
+      text(
+        drawing,
+        600,
+        190,
+        "Схема: 3 менеджера из 8 узлов — 37,5% управления;",
+        "fallback"
+      );
+      text(
+        drawing,
+        600,
+        224,
+        "в демо 3 менеджера из 6 узлов — 50% управления.",
+        "fallback"
+      );
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как Agent переключает активного агента</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #53627a;
+      --arrow: #315fc4;
+      --turn-one: #edf3ff;
+      --turn-two: #eef9f3;
+      --node: #ffffff;
+      --node-accent: #e0eaff;
+      --agent-accent: #daf3e5;
+      --runtime: #fff5d9;
+      --legend: #eef0f5;
+      --label-pad: 12px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111723;
+        --ink: #eef3ff;
+        --muted: #aeb9ce;
+        --line: #8090aa;
+        --arrow: #8eafff;
+        --turn-one: #17233c;
+        --turn-two: #153128;
+        --node: #1b2433;
+        --node-accent: #243a65;
+        --agent-accent: #1e4938;
+        --runtime: #44391c;
+        --legend: #202938;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: var(--label-pad);
+    }
+
+    h1 {
+      font-size: 21px;
+    }
+
+    .canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--page);
+    }
+
+    .turn {
+      stroke: var(--line);
+      stroke-width: 1.5;
+      fill: var(--turn-one);
+    }
+
+    .turn.next {
+      fill: var(--turn-two);
+    }
+
+    .node {
+      fill: var(--node);
+      stroke: var(--line);
+      stroke-width: 1.5;
+    }
+
+    .tool-node {
+      fill: var(--node-accent);
+    }
+
+    .agent-node {
+      fill: var(--agent-accent);
+    }
+
+    .runtime-node {
+      fill: var(--runtime);
+      stroke: var(--arrow);
+    }
+
+    .legend-node {
+      fill: var(--legend);
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .divider {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.5;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--arrow);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--arrow);
+      stroke: none;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+      dominant-baseline: middle;
+    }
+
+    .section-label {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .node-title {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .arrow-label {
+      fill: var(--arrow);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .runtime-result {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .legend-label {
+      font-size: 14px;
+    }
+
+    .fallback {
+      font-size: 16px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Как объект Agent передаёт управление</h1>
+
+  <svg
+    id="diagram"
+    class="canvas"
+    viewBox="0 0 1000 390"
+    width="1000"
+    height="390"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-desc"
+  >
+    <title id="diagram-title">Переключение активного агента между двумя ходами</title>
+    <desc id="diagram-desc">
+      Triage вызывает transfer_to_refunds. Функция возвращает объект refund Agent.
+      Рантайм распознаёт тип Agent, сохраняет refund как активного, и следующий ход
+      обрабатывает агент возвратов.
+    </desc>
+  </svg>
+
+  <script>
+    const diagramData = Object.freeze([
+      {
+        type: "meta",
+        origin: [40, 24],
+        scale: [1, 1],
+        zero: 0,
+        unit: 1,
+        radius: 12,
+        arrowHead: [11, 6],
+        dash: [7, 7],
+        fallbackPoints: [[460, 145], [460, 180], [460, 215]],
+        fallbackLines: [
+          "Схема: triage вызывает transfer_to_refunds;",
+          "функция возвращает refund Agent, рантайм делает его активным;",
+          "следующий ход обрабатывает refund."
+        ]
+      },
+      {
+        type: "region",
+        box: [0, 20, 640, 290],
+        className: "turn"
+      },
+      {
+        type: "region",
+        box: [680, 20, 240, 290],
+        className: "turn next"
+      },
+      {
+        type: "divider",
+        from: [660, 54],
+        to: [660, 296]
+      },
+      {
+        type: "text",
+        point: [24, 48],
+        offset: [0, 0],
+        anchor: "start",
+        className: "section-label",
+        value: "Ход разговора: triage"
+      },
+      {
+        type: "text",
+        point: [704, 48],
+        offset: [0, 0],
+        anchor: "start",
+        className: "section-label",
+        value: "Следующий ход: refund"
+      },
+      {
+        type: "arrow",
+        from: [200, 120],
+        to: [240, 120]
+      },
+      {
+        type: "arrow",
+        from: [420, 120],
+        to: [460, 120]
+      },
+      {
+        type: "arrow",
+        from: [542, 160],
+        to: [542, 220]
+      },
+      {
+        type: "arrow",
+        from: [625, 252],
+        to: [705, 237]
+      },
+      {
+        type: "text",
+        point: [220, 69],
+        offset: [0, 0],
+        anchor: "middle",
+        className: "arrow-label",
+        value: "вызывает"
+      },
+      {
+        type: "text",
+        point: [440, 69],
+        offset: [0, 0],
+        anchor: "middle",
+        className: "arrow-label",
+        value: "возвращает"
+      },
+      {
+        type: "node",
+        box: [25, 80, 175, 80],
+        className: "node",
+        lines: [
+          {
+            point: [112, 105],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "node-title",
+            value: "triage"
+          },
+          {
+            point: [112, 135],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "выбирает инструмент"
+          }
+        ]
+      },
+      {
+        type: "node",
+        box: [240, 80, 180, 80],
+        className: "node tool-node",
+        lines: [
+          {
+            point: [330, 102],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "инструмент"
+          },
+          {
+            point: [330, 128],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "code",
+            value: "transfer_to_refunds"
+          }
+        ]
+      },
+      {
+        type: "node",
+        box: [460, 80, 165, 80],
+        className: "node agent-node",
+        lines: [
+          {
+            point: [542, 103],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "результат функции"
+          },
+          {
+            point: [542, 132],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "node-title",
+            value: "refund Agent"
+          }
+        ]
+      },
+      {
+        type: "node",
+        box: [240, 220, 385, 65],
+        className: "node runtime-node",
+        lines: [
+          {
+            point: [432, 239],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "Рантайм проверяет тип результата"
+          },
+          {
+            point: [432, 263],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "runtime-result",
+            value: "Agent → active = refund"
+          }
+        ]
+      },
+      {
+        type: "node",
+        box: [705, 190, 190, 95],
+        className: "node agent-node",
+        lines: [
+          {
+            point: [800, 211],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "активный агент"
+          },
+          {
+            point: [800, 239],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "node-title",
+            value: "refund"
+          },
+          {
+            point: [800, 266],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "small",
+            value: "обрабатывает следующий ход"
+          }
+        ]
+      },
+      {
+        type: "node",
+        box: [0, 325, 920, 35],
+        className: "legend-node",
+        lines: [
+          {
+            point: [460, 343],
+            offset: [0, 0],
+            anchor: "middle",
+            className: "legend-label",
+            value: "Обычный результат: active не меняется · объект Agent: active становится refund"
+          }
+        ]
+      }
+    ]);
+
+    const meta = diagramData.find(({ type }) => type === "meta");
+    const [originX, originY] = meta.origin;
+    const [scaleX, scaleY] = meta.scale;
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function makeElement(name, className) {
+      const element = document.createElementNS(namespace, name);
+      if (className) {
+        element.setAttribute("class", className);
+      }
+      return element;
+    }
+
+    function drawRect(item) {
+      const [x, y, width, height] = item.box;
+      const rect = makeElement("rect", item.className);
+      rect.setAttribute("x", sx(x));
+      rect.setAttribute("y", sy(y));
+      rect.setAttribute("width", sx(x + width) - sx(x));
+      rect.setAttribute("height", sy(y + height) - sy(y));
+      rect.setAttribute("rx", sx(meta.radius) - sx(meta.zero));
+      rect.setAttribute("ry", sy(meta.radius) - sy(meta.zero));
+      svg.append(rect);
+    }
+
+    function drawText(item) {
+      const [x, y] = item.point;
+      const [paddingX, paddingY] = item.offset;
+      const label = makeElement("text", item.className);
+      label.setAttribute("x", sx(x) + paddingX);
+      label.setAttribute("y", sy(y) + paddingY);
+      label.setAttribute("text-anchor", item.anchor);
+      label.textContent = item.value;
+      svg.append(label);
+    }
+
+    function drawLine(item) {
+      const [xStart, yStart] = item.from;
+      const [xEnd, yEnd] = item.to;
+      const line = makeElement("line", "divider");
+      line.setAttribute("x1", sx(xStart));
+      line.setAttribute("y1", sy(yStart));
+      line.setAttribute("x2", sx(xEnd));
+      line.setAttribute("y2", sy(yEnd));
+      line.setAttribute(
+        "stroke-dasharray",
+        meta.dash
+          .map(value => sx(value) - sx(meta.zero))
+          .join(" ")
+      );
+      svg.append(line);
+    }
+
+    function drawArrow(item) {
+      const [xStart, yStart] = item.from;
+      const [xEnd, yEnd] = item.to;
+      const [headLength, headHalfWidth] = meta.arrowHead;
+      const deltaX = xEnd - xStart;
+      const deltaY = yEnd - yStart;
+      const length = Math.hypot(deltaX, deltaY) || meta.unit;
+      const unitX = deltaX / length;
+      const unitY = deltaY / length;
+      const baseX = xEnd - unitX * headLength;
+      const baseY = yEnd - unitY * headLength;
+      const normalX = -unitY;
+      const normalY = unitX;
+
+      const shaft = makeElement("line", "arrow");
+      shaft.setAttribute("x1", sx(xStart));
+      shaft.setAttribute("y1", sy(yStart));
+      shaft.setAttribute("x2", sx(baseX));
+      shaft.setAttribute("y2", sy(baseY));
+      svg.append(shaft);
+
+      const head = makeElement("polygon", "arrow-head");
+      const points = [
+        [xEnd, yEnd],
+        [
+          baseX + normalX * headHalfWidth,
+          baseY + normalY * headHalfWidth
+        ],
+        [
+          baseX - normalX * headHalfWidth,
+          baseY - normalY * headHalfWidth
+        ]
+      ];
+      head.setAttribute(
+        "points",
+        points
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" ")
+      );
+      svg.append(head);
+    }
+
+    try {
+      diagramData
+        .filter(({ type }) => type === "region")
+        .forEach(drawRect);
+
+      diagramData
+        .filter(({ type }) => type === "divider")
+        .forEach(drawLine);
+
+      diagramData
+        .filter(({ type }) => type === "arrow")
+        .forEach(drawArrow);
+
+      diagramData
+        .filter(({ type }) => type === "node")
+        .forEach(item => {
+          drawRect(item);
+          item.lines.forEach(drawText);
+        });
+
+      diagramData
+        .filter(({ type }) => type === "text")
+        .forEach(drawText);
+    } catch (error) {
+      svg.replaceChildren();
+
+      meta.fallbackLines.forEach((value, position) => {
+        const [x, y] = meta.fallbackPoints.at(position);
+        const label = makeElement("text", "fallback");
+        label.setAttribute("x", sx(x));
+        label.setAttribute("y", sy(y));
+        label.setAttribute("text-anchor", "middle");
+        label.textContent = value;
+        svg.append(label);
+      });
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

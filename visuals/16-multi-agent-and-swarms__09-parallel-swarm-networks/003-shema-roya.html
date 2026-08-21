@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Общая очередь вместо центрального раздатчика</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: aliceblue;
+      --surface: white;
+      --surface-soft: lavender;
+      --queue: royalblue;
+      --queue-soft: lightcyan;
+      --worker: midnightblue;
+      --worker-soft: whitesmoke;
+      --result: seagreen;
+      --result-soft: honeydew;
+      --feedback: darkorange;
+      --text: midnightblue;
+      --muted: slategray;
+      --line: lightslategray;
+      --on-strong: white;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: midnightblue;
+        --surface: darkslategray;
+        --surface-soft: darkslateblue;
+        --queue: lightskyblue;
+        --queue-soft: darkslateblue;
+        --worker: lightsteelblue;
+        --worker-soft: darkslategray;
+        --result: lightgreen;
+        --result-soft: darkgreen;
+        --feedback: gold;
+        --text: white;
+        --muted: lightsteelblue;
+        --line: slategray;
+        --on-strong: midnightblue;
+      }
+    }
+
+    html,
+    body,
+    figure,
+    svg {
+      background: var(--page);
+    }
+
+    body {
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: auto;
+      max-width: 1000px;
+    }
+
+    figcaption {
+      color: var(--text);
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      font-family: inherit;
+    }
+
+    .panel {
+      stroke-width: 2px;
+    }
+
+    .queue-panel {
+      fill: var(--surface);
+      stroke: var(--queue);
+    }
+
+    .worker-panel {
+      fill: var(--worker-soft);
+      stroke: var(--worker);
+    }
+
+    .pool-panel {
+      fill: var(--result-soft);
+      stroke: var(--result);
+    }
+
+    .chip {
+      fill: var(--queue-soft);
+      stroke: var(--queue);
+      stroke-width: 1px;
+    }
+
+    .count-chip {
+      fill: var(--queue);
+      stroke: var(--queue);
+      stroke-width: 1px;
+    }
+
+    .callout {
+      fill: var(--page);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .flow {
+      fill: none;
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .pull-flow,
+    .pull-head {
+      stroke: var(--queue);
+    }
+
+    .pull-head {
+      fill: var(--queue);
+    }
+
+    .write-flow,
+    .write-head {
+      stroke: var(--result);
+    }
+
+    .write-head {
+      fill: var(--result);
+    }
+
+    .feedback-flow,
+    .feedback-head {
+      stroke: var(--feedback);
+    }
+
+    .feedback-head {
+      fill: var(--feedback);
+    }
+
+    text {
+      fill: var(--text);
+    }
+
+    .queue-title {
+      fill: var(--queue);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .queue-subtitle {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .chip-label {
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .count-label {
+      fill: var(--on-strong);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .worker-title {
+      fill: var(--worker);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .worker-subtitle {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .pool-title {
+      fill: var(--result);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .pool-subtitle {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .callout-label {
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .feedback-label {
+      fill: var(--feedback);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <figcaption id="diagram-title">
+      Общая очередь вместо центрального раздатчика
+    </figcaption>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1000 460"
+      width="1000"
+      height="460"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Четыре воркера независимо забирают задания из общей очереди и
+        записывают ответы в общий пул результатов.
+      </desc>
+    </svg>
+
+    <noscript>
+      Схема показывает общую очередь, воркеров A, B, C и D и общий пул
+      результатов.
+    </noscript>
+  </figure>
+
+  <script>
+    const diagramData = [
+      {
+        kind: "config",
+        origin: { x: 0, y: 0 },
+        scale: { x: 10, y: 10 },
+        zero: 0,
+        corner: 1.2,
+        smallCorner: 0.7,
+        arrowLength: 1.5,
+        arrowHalfWidth: 0.75,
+        fallback: { x: 50, y: 23 }
+      },
+      {
+        kind: "arrow",
+        className: "pull",
+        points: [
+          { x: 15.5, y: 14.5 },
+          { x: 15.5, y: 24.5 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "pull",
+        points: [
+          { x: 38.5, y: 14.5 },
+          { x: 38.5, y: 24.5 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "pull",
+        points: [
+          { x: 61.5, y: 14.5 },
+          { x: 61.5, y: 24.5 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "pull",
+        points: [
+          { x: 84.5, y: 14.5 },
+          { x: 84.5, y: 24.5 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "write",
+        points: [
+          { x: 15.5, y: 33.5 },
+          { x: 15.5, y: 36.5 },
+          { x: 28, y: 36.5 },
+          { x: 28, y: 40 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "write",
+        points: [
+          { x: 38.5, y: 33.5 },
+          { x: 38.5, y: 40 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "write",
+        points: [
+          { x: 61.5, y: 33.5 },
+          { x: 61.5, y: 40 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "write",
+        points: [
+          { x: 84.5, y: 33.5 },
+          { x: 84.5, y: 36.5 },
+          { x: 72, y: 36.5 },
+          { x: 72, y: 40 }
+        ]
+      },
+      {
+        kind: "arrow",
+        className: "feedback",
+        points: [
+          { x: 93, y: 29 },
+          { x: 96, y: 29 },
+          { x: 96, y: 9.5 },
+          { x: 93, y: 9.5 }
+        ]
+      },
+      {
+        kind: "box",
+        className: "panel queue-panel",
+        x: 7,
+        y: 3,
+        width: 86,
+        height: 11.5,
+        radius: "corner"
+      },
+      {
+        kind: "box",
+        className: "chip count-chip",
+        x: 10,
+        y: 9.7,
+        width: 14,
+        height: 3.2,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "chip",
+        x: 27,
+        y: 9.7,
+        width: 18,
+        height: 3.2,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "chip",
+        x: 47,
+        y: 9.7,
+        width: 23,
+        height: 3.2,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "chip",
+        x: 72,
+        y: 9.7,
+        width: 18,
+        height: 3.2,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "callout",
+        x: 40,
+        y: 18.6,
+        width: 20,
+        height: 3.3,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "panel worker-panel",
+        x: 7,
+        y: 24.5,
+        width: 17,
+        height: 9,
+        radius: "corner"
+      },
+      {
+        kind: "box",
+        className: "panel worker-panel",
+        x: 30,
+        y: 24.5,
+        width: 17,
+        height: 9,
+        radius: "corner"
+      },
+      {
+        kind: "box",
+        className: "panel worker-panel",
+        x: 53,
+        y: 24.5,
+        width: 17,
+        height: 9,
+        radius: "corner"
+      },
+      {
+        kind: "box",
+        className: "panel worker-panel",
+        x: 76,
+        y: 24.5,
+        width: 17,
+        height: 9,
+        radius: "corner"
+      },
+      {
+        kind: "box",
+        className: "callout",
+        x: 41,
+        y: 35.1,
+        width: 18,
+        height: 3.1,
+        radius: "smallCorner"
+      },
+      {
+        kind: "box",
+        className: "panel pool-panel",
+        x: 15,
+        y: 40,
+        width: 70,
+        height: 5.5,
+        radius: "corner"
+      },
+      {
+        kind: "label",
+        className: "queue-title",
+        x: 50,
+        y: 6.6,
+        anchor: "middle",
+        text: "Общая очередь"
+      },
+      {
+        kind: "label",
+        className: "queue-subtitle",
+        x: 50,
+        y: 8.5,
+        anchor: "middle",
+        text: "ещё не взятые задания"
+      },
+      {
+        kind: "label",
+        className: "count-label",
+        x: 17,
+        y: 11.8,
+        anchor: "middle",
+        text: "120 фрагментов"
+      },
+      {
+        kind: "label",
+        className: "chip-label",
+        x: 36,
+        y: 11.8,
+        anchor: "middle",
+        text: "простая правка"
+      },
+      {
+        kind: "label",
+        className: "chip-label",
+        x: 58.5,
+        y: 11.8,
+        anchor: "middle",
+        text: "синхронизация звука"
+      },
+      {
+        kind: "label",
+        className: "chip-label",
+        x: 81,
+        y: 11.8,
+        anchor: "middle",
+        text: "следующий фрагмент"
+      },
+      {
+        kind: "label",
+        className: "callout-label",
+        x: 50,
+        y: 20.8,
+        anchor: "middle",
+        text: "забирают независимо"
+      },
+      {
+        kind: "label",
+        className: "worker-title",
+        x: 15.5,
+        y: 28.5,
+        anchor: "middle",
+        text: "Воркер A"
+      },
+      {
+        kind: "label",
+        className: "worker-subtitle",
+        x: 15.5,
+        y: 31.2,
+        anchor: "middle",
+        text: "берёт сам"
+      },
+      {
+        kind: "label",
+        className: "worker-title",
+        x: 38.5,
+        y: 28.5,
+        anchor: "middle",
+        text: "Воркер B"
+      },
+      {
+        kind: "label",
+        className: "worker-subtitle",
+        x: 38.5,
+        y: 31.2,
+        anchor: "middle",
+        text: "берёт сам"
+      },
+      {
+        kind: "label",
+        className: "worker-title",
+        x: 61.5,
+        y: 28.5,
+        anchor: "middle",
+        text: "Воркер C"
+      },
+      {
+        kind: "label",
+        className: "worker-subtitle",
+        x: 61.5,
+        y: 31.2,
+        anchor: "middle",
+        text: "берёт сам"
+      },
+      {
+        kind: "label",
+        className: "worker-title",
+        x: 84.5,
+        y: 28.5,
+        anchor: "middle",
+        text: "Воркер D"
+      },
+      {
+        kind: "label",
+        className: "worker-subtitle",
+        x: 84.5,
+        y: 31.2,
+        anchor: "middle",
+        text: "берёт сам"
+      },
+      {
+        kind: "label",
+        className: "callout-label",
+        x: 50,
+        y: 37.2,
+        anchor: "middle",
+        text: "записывают ответы"
+      },
+      {
+        kind: "label",
+        className: "feedback-label",
+        x: 94.7,
+        y: 21.7,
+        anchor: "end",
+        text: "новая задача"
+      },
+      {
+        kind: "label",
+        className: "pool-title",
+        x: 50,
+        y: 43.1,
+        anchor: "middle",
+        text: "Общий пул результатов"
+      },
+      {
+        kind: "label",
+        className: "pool-subtitle",
+        x: 50,
+        y: 44.8,
+        anchor: "middle",
+        text: "готовые ответы"
+      }
+    ];
+
+    const config = diagramData.find((item) => item.kind === "config");
+    const origin = Object.freeze(config.origin);
+    const scale = Object.freeze(config.scale);
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale.y;
+    }
+
+    const svg = document.getElementById("diagram");
+
+    function makeElement(name, attributes, content) {
+      const element = document.createElementNS(svg.namespaceURI, name);
+
+      for (const [key, value] of Object.entries(attributes)) {
+        element.setAttribute(key, value);
+      }
+
+      if (content) {
+        element.textContent = content;
+      }
+
+      return element;
+    }
+
+    function drawBox(item) {
+      const radius = config[item.radius];
+
+      svg.append(
+        makeElement("rect", {
+          class: item.className,
+          x: sx(item.x),
+          y: sy(item.y),
+          width: sx(item.x + item.width) - sx(item.x),
+          height: sy(item.y + item.height) - sy(item.y),
+          rx: sx(radius) - sx(config.zero),
+          ry: sy(radius) - sy(config.zero)
+        })
+      );
+    }
+
+    function drawLabel(item) {
+      svg.append(
+        makeElement(
+          "text",
+          {
+            class: item.className,
+            x: sx(item.x),
+            y: sy(item.y),
+            "text-anchor": item.anchor,
+            "dominant-baseline": "middle"
+          },
+          item.text
+        )
+      );
+    }
+
+    function drawArrow(item) {
+      const route = item.points
+        .map((point) => `${sx(point.x)},${sy(point.y)}`)
+        .join(" ");
+
+      svg.append(
+        makeElement("polyline", {
+          class: `flow ${item.className}-flow`,
+          points: route
+        })
+      );
+
+      let previous;
+      let tip;
+
+      for (const point of item.points) {
+        previous = tip;
+        tip = point;
+      }
+
+      const dx = tip.x - previous.x;
+      const dy = tip.y - previous.y;
+      const length = Math.hypot(dx, dy);
+
+      if (!length) {
+        return;
+      }
+
+      const ux = dx / length;
+      const uy = dy / length;
+      const baseX = tip.x - ux * config.arrowLength;
+      const baseY = tip.y - uy * config.arrowLength;
+      const sideX = -uy * config.arrowHalfWidth;
+      const sideY = ux * config.arrowHalfWidth;
+
+      const head = [
+        `${sx(tip.x)},${sy(tip.y)}`,
+        `${sx(baseX + sideX)},${sy(baseY + sideY)}`,
+        `${sx(baseX - sideX)},${sy(baseY - sideY)}`
+      ].join(" ");
+
+      svg.append(
+        makeElement("polygon", {
+          class: `${item.className}-head`,
+          points: head
+        })
+      );
+    }
+
+    try {
+      for (const item of diagramData.filter((entry) => entry.kind === "arrow")) {
+        drawArrow(item);
+      }
+
+      for (const item of diagramData.filter((entry) => entry.kind === "box")) {
+        drawBox(item);
+      }
+
+      for (const item of diagramData.filter((entry) => entry.kind === "label")) {
+        drawLabel(item);
+      }
+    } catch (error) {
+      svg.replaceChildren();
+
+      svg.append(
+        makeElement(
+          "text",
+          {
+            class: "fallback",
+            x: sx(config.fallback.x),
+            y: sy(config.fallback.y),
+            "text-anchor": "middle",
+            "dominant-baseline": "middle"
+          },
+          "Воркеры A, B, C и D берут задания из общей очереди и записывают ответы в общий пул."
+        )
+      );
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

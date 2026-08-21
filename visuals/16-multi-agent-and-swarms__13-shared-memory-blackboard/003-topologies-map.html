@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Message pool и доска с подписками</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --bg: #ffffff;
+    --ink: #172033;
+    --muted: #596579;
+    --line: #66758d;
+    --soft: #e9eef6;
+    --pool: #edf3ff;
+    --pool-strong: #3867d6;
+    --price: #167c65;
+    --price-soft: #dff5ee;
+    --order: #a15c00;
+    --order-soft: #fff0d6;
+    --alert: #b33a4a;
+    --alert-soft: #ffe5e9;
+    --divider: #c7d0df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --bg: #171d29;
+      --ink: #edf2fb;
+      --muted: #aeb9ca;
+      --line: #8391a8;
+      --soft: #252e3e;
+      --pool: #202e4b;
+      --pool-strong: #79a1ff;
+      --price: #68d6b5;
+      --price-soft: #183d35;
+      --order: #ffc56d;
+      --order-soft: #49351a;
+      --alert: #ff8897;
+      --alert-soft: #4b252d;
+      --divider: #3d485a;
+    }
+  }
+
+  html,
+  body {
+    margin: unset;
+    padding: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: unset;
+    padding: 12px 18px 8px;
+    font-size: 20px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .subtitle,
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .strong {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .mono {
+    fill: var(--ink);
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .agent-box,
+  .source-box {
+    fill: var(--soft);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .pool-box {
+    fill: var(--pool);
+    stroke: var(--pool-strong);
+    stroke-width: 2px;
+  }
+
+  .board-box {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .topic-price,
+  .target-price {
+    fill: var(--price-soft);
+    stroke: var(--price);
+    stroke-width: 2px;
+  }
+
+  .topic-order,
+  .target-order {
+    fill: var(--order-soft);
+    stroke: var(--order);
+    stroke-width: 2px;
+  }
+
+  .topic-alert,
+  .target-alert {
+    fill: var(--alert-soft);
+    stroke: var(--alert);
+    stroke-width: 2px;
+  }
+
+  .connection {
+    fill: none;
+    stroke: var(--pool-strong);
+    stroke-width: 2px;
+  }
+
+  .price-line {
+    fill: none;
+    stroke: var(--price);
+    stroke-width: 2px;
+  }
+
+  .order-line {
+    fill: none;
+    stroke: var(--order);
+    stroke-width: 2px;
+  }
+
+  .alert-line {
+    fill: none;
+    stroke: var(--alert);
+    stroke-width: 2px;
+  }
+
+  .price-fill {
+    fill: var(--price);
+  }
+
+  .order-fill {
+    fill: var(--order);
+  }
+
+  .alert-fill {
+    fill: var(--alert);
+  }
+
+  .pool-fill {
+    fill: var(--pool-strong);
+  }
+
+  .matrix-cell {
+    fill: var(--bg);
+    stroke: var(--pool-strong);
+    stroke-width: 1px;
+  }
+
+  .divider {
+    stroke: var(--divider);
+    stroke-width: 2px;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Message pool и доска с подписками</h1>
+  <svg id="canvas" viewBox="0 0 1200 460" width="1200" height="460"
+       preserveAspectRatio="xMidYMid meet"
+       role="img" aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Сравнение общего message pool и доски с подписками</title>
+    <desc id="svg-description">Слева шесть агентов читают шесть потоков общего лога, образуя тридцать шесть пар чтения. Справа агенты D, E и F получают только темы prices, orders и alerts.</desc>
+    <g id="diagram"></g>
+  </svg>
+</main>
+
+<script>
+const DATA = Object.freeze({
+  canvas: { width: 1200, height: 460 },
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  line: { arrowBack: 12, arrowHalf: 6, dash: 8, gap: 7 },
+  left: {
+    title: { x: 300, y: 25 },
+    subtitle: { x: 300, y: 49 },
+    agentLeft: 24,
+    agentRight: 142,
+    agentHalfHeight: 16,
+    poolLeft: 244,
+    poolRight: 570,
+    poolTop: 73,
+    poolBottom: 382,
+    poolTitle: { x: 407, y: 96 },
+    matrixTitle: { x: 407, y: 121 },
+    matrixLeft: 304,
+    matrixTop: 137,
+    cellWidth: 30,
+    cellHeight: 29,
+    footer: { x: 407, y: 337 },
+    note: { x: 407, y: 360 },
+    agents: [
+      { name: "агент A", y: 103 },
+      { name: "агент B", y: 153 },
+      { name: "агент C", y: 203 },
+      { name: "агент D", y: 253 },
+      { name: "агент E", y: 303 },
+      { name: "агент F", y: 353 }
+    ],
+    streams: [
+      { key: "A", tone: "price-fill" },
+      { key: "B", tone: "order-fill" },
+      { key: "C", tone: "alert-fill" },
+      { key: "D", tone: "price-fill" },
+      { key: "E", tone: "order-fill" },
+      { key: "F", tone: "alert-fill" }
+    ],
+    dotInset: 9
+  },
+  divider: { x: 600, top: 16, bottom: 442 },
+  right: {
+    title: { x: 900, y: 25 },
+    subtitle: { x: 900, y: 49 },
+    board: { left: 777, right: 979, top: 72, bottom: 394 },
+    boardLabel: { x: 878, y: 91 },
+    sourceLeft: 630,
+    sourceRight: 746,
+    topicLeft: 800,
+    topicRight: 956,
+    targetLeft: 1022,
+    targetRight: 1174,
+    halfHeight: 30,
+    rows: [
+      {
+        y: 140,
+        source: "цены",
+        publish: "публикация",
+        topic: "тема: prices",
+        target: "агент D",
+        only: "только prices",
+        boxClass: "topic-price",
+        targetClass: "target-price",
+        lineClass: "price-line",
+        fillClass: "price-fill"
+      },
+      {
+        y: 235,
+        source: "заказы",
+        publish: "публикация",
+        topic: "тема: orders",
+        target: "агент E",
+        only: "только orders",
+        boxClass: "topic-order",
+        targetClass: "target-order",
+        lineClass: "order-line",
+        fillClass: "order-fill"
+      },
+      {
+        y: 330,
+        source: "тревоги",
+        publish: "публикация",
+        topic: "тема: alerts",
+        target: "агент F",
+        only: "только alerts",
+        boxClass: "topic-alert",
+        targetClass: "target-alert",
+        lineClass: "alert-line",
+        fillClass: "alert-fill"
+      }
+    ],
+    publishOffset: 22,
+    targetMainOffset: 7,
+    targetSubOffset: 13,
+    footer: { x: 900, y: 428 },
+    note: { x: 900, y: 448 }
+  },
+  text: {
+    leftTitle: "Общий message pool",
+    leftSubtitle: "каждый агент читает каждый поток",
+    poolTitle: "общий лог",
+    matrixTitle: "6 потоков сообщений",
+    pairs: "6 × 6 = 36 пар чтения",
+    noisy: "полная история, но много лишнего контекста",
+    rightTitle: "Доска с подписками",
+    rightSubtitle: "сообщение доставляется по теме",
+    board: "темы",
+    rightFooter: "D, E и F получают только свои темы",
+    rightNote: "prices → D   ·   orders → E   ·   alerts → F",
+    fallback: "Схема: 6 агентов образуют 36 пар чтения в общем логе; D, E и F получают только prices, orders и alerts."
+  }
+});
+
+const origin = Object.freeze(DATA.origin);
+const scale = Object.freeze(DATA.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("diagram");
+
+  const element = (name, attrs, parent = root) => {
+    const node = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, String(value));
+    }
+    parent.appendChild(node);
+    return node;
+  };
+
+  const text = (x, y, value, className, anchor = "middle") => {
+    const node = element("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    });
+    node.textContent = value;
+    return node;
+  };
+
+  const line = (a, b, className) => element("line", {
+    x1: sx(a.x),
+    y1: sy(a.y),
+    x2: sx(b.x),
+    y2: sy(b.y),
+    class: className
+  });
+
+  const polygon = (points, className) => element("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: className
+  });
+
+  const box = (left, top, right, bottom, className) => polygon([
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom }
+  ], className);
+
+  const arrow = (from, to, lineClass, fillClass) => {
+    line(from, to, lineClass);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const backX = to.x - ux * DATA.line.arrowBack;
+    const backY = to.y - uy * DATA.line.arrowBack;
+    const sideX = -uy * DATA.line.arrowHalf;
+    const sideY = ux * DATA.line.arrowHalf;
+    polygon([
+      { x: to.x, y: to.y },
+      { x: backX + sideX, y: backY + sideY },
+      { x: backX - sideX, y: backY - sideY }
+    ], fillClass);
+  };
+
+  text(DATA.left.title.x, DATA.left.title.y, DATA.text.leftTitle, "panel-title");
+  text(DATA.left.subtitle.x, DATA.left.subtitle.y, DATA.text.leftSubtitle, "subtitle");
+
+  box(
+    DATA.left.poolLeft,
+    DATA.left.poolTop,
+    DATA.left.poolRight,
+    DATA.left.poolBottom,
+    "pool-box"
+  );
+
+  text(DATA.left.poolTitle.x, DATA.left.poolTitle.y, DATA.text.poolTitle, "strong");
+  text(DATA.left.matrixTitle.x, DATA.left.matrixTitle.y, DATA.text.matrixTitle, "small");
+
+  for (const agent of DATA.left.agents) {
+    box(
+      DATA.left.agentLeft,
+      agent.y - DATA.left.agentHalfHeight,
+      DATA.left.agentRight,
+      agent.y + DATA.left.agentHalfHeight,
+      "agent-box"
+    );
+    text(
+      (DATA.left.agentLeft + DATA.left.agentRight) / DATA.scale.x / (DATA.scale.x + DATA.scale.x),
+      agent.y,
+      agent.name,
+      "label"
+    );
+    arrow(
+      { x: DATA.left.poolLeft, y: agent.y },
+      { x: DATA.left.agentRight, y: agent.y },
+      "connection",
+      "pool-fill"
+    );
+  }
+
+  for (const [rowIndex, agent] of DATA.left.agents.entries()) {
+    for (const [columnIndex, stream] of DATA.left.streams.entries()) {
+      const left = DATA.left.matrixLeft + columnIndex * DATA.left.cellWidth;
+      const top = DATA.left.matrixTop + rowIndex * DATA.left.cellHeight;
+      const right = left + DATA.left.cellWidth;
+      const bottom = top + DATA.left.cellHeight;
+      box(left, top, right, bottom, "matrix-cell");
+      box(
+        left + DATA.left.dotInset,
+        top + DATA.left.dotInset,
+        right - DATA.left.dotInset,
+        bottom - DATA.left.dotInset,
+        stream.tone
+      );
+    }
+  }
+
+  text(DATA.left.footer.x, DATA.left.footer.y, DATA.text.pairs, "strong");
+  text(DATA.left.note.x, DATA.left.note.y, DATA.text.noisy, "small");
+
+  line(
+    { x: DATA.divider.x, y: DATA.divider.top },
+    { x: DATA.divider.x, y: DATA.divider.bottom },
+    "divider"
+  );
+
+  text(DATA.right.title.x, DATA.right.title.y, DATA.text.rightTitle, "panel-title");
+  text(DATA.right.subtitle.x, DATA.right.subtitle.y, DATA.text.rightSubtitle, "subtitle");
+
+  const board = box(
+    DATA.right.board.left,
+    DATA.right.board.top,
+    DATA.right.board.right,
+    DATA.right.board.bottom,
+    "board-box"
+  );
+  board.setAttribute(
+    "stroke-dasharray",
+    `${sx(DATA.line.dash)} ${sx(DATA.line.gap)}`
+  );
+  text(DATA.right.boardLabel.x, DATA.right.boardLabel.y, DATA.text.board, "small");
+
+  for (const row of DATA.right.rows) {
+    box(
+      DATA.right.sourceLeft,
+      row.y - DATA.right.halfHeight,
+      DATA.right.sourceRight,
+      row.y + DATA.right.halfHeight,
+      "source-box"
+    );
+    text(
+      (DATA.right.sourceLeft + DATA.right.sourceRight) / DATA.scale.x / (DATA.scale.x + DATA.scale.x),
+      row.y,
+      row.source,
+      "label"
+    );
+
+    text(
+      DATA.right.sourceRight,
+      row.y - DATA.right.publishOffset,
+      row.publish,
+      "small",
+      "end"
+    );
+
+    arrow(
+      { x: DATA.right.sourceRight, y: row.y },
+      { x: DATA.right.topicLeft, y: row.y },
+      row.lineClass,
+      row.fillClass
+    );
+
+    box(
+      DATA.right.topicLeft,
+      row.y - DATA.right.halfHeight,
+      DATA.right.topicRight,
+      row.y + DATA.right.halfHeight,
+      row.boxClass
+    );
+    text(
+      (DATA.right.topicLeft + DATA.right.topicRight) / DATA.scale.x / (DATA.scale.x + DATA.scale.x),
+      row.y,
+      row.topic,
+      "mono"
+    );
+
+    arrow(
+      { x: DATA.right.topicRight, y: row.y },
+      { x: DATA.right.targetLeft, y: row.y },
+      row.lineClass,
+      row.fillClass
+    );
+
+    box(
+      DATA.right.targetLeft,
+      row.y - DATA.right.halfHeight,
+      DATA.right.targetRight,
+      row.y + DATA.right.halfHeight,
+      row.targetClass
+    );
+    text(
+      (DATA.right.targetLeft + DATA.right.targetRight) / DATA.scale.x / (DATA.scale.x + DATA.scale.x),
+      row.y - DATA.right.targetMainOffset,
+      row.target,
+      "strong"
+    );
+    text(
+      (DATA.right.targetLeft + DATA.right.targetRight) / DATA.scale.x / (DATA.scale.x + DATA.scale.x),
+      row.y + DATA.right.targetSubOffset,
+      row.only,
+      "small"
+    );
+  }
+
+  text(DATA.right.footer.x, DATA.right.footer.y, DATA.text.rightFooter, "strong");
+  text(DATA.right.note.x, DATA.right.note.y, DATA.text.rightNote, "mono");
+} catch (error) {
+  const root = document.getElementById("diagram");
+  root.replaceChildren();
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  fallback.setAttribute("x", sx(DATA.canvas.width / (DATA.scale.x + DATA.scale.x)));
+  fallback.setAttribute("y", sy(DATA.canvas.height / (DATA.scale.y + DATA.scale.y)));
+  fallback.setAttribute("class", "fallback");
+  fallback.setAttribute("text-anchor", "middle");
+  fallback.setAttribute("dominant-baseline", "middle");
+  fallback.textContent = DATA.text.fallback;
+  root.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

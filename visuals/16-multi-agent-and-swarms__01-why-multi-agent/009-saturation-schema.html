@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Как файлы заполняют контекстное окно</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --ink: #172033;
+    --muted: #5f6b7d;
+    --frame: #aab4c5;
+    --grid: #ffffff;
+    --file-a: #5b8def;
+    --file-b: #467bd8;
+    --file-c: #3569c1;
+    --file-d: #2857a8;
+    --other: #f0a24a;
+    --blocked: #d84f5f;
+    --soft: #e6ebf3;
+    --panel: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #eef3fb;
+      --muted: #aeb9ca;
+      --frame: #617087;
+      --grid: #172131;
+      --file-a: #70a2ff;
+      --file-b: #5b91ef;
+      --file-c: #477ed6;
+      --file-d: #386bbb;
+      --other: #efad61;
+      --blocked: #f06a78;
+      --soft: #273244;
+      --panel: #151e2c;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  header {
+    background: var(--page);
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 24px;
+    line-height: normal;
+  }
+
+  .lead {
+    margin: unset;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+    border: 1px solid var(--frame);
+  }
+
+  text {
+    font-family: inherit;
+    fill: var(--ink);
+    dominant-baseline: middle;
+  }
+
+  .caption {
+    font-size: 14px;
+    fill: var(--muted);
+  }
+
+  .panel-title {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .bar-label {
+    font-size: 18px;
+    font-weight: bold;
+    fill: #ffffff;
+  }
+
+  .milestone {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend {
+    font-size: 14px;
+  }
+
+  .warning {
+    font-size: 14px;
+    font-weight: bold;
+    fill: var(--blocked);
+  }
+
+  .file-a {
+    fill: var(--file-a);
+  }
+
+  .file-b {
+    fill: var(--file-b);
+  }
+
+  .file-c {
+    fill: var(--file-c);
+  }
+
+  .file-d {
+    fill: var(--file-d);
+  }
+
+  .other {
+    fill: var(--other);
+  }
+
+  .blocked {
+    fill: var(--blocked);
+  }
+
+  .remainder {
+    fill: var(--blocked);
+  }
+
+  .outline {
+    fill: none;
+    stroke: var(--frame);
+    stroke-width: 2px;
+  }
+
+  .divider {
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .tick {
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+
+  .guide {
+    stroke: var(--muted);
+    stroke-width: 1.5px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 2px;
+  }
+
+  .warning-line {
+    fill: none;
+    stroke: var(--blocked);
+    stroke-width: 3px;
+  }
+
+  .arrow-head {
+    fill: var(--muted);
+  }
+
+  .warning-head {
+    fill: var(--blocked);
+  }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    border: 2px solid var(--blocked);
+    font-size: 16px;
+  }
+
+  [hidden] {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Как 50 файлов по 4k заполняют окно в 200k</h1>
+  <p class="lead">Общая вместимость окна — это место и для кода, и для работы агента.</p>
+</header>
+
+<svg id="diagram"
+     viewBox="0 0 1200 470"
+     width="1200"
+     height="470"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="diagram-title diagram-description">
+  <title id="diagram-title">Заполнение контекстного окна файлами</title>
+  <desc id="diagram-description">
+    Пятьдесят файлов по четыре тысячи токенов полностью занимают окно
+    в двести тысяч токенов. Если пятнадцать тысяч уже заняты служебным
+    контекстом, коду остаётся сто восемьдесят пять тысяч, или примерно
+    сорок шесть файлов.
+  </desc>
+  <g id="drawing"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать: 50 файлов по 4k занимают все 200k токенов,
+  а служебный контекст сокращает доступное коду место до 185k — примерно
+  до 46 файлов.
+</p>
+
+<script>
+const data = [
+  {
+    origin: [55, 5],
+    scale: [9.7, 8.3],
+    zero: 0,
+    one: 1,
+    half: 0.5,
+    left: 8,
+    right: 108,
+    topY: 13,
+    topH: 12,
+    realY: 39,
+    realH: 9,
+    flowY: 5,
+    flowLabelY: 2,
+    upperLabelY: 9.5,
+    lowerLabelY: 29,
+    realTitleY: 34,
+    realLabelY: 52,
+    fileWidth: 2,
+    files: 50,
+    fileTokens: 4,
+    windowTokens: 200,
+    overheadTokens: 15,
+    codeTokens: 185,
+    approximateFiles: 46,
+    overheadWidth: 7.5,
+    codeStart: 15.5,
+    fullCodeWidth: 92,
+    remainderWidth: 0.5,
+    flowHead: [[106.4, 4], [108, 5], [106.4, 6]],
+    warningTail: [108, 34.8],
+    warningTip: [108, 39],
+    warningHead: [[107.1, 37.5], [108, 39], [108.9, 37.5]],
+    overheadGuide: [[12, 48], [12, 49.7]],
+    codeGuide: [[108, 48], [108, 49.7]],
+    labelPad: [0, 0]
+  },
+  { files: 10, tokens: 40, x: 28, y: 29, direction: "down" },
+  { files: 25, tokens: 100, x: 58, y: 9.5, direction: "up" },
+  { files: 40, tokens: 160, x: 88, y: 29, direction: "down" },
+  { files: 50, tokens: 200, x: 108, y: 9.5, direction: "up" }
+];
+
+const [cfg, ...milestones] = data;
+const [originX, originY] = cfg.origin;
+const [scaleX, scaleY] = cfg.scale;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const namespace = svg.namespaceURI;
+  const [milestoneTen, milestoneTwentyFive, milestoneForty] = milestones;
+
+  function node(tag, attributes, content) {
+    const element = document.createElementNS(namespace, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      element.setAttribute(name, String(value));
+    });
+    if (content !== undefined) {
+      element.textContent = content;
+    }
+    return element;
+  }
+
+  function add(tag, attributes, content, parent = drawing) {
+    const element = node(tag, attributes, content);
+    parent.appendChild(element);
+    return element;
+  }
+
+  function line(x1, y1, x2, y2, className, parent = drawing) {
+    return add("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    }, undefined, parent);
+  }
+
+  function rect(x, y, width, height, className, parent = drawing) {
+    return add("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      class: className
+    }, undefined, parent);
+  }
+
+  function label(x, y, content, className, anchor, dx, dy, parent = drawing) {
+    return add("text", {
+      x: sx(x) + dx,
+      y: sy(y) + dy,
+      class: className,
+      "text-anchor": anchor
+    }, content, parent);
+  }
+
+  function polygon(points, className, parent = drawing) {
+    const value = points
+      .map(([x, y]) => `${sx(x)},${sy(y)}`)
+      .join(" ");
+    return add("polygon", {
+      points: value,
+      class: className
+    }, undefined, parent);
+  }
+
+  const theoretical = add("g", {
+    "aria-label": "Теоретическое заполнение окна"
+  });
+
+  line(
+    cfg.left,
+    cfg.flowY,
+    cfg.right,
+    cfg.flowY,
+    "flow",
+    theoretical
+  );
+  polygon(cfg.flowHead, "arrow-head", theoretical);
+
+  label(
+    cfg.left,
+    cfg.flowLabelY,
+    "файлы добавляются по очереди",
+    "caption",
+    "start",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    theoretical
+  );
+  label(
+    cfg.right,
+    cfg.flowLabelY,
+    "после 50-го — места для рассуждений нет",
+    "warning",
+    "end",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    theoretical
+  );
+
+  for (
+    let index = cfg.zero;
+    index < cfg.files;
+    index += cfg.one
+  ) {
+    const x = cfg.left + index * cfg.fileWidth;
+    let className = "file-d";
+
+    if (index < milestoneTen.files) {
+      className = "file-a";
+    } else if (index < milestoneTwentyFive.files) {
+      className = "file-b";
+    } else if (index < milestoneForty.files) {
+      className = "file-c";
+    }
+
+    rect(
+      x,
+      cfg.topY,
+      cfg.fileWidth,
+      cfg.topH,
+      className,
+      theoretical
+    );
+
+    if (index > cfg.zero) {
+      line(
+        x,
+        cfg.topY,
+        x,
+        cfg.topY + cfg.topH,
+        "divider",
+        theoretical
+      );
+    }
+  }
+
+  rect(
+    cfg.left,
+    cfg.topY,
+    cfg.right - cfg.left,
+    cfg.topH,
+    "outline",
+    theoretical
+  );
+
+  label(
+    (cfg.left + cfg.right) * cfg.half,
+    cfg.topY + cfg.topH * cfg.half,
+    "50 файлов × 4k = 200k",
+    "bar-label",
+    "middle",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    theoretical
+  );
+
+  milestones.forEach((milestone) => {
+    const barEdge = milestone.direction === "up"
+      ? cfg.topY
+      : cfg.topY + cfg.topH;
+    const guideEdge = milestone.direction === "up"
+      ? milestone.y + cfg.half
+      : milestone.y - cfg.half;
+
+    line(
+      milestone.x,
+      barEdge,
+      milestone.x,
+      guideEdge,
+      "tick",
+      theoretical
+    );
+
+    label(
+      milestone.x,
+      milestone.y,
+      `${milestone.files} файлов → ${milestone.tokens}k`,
+      "milestone",
+      milestone.files === cfg.files ? "end" : "middle",
+      cfg.labelPad[0],
+      cfg.labelPad[1],
+      theoretical
+    );
+  });
+
+  const realistic = add("g", {
+    "aria-label": "Реальное заполнение окна"
+  });
+
+  label(
+    cfg.left,
+    cfg.realTitleY,
+    "Реально: то же окно уже содержит не только код",
+    "panel-title",
+    "start",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    realistic
+  );
+
+  label(
+    cfg.right,
+    cfg.realTitleY,
+    "последние файлы не помещаются",
+    "warning",
+    "end",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    realistic
+  );
+
+  line(
+    cfg.warningTail[0],
+    cfg.warningTail[1],
+    cfg.warningTip[0],
+    cfg.warningTip[1],
+    "warning-line",
+    realistic
+  );
+  polygon(cfg.warningHead, "warning-head", realistic);
+
+  rect(
+    cfg.left,
+    cfg.realY,
+    cfg.overheadWidth,
+    cfg.realH,
+    "other",
+    realistic
+  );
+
+  for (
+    let index = cfg.zero;
+    index < cfg.approximateFiles;
+    index += cfg.one
+  ) {
+    const x = cfg.codeStart + index * cfg.fileWidth;
+
+    rect(
+      x,
+      cfg.realY,
+      cfg.fileWidth,
+      cfg.realH,
+      "file-b",
+      realistic
+    );
+
+    if (index > cfg.zero) {
+      line(
+        x,
+        cfg.realY,
+        x,
+        cfg.realY + cfg.realH,
+        "divider",
+        realistic
+      );
+    }
+  }
+
+  rect(
+    cfg.codeStart + cfg.fullCodeWidth,
+    cfg.realY,
+    cfg.remainderWidth,
+    cfg.realH,
+    "remainder",
+    realistic
+  );
+
+  rect(
+    cfg.left,
+    cfg.realY,
+    cfg.right - cfg.left,
+    cfg.realH,
+    "outline",
+    realistic
+  );
+
+  line(
+    cfg.codeStart,
+    cfg.realY,
+    cfg.codeStart,
+    cfg.realY + cfg.realH,
+    "tick",
+    realistic
+  );
+
+  line(
+    cfg.overheadGuide[0][0],
+    cfg.overheadGuide[0][1],
+    cfg.overheadGuide[1][0],
+    cfg.overheadGuide[1][1],
+    "guide",
+    realistic
+  );
+
+  line(
+    cfg.codeGuide[0][0],
+    cfg.codeGuide[0][1],
+    cfg.codeGuide[1][0],
+    cfg.codeGuide[1][1],
+    "guide",
+    realistic
+  );
+
+  label(
+    cfg.left,
+    cfg.realLabelY,
+    "15k — промпт, задача, история, команды и ответы",
+    "legend",
+    "start",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    realistic
+  );
+
+  label(
+    cfg.right,
+    cfg.realLabelY,
+    "коду остаётся 185k ≈ 46 файлов",
+    "legend",
+    "end",
+    cfg.labelPad[0],
+    cfg.labelPad[1],
+    realistic
+  );
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
