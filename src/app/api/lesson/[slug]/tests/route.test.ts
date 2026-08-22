@@ -55,6 +55,12 @@ vi.mock("@/lib/practice/run-tests", () => ({
 }));
 
 const { isPassingRun, POST } = await import("./route");
+// Тот же мок, что видит route.ts (модуль ESM закэширован) — нужен, чтобы
+// проверить не только итоговый ответ, но и то, с чем маршрут ЗВАЛ runTests:
+// на фиксированном возврате мока тест на дубль иначе прошёл бы даже после
+// регрессии, которая вернула бы фильтр по имени функции.
+const { runTests } = await import("@/lib/practice/run-tests");
+const runTestsMock = vi.mocked(runTests);
 
 // Только валидация тела: она отвечает до loadConfig(), до чтения шага и до
 // спавна интерпретатора. Успешный путь без дубля — приёмка руками (Task 21).
@@ -113,6 +119,7 @@ describe("POST /api/lesson/[slug]/tests — многофайловое упра�
     closeProgressDb(dataDir);
     fs.rmSync(sourceDir, { recursive: true, force: true });
     fs.rmSync(dataDir, { recursive: true, force: true });
+    runTestsMock.mockClear();
   });
 
   it("гоняет тесты без фильтра, когда имя функции шага есть в двух файлах", async () => {
@@ -123,6 +130,11 @@ describe("POST /api/lesson/[slug]/tests — многофайловое упра�
     expect(body.result.warning).toBe(
       "Функция run есть в нескольких файлах упражнения — прогнан весь файл тестов",
     );
+    // Главное, что доказывает тест: сам вызов runTests пошёл без фильтра.
+    // filtered/warning в ответе — из фиксированного мока, а не из этого —
+    // регрессия, вернувшая `fn: step.exercise_fn`, эти два поля бы не тронула.
+    expect(runTestsMock).toHaveBeenCalledTimes(1);
+    expect(runTestsMock.mock.calls[0][0]).toMatchObject({ fn: undefined });
   });
 });
 

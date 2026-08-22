@@ -1,11 +1,12 @@
 import { loadConfig } from "@/lib/config";
 import { findExercise } from "@/lib/exercise/file";
 import { findPreviousImplementation, insertPreviousImplementation } from "@/lib/exercise/recall";
+import { readExerciseTree, resolveExerciseFile } from "@/lib/exercise/tree";
 import { findLesson } from "@/lib/source/catalog";
 
 interface Body {
   fn?: unknown;
-  /** Файл упражнения, в который встаёт прошлый код; не передан — exercise.py. */
+  /** Файл упражнения, в который встаёт прошлый код; не передан — резолвится по дереву (см. resolveExerciseFile). */
   file?: unknown;
 }
 
@@ -44,11 +45,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   }
 
   const { config, ref, previous } = resolved;
+  // Дерева может не быть вовсе — тогда имя файла не имеет значения,
+  // insertPreviousImplementation сам вернёт правильную ошибку.
+  const tree = readExerciseTree(config.sourceDir, ref);
+  const fileName = tree ? resolveExerciseFile(tree, fn, file) : file;
+
   // Прошлый код встаёт на место заготовки: спека прямо говорит, что дальше он
   // используется как есть, а не переписывается заново. Если в упражнении
   // этого урока функции нет вовсе, insertPreviousImplementation отдаёт
   // ошибку — файл не тронут, и отвечать 200 в этом случае нельзя.
-  const result = insertPreviousImplementation(config.sourceDir, ref, fn, previous, file);
+  const result = insertPreviousImplementation(config.sourceDir, ref, fn, previous, fileName);
   if ("error" in result) return Response.json({ error: result.error }, { status: 404 });
   return Response.json(result);
 }

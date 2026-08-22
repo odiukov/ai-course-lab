@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LessonRef } from "@/lib/source/catalog";
-import { canonicalFunctions, findTreeFile, readExerciseTree } from "./tree";
+import { canonicalFunctions, findTreeFile, readExerciseTree, resolveExerciseFile } from "./tree";
 
 const ref: LessonRef = {
   slug: "01-math__02-beta",
@@ -121,5 +121,43 @@ describe("findTreeFile", () => {
     const tree = readExerciseTree(makeMulti(), p19)!;
     expect(findTreeFile(tree, "secrets.py")).toBeNull();
     expect(findTreeFile(tree, "../../etc/passwd")).toBeNull();
+  });
+});
+
+describe("resolveExerciseFile", () => {
+  it("объявленный файл побеждает всегда, даже когда имя не совпадает ни с одним владельцем", () => {
+    const tree = readExerciseTree(makeMulti(), p19)!;
+    expect(resolveExerciseFile(tree, "run", "hooks.py")).toBe("hooks.py");
+  });
+
+  it("одно-файловая форма — всегда exercise.py, объявление не нужно", () => {
+    const tree = readExerciseTree(makeSingle(), ref)!;
+    expect(resolveExerciseFile(tree, "transpose")).toBe("exercise.py");
+  });
+
+  it("каталожная форма без объявления — файл, где функция единственная", () => {
+    const tree = readExerciseTree(makeMulti(), p19)!;
+    expect(resolveExerciseFile(tree, "fire")).toBe("hooks.py");
+    expect(resolveExerciseFile(tree, "emit")).toBe("events.py");
+  });
+
+  it("дубль без объявления — первый файл по порядку шаблона, а не ошибка", () => {
+    const sourceDir = makeMulti();
+    const template = path.join(
+      sourceDir, "learning-exercises", "p19-l20-loop", "exercise.template",
+    );
+    // run уже есть в main.py — делаем его дублем и в hooks.py.
+    fs.writeFileSync(
+      path.join(template, "hooks.py"),
+      "def run(goal):\n    raise NotImplementedError\n",
+      "utf8",
+    );
+    const tree = readExerciseTree(sourceDir, p19)!;
+    expect(tree.duplicateFunctions).toEqual(["run"]);
+    // main.py — первый по порядку (см. orderNames), поэтому он и побеждает
+    // как разумный дефолт: до этого места дойти не должно (plan-lesson
+    // обязан был потребовать exercise_file на дубле), но упасть тут хуже,
+    // чем вернуть хоть какой-то файл.
+    expect(resolveExerciseFile(tree, "run")).toBe("main.py");
   });
 });

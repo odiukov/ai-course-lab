@@ -2,7 +2,7 @@ import path from "node:path";
 import { loadConfig } from "@/lib/config";
 import { readStep } from "@/lib/content/step-file";
 import { readCanonicalFunctionNames } from "@/lib/exercise/file";
-import { readExerciseTree } from "@/lib/exercise/tree";
+import { readExerciseTree, resolveExerciseFile } from "@/lib/exercise/tree";
 import { PracticeError } from "@/lib/practice/errors";
 import { runTests } from "@/lib/practice/run-tests";
 import { openProgressDb } from "@/lib/progress/db";
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
 
-  const fileName = step.exercise_file ?? "exercise.py";
+  const fileName = resolveExerciseFile(tree, step.exercise_fn, step.exercise_file);
   // Фильтр -k про файлы ничего не знает: у имени, встречающегося в нескольких
   // файлах упражнения, он собрал бы тесты соседнего модуля вместо своих.
   // Честнее прогнать весь файл тестов и сказать об этом прямо, чем покрасить
@@ -77,7 +77,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       // тестами — без PYTHONPATH на этот каталог pytest импортировал бы либо
       // ничего, либо чужой solution/.
       pythonPath: tree.multi ? path.join(tree.dir, "exercise") : undefined,
-      testFile: tree.testPath ?? undefined,
+      // Одно-файловая форма ведёт себя ровно как раньше и в этом: testFile ей
+      // не передавался, pytest находил test_exercise.py сам, по рабочему
+      // каталогу прогона.
+      testFile: tree.multi ? tree.testPath ?? undefined : undefined,
     });
   } catch (error) {
     const kind = error instanceof PracticeError ? error.kind : "output";
