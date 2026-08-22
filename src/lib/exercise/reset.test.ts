@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LessonRef } from "@/lib/source/catalog";
-import { resetFunctionToTemplate } from "./reset";
+import { resetFunctionToTemplate, type ResetResult } from "./reset";
+import { readExerciseFiles } from "./file";
 
 const ref: LessonRef = {
   slug: "01-math__02-beta",
@@ -12,6 +13,15 @@ const ref: LessonRef = {
   phaseNumber: 1,
   lessonNumber: 2,
   title: "Beta",
+};
+
+const p19: LessonRef = {
+  slug: "19-adv__20-loop",
+  phaseDir: "19-adv",
+  lessonDir: "20-loop",
+  phaseNumber: 19,
+  lessonNumber: 20,
+  title: "Loop",
 };
 
 const TEMPLATE = [
@@ -44,9 +54,48 @@ function makeSource(exercise?: string): { sourceDir: string; file: string } {
   return { sourceDir, file };
 }
 
-function ok(result: ReturnType<typeof resetFunctionToTemplate>): { code: string; mtimeMs: number } {
+function ok(result: ReturnType<typeof resetFunctionToTemplate>): ResetResult {
   if ("error" in result) throw new Error(`ожидался успех, пришло: ${result.error}`);
-  return result;
+  return result as ResetResult;
+}
+
+function makeMulti(): string {
+  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-reset-multi-"));
+  const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+  const templateDir = path.join(dir, "exercise.template");
+  fs.mkdirSync(templateDir, { recursive: true });
+
+  // main.py шаблон
+  fs.writeFileSync(
+    path.join(templateDir, "main.py"),
+    [
+      '"""Основной модуль."""',
+      "",
+      "",
+      "def run(goal):",
+      '    """Запуск."""',
+      "    raise NotImplementedError",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  // hooks.py шаблон
+  fs.writeFileSync(
+    path.join(templateDir, "hooks.py"),
+    [
+      '"""Хуки."""',
+      "",
+      "",
+      "def fire(topic):",
+      '    """Сигнал."""',
+      "    raise NotImplementedError",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  return sourceDir;
 }
 
 describe("resetFunctionToTemplate", () => {
@@ -282,5 +331,35 @@ describe("resetFunctionToTemplate", () => {
     const result = resetFunctionToTemplate(sourceDir, ref, "matmul");
 
     expect(result).toEqual({ error: "У упражнения нет заготовки exercise.template.py" });
+  });
+});
+
+describe("resetFunctionToTemplate с многофайловым упражнением", () => {
+  it("возвращает заготовку в тот файл, где функция объявлена", () => {
+    const sourceDir = makeMulti();
+    readExerciseFiles(sourceDir, p19);
+    const hooks = path.join(sourceDir, "learning-exercises", "p19-l20-loop", "exercise", "hooks.py");
+    fs.mkdirSync(path.dirname(hooks), { recursive: true });
+    fs.writeFileSync(hooks, "def fire(topic):\n    return 1\n", "utf8");
+
+    const result = ok(resetFunctionToTemplate(sourceDir, p19, "fire", "hooks.py"));
+
+    expect(result.name).toBe("hooks.py");
+    expect(result.code).toContain("raise NotImplementedError");
+    expect(fs.readFileSync(hooks, "utf8")).toContain("raise NotImplementedError");
+    // Соседний файл не тронут: сброс адресный.
+    const main = path.join(sourceDir, "learning-exercises", "p19-l20-loop", "exercise", "main.py");
+    expect(fs.readFileSync(main, "utf8")).toContain("def run(goal)");
+  });
+
+  it("сообщает об ошибке, когда в заготовке этого файла такой функции нет", () => {
+    const sourceDir = makeMulti();
+    readExerciseFiles(sourceDir, p19);
+
+    const result = resetFunctionToTemplate(sourceDir, p19, "fire", "main.py");
+
+    expect(result).toEqual({
+      error: "В заготовке main.py нет функции fire",
+    });
   });
 });

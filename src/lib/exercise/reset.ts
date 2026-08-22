@@ -2,23 +2,25 @@ import fs from "node:fs";
 import path from "node:path";
 import type { LessonRef } from "../source/catalog";
 import { parseTopLevelFunctions } from "../source/written-functions";
+import { findExerciseDir } from "../source/naming";
 import {
   extractFunction,
-  findExercise,
   readExerciseFiles,
   replaceFunction,
   writeExerciseFile,
   type ExerciseFunction,
 } from "./file";
+import { readExerciseTree, findTreeFile } from "./tree";
 
 export interface ResetResult {
+  name: string;
   code: string;
   functions: ExerciseFunction[];
   mtimeMs: number;
 }
 
 /**
- * Ставит функцию обратно в том виде, в каком её выдаёт `exercise.template.py`.
+ * Ставит функцию обратно в том виде, в каком её выдаёт заготовка файла.
  *
  * Нужна не для «начать заново с чистого листа», а для одного конкретного
  * тупика: учащийся сносит строку `def`, сервер перестаёт видеть функцию в
@@ -33,32 +35,59 @@ export function resetFunctionToTemplate(
   sourceDir: string,
   ref: LessonRef,
   fn: string,
+  fileName = "exercise.py",
 ): ResetResult | { error: string } {
-  const found = findExercise(sourceDir, ref);
-  if (!found) return { error: "У урока нет упражнения" };
+  const tree = readExerciseTree(sourceDir, ref);
 
-  const templateFile = path.join(found.dir, "exercise.template.py");
-  if (!fs.existsSync(templateFile)) {
-    return { error: "У упражнения нет заготовки exercise.template.py" };
+  if (!tree) {
+    // Для одно-файловой формы: readExerciseTree вернул null, но это может быть
+    // и потому, что шаблона нет, и потому, что упражнения вообще нет.
+    // Различаем: если каталог упражнения существует, шаблон из одного файла
+    // точно должен быть, и его отсутствие — ошибка заготовки.
+    if (fileName === "exercise.py") {
+      const root = path.join(sourceDir, "learning-exercises");
+      const slug = findExerciseDir(root, ref);
+      if (slug) {
+        const dir = path.join(root, slug);
+        const templateFile = path.join(dir, "exercise.template.py");
+        if (!fs.existsSync(templateFile)) {
+          return { error: "У упражнения нет заготовки exercise.template.py" };
+        }
+      }
+    }
+    return { error: "У урока нет упражнения" };
   }
 
-  const template = fs.readFileSync(templateFile, "utf8");
+  const target = findTreeFile(tree, fileName);
+  if (!target) return { error: `В упражнении нет файла ${fileName}` };
+
+  if (!fs.existsSync(target.templatePath)) {
+    return { error: `У упражнения нет заготовки ${fileName}` };
+  }
+
+  const template = fs.readFileSync(target.templatePath, "utf8");
   const block = extractFunction(template, fn);
-  if (!block) return { error: `В заготовке упражнения нет функции ${fn}` };
+  if (!block) {
+    // Для одно-файловой формы: старое сообщение об ошибке.
+    const errorMsg =
+      fileName === "exercise.py"
+        ? `В заготовке упражнения нет функции ${fn}`
+        : `В заготовке ${fileName} нет функции ${fn}`;
+    return { error: errorMsg };
+  }
 
-  // readExerciseFiles, а не чтение файла: у урока, чей exercise.py ещё не
+  // readExerciseFiles, а не чтение файла: у урока, чей файл ещё не
   // заводили, сброс — такой же законный первый заход, как открытие шага.
-  const exercise = readExerciseFiles(sourceDir, ref)?.files.find(
-    (item) => item.name === "exercise.py",
-  );
-  if (!exercise) return { error: "У урока нет упражнения" };
+  const set = readExerciseFiles(sourceDir, ref);
+  const state = set?.files.find((item) => item.name === fileName);
+  if (!state) return { error: "У урока нет упражнения" };
 
-  const code = exercise.functions.some((item) => item.fn === fn)
-    ? replaceFunction(exercise.code, fn, block)
-    : insertByTemplateOrder(exercise.code, template, fn, block);
+  const code = state.functions.some((item) => item.fn === fn)
+    ? replaceFunction(state.code, fn, block)
+    : insertByTemplateOrder(state.code, template, fn, block);
 
-  const written = writeExerciseFile(sourceDir, ref, "exercise.py", code);
-  return { code, functions: written.functions, mtimeMs: written.mtimeMs };
+  const written = writeExerciseFile(sourceDir, ref, fileName, code);
+  return { name: fileName, code, functions: written.functions, mtimeMs: written.mtimeMs };
 }
 
 /**
