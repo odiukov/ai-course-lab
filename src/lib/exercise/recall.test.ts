@@ -161,5 +161,15 @@ describe("insertPreviousImplementation", () => {
 
     const result = insertPreviousImplementation(sourceDir, p19next, "run", previous, "main.py");
     expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unreachable");
+
+    expect(result.changed).toBe(true);
+    expect(result.code).toContain("return goal");
+
+    // Главная проверка: заготовка заменена именно в exercise/main.py текущего
+    // упражнения на диске, а не в файле прошлого и не молчаливым no-op.
+    const nextFile = path.join(sourceDir, "learning-exercises", "p19-l21-next", "exercise", "main.py");
+    expect(fs.readFileSync(nextFile, "utf8")).toContain("return goal");
+    expect(fs.readFileSync(nextFile, "utf8")).toBe(result.code);
   });
 });
