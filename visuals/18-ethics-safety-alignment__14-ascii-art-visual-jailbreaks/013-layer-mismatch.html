@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Фильтр и модель читают разные слои одного промпта</title>
+<style>
+:root{
+  --page:#f6f3eb;
+  --panel:#fffdf8;
+  --subpanel:#eee9dd;
+  --ink:#252821;
+  --muted:#686d63;
+  --line:#777d72;
+  --accent:#6557d9;
+  --accent-soft:#e7e2ff;
+  --filter:#18794e;
+  --filter-soft:#dcefe4;
+  --model:#a54c13;
+  --model-soft:#f7e2d3;
+  --cell:#32372f;
+  --empty:#ded9cd;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#181a18;
+    --panel:#222521;
+    --subpanel:#2c302b;
+    --ink:#f1eee5;
+    --muted:#b7b9b1;
+    --line:#92978e;
+    --accent:#b9afff;
+    --accent-soft:#373252;
+    --filter:#77d4a5;
+    --filter-soft:#203e30;
+    --model:#f0a16b;
+    --model-soft:#4a3023;
+    --cell:#f0ede4;
+    --empty:#41453f;
+  }
+}
+html,body{background:var(--page);color:var(--ink)}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:18px}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  background:var(--page);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.frame,.box,.word-card,.glyph-card,.stream-track{
+  fill:var(--panel);
+  stroke:var(--line);
+  stroke-width:2;
+}
+.word-card,.glyph-card,.stream-track{fill:var(--subpanel)}
+.connector{
+  fill:none;
+  stroke:var(--line);
+  stroke-width:3;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.arrowhead{fill:var(--line)}
+.junction{fill:var(--accent)}
+.cell-empty{fill:var(--empty)}
+.cell-on{fill:var(--cell)}
+.title{fill:var(--ink);font-size:17px;font-weight:bold}
+.kicker{fill:var(--muted);font-size:12px;font-weight:bold}
+.caption{fill:var(--muted);font-size:13px}
+.note{fill:var(--ink);font-size:14px}
+.branch{fill:var(--muted);font-size:13px;font-weight:bold}
+.word{fill:var(--accent);font-size:31px;font-weight:bold}
+.recovered{fill:var(--model);font-size:44px;font-weight:bold}
+.stream{fill:var(--ink);font-size:9px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.filter-pill{fill:var(--filter-soft);stroke:var(--filter);stroke-width:2}
+.model-pill{fill:var(--model-soft);stroke:var(--model);stroke-width:2}
+.filter-text{fill:var(--filter);font-size:13px;font-weight:bold}
+.model-text{fill:var(--model);font-size:13px;font-weight:bold}
+.filter-result{fill:var(--filter);font-size:16px;font-weight:bold}
+.model-result{fill:var(--model);font-size:16px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>Один промпт — два слоя чтения</h1>
+<svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Фильтр и модель читают разные слои одного промпта</title>
+  <desc id="svg-desc">Слово МОРЕ превращается в четыре глифа семь на пять. Фильтр видит линейную последовательность из ста сорока символов, а модель восстанавливает четыре буквы.</desc>
+  <g id="drawing"></g>
+</svg>
+<p id="fallback" hidden>Схема должна была показать, как один промпт даёт фильтру 140 символов, а модель восстанавливает 4 буквы из 4 глифов 7×5.</p>
+<script>
+const DATA=[{
+  zero:0,one:1,
+  origin:{x:20,y:4},scale:1,
+  corner:10,dot:5,
+  frame:{x:0,y:0,w:1160,h:165},
+  wordCard:{x:35,y:43,w:185,h:98},
+  glyphCard:{x:320,y:31,w:525,h:119},
+  wordArrow:{
+    a:{x:235,y:94},b:{x:305,y:94},
+    head:[{x:305,y:94},{x:291,y:86},{x:291,y:102}]
+  },
+  branch:{
+    stemA:{x:580,y:165},stemB:{x:580,y:194},
+    left:{x:290,y:230},right:{x:870,y:230},
+    leftHead:[{x:290,y:230},{x:306,y:220},{x:308,y:238}],
+    rightHead:[{x:870,y:230},{x:852,y:220},{x:854,y:238}]
+  },
+  boxes:[
+    {x:0,y:235,w:550,h:195,kind:"filter"},
+    {x:610,y:235,w:550,h:195,kind:"model"}
+  ],
+  glyph:{
+    y:65,cell:8,pitch:10,
+    items:[
+      {x:500,char:"М",rows:["#   #","## ##","# # #","#   #","#   #","#   #","#   #"]},
+      {x:568,char:"О",rows:[" ### ","#   #","#   #","#   #","#   #","#   #"," ### "]},
+      {x:636,char:"Р",rows:["#### ","#   #","#   #","#### ","#    ","#    ","#    "]},
+      {x:704,char:"Е",rows:["#####","#    ","#    ","#### ","#    ","#    ","#####"]}
+    ]
+  },
+  labels:[
+    {x:25,y:22,dx:0,dy:0,a:"start",c:"kicker",t:"ОДИН ПРОМПТ"},
+    {x:127,y:76,dx:0,dy:0,a:"middle",c:"kicker",t:"СЛОВО"},
+    {x:127,y:111,dx:0,dy:0,a:"middle",c:"word",t:"МОРЕ"},
+    {x:127,y:132,dx:0,dy:0,a:"middle",c:"caption",t:"4 буквы"},
+    {x:235,y:94,dx:0,dy:-13,a:"start",c:"branch",t:"маскировка"},
+    {x:343,y:55,dx:0,dy:0,a:"start",c:"title",t:"4 глифа · 7×5"},
+    {x:823,y:67,dx:27,dy:0,a:"start",c:"kicker",t:"ТЕ ЖЕ ЗНАКИ"},
+    {x:823,y:92,dx:27,dy:0,a:"start",c:"note",t:"один ввод"},
+    {x:823,y:117,dx:27,dy:0,a:"start",c:"note",t:"140 символов"},
+    {x:474,y:194,dx:0,dy:-10,a:"middle",c:"branch",t:"линейный слой"},
+    {x:686,y:194,dx:0,dy:18,a:"middle",c:"branch",t:"визуальный слой"},
+    {x:25,y:265,dx:0,dy:0,a:"start",c:"title",t:"Keyword-фильтр"},
+    {x:25,y:291,dx:0,dy:0,a:"start",c:"caption",t:"140 символов: знак или ␠ пробел"},
+    {x:25,y:368,dx:0,dy:0,a:"start",c:"note",t:"Читает последовательно: подстроки нет"},
+    {x:25,y:402,dx:0,dy:0,a:"start",c:"filter-result",t:"✓ зелёная отметка"},
+    {x:635,y:265,dx:0,dy:0,a:"start",c:"title",t:"Модель"},
+    {x:635,y:291,dx:0,dy:0,a:"start",c:"caption",t:"Учитывает соседство и общий контур"},
+    {x:885,y:343,dx:0,dy:0,a:"middle",c:"recovered",t:"М О Р Е"},
+    {x:885,y:378,dx:0,dy:0,a:"middle",c:"note",t:"Расположение складывается в слово"},
+    {x:885,y:405,dx:0,dy:0,a:"middle",c:"model-result",t:"распознаны 4 буквы"}
+  ],
+  pills:[
+    {x:405,y:248,w:119,h:29,c:"filter-pill",tx:465,ty:263,tc:"filter-text",t:"✓ ПРОПУЩЕН"},
+    {x:1011,y:248,w:119,h:29,c:"model-pill",tx:1070,ty:263,tc:"model-text",t:"РАСПОЗНАНО"}
+  ],
+  stream:{x:25,y:300,w:500,h:55,textX:35,rowsY:[319,346],chunk:70},
+  fallback:{x:30,y:60}
+}];
+const [D]=DATA;
+const origin=D.origin;
+const scale=D.scale;
+const sx=x=>origin.x+x*scale;
+const sy=y=>origin.y+y*scale;
+
+try{
+  const NS="http://www.w3.org/2000/svg";
+  const root=document.getElementById("drawing");
+  const make=(tag,attrs,text)=>{
+    const node=document.createElementNS(NS,tag);
+    Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,value));
+    if(text!==undefined)node.textContent=text;
+    return node;
+  };
+  const rect=(g,c)=>{
+    g.append(make("rect",{
+      x:sx(c.x),y:sy(c.y),
+      width:sx(c.x+c.w)-sx(c.x),
+      height:sy(c.y+c.h)-sy(c.y),
+      rx:sx(D.corner)-sx(D.zero),
+      class:c.c
+    }));
+  };
+  const line=(g,a,b,c)=>{
+    g.append(make("line",{
+      x1:sx(a.x),y1:sy(a.y),x2:sx(b.x),y2:sy(b.y),class:c
+    }));
+  };
+  const polygon=(g,points,c)=>{
+    g.append(make("polygon",{
+      points:points.map(p=>sx(p.x)+","+sy(p.y)).join(" "),
+      class:c
+    }));
+  };
+  const text=(g,p)=>{
+    g.append(make("text",{
+      x:sx(p.x),y:sy(p.y),dx:p.dx,dy:p.dy,
+      "text-anchor":p.a,class:p.c
+    },p.t));
+  };
+
+  rect(root,{...D.frame,c:"frame"});
+  rect(root,{...D.wordCard,c:"word-card"});
+  rect(root,{...D.glyphCard,c:"glyph-card"});
+
+  line(root,D.wordArrow.a,D.wordArrow.b,"connector");
+  polygon(root,D.wordArrow.head,"arrowhead");
+
+  line(root,D.branch.stemA,D.branch.stemB,"connector");
+  line(root,D.branch.stemB,D.branch.left,"connector");
+  line(root,D.branch.stemB,D.branch.right,"connector");
+  polygon(root,D.branch.leftHead,"arrowhead");
+  polygon(root,D.branch.rightHead,"arrowhead");
+  root.append(make("circle",{
+    cx:sx(D.branch.stemA.x),cy:sy(D.branch.stemA.y),
+    r:sx(D.dot)-sx(D.zero),class:"junction"
+  }));
+
+  D.boxes.forEach(box=>rect(root,{...box,c:"box"}));
+
+  D.glyph.items.forEach(glyph=>{
+    glyph.rows.forEach((row,r)=>{
+      for(let c=D.zero;c<row.length;c+=D.one){
+        const x=glyph.x+c*D.glyph.pitch;
+        const y=D.glyph.y+r*D.glyph.pitch;
+        root.append(make("rect",{
+          x:sx(x),y:sy(y),
+          width:sx(x+D.glyph.cell)-sx(x),
+          height:sy(y+D.glyph.cell)-sy(y),
+          rx:sx(D.one)-sx(D.zero),
+          class:row[c]==="#"?"cell-on":"cell-empty"
+        }));
+      }
+    });
+  });
+
+  D.pills.forEach(p=>{
+    rect(root,{x:p.x,y:p.y,w:p.w,h:p.h,c:p.c});
+    text(root,{x:p.tx,y:p.ty,dx:D.zero,dy:D.dot,a:"middle",c:p.tc,t:p.t});
+  });
+
+  rect(root,{x:D.stream.x,y:D.stream.y,w:D.stream.w,h:D.stream.h,c:"stream-track"});
+  const stream=D.glyph.items.flatMap(g=>g.rows).join("");
+  D.stream.rowsY.forEach((y,row)=>{
+    const start=row*D.stream.chunk;
+    const visible=stream.slice(start,start+D.stream.chunk).replaceAll(" ","·");
+    root.append(make("text",{
+      x:sx(D.stream.textX),y:sy(y),class:"stream"
+    },visible));
+  });
+
+  D.labels.forEach(p=>text(root,p));
+}catch(error){
+  document.getElementById("diagram").hidden=true;
+  document.getElementById("fallback").hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

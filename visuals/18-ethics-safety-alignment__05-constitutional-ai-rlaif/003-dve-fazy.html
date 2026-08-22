@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта двух фаз Constitutional AI</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fb;
+    --text: #18202b;
+    --muted: #586474;
+    --border: #aab4c2;
+    --neutral-fill: #ffffff;
+    --phase-one-fill: #e9f7ef;
+    --phase-one-stroke: #278354;
+    --phase-one-strong: #146b40;
+    --phase-two-fill: #edf2ff;
+    --phase-two-stroke: #496fc2;
+    --phase-two-strong: #3157a8;
+    --constitution-fill: #fff2c9;
+    --constitution-stroke: #a87409;
+    --output-one: #d6f1e1;
+    --output-two: #dce6ff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151a22;
+      --text: #eef2f7;
+      --muted: #b8c1ce;
+      --border: #526071;
+      --neutral-fill: #222a35;
+      --phase-one-fill: #173629;
+      --phase-one-stroke: #67c894;
+      --phase-one-strong: #8cddb0;
+      --phase-two-fill: #202e50;
+      --phase-two-stroke: #85a7ef;
+      --phase-two-strong: #abc2f5;
+      --constitution-fill: #453815;
+      --constitution-stroke: #e0b64c;
+      --output-one: #244d38;
+      --output-two: #2b416f;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  h2 {
+    margin: 0;
+    padding: 14px 18px 8px;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+  }
+
+  .band {
+    stroke-width: 1.5px;
+  }
+
+  .node {
+    stroke-width: 2px;
+  }
+
+  .flow {
+    fill: none;
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+  }
+
+  .support {
+    fill: none;
+    stroke: var(--constitution-stroke);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+  }
+
+  .phase-title {
+    font-size: 14px;
+    font-weight: 750;
+  }
+
+  .node-label {
+    fill: var(--text);
+    font-size: 17px;
+    font-weight: 650;
+  }
+
+  .node-detail {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .constitution-label {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .branch-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Карта двух фаз Constitutional AI</h2>
+  <svg id="diagram" viewBox="0 0 1200 460" width="1200" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">Один исходный ответ разветвляется на маршрут критики, правки и SFT и на маршрут пар ответов, ИИ-предпочтений, модели награды и PPO. Конституция участвует в обоих маршрутах.</desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = [
+  {
+    kind: "config",
+    origin: { x: 48, y: 28 },
+    scale: 9.6,
+    zero: 0,
+    radius: 1.1,
+    arrowHead: 1.25,
+    arrowWing: 0.72,
+    dash: [0.7, 0.55],
+    fallback: { x: 4, y: 18 },
+    labelOffset: 8
+  },
+  {
+    kind: "band",
+    className: "band",
+    x: 22,
+    y: 0,
+    w: 96,
+    h: 18,
+    fill: "var(--phase-one-fill)",
+    stroke: "var(--phase-one-stroke)",
+    title: "ФАЗА 1 · ПРАВКА → SFT",
+    titleAt: { x: 24, y: 3.2 },
+    titleClass: "phase-title",
+    titleFill: "var(--phase-one-strong)"
+  },
+  {
+    kind: "band",
+    className: "band",
+    x: 22,
+    y: 28,
+    w: 96,
+    h: 16,
+    fill: "var(--phase-two-fill)",
+    stroke: "var(--phase-two-stroke)",
+    title: "ФАЗА 2 · ИИ-ПРЕДПОЧТЕНИЯ → PPO",
+    titleAt: { x: 24, y: 30.7 },
+    titleClass: "phase-title",
+    titleFill: "var(--phase-two-strong)"
+  },
+  {
+    kind: "node",
+    id: "answer",
+    x: 1,
+    y: 18,
+    w: 18,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--border)",
+    lines: [
+      { text: "Исходный", x: 10, y: 22.1, className: "node-label" },
+      { text: "ответ", x: 10, y: 24.9, className: "node-label" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "critique",
+    x: 26,
+    y: 6,
+    w: 20,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--phase-one-stroke)",
+    lines: [
+      { text: "Критика", x: 36, y: 10.1, className: "node-label" },
+      { text: "по принципу", x: 36, y: 12.9, className: "node-detail" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "revision",
+    x: 54,
+    y: 6,
+    w: 18,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--phase-one-stroke)",
+    lines: [
+      { text: "Правка", x: 63, y: 11.4, className: "node-label" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "sft",
+    x: 80,
+    y: 6,
+    w: 22,
+    h: 10,
+    fill: "var(--output-one)",
+    stroke: "var(--phase-one-strong)",
+    lines: [
+      { text: "SFT", x: 91, y: 10.1, className: "node-label" },
+      { text: "целевой образец", x: 91, y: 12.9, className: "node-detail" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "pair",
+    x: 26,
+    y: 32,
+    w: 20,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--phase-two-stroke)",
+    lines: [
+      { text: "Пара ответов", x: 36, y: 36.1, className: "node-label" },
+      { text: "исходный + другой", x: 36, y: 38.9, className: "node-detail" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "preference",
+    x: 54,
+    y: 32,
+    w: 20,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--phase-two-stroke)",
+    lines: [
+      { text: "ИИ-выбор", x: 64, y: 36.1, className: "node-label" },
+      { text: "предпочтение", x: 64, y: 38.9, className: "node-detail" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "reward",
+    x: 82,
+    y: 32,
+    w: 20,
+    h: 10,
+    fill: "var(--neutral-fill)",
+    stroke: "var(--phase-two-stroke)",
+    lines: [
+      { text: "Модель награды", x: 92, y: 36.1, className: "node-label" },
+      { text: "численный сигнал", x: 92, y: 38.9, className: "node-detail" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "ppo",
+    x: 110,
+    y: 32,
+    w: 8,
+    h: 10,
+    fill: "var(--output-two)",
+    stroke: "var(--phase-two-strong)",
+    lines: [
+      { text: "PPO", x: 114, y: 37.5, className: "node-label" }
+    ]
+  },
+  {
+    kind: "node",
+    id: "constitution",
+    x: 48,
+    y: 21,
+    w: 30,
+    h: 6,
+    fill: "var(--constitution-fill)",
+    stroke: "var(--constitution-stroke)",
+    lines: [
+      { text: "Конституция: одни принципы", x: 63, y: 24.7, className: "constitution-label" }
+    ]
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-one-strong)",
+    from: { x: 19, y: 21.2 },
+    to: { x: 26, y: 11 },
+    label: { text: "улучшить", x: 20.2, y: 17.1, ox: 0, oy: -8, anchor: "start" }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-one-strong)",
+    from: { x: 46, y: 11 },
+    to: { x: 54, y: 11 }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-one-strong)",
+    from: { x: 72, y: 11 },
+    to: { x: 80, y: 11 }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-two-strong)",
+    from: { x: 19, y: 25.7 },
+    to: { x: 26, y: 37 },
+    label: { text: "сравнить", x: 20.1, y: 31.2, ox: 0, oy: 8, anchor: "start" }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-two-strong)",
+    from: { x: 46, y: 37 },
+    to: { x: 54, y: 37 }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-two-strong)",
+    from: { x: 74, y: 37 },
+    to: { x: 82, y: 37 }
+  },
+  {
+    kind: "arrow",
+    className: "flow",
+    stroke: "var(--phase-two-strong)",
+    from: { x: 102, y: 37 },
+    to: { x: 110, y: 37 }
+  },
+  {
+    kind: "support",
+    points: [
+      { x: 52, y: 21 },
+      { x: 44, y: 17.5 },
+      { x: 36, y: 16 }
+    ]
+  },
+  {
+    kind: "support",
+    points: [
+      { x: 64, y: 27 },
+      { x: 64, y: 29.5 },
+      { x: 64, y: 32 }
+    ]
+  }
+];
+
+const config = DATA.find(item => item.kind === "config");
+const origin = Object.freeze({ x: config.origin.x, y: config.origin.y });
+const scale = config.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+
+  const make = (name, attrs, parent = root) => {
+    const element = document.createElementNS(svgNS, name);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    parent.appendChild(element);
+    return element;
+  };
+
+  const drawText = (line, fill) => {
+    const text = make("text", {
+      x: sx(line.x),
+      y: sy(line.y),
+      class: line.className,
+      "text-anchor": line.anchor || "middle",
+      "dominant-baseline": "middle",
+      fill: fill || ""
+    });
+    text.textContent = line.text;
+  };
+
+  const drawRect = item => {
+    make("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x + item.w) - sx(item.x),
+      height: sy(item.y + item.h) - sy(item.y),
+      rx: sx(item.x + config.radius) - sx(item.x),
+      ry: sy(item.y + config.radius) - sy(item.y),
+      class: item.className || "node",
+      fill: item.fill,
+      stroke: item.stroke
+    });
+  };
+
+  DATA.filter(item => item.kind === "band").forEach(item => {
+    drawRect(item);
+    drawText({
+      text: item.title,
+      x: item.titleAt.x,
+      y: item.titleAt.y,
+      className: item.titleClass,
+      anchor: "start"
+    }, item.titleFill);
+  });
+
+  DATA.filter(item => item.kind === "support").forEach(item => {
+    make("polyline", {
+      points: item.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: "support",
+      "stroke-dasharray": config.dash
+        .map(value => sx(value) - sx(config.zero))
+        .join(" ")
+    });
+  });
+
+  const drawArrow = item => {
+    const dx = item.to.x - item.from.x;
+    const dy = item.to.y - item.from.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = item.to.x - config.arrowHead * ux;
+    const baseY = item.to.y - config.arrowHead * uy;
+    const leftX = baseX - config.arrowWing * uy;
+    const leftY = baseY + config.arrowWing * ux;
+    const rightX = baseX + config.arrowWing * uy;
+    const rightY = baseY - config.arrowWing * ux;
+
+    make("line", {
+      x1: sx(item.from.x),
+      y1: sy(item.from.y),
+      x2: sx(baseX),
+      y2: sy(baseY),
+      class: item.className,
+      stroke: item.stroke
+    });
+
+    make("polygon", {
+      points: [
+        `${sx(item.to.x)},${sy(item.to.y)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      fill: item.stroke
+    });
+
+    if (item.label) {
+      const text = make("text", {
+        x: sx(item.label.x) + item.label.ox,
+        y: sy(item.label.y) + item.label.oy,
+        class: "branch-label",
+        "text-anchor": item.label.anchor,
+        "dominant-baseline": "middle"
+      });
+      text.textContent = item.label.text;
+    }
+  };
+
+  DATA.filter(item => item.kind === "arrow").forEach(drawArrow);
+
+  DATA.filter(item => item.kind === "node").forEach(item => {
+    drawRect(item);
+    item.lines.forEach(line => drawText(line));
+  });
+} catch (error) {
+  const root = document.getElementById("drawing");
+  root.replaceChildren();
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  fallback.setAttribute("x", sx(config.fallback.x));
+  fallback.setAttribute("y", sy(config.fallback.y));
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = "Схема: ответ → критика → правка → SFT; пары ответов → ИИ-предпочтения → модель награды → PPO.";
+  root.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

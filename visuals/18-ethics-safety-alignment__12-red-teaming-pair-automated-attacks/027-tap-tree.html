@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<title>Как TAP превращает один цикл PAIR в дерево</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:whitesmoke;
+  --canvas:ghostwhite;
+  --panel:white;
+  --ink:midnightblue;
+  --muted:slategray;
+  --edge:lightsteelblue;
+  --live:royalblue;
+  --good:seagreen;
+  --weak:crimson;
+  --judge:darkorchid;
+  --divider:gainsboro;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;background:var(--page)}
+body{
+  padding:12px 16px;
+  color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+main{width:100%;max-width:1200px;margin:0 auto}
+h1{
+  margin:0;
+  font-size:20px;
+  line-height:normal;
+}
+.subtitle{
+  margin:4px 0 8px;
+  color:var(--muted);
+  font-size:13px;
+}
+.stage{width:100%}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  overflow:visible;
+  background:var(--canvas);
+  border:1px solid var(--divider);
+}
+.edge{
+  fill:none;
+  stroke:var(--edge);
+  stroke-width:2px;
+  stroke-linecap:round;
+}
+.edge-live{stroke:var(--live)}
+.edge-pair{stroke:var(--good)}
+.divider{
+  stroke:var(--divider);
+  stroke-width:2px;
+}
+.node{
+  fill:var(--panel);
+  stroke:var(--edge);
+  stroke-width:2px;
+}
+.node-live{stroke:var(--live)}
+.node-final{stroke:var(--good)}
+.node-weak{stroke:var(--weak)}
+.band{
+  fill:var(--panel);
+  stroke:var(--judge);
+  stroke-width:1px;
+}
+.summary{
+  fill:var(--panel);
+  stroke:var(--divider);
+  stroke-width:1px;
+}
+.budget{
+  fill:var(--panel);
+  stroke:var(--live);
+  stroke-width:2px;
+}
+.heading{
+  fill:var(--ink);
+  font-size:15px;
+  font-weight:bold;
+}
+.budget-text{
+  fill:var(--live);
+  font-size:13px;
+  font-weight:bold;
+}
+.node-title{
+  fill:var(--ink);
+  font-size:12px;
+  font-weight:bold;
+}
+.score{
+  fill:var(--muted);
+  font-size:10px;
+}
+.score-good{fill:var(--good)}
+.score-weak{fill:var(--weak)}
+.judge-text{
+  fill:var(--judge);
+  font-size:11px;
+  font-weight:bold;
+}
+.note{
+  fill:var(--muted);
+  font-size:10px;
+}
+.summary-title{
+  fill:var(--ink);
+  font-size:11px;
+  font-weight:bold;
+}
+.summary-note{
+  fill:var(--muted);
+  font-size:10px;
+}
+.prune{
+  stroke:var(--weak);
+  stroke-width:2px;
+  stroke-linecap:round;
+}
+.arrow{fill:var(--good)}
+#fallback{
+  padding:18px;
+  color:var(--weak);
+  background:var(--canvas);
+  border:1px solid var(--weak);
+  font-size:14px;
+}
+[hidden]{display:none}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:midnightblue;
+    --canvas:darkslateblue;
+    --panel:midnightblue;
+    --ink:aliceblue;
+    --muted:lightsteelblue;
+    --edge:slategray;
+    --live:lightskyblue;
+    --good:mediumaquamarine;
+    --weak:lightcoral;
+    --judge:plum;
+    --divider:slategray;
+  }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Как TAP превращает один цикл PAIR в дерево</h1>
+  <p class="subtitle">Одинаковый бюджет запросов, но разная стратегия поиска</p>
+  <div class="stage">
+    <svg id="diagram" width="960" height="430" viewBox="0 0 960 430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img" aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Сравнение дерева TAP и одной последовательной ветви PAIR</title>
+      <desc id="svg-desc">TAP порождает варианты, получает оценки судьи и отсекает слабые ветви. PAIR последовательно продолжает единственный промпт.</desc>
+    </svg>
+    <div id="fallback" hidden></div>
+  </div>
+</main>
+
+<script>
+const DATA = [
+  ["origin",0,0],
+  ["scale",1,1],
+
+  ["line","divider",716,16,716,365],
+  ["line","edge",360,96,123,120],
+  ["line","edge-live",360,96,311,120],
+  ["line","edge-live",360,96,499,120],
+  ["line","edge-live",311,168,240,215],
+  ["line","edge-live",311,168,355,215],
+  ["line","edge-live",499,168,475,215],
+  ["line","edge-live",499,168,590,215],
+  ["line","edge-live",240,263,180,310],
+  ["line","edge-live",240,263,285,310],
+  ["line","edge-live",475,263,430,310],
+  ["line","edge-live",475,263,535,310],
+
+  ["line","edge-pair",822,92,822,116],
+  ["line","edge-pair",822,156,822,180],
+  ["line","edge-pair",822,220,822,244],
+  ["line","edge-pair",822,284,822,310],
+
+  ["box","budget",371,12,218,32,8],
+  ["box","band",216,177,288,26,8],
+  ["box","band",216,273,288,26,8],
+  ["box","summary",34,377,646,40,8],
+  ["box","summary",738,377,188,40,8],
+
+  ["node","node node-live",285,50,150,46,9,360,69,360,86,
+    "исходный промпт","ещё без выбора"],
+  ["node","node node-weak",58,120,130,48,9,123,139,123,157,
+    "иная рамка","оценка: слабо"],
+  ["node","node node-live",246,120,130,48,9,311,139,311,157,
+    "новая формулировка","оценка: ближе"],
+  ["node","node node-live",434,120,130,48,9,499,139,499,157,
+    "иная подача","оценка: перспективно"],
+
+  ["node","node node-live",180,215,120,48,9,240,234,240,252,
+    "уточнение A","оценка: ближе"],
+  ["node","node node-weak",300,215,110,48,9,355,234,355,252,
+    "уточнение B","оценка: слабо"],
+  ["node","node node-live",420,215,110,48,9,475,234,475,252,
+    "уточнение C","оценка: перспективно"],
+  ["node","node node-weak",535,215,110,48,9,590,234,590,252,
+    "уточнение D","оценка: слабо"],
+
+  ["node","node node-final",120,310,120,48,9,180,329,180,347,
+    "продолжение A","сохраняем ветвь"],
+  ["node","node node-final",225,310,120,48,9,285,329,285,347,
+    "продолжение B","сохраняем ветвь"],
+  ["node","node node-final",370,310,120,48,9,430,329,430,347,
+    "продолжение C","сохраняем ветвь"],
+  ["node","node node-final",475,310,120,48,9,535,329,535,347,
+    "продолжение D","сохраняем ветвь"],
+
+  ["node","node node-live",752,52,140,40,9,822,69,822,84,
+    "промпт","одна версия"],
+  ["node","node node-live",752,116,140,40,9,822,133,822,148,
+    "ответ → уточнение","та же история"],
+  ["node","node node-live",752,180,140,40,9,822,197,822,212,
+    "ответ → уточнение","та же история"],
+  ["node","node node-live",752,244,140,40,9,822,261,822,276,
+    "ответ → уточнение","та же история"],
+  ["node","node node-final",752,310,140,44,9,822,328,822,345,
+    "следующий промпт","единственная ветвь"],
+
+  ["cross",104,133,142,155,142,133,104,155],
+  ["cross",338,228,372,250,372,228,338,250],
+  ["cross",573,228,607,250,607,228,573,250],
+
+  ["poly","arrow",[[816,108],[828,108],[822,116]]],
+  ["poly","arrow",[[816,172],[828,172],[822,180]]],
+  ["poly","arrow",[[816,236],[828,236],[822,244]]],
+  ["poly","arrow",[[816,302],[828,302],[822,310]]],
+
+  ["text","heading",34,34,"start","TAP: несколько дорожек"],
+  ["text","heading",738,34,"start","PAIR: одна дорожка"],
+  ["text","budget-text",480,33,"middle","общий бюджет: 20 запросов"],
+
+  ["text","note",34,112,"start","горизонталь: разные попытки"],
+  ["text","judge-text",360,194,"middle","судья оценивает → слабые ветви закрываются"],
+  ["text","judge-text",360,290,"middle","судья снова сравнивает → продолжаются лучшие"],
+  ["text","note",34,304,"start","вниз: следующий раунд уточнения"],
+  ["text","note",822,369,"middle","до 20 запросов подряд"],
+
+  ["text","summary-title",50,394,"start","TAP: 20 запросов распределены по ветвям"],
+  ["text","summary-note",50,409,"start","Каждая ветвь хранит собственную историю запросов и ответов."],
+  ["text","summary-title",832,394,"middle","PAIR: 20 запросов"],
+  ["text","summary-note",832,409,"middle","Одна общая цепочка."]
+];
+
+const [,originX,originY] = DATA.find(([kind]) => kind === "origin");
+const [,scaleX,scaleY] = DATA.find(([kind]) => kind === "scale");
+const origin = [originX,originY];
+const scale = [scaleX,scaleY];
+const [ox,oy] = origin;
+const [kx,ky] = scale;
+const sx = x => ox + x * kx;
+const sy = y => oy + y * ky;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const make = (name,attrs,text) => {
+    const element = document.createElementNS(NS,name);
+    Object.entries(attrs).forEach(([key,value]) => element.setAttribute(key,value));
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+
+  DATA.filter(([kind]) => kind === "line").forEach(
+    ([,className,x1,y1,x2,y2]) => {
+      svg.appendChild(make("line",{
+        class:className,
+        x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2)
+      }));
+    }
+  );
+
+  DATA.filter(([kind]) => kind === "box").forEach(
+    ([,className,x,y,w,h,r]) => {
+      svg.appendChild(make("rect",{
+        class:className,
+        x:sx(x),y:sy(y),
+        width:sx(w)-sx(0),height:sy(h)-sy(0),
+        rx:sx(r)-sx(0),ry:sy(r)-sy(0)
+      }));
+    }
+  );
+
+  DATA.filter(([kind]) => kind === "node").forEach(
+    ([,className,x,y,w,h,r,tx,ty,sxText,syText,title,score]) => {
+      svg.appendChild(make("rect",{
+        class:className,
+        x:sx(x),y:sy(y),
+        width:sx(w)-sx(0),height:sy(h)-sy(0),
+        rx:sx(r)-sx(0),ry:sy(r)-sy(0)
+      }));
+      svg.appendChild(make("text",{
+        class:"node-title",x:sx(tx),y:sy(ty),"text-anchor":"middle"
+      },title));
+      const scoreClass = className.includes("node-weak")
+        ? "score score-weak"
+        : className.includes("node-final")
+          ? "score score-good"
+          : "score";
+      svg.appendChild(make("text",{
+        class:scoreClass,x:sx(sxText),y:sy(syText),"text-anchor":"middle"
+      },score));
+    }
+  );
+
+  DATA.filter(([kind]) => kind === "cross").forEach(
+    ([,ax,ay,bx,by,cx,cy,dx,dy]) => {
+      svg.appendChild(make("line",{
+        class:"prune",x1:sx(ax),y1:sy(ay),x2:sx(bx),y2:sy(by)
+      }));
+      svg.appendChild(make("line",{
+        class:"prune",x1:sx(cx),y1:sy(cy),x2:sx(dx),y2:sy(dy)
+      }));
+    }
+  );
+
+  DATA.filter(([kind]) => kind === "poly").forEach(
+    ([,className,points]) => {
+      const value = points.map(([x,y]) => `${sx(x)},${sy(y)}`).join(" ");
+      svg.appendChild(make("polygon",{class:className,points:value}));
+    }
+  );
+
+  DATA.filter(([kind]) => kind === "text").forEach(
+    ([,className,x,y,anchor,label]) => {
+      svg.appendChild(make("text",{
+        class:className,x:sx(x),y:sy(y),"text-anchor":anchor
+      },label));
+    }
+  );
+
+  fallback.hidden = true;
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать, как TAP ветвит промпты, оценивает их судьёй, отсекает слабые варианты и при бюджете 20 запросов сравнивается с одной последовательной ветвью PAIR.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

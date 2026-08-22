@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как ε меняет допустимое различие двух миров</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f4fa;
+    --ink: #182033;
+    --muted: #5d667a;
+    --line: #aeb7c8;
+    --accent: #5b5ce2;
+    --accent-soft: #e8e8ff;
+    --record: #087f6c;
+    --record-soft: #dff6ef;
+    --warn: #9a5b00;
+    --warn-soft: #fff1cc;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--page);
+  }
+
+  h1 {
+    margin: unset;
+    padding: 14px 18px 8px;
+    font-size: 21px;
+    font-weight: 720;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--page);
+  }
+
+  .panel, .world {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .soft { fill: var(--panel-soft); }
+  .row { fill: var(--panel-soft); stroke: var(--line); stroke-width: 1.5; }
+  .record-row { fill: var(--record-soft); stroke: var(--record); stroke-width: 2; }
+  .missing-row { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 7 6; }
+  .person { fill: var(--line); }
+  .person-record { fill: var(--record); }
+  .axis, .connector { stroke: var(--line); stroke-width: 3; fill: none; }
+  .accent-line { stroke: var(--accent); stroke-width: 7; stroke-linecap: round; }
+  .base-line { stroke: var(--muted); stroke-width: 7; stroke-linecap: round; }
+  .arrow-head { fill: var(--muted); }
+  .accent-head { fill: var(--accent); }
+  .tick { stroke: var(--line); stroke-width: 3; }
+  .stop { fill: var(--panel); stroke: var(--accent); stroke-width: 3; }
+  .stop.selected { fill: var(--accent); }
+  .halo { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .hit { fill: transparent; cursor: pointer; }
+  .hit:focus { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .delta-box { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 2; }
+
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .small { fill: var(--muted); font-size: 13px; }
+  .card-title { font-size: 16px; font-weight: 700; }
+  .section-title { font-size: 17px; font-weight: 720; }
+  .value { font-size: 18px; font-weight: 760; }
+  .epsilon { font-size: 16px; font-weight: 700; }
+  .delta-text { fill: var(--warn); font-size: 14px; font-weight: 680; }
+  .selected-label { fill: var(--accent); }
+  .record-text { fill: var(--record); font-size: 13px; font-weight: 680; }
+
+  #fallback {
+    margin: unset;
+    padding: 20px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111521;
+      --panel: #1a2030;
+      --panel-soft: #222a3d;
+      --ink: #f2f4fb;
+      --muted: #b3bdd1;
+      --line: #536078;
+      --accent: #a7a5ff;
+      --accent-soft: #31305c;
+      --record: #68d9bf;
+      --record-soft: #163d38;
+      --warn: #f2bd63;
+      --warn-soft: #3d3019;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Как ε меняет допустимое различие двух миров</h1>
+  <svg id="diagram" viewBox="0 0 1000 440" width="1000" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">
+      Два соседних датасета сравниваются по вероятности одного выхода.
+      Шкала показывает рост множителя e в степени ε, а δ обозначено как редкое исключение.
+    </desc>
+  </svg>
+  <p id="fallback" hidden>
+    Схема должна была показать два соседних датасета: при ε=1 множитель e^ε равен 2,72,
+    при ε=10 — примерно 22 000, а δ=10^-5 остаётся редким исключением.
+  </p>
+</main>
+
+<script>
+const data = [
+  {
+    kind: "config",
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    canvas: { w: 1000, h: 440 },
+    pad: { none: 0, near: 8, text: 12, far: 18 },
+    shape: { radius: 12, dot: 5, stop: 9, halo: 16, arrow: 10, wing: 6 },
+    worlds: [
+      { x: 40, y: 42, w: 190, h: 130, title: "Мир D′: записи нет", record: false },
+      { x: 258, y: 42, w: 190, h: 130, title: "Мир D: запись есть", record: true }
+    ],
+    rows: [
+      { y: 79, w: 150 },
+      { y: 101, w: 150 },
+      { y: 123, w: 150 },
+      { y: 145, w: 150, special: true }
+    ],
+    neighbor: { x1: 230, x2: 258, y: 108, labelX: 244, labelY: 25 },
+    compare: { x1: 448, x2: 510, y: 108, labelX: 479, labelY: 86 },
+    outcome: {
+      x: 520, y: 42, w: 440, h: 130,
+      titleX: 540, titleY: 66,
+      baseTextX: 540, baseTextY: 96,
+      boundTextX: 540, boundTextY: 133,
+      barX: 752, baseY: 91, boundY: 128, baseW: 22
+    },
+    delta: { x: 520, y: 182, w: 440, h: 32, textX: 740, textY: 203 },
+    scalePanel: { x: 40, y: 226, w: 920, h: 198 },
+    axis: { x1: 140, x2: 900, y: 305, arrowX: 914 },
+    scaleTitle: { x: 60, y: 254 },
+    guidance: {
+      leftX: 60, rightX: 940, y: 399,
+      lineX1: 335, lineX2: 665, lineY: 394
+    },
+    hit: { w: 170, h: 106, y: 258 }
+  },
+  {
+    kind: "state",
+    eps: "0,1",
+    multiplier: "1,1",
+    bound: "1,1%",
+    x: 190,
+    barW: 30,
+    aria: "ε равно 0,1: множитель примерно 1,1"
+  },
+  {
+    kind: "state",
+    eps: "1",
+    multiplier: "2,72",
+    bound: "2,72%",
+    x: 500,
+    barW: 82,
+    aria: "ε равно 1: множитель 2,72"
+  },
+  {
+    kind: "state",
+    eps: "10",
+    multiplier: "≈22 000",
+    bound: "≈22 000% → ≤100%",
+    x: 820,
+    barW: 188,
+    aria: "ε равно 10: множитель примерно 22 000"
+  }
+];
+
+const origin = data.find(item => item.kind === "config").origin;
+const scale = data.find(item => item.kind === "config").scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const cfg = data.find(item => item.kind === "config");
+  const states = data.filter(item => item.kind === "state");
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  let selected = states.find(item => item.eps === "1");
+
+  const make = (tag, attrs, content) => {
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => element.setAttribute(name, value));
+    if (content !== undefined) element.textContent = content;
+    return element;
+  };
+
+  const add = element => {
+    svg.appendChild(element);
+    return element;
+  };
+
+  const rect = (x, y, w, h, className, radius) => add(make("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    rx: sx(radius) - sx(cfg.pad.none),
+    class: className
+  }));
+
+  const line = (x1, y1, x2, y2, className) => add(make("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: className
+  }));
+
+  const circle = (x, y, radius, className) => add(make("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(radius) - sx(cfg.pad.none),
+    class: className
+  }));
+
+  const label = (x, y, content, className, anchor, dx, dy) => add(make("text", {
+    x: sx(x) + dx,
+    y: sy(y) + dy,
+    class: className,
+    "text-anchor": anchor
+  }, content));
+
+  const arrow = (x1, y1, x2, y2, className, headClass) => {
+    line(x1, y1, x2, y2, className);
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const length = Math.hypot(vx, vy);
+    if (!length) return;
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = x2 - ux * cfg.shape.arrow;
+    const by = y2 - uy * cfg.shape.arrow;
+    const px = -uy * cfg.shape.wing;
+    const py = ux * cfg.shape.wing;
+    add(make("polygon", {
+      points: [
+        `${sx(x2)},${sy(y2)}`,
+        `${sx(bx + px)},${sy(by + py)}`,
+        `${sx(bx - px)},${sy(by - py)}`
+      ].join(" "),
+      class: headClass
+    }));
+  };
+
+  label(
+    cfg.neighbor.labelX, cfg.neighbor.labelY,
+    "соседние датасеты: отличие — одна запись",
+    "small", "middle", cfg.pad.none, cfg.pad.none
+  );
+
+  cfg.worlds.forEach(world => {
+    rect(world.x, world.y, world.w, world.h, "world", cfg.shape.radius);
+    label(
+      world.x, world.y, world.title,
+      "card-title", "start", cfg.pad.text, cfg.pad.far
+    );
+
+    cfg.rows.forEach(row => {
+      const rowX = world.x + cfg.pad.text;
+      const rowY = row.y;
+      const rowClass = row.special
+        ? (world.record ? "record-row" : "missing-row")
+        : "row";
+
+      rect(rowX, rowY, row.w, cfg.pad.far, rowClass, cfg.shape.dot);
+
+      if (!row.special || world.record) {
+        circle(
+          rowX + cfg.pad.text,
+          rowY + cfg.shape.stop,
+          cfg.shape.dot,
+          row.special ? "person-record" : "person"
+        );
+        line(
+          rowX + cfg.pad.far + cfg.shape.dot,
+          rowY + cfg.shape.stop,
+          rowX + row.w - cfg.pad.text,
+          rowY + cfg.shape.stop,
+          row.special ? "accent-line" : "connector"
+        );
+      }
+
+      if (row.special) {
+        label(
+          rowX + row.w, rowY + cfg.shape.stop,
+          world.record ? "запись человека" : "записи нет",
+          world.record ? "record-text" : "small",
+          "end", -cfg.pad.near, cfg.shape.dot
+        );
+      }
+    });
+  });
+
+  arrow(
+    cfg.neighbor.x1, cfg.neighbor.y,
+    cfg.neighbor.x2, cfg.neighbor.y,
+    "connector", "arrow-head"
+  );
+  arrow(
+    cfg.neighbor.x2, cfg.neighbor.y,
+    cfg.neighbor.x1, cfg.neighbor.y,
+    "connector", "arrow-head"
+  );
+
+  arrow(
+    cfg.compare.x1, cfg.compare.y,
+    cfg.compare.x2, cfg.compare.y,
+    "connector", "arrow-head"
+  );
+  label(
+    cfg.compare.labelX, cfg.compare.labelY,
+    "сравниваем шанс S",
+    "small", "middle", cfg.pad.none, cfg.pad.none
+  );
+
+  rect(
+    cfg.outcome.x, cfg.outcome.y,
+    cfg.outcome.w, cfg.outcome.h,
+    "panel", cfg.shape.radius
+  );
+  label(
+    cfg.outcome.titleX, cfg.outcome.titleY,
+    "Один и тот же выход модели S",
+    "card-title", "start", cfg.pad.none, cfg.pad.none
+  );
+  label(
+    cfg.outcome.baseTextX, cfg.outcome.baseTextY,
+    "Без записи: P(S | D′) = 1%",
+    "", "start", cfg.pad.none, cfg.pad.none
+  );
+  line(
+    cfg.outcome.barX, cfg.outcome.baseY,
+    cfg.outcome.barX + cfg.outcome.baseW, cfg.outcome.baseY,
+    "base-line"
+  );
+
+  const boundLabel = label(
+    cfg.outcome.boundTextX, cfg.outcome.boundTextY,
+    "", "value selected-label", "start", cfg.pad.none, cfg.pad.none
+  );
+  const boundLine = line(
+    cfg.outcome.barX, cfg.outcome.boundY,
+    cfg.outcome.barX + selected.barW, cfg.outcome.boundY,
+    "accent-line"
+  );
+
+  rect(
+    cfg.delta.x, cfg.delta.y,
+    cfg.delta.w, cfg.delta.h,
+    "delta-box", cfg.shape.radius
+  );
+  label(
+    cfg.delta.textX, cfg.delta.textY,
+    "δ = 10⁻⁵ — редкое исключение: примерно 1 случай на 100 000",
+    "delta-text", "middle", cfg.pad.none, cfg.pad.none
+  );
+
+  rect(
+    cfg.scalePanel.x, cfg.scalePanel.y,
+    cfg.scalePanel.w, cfg.scalePanel.h,
+    "panel", cfg.shape.radius
+  );
+  label(
+    cfg.scaleTitle.x, cfg.scaleTitle.y,
+    "Шкала множителя eᵋ",
+    "section-title", "start", cfg.pad.none, cfg.pad.none
+  );
+
+  arrow(
+    cfg.axis.x1, cfg.axis.y,
+    cfg.axis.arrowX, cfg.axis.y,
+    "axis", "arrow-head"
+  );
+
+  const stopNodes = [];
+  states.forEach(state => {
+    line(
+      state.x, cfg.axis.y - cfg.pad.text,
+      state.x, cfg.axis.y + cfg.pad.text,
+      "tick"
+    );
+
+    const halo = circle(
+      state.x, cfg.axis.y,
+      cfg.shape.halo, "halo"
+    );
+    const stop = circle(
+      state.x, cfg.axis.y,
+      cfg.shape.stop, "stop"
+    );
+
+    const multiplier = label(
+      state.x, cfg.axis.y,
+      `×${state.multiplier}`,
+      "value", "middle", cfg.pad.none, -cfg.pad.far
+    );
+    const epsilon = label(
+      state.x, cfg.axis.y,
+      `ε = ${state.eps}`,
+      "epsilon", "middle", cfg.pad.none, cfg.pad.far + cfg.pad.text
+    );
+
+    const hit = add(make("rect", {
+      x: sx(state.x - cfg.hit.w / cfg.scale.x / cfg.shape.dot),
+      y: sy(cfg.hit.y),
+      width: sx(state.x + cfg.hit.w / cfg.scale.x / cfg.shape.dot) -
+             sx(state.x - cfg.hit.w / cfg.scale.x / cfg.shape.dot),
+      height: sy(cfg.hit.y + cfg.hit.h) - sy(cfg.hit.y),
+      class: "hit",
+      tabindex: cfg.pad.none,
+      role: "button",
+      "aria-label": state.aria
+    }));
+
+    const choose = () => {
+      selected = state;
+      renderSelection();
+    };
+
+    hit.addEventListener("click", choose);
+    hit.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") choose();
+    });
+
+    stopNodes.push({ state, halo, stop, multiplier, epsilon, hit });
+  });
+
+  label(
+    cfg.guidance.leftX, cfg.guidance.y,
+    "малое ε: миры дают похожие шансы",
+    "small", "start", cfg.pad.none, cfg.pad.none
+  );
+  label(
+    cfg.guidance.rightX, cfg.guidance.y,
+    "большое ε: различия разрешены сильнее",
+    "small", "end", cfg.pad.none, cfg.pad.none
+  );
+  arrow(
+    cfg.guidance.lineX1, cfg.guidance.lineY,
+    cfg.guidance.lineX2, cfg.guidance.lineY,
+    "connector", "arrow-head"
+  );
+
+  function renderSelection() {
+    boundLabel.textContent = `С записью: P(S | D) ≤ ${selected.bound} + δ`;
+    boundLine.setAttribute("x2", sx(cfg.outcome.barX + selected.barW));
+
+    stopNodes.forEach(node => {
+      const active = node.state === selected;
+      node.stop.classList.toggle("selected", active);
+      node.multiplier.classList.toggle("selected-label", active);
+      node.epsilon.classList.toggle("selected-label", active);
+      node.halo.setAttribute("visibility", active ? "visible" : "hidden");
+      node.hit.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  renderSelection();
+} catch (error) {
+  document.getElementById("diagram").setAttribute("hidden", "");
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

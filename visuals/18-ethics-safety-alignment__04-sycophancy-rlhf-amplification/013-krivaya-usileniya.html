@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кривая эмпирического усиления</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #ffffff;
+      --panel: #f7f8fb;
+      --ink: #172033;
+      --muted: #596579;
+      --grid: #d7dde7;
+      --axis: #344054;
+      --accent: #c4322b;
+      --accent-soft: #f6d5d2;
+      --focus: #8f201b;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0b0f16;
+        --panel: #111722;
+        --ink: #f2f4f7;
+        --muted: #aeb8c8;
+        --grid: #303949;
+        --axis: #c8d0dc;
+        --accent: #ff766e;
+        --accent-soft: #542a2d;
+        --focus: #ffaaa5;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 960px;
+      padding: 10px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+    }
+
+    h1 {
+      margin: 10px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 10px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .arrowhead {
+      fill: var(--axis);
+      stroke: none;
+    }
+
+    .guide {
+      stroke: var(--grid);
+      fill: none;
+    }
+
+    .curve-halo {
+      stroke: var(--panel);
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .curve {
+      stroke: var(--accent);
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .point-halo {
+      fill: var(--panel);
+      stroke: var(--panel);
+    }
+
+    .point {
+      fill: var(--accent);
+      stroke: var(--focus);
+    }
+
+    text {
+      font-family: inherit;
+      user-select: none;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-weight: 600;
+    }
+
+    .stage-label {
+      fill: var(--ink);
+      font-weight: 600;
+    }
+
+    .value-label {
+      fill: var(--accent);
+      font-weight: 800;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-linejoin: round;
+    }
+
+    .change-label {
+      fill: var(--muted);
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-linejoin: round;
+    }
+
+    .fallback {
+      margin: 10px;
+      padding: 10px;
+      color: var(--ink);
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="figure-heading figure-caption">
+    <h1 id="figure-heading">Кривая эмпирического усиления</h1>
+    <p class="subtitle" id="figure-caption">
+      Чем дольше продолжается RLHF, тем выше доля подхалимских ответов.
+    </p>
+
+    <svg
+      id="chart"
+      viewBox="0 0 960 430"
+      width="960"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Рост доли подхалимских ответов</title>
+      <desc id="svg-description">
+        Линейный график: до RLHF — 15%, после RLHF — 40%, после вдвое
+        более долгого RLHF — 55%.
+      </desc>
+    </svg>
+
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать рост доли подхалимских ответов:
+      до RLHF — 15%, после RLHF — 40%, после вдвое более долгого
+      RLHF — 55%.
+    </div>
+
+    <noscript>
+      <p class="fallback">
+        Схема: до RLHF — 15%, после RLHF — 40%, после вдвое более
+        долгого RLHF — 55% подхалимских ответов.
+      </p>
+    </noscript>
+  </figure>
+
+  <script>
+    const diagramData = Object.freeze([
+      Object.freeze({
+        role: "layout",
+        originX: 170,
+        originY: 330,
+        scaleX: 260,
+        scaleY: 4.25,
+        zero: 0,
+        axisXEnd: 2.7,
+        axisYEnd: 65,
+        gridXEnd: 2.42,
+        stageY: -7,
+        xLabelX: 2.7,
+        xLabelY: -18,
+        yLabelX: -0.48,
+        yLabelY: 69,
+        pointRadiusX: 0.026,
+        pointRadiusY: 1.6,
+        pointHaloRadiusX: 0.04,
+        pointHaloRadiusY: 2.45,
+        xArrow: Object.freeze([
+          Object.freeze({ x: 2.61, y: 2.25 }),
+          Object.freeze({ x: 2.7, y: 0 }),
+          Object.freeze({ x: 2.61, y: -2.25 })
+        ]),
+        yArrow: Object.freeze([
+          Object.freeze({ x: -0.036, y: 62.4 }),
+          Object.freeze({ x: 0, y: 65 }),
+          Object.freeze({ x: 0.036, y: 62.4 })
+        ]),
+        changes: Object.freeze([
+          Object.freeze({ x: 0.48, y: 33, label: "+25 п. п." }),
+          Object.freeze({ x: 1.5, y: 50, label: "+15 п. п." })
+        ])
+      }),
+      Object.freeze({
+        role: "point",
+        x: 0,
+        y: 15,
+        value: "15%",
+        valueSide: "left",
+        valueVertical: "above",
+        stage: Object.freeze(["до RLHF"])
+      }),
+      Object.freeze({
+        role: "point",
+        x: 1,
+        y: 40,
+        value: "40%",
+        valueSide: "right",
+        valueVertical: "above",
+        stage: Object.freeze(["после RLHF"])
+      }),
+      Object.freeze({
+        role: "point",
+        x: 2,
+        y: 55,
+        value: "55%",
+        valueSide: "right",
+        valueVertical: "below",
+        stage: Object.freeze(["после RLHF", "в 2 раза дольше"])
+      })
+    ]);
+
+    const canvas = Object.freeze({ width: 960, height: 430 });
+    const labelPadding = 10;
+    const lineWidths = Object.freeze({
+      axis: 2,
+      guide: 1,
+      curveHalo: 8,
+      curve: 5,
+      pointHalo: 2,
+      point: 2,
+      textHalo: 5
+    });
+    const fontSizes = Object.freeze({
+      axis: 16,
+      stage: 16,
+      value: 23,
+      change: 15
+    });
+
+    const [layout, ...points] = diagramData;
+    const origin = Object.freeze({ x: layout.originX, y: layout.originY });
+    const scale = Object.freeze({ x: layout.scaleX, y: layout.scaleY });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y - y * scale.y;
+
+    let plotRoot;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const namespace = svg.namespaceURI;
+
+      if (!svg || !fallback || !namespace || !points.length) {
+        throw new Error("Недостаточно данных для построения схемы.");
+      }
+
+      const make = (tag, attributes, content) => {
+        const node = document.createElementNS(namespace, tag);
+
+        for (const [name, value] of Object.entries(attributes)) {
+          if (value !== undefined) {
+            node.setAttribute(name, String(value));
+          }
+        }
+
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+
+        return node;
+      };
+
+      const add = (parent, tag, attributes, content) => {
+        const node = make(tag, attributes, content);
+        parent.append(node);
+        return node;
+      };
+
+      const logicalPoints = (items) =>
+        items.map((item) => `${sx(item.x)},${sy(item.y)}`).join(" ");
+
+      const radiusX = (logicalRadius) =>
+        Math.abs(sx(logicalRadius) - sx(layout.zero));
+
+      const radiusY = (logicalRadius) =>
+        Math.abs(sy(logicalRadius) - sy(layout.zero));
+
+      plotRoot = add(svg, "g", {
+        id: "plot",
+        "aria-hidden": "true"
+      });
+
+      const guides = add(plotRoot, "g", { class: "guides" });
+      const axes = add(plotRoot, "g", { class: "axes" });
+      const series = add(plotRoot, "g", { class: "series" });
+      const labels = add(plotRoot, "g", { class: "labels" });
+
+      for (const point of points) {
+        add(guides, "line", {
+          class: "guide",
+          x1: sx(layout.zero),
+          y1: sy(point.y),
+          x2: sx(layout.gridXEnd),
+          y2: sy(point.y),
+          "stroke-width": lineWidths.guide
+        });
+
+        add(guides, "line", {
+          class: "guide",
+          x1: sx(point.x),
+          y1: sy(layout.zero),
+          x2: sx(point.x),
+          y2: sy(point.y),
+          "stroke-width": lineWidths.guide
+        });
+      }
+
+      add(axes, "line", {
+        class: "axis",
+        x1: sx(layout.zero),
+        y1: sy(layout.zero),
+        x2: sx(layout.axisXEnd),
+        y2: sy(layout.zero),
+        "stroke-width": lineWidths.axis
+      });
+
+      add(axes, "line", {
+        class: "axis",
+        x1: sx(layout.zero),
+        y1: sy(layout.zero),
+        x2: sx(layout.zero),
+        y2: sy(layout.axisYEnd),
+        "stroke-width": lineWidths.axis
+      });
+
+      add(axes, "polygon", {
+        class: "arrowhead",
+        points: logicalPoints(layout.xArrow)
+      });
+
+      add(axes, "polygon", {
+        class: "arrowhead",
+        points: logicalPoints(layout.yArrow)
+      });
+
+      const seriesCoordinates = logicalPoints(points);
+
+      add(series, "polyline", {
+        class: "curve-halo",
+        points: seriesCoordinates,
+        "stroke-width": lineWidths.curveHalo
+      });
+
+      add(series, "polyline", {
+        class: "curve",
+        points: seriesCoordinates,
+        "stroke-width": lineWidths.curve
+      });
+
+      for (const point of points) {
+        add(series, "ellipse", {
+          class: "point-halo",
+          cx: sx(point.x),
+          cy: sy(point.y),
+          rx: radiusX(layout.pointHaloRadiusX),
+          ry: radiusY(layout.pointHaloRadiusY),
+          "stroke-width": lineWidths.pointHalo
+        });
+
+        add(series, "ellipse", {
+          class: "point",
+          cx: sx(point.x),
+          cy: sy(point.y),
+          rx: radiusX(layout.pointRadiusX),
+          ry: radiusY(layout.pointRadiusY),
+          "stroke-width": lineWidths.point
+        });
+      }
+
+      add(labels, "text", {
+        class: "axis-label",
+        x: sx(layout.yLabelX),
+        y: sy(layout.yLabelY),
+        "text-anchor": "start",
+        "font-size": fontSizes.axis
+      }, "Доля подхалимских ответов");
+
+      add(labels, "text", {
+        class: "axis-label",
+        x: sx(layout.xLabelX),
+        y: sy(layout.xLabelY),
+        "text-anchor": "end",
+        "font-size": fontSizes.axis
+      }, "Этап обучения →");
+
+      for (const change of layout.changes) {
+        add(labels, "text", {
+          class: "change-label",
+          x: sx(change.x),
+          y: sy(change.y),
+          "text-anchor": "middle",
+          "font-size": fontSizes.change,
+          "stroke-width": lineWidths.textHalo
+        }, change.label);
+      }
+
+      for (const point of points) {
+        const valueOnLeft = point.valueSide === "left";
+        const valueAbove = point.valueVertical === "above";
+
+        add(labels, "text", {
+          class: "value-label",
+          x: sx(point.x),
+          y: sy(point.y),
+          dx: valueOnLeft ? -labelPadding : labelPadding,
+          dy: valueAbove ? -labelPadding : labelPadding + lineWidths.axis,
+          "text-anchor": valueOnLeft ? "end" : "start",
+          "font-size": fontSizes.value,
+          "stroke-width": lineWidths.textHalo
+        }, point.value);
+
+        const stageLabel = add(labels, "text", {
+          class: "stage-label",
+          x: sx(point.x),
+          y: sy(layout.stageY),
+          "text-anchor": point.x === layout.zero ? "start" : "middle",
+          "font-size": fontSizes.stage
+        });
+
+        let continuation = false;
+
+        for (const line of point.stage) {
+          add(stageLabel, "tspan", {
+            x: sx(point.x),
+            dy: continuation ? fontSizes.stage : undefined
+          }, line);
+          continuation = true;
+        }
+      }
+
+      if (
+        canvas.width <= layout.originX ||
+        canvas.height <= layout.originY
+      ) {
+        throw new Error("Содержимое схемы не помещается в холст.");
+      }
+    } catch (error) {
+      if (plotRoot) {
+        plotRoot.remove();
+      }
+
+      const fallback = document.getElementById("fallback");
+      const svg = document.getElementById("chart");
+
+      if (fallback) {
+        fallback.hidden = false;
+      }
+
+      if (svg) {
+        svg.setAttribute("aria-hidden", "true");
+      }
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

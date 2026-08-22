@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта трёхэтапного пайплайна RLHF</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f5f7fb;
+    --panel: #ffffff;
+    --panel-soft: #eef3fa;
+    --ink: #172033;
+    --muted: #5c687d;
+    --line: #8290a6;
+    --sft: #167a72;
+    --sft-soft: #dff5ef;
+    --rm: #9a5a12;
+    --rm-soft: #fff0d5;
+    --ppo: #6150b7;
+    --ppo-soft: #ece8ff;
+    --anchor: #c34a62;
+    --anchor-soft: #fde6eb;
+    --shadow: #d8deea;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #192231;
+      --panel-soft: #222d3e;
+      --ink: #eef3fb;
+      --muted: #b7c1d1;
+      --line: #8190a7;
+      --sft: #62d2c5;
+      --sft-soft: #173d3b;
+      --rm: #f1b65f;
+      --rm-soft: #49351e;
+      --ppo: #b5a8ff;
+      --ppo-soft: #302b55;
+      --anchor: #ff91a7;
+      --anchor-soft: #4e2732;
+      --shadow: #0b1018;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  main {
+    background: var(--page);
+  }
+
+  header {
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--ink);
+    padding: 12px 18px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .card {
+    fill: var(--panel);
+    stroke: var(--shadow);
+    stroke-width: 2px;
+  }
+
+  .soft { fill: var(--panel-soft); }
+  .sft-soft { fill: var(--sft-soft); }
+  .rm-soft { fill: var(--rm-soft); }
+  .ppo-soft { fill: var(--ppo-soft); }
+  .anchor-soft { fill: var(--anchor-soft); }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .kl {
+    fill: none;
+    stroke: var(--anchor);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow-flow { fill: var(--line); }
+  .arrow-kl { fill: var(--anchor); }
+
+  .ink {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .muted {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .tiny {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .stage {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .headline {
+    fill: var(--ink);
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  .strong {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .sft-text { fill: var(--sft); }
+  .rm-text { fill: var(--rm); }
+  .ppo-text { fill: var(--ppo); }
+  .anchor-text { fill: var(--anchor); }
+
+  .rule {
+    stroke: var(--shadow);
+    stroke-width: 2px;
+  }
+
+  .role-dot-sft { fill: var(--sft); }
+  .role-dot-rm { fill: var(--rm); }
+  .role-dot-ppo { fill: var(--ppo); }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+    padding: 18px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>Карта трёхэтапного пайплайна</header>
+  <svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Три этапа RLHF: SFT, reward model и PPO</title>
+    <desc id="svg-desc">SFT создаёт исходную политику из тринадцати тысяч демонстраций. Попарные предпочтения обучают отдельную reward model. PPO улучшает политику по её награде, оставаясь рядом с SFT-политикой благодаря KL-якорю.</desc>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать цепочку: SFT на 13 тысячах пар создаёт исходную политику; попарные предпочтения обучают отдельную reward model; PPO меняет политику по награде судьи, а KL-якорь удерживает её рядом с SFT-политикой.</p>
+</main>
+
+<script>
+const DATA = [{
+  originX: 0,
+  originY: 0,
+  scale: 1,
+  radius: 16,
+  smallRadius: 10,
+  dotRadius: 7,
+
+  cards: [
+    {x1: 42, y1: 55, x2: 350, y2: 280, cls: "card", rx: 16},
+    {x1: 415, y1: 55, x2: 760, y2: 280, cls: "card", rx: 16},
+    {x1: 825, y1: 55, x2: 1158, y2: 280, cls: "card", rx: 16}
+  ],
+
+  arrows: [
+    {
+      points: [[350, 168], [415, 168]],
+      lineClass: "flow",
+      headClass: "arrow-flow",
+      head: [[415, 168], [399, 158], [399, 178]]
+    },
+    {
+      points: [[760, 168], [825, 168]],
+      lineClass: "flow",
+      headClass: "arrow-flow",
+      head: [[825, 168], [809, 158], [809, 178]]
+    },
+    {
+      points: [[196, 280], [196, 337], [987, 337], [987, 280]],
+      lineClass: "kl",
+      headClass: "arrow-kl",
+      head: [[987, 280], [976, 297], [998, 297]]
+    }
+  ],
+
+  rects: [
+    {x1: 64, y1: 75, x2: 142, y2: 103, rx: 10, cls: "sft-soft"},
+    {x1: 64, y1: 209, x2: 328, y2: 260, rx: 10, cls: "sft-soft"},
+
+    {x1: 437, y1: 75, x2: 515, y2: 103, rx: 10, cls: "rm-soft"},
+    {x1: 437, y1: 132, x2: 738, y2: 195, rx: 10, cls: "soft"},
+    {x1: 437, y1: 209, x2: 738, y2: 260, rx: 10, cls: "rm-soft"},
+
+    {x1: 847, y1: 75, x2: 934, y2: 103, rx: 10, cls: "ppo-soft"},
+    {x1: 847, y1: 132, x2: 1136, y2: 195, rx: 10, cls: "soft"},
+    {x1: 847, y1: 209, x2: 1136, y2: 260, rx: 10, cls: "ppo-soft"},
+
+    {x1: 413, y1: 318, x2: 770, y2: 359, rx: 16, cls: "anchor-soft"}
+  ],
+
+  rules: [
+    {x1: 479, y1: 163, x2: 695, y2: 163, cls: "rule"},
+    {x1: 891, y1: 163, x2: 1092, y2: 163, cls: "rule"}
+  ],
+
+  circles: [
+    {x: 457, y: 148, r: 7, cls: "role-dot-sft"},
+    {x: 457, y: 180, r: 7, cls: "role-dot-rm"},
+    {x: 867, y: 148, r: 7, cls: "role-dot-ppo"},
+    {x: 867, y: 180, r: 7, cls: "role-dot-rm"},
+
+    {x: 72, y: 401, r: 7, cls: "role-dot-sft"},
+    {x: 440, y: 401, r: 7, cls: "role-dot-rm"},
+    {x: 820, y: 401, r: 7, cls: "role-dot-ppo"}
+  ],
+
+  texts: [
+    {x: 103, y: 94, value: "ЭТАП I", anchor: "middle", cls: "stage sft-text"},
+    {x: 64, y: 132, value: "SFT", anchor: "start", cls: "headline"},
+    {x: 64, y: 160, value: "13 000 пар", anchor: "start", cls: "strong"},
+    {x: 64, y: 184, value: "«инструкция — ответ»", anchor: "start", cls: "muted"},
+    {x: 196, y: 231, value: "ВЫХОД", anchor: "middle", cls: "tiny sft-text"},
+    {x: 196, y: 250, value: "политика πSFT", anchor: "middle", cls: "strong"},
+
+    {x: 476, y: 94, value: "ЭТАП II", anchor: "middle", cls: "stage rm-text"},
+    {x: 437, y: 122, value: "RM · отдельный судья", anchor: "start", cls: "strong"},
+    {x: 476, y: 153, value: "варианты ответов", anchor: "start", cls: "ink"},
+    {x: 476, y: 185, value: "разметчик сравнивает попарно", anchor: "start", cls: "ink"},
+    {x: 587, y: 231, value: "ВЫХОД", anchor: "middle", cls: "tiny rm-text"},
+    {x: 587, y: 250, value: "r(промпт, ответ) → балл", anchor: "middle", cls: "strong"},
+
+    {x: 890, y: 94, value: "ЭТАП III", anchor: "middle", cls: "stage ppo-text"},
+    {x: 847, y: 122, value: "PPO", anchor: "start", cls: "headline"},
+    {x: 886, y: 153, value: "политика генерирует ответ", anchor: "start", cls: "ink"},
+    {x: 886, y: 185, value: "зафиксированная RM оценивает", anchor: "start", cls: "ink"},
+    {x: 991, y: 231, value: "ВЫХОД", anchor: "middle", cls: "tiny ppo-text"},
+    {x: 991, y: 250, value: "обновлённая политика", anchor: "middle", cls: "strong"},
+
+    {x: 350, y: 142, value: "варианты", anchor: "end", cls: "tiny"},
+    {x: 415, y: 194, value: "предпочтения", anchor: "start", cls: "tiny"},
+    {x: 760, y: 142, value: "численный балл", anchor: "end", cls: "tiny"},
+    {x: 591, y: 344, value: "KL-якорь: оставаться рядом с πSFT", anchor: "middle", cls: "strong anchor-text"},
+
+    {x: 90, y: 406, value: "Политика создаёт ответы", anchor: "start", cls: "ink"},
+    {x: 458, y: 406, value: "Разметчик обучает судью сравнениями", anchor: "start", cls: "ink"},
+    {x: 838, y: 406, value: "Судья подаёт награду политике", anchor: "start", cls: "ink"}
+  ]
+}];
+
+const [cfg] = DATA;
+const origin = Object.freeze({x: cfg.originX, y: cfg.originY});
+const scale = cfg.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const namespace = svg.namespaceURI;
+
+  const make = (tag, attrs, value) => {
+    const node = document.createElementNS(namespace, tag);
+    for (const [name, entry] of Object.entries(attrs)) {
+      node.setAttribute(name, entry);
+    }
+    if (value) node.textContent = value;
+    svg.appendChild(node);
+    return node;
+  };
+
+  const pointString = points =>
+    points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+
+  for (const arrow of cfg.arrows) {
+    make("polyline", {
+      points: pointString(arrow.points),
+      class: arrow.lineClass
+    });
+    make("polygon", {
+      points: pointString(arrow.head),
+      class: arrow.headClass
+    });
+  }
+
+  for (const card of cfg.cards) {
+    make("rect", {
+      x: sx(card.x1),
+      y: sy(card.y1),
+      width: sx(card.x2) - sx(card.x1),
+      height: sy(card.y2) - sy(card.y1),
+      rx: sx(card.rx) - sx(cfg.originX),
+      ry: sy(card.rx) - sy(cfg.originY),
+      class: card.cls
+    });
+  }
+
+  for (const rect of cfg.rects) {
+    make("rect", {
+      x: sx(rect.x1),
+      y: sy(rect.y1),
+      width: sx(rect.x2) - sx(rect.x1),
+      height: sy(rect.y2) - sy(rect.y1),
+      rx: sx(rect.rx) - sx(cfg.originX),
+      ry: sy(rect.rx) - sy(cfg.originY),
+      class: rect.cls
+    });
+  }
+
+  for (const rule of cfg.rules) {
+    make("line", {
+      x1: sx(rule.x1),
+      y1: sy(rule.y1),
+      x2: sx(rule.x2),
+      y2: sy(rule.y2),
+      class: rule.cls
+    });
+  }
+
+  for (const circle of cfg.circles) {
+    make("circle", {
+      cx: sx(circle.x),
+      cy: sy(circle.y),
+      r: sx(circle.r) - sx(cfg.originX),
+      class: circle.cls
+    });
+  }
+
+  for (const label of cfg.texts) {
+    make("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      "text-anchor": label.anchor,
+      class: label.cls
+    }, label.value);
+  }
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

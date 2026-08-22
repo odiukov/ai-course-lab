@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как поддельные реплики направляют модель</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --surface: #ffffff;
+    --surface-soft: #f1f4f9;
+    --ink: #172033;
+    --muted: #5e687c;
+    --line: #bdc6d6;
+    --user: #176b87;
+    --user-soft: #e1f3f8;
+    --assistant: #a3444f;
+    --assistant-soft: #fbe8ea;
+    --accent: #6846c7;
+    --accent-soft: #eee9ff;
+    --target: #d17813;
+    --target-soft: #fff2d9;
+    --blank: #f8fafc;
+    --shadow: #dfe4ee;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111522;
+      --surface: #1a2030;
+      --surface-soft: #222a3b;
+      --ink: #eef2fb;
+      --muted: #aeb8cc;
+      --line: #4b566e;
+      --user: #65c6e5;
+      --user-soft: #183a48;
+      --assistant: #f08d98;
+      --assistant-soft: #48272f;
+      --accent: #b5a0ff;
+      --accent-soft: #332b59;
+      --target: #ffc063;
+      --target-soft: #4a351a;
+      --blank: #161c29;
+      --shadow: #0b0e17;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0 auto;
+    width: 100%;
+    max-width: 1180px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  figcaption {
+    padding: 12px 18px 8px;
+    background: var(--surface);
+    font-size: 22px;
+    font-weight: 750;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--surface);
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .frame {
+    fill: var(--surface-soft);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .card {
+    fill: var(--surface);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .target-card {
+    fill: var(--surface);
+    stroke: var(--target);
+    stroke-width: 2;
+  }
+
+  .user-box {
+    fill: var(--user-soft);
+    stroke: var(--user);
+    stroke-width: 1.5;
+  }
+
+  .assistant-box {
+    fill: var(--assistant-soft);
+    stroke: var(--assistant);
+    stroke-width: 1.5;
+  }
+
+  .blank-box {
+    fill: var(--blank);
+    stroke: var(--target);
+    stroke-width: 2;
+  }
+
+  .repeat-card {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-head { fill: var(--accent); }
+  .target-flow { stroke: var(--target); }
+  .target-head { fill: var(--target); }
+
+  .eyebrow {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 750;
+  }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 750;
+  }
+
+  .role-user {
+    fill: var(--user);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .role-assistant {
+    fill: var(--assistant);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .body-copy {
+    font-size: 14px;
+  }
+
+  .small-copy {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .repeat-count {
+    fill: var(--accent);
+    font-size: 30px;
+    font-weight: 850;
+  }
+
+  .target-label {
+    fill: var(--target);
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .blank-label {
+    fill: var(--target);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .summary {
+    fill: var(--surface);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .summary-strong {
+    fill: var(--accent);
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .summary-copy {
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  #fallback {
+    margin: 0;
+    padding: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Как 256 поддельных пар направляют следующее продолжение</figcaption>
+  <svg id="diagram" viewBox="0 0 1180 435" width="1180" height="435"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Длинный промпт: 256 поддельных пар User–Assistant ведут к целевому запросу и пустому ответу Assistant">
+    <title>256 повторяющихся поддельных пар перед целевым запросом</title>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать длинный промпт: вредное послушание повторяется 256 раз, после чего идут целевой запрос и пустое место для ответа Assistant.</p>
+</figure>
+
+<script>
+const data = Object.freeze({
+  canvas: { width: 1180, height: 435 },
+  metrics: { radius: 10, smallRadius: 7, dash: 7, gap: 6 },
+  prompt: { x: 22, y: 18, w: 1136, h: 310 },
+  labels: [
+    { x: 44, y: 48, text: "ОДИН ДЛИННЫЙ ПРОМПТ · ВСЁ НИЖЕ — ВХОДНОЙ ТЕКСТ", cls: "eyebrow", anchor: "start" },
+    { x: 536, y: 286, text: "256 примеров одного порядка ответа", cls: "repeat-count", anchor: "middle" },
+    { x: 536, y: 310, text: "повторение делает шаблон всё заметнее", cls: "small-copy", anchor: "middle" }
+  ],
+  cards: [
+    {
+      x: 48, y: 72, w: 238, h: 184, cls: "card",
+      title: { x: 64, y: 96, text: "поддельная пара 1", cls: "card-title" },
+      rows: [
+        { x: 62, y: 110, w: 210, h: 56, cls: "user-box",
+          role: { x: 74, y: 130, text: "User", cls: "role-user" },
+          copy: [{ x: 74, y: 150, text: "запрещённый вопрос", cls: "body-copy" }] },
+        { x: 62, y: 176, w: 210, h: 64, cls: "assistant-box",
+          role: { x: 74, y: 196, text: "Assistant", cls: "role-assistant" },
+          copy: [
+            { x: 74, y: 216, text: "ответ без отказа", cls: "body-copy" },
+            { x: 74, y: 232, text: "и без проверки", cls: "small-copy" }
+          ] }
+      ]
+    },
+    {
+      x: 700, y: 72, w: 224, h: 184, cls: "card",
+      title: { x: 716, y: 96, text: "поддельная пара 256", cls: "card-title" },
+      rows: [
+        { x: 714, y: 110, w: 196, h: 56, cls: "user-box",
+          role: { x: 726, y: 130, text: "User", cls: "role-user" },
+          copy: [{ x: 726, y: 150, text: "запрещённый вопрос", cls: "body-copy" }] },
+        { x: 714, y: 176, w: 196, h: 64, cls: "assistant-box",
+          role: { x: 726, y: 196, text: "Assistant", cls: "role-assistant" },
+          copy: [
+            { x: 726, y: 216, text: "снова ответ", cls: "body-copy" },
+            { x: 726, y: 232, text: "без отказа", cls: "small-copy" }
+          ] }
+      ]
+    }
+  ],
+  repeats: [
+    { x: 350, y: 100, w: 180, h: 112 },
+    { x: 366, y: 92, w: 180, h: 112 },
+    { x: 382, y: 84, w: 180, h: 112 },
+    { x: 398, y: 76, w: 180, h: 112 },
+    { x: 414, y: 84, w: 180, h: 112 },
+    { x: 430, y: 92, w: 180, h: 112 },
+    { x: 446, y: 100, w: 180, h: 112 }
+  ],
+  repeatText: [
+    { x: 488, y: 135, text: "User → вопрос", cls: "role-user", anchor: "middle" },
+    { x: 488, y: 159, text: "Assistant → послушание", cls: "role-assistant", anchor: "middle" },
+    { x: 488, y: 232, text: "… тот же рисунок снова …", cls: "small-copy", anchor: "middle" }
+  ],
+  target: {
+    x: 958, y: 62, w: 176, h: 214,
+    title: { x: 1046, y: 88, text: "ЦЕЛЕВОЙ ЗАПРОС", cls: "target-label", anchor: "middle" },
+    user: {
+      x: 972, y: 104, w: 148, h: 68,
+      role: { x: 984, y: 126, text: "User", cls: "role-user" },
+      copy: [
+        { x: 984, y: 147, text: "целевой вредный", cls: "body-copy" },
+        { x: 984, y: 163, text: "вопрос", cls: "body-copy" }
+      ]
+    },
+    assistant: {
+      x: 972, y: 184, w: 148, h: 72,
+      role: { x: 984, y: 207, text: "Assistant", cls: "role-assistant" },
+      copy: [
+        { x: 1046, y: 235, text: "пусто", cls: "blank-label", anchor: "middle" }
+      ]
+    }
+  },
+  arrows: [
+    {
+      line: [[294, 164], [334, 164]],
+      head: [[334, 164], [322, 156], [322, 172]],
+      cls: "flow", headCls: "flow-head"
+    },
+    {
+      line: [[638, 164], [684, 164]],
+      head: [[684, 164], [672, 156], [672, 172]],
+      cls: "flow", headCls: "flow-head"
+    },
+    {
+      line: [[930, 164], [950, 164]],
+      head: [[950, 164], [938, 156], [938, 172]],
+      cls: "flow target-flow", headCls: "target-head"
+    }
+  ],
+  summary: { x: 22, y: 346, w: 1136, h: 70 },
+  summaryItems: [
+    { x: 54, y: 374, strong: "НЕ архив беседы", copy: "метки ролей не доказывают прошлое" },
+    { x: 430, y: 374, strong: "А цепочка примеров", copy: "каждая пара усиливает образец" },
+    { x: 808, y: 374, strong: "Поэтому пустое место", copy: "подталкивает продолжить шаблон" }
+  ],
+  separators: [
+    [[398, 360], [398, 402]],
+    [[776, 360], [776, 402]]
+  ]
+});
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const labelPad = 12;
+
+  function node(tag, attrs, parent = svg) {
+    const el = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => el.setAttribute(name, value));
+    parent.appendChild(el);
+    return el;
+  }
+
+  function rect(spec, cls) {
+    return node("rect", {
+      x: sx(spec.x),
+      y: sy(spec.y),
+      width: sx(spec.x + spec.w) - sx(spec.x),
+      height: sy(spec.y + spec.h) - sy(spec.y),
+      rx: sx(data.metrics.radius) - sx(origin.x),
+      class: cls
+    });
+  }
+
+  function text(spec, parent = svg) {
+    const el = node("text", {
+      x: sx(spec.x),
+      y: sy(spec.y),
+      class: spec.cls,
+      "text-anchor": spec.anchor || "start"
+    }, parent);
+    el.textContent = spec.text;
+    return el;
+  }
+
+  function points(list) {
+    return list.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  }
+
+  node("rect", {
+    x: sx(origin.x),
+    y: sy(origin.y),
+    width: sx(data.canvas.width) - sx(origin.x),
+    height: sy(data.canvas.height) - sy(origin.y),
+    fill: "var(--surface)"
+  });
+
+  rect(data.prompt, "frame");
+  data.labels.forEach(item => text(item));
+
+  data.cards.forEach(card => {
+    rect(card, card.cls);
+    text(card.title);
+    card.rows.forEach(row => {
+      rect(row, row.cls);
+      text(row.role);
+      row.copy.forEach(item => text(item));
+    });
+  });
+
+  data.repeats.forEach((item, position) => {
+    const card = rect(item, "repeat-card");
+    card.setAttribute(
+      "stroke-dasharray",
+      `${sx(data.metrics.dash) - sx(origin.x)} ${sx(data.metrics.gap) - sx(origin.x)}`
+    );
+    if (position === data.repeats.length - labelPad + data.metrics.radius) {
+      card.setAttribute("fill", "var(--surface)");
+    }
+  });
+  data.repeatText.forEach(item => text(item));
+
+  data.arrows.forEach(arrow => {
+    node("polyline", { points: points(arrow.line), class: arrow.cls });
+    node("polygon", { points: points(arrow.head), class: arrow.headCls });
+  });
+
+  rect(data.target, "target-card");
+  text(data.target.title);
+  rect(data.target.user, "user-box");
+  text(data.target.user.role);
+  data.target.user.copy.forEach(item => text(item));
+  rect(data.target.assistant, "blank-box");
+  text(data.target.assistant.role);
+  data.target.assistant.copy.forEach(item => text(item));
+
+  rect(data.summary, "summary");
+  data.separators.forEach(line => node("line", {
+    x1: sx(line[origin.x][origin.x]),
+    y1: sy(line[origin.x][origin.y + scale.y]),
+    x2: sx(line[scale.x][origin.x]),
+    y2: sy(line[scale.y][origin.y + scale.y]),
+    class: "divider"
+  }));
+
+  data.summaryItems.forEach(item => {
+    text({ x: item.x, y: item.y, text: item.strong, cls: "summary-strong" });
+    text({
+      x: item.x,
+      y: item.y + labelPad + data.metrics.smallRadius,
+      text: item.copy,
+      cls: "summary-copy"
+    });
+  });
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  svg.replaceChildren();
+  svg.hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

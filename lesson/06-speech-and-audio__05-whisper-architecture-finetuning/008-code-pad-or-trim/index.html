@@ -292,11 +292,19 @@ window.addEventListener("message", function (event) {
   if (!area || !runButton) return;
 
   var storageKey = "course-exercise:" + data.slug;
+  var recoveryKey = storageKey + ":recovery";
   var template = "";
   // Полный файл упражнения. В редакторе видна только функция шага, но на
   // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
   // сразу, и файл с одной функцией не загрузился бы вовсе.
   var full = "";
+  // Границы видимой функции в полном файле фиксируются при загрузке страницы.
+  // Искать функцию заново после каждого символа нельзя: учащийся может на
+  // секунду переименовать is_symmetric в issymmetric, и тогда следующий
+  // input уже не найдёт каноническое имя. Редактор покажет исправленный текст,
+  // а hidden full останется со старой опечаткой — тесты проверят не то, что
+  // видно на экране.
+  var activeParts = null;
 
   /**
    * Делит файл на «до функции», саму функцию и «после».
@@ -342,8 +350,50 @@ window.addEventListener("message", function (event) {
     return [parts.before, code, parts.after].join("\n");
   }
 
+  /**
+   * Возвращает пропавшее каноническое имя, не стирая остальные функции.
+   *
+   * Частая опечатка — удалить или добавить подчёркивание в имени. Если такой
+   * кандидат ровно один, сохраняем всё его тело и чиним только заголовок.
+   * Для неизвестного переименования безопаснее добавить заготовку в конец:
+   * прежний файл останется целиком, а не заменится всем шаблоном.
+   */
+  function restoreMissingFunction(source, templateSource, fn) {
+    var normalized = fn.replace(/_/g, "").toLowerCase();
+    var candidates = [];
+    var head = /^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+    var match = null;
+    while ((match = head.exec(source)) !== null) {
+      var name = match[1];
+      if (name !== fn && name.replace(/_/g, "").toLowerCase() === normalized) {
+        candidates.push(name);
+      }
+    }
+
+    if (candidates.length === 1) {
+      var alias = candidates[0];
+      var aliasParts = split(source, alias);
+      if (aliasParts) {
+        var aliasHead = new RegExp("^(async\\s+)?def\\s+" + alias + "\\s*\\(");
+        var repaired = aliasParts.code.replace(aliasHead, function (_, asyncPrefix) {
+          return (asyncPrefix || "") + "def " + fn + "(";
+        });
+        return join(source, alias, repaired);
+      }
+    }
+
+    var fresh = split(templateSource, fn);
+    if (!fresh) return source;
+    return source.replace(/\s+$/, "") + "\n\n" + fresh.code + "\n";
+  }
+
   function save() {
-    full = join(full, data.fn, area.value);
+    if (activeParts) {
+      activeParts.code = area.value;
+      full = [activeParts.before, activeParts.code, activeParts.after].join("\n");
+    } else {
+      full = join(full, data.fn, area.value);
+    }
     try {
       localStorage.setItem(storageKey, full);
     } catch (error) {
@@ -377,12 +427,34 @@ window.addEventListener("message", function (event) {
 
     var parts = split(full, data.fn);
     // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
-    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
-    // или чужим кодом.
+    // раньше целиком заменялся заготовкой, и написанные на прошлых шагах
+    // функции исчезали. Сначала сохраняем исходник отдельно, затем чиним
+    // только текущую функцию, не трогая остальные участки файла.
+    if (!parts) {
+      if (saved !== null) {
+        try {
+          localStorage.setItem(recoveryKey, saved);
+        } catch (error) {
+          // Даже без backup продолжаем в памяти: приватный режим не должен
+          // снова превращать локальную опечатку в сброс всего упражнения.
+        }
+      }
+      full = restoreMissingFunction(full, source, data.fn);
+      parts = split(full, data.fn);
+      if (parts) {
+        try {
+          localStorage.setItem(storageKey, full);
+        } catch (error) {
+          // В приватном режиме отремонтированный текст проживёт хотя бы вкладку.
+        }
+      }
+    }
+    // Повреждён даже шаблон — только тогда остаётся последний аварийный путь.
     if (!parts) {
       full = source;
       parts = split(full, data.fn);
     }
+    activeParts = parts;
     setCode(parts ? parts.code : full);
     if (window.CourseEditor) window.CourseEditor.mount(area);
   });
@@ -481,6 +553,7 @@ window.addEventListener("message", function (event) {
         }
         full = template;
         var fresh = split(full, data.fn);
+        activeParts = fresh;
         setCode(fresh ? fresh.code : full);
         save();
         results.innerHTML = "";
@@ -518,12 +591,16 @@ window.addEventListener("message", function (event) {
     loadPyodideOnce()
       .then(function (pyodide) {
         status.textContent = "Гоняю тесты…";
+        // Синхронизируем полный файл прямо перед прогоном. Обычно это уже
+        // сделал input, но кнопка не должна зависеть от порядка браузерных
+        // событий или от конкретной реализации редактора.
+        save();
         // В Python уезжает файл целиком, а не то, что в редакторе: тесты
         // импортируют из него все имена упражнения разом.
         pyodide.globals.set(
           "PAYLOAD",
           JSON.stringify({
-            code: join(full, data.fn, area.value),
+            code: full,
             fn: data.fn,
             functions: data.functions,
           })

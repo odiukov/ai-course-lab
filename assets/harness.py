@@ -123,6 +123,7 @@ def _parametrize(argnames, argvalues, **kwargs):
                     raise AssertionError("случай {!r}: {}".format(case, error))
 
         wrapper.__name__ = function.__name__
+        wrapper.__wrapped__ = function
         return wrapper
 
     return decorate
@@ -198,7 +199,29 @@ def install_pytest_stub():
     sys.modules["pytest"] = module
 
 
-def select_tests(names, fn, functions):
+def referenced_names(function, module):
+    """Глобальные имена теста, включая вызванные им локальные helpers."""
+
+    found = set()
+    seen = set()
+
+    def visit(current):
+        while callable(current) and id(current) not in seen:
+            seen.add(id(current))
+            code = getattr(current, "__code__", None)
+            if code is not None:
+                found.update(code.co_names)
+                for name in code.co_names:
+                    helper = getattr(module, name, None)
+                    if callable(helper) and getattr(helper, "__module__", None) == module.__name__:
+                        visit(helper)
+            current = getattr(current, "__wrapped__", None)
+
+    visit(function)
+    return found
+
+
+def select_tests(names, fn, functions, module=None):
     """Тесты шага: те, что про его функцию, и только они.
 
     Правило то же, что у фильтра `pytest -k` в локальном приложении: имя
@@ -210,6 +233,18 @@ def select_tests(names, fn, functions):
     """
 
     others = [name for name in dict.fromkeys(functions) if name != fn and name not in fn]
+    if module is not None:
+        direct = []
+        isolated = []
+        for name in names:
+            references = referenced_names(getattr(module, name), module)
+            if fn in references:
+                direct.append(name)
+                if not any(other in references for other in others):
+                    isolated.append(name)
+        if isolated or direct:
+            return isolated or direct
+
     chosen = [
         name for name in names if fn in name and not any(other in name for other in others)
     ]
@@ -248,7 +283,7 @@ def run(code, fn, functions, workdir="/exercise"):
 
     names = [name for name in dir(module) if name.startswith("test_")]
     names.sort()
-    chosen = select_tests(names, fn, functions) if fn else names
+    chosen = select_tests(names, fn, functions, module) if fn else names
     # Пустой отбор — не повод молчать: гоняем весь файл и говорим об этом.
     # Зелёный вердикт по случайно совпавшему тесту хуже честного «прогнали всё».
     filtered = len(chosen) > 0
