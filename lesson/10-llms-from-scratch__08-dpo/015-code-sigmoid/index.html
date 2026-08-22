@@ -418,7 +418,36 @@ window.addEventListener("message", function (event) {
     };
   }
 
-  /** Контекст метода: поля и готовые соседи без дублирования самого задания. */
+  /** Границы метода внутри класса, включая его декораторы. */
+  function methodSpan(lines, start, end, name) {
+    var head = new RegExp("^(\\s*)(?:async\\s+)?def\\s+" + name + "\\s*\\(");
+    var methodStart = -1;
+    for (var i = start + 1; i < end; i += 1) {
+      if (head.test(lines[i])) { methodStart = i; break; }
+    }
+    if (methodStart === -1) return null;
+
+    var indent = (head.exec(lines[methodStart]) || ["", ""])[1];
+    var methodEnd = end;
+    for (var j = methodStart + 1; j < end; j += 1) {
+      if (lines[j].trim() === "") continue;
+      var currentIndent = (/^(\s*)/.exec(lines[j]) || ["", ""])[1];
+      if (currentIndent.length < indent.length ||
+          (currentIndent.length === indent.length && /^\s*(?:@|async\s+def\s|def\s)/.test(lines[j]))) {
+        methodEnd = j;
+        break;
+      }
+    }
+
+    while (methodStart > start + 1 &&
+           lines[methodStart - 1].slice(0, indent.length) === indent &&
+           lines[methodStart - 1].trim().startsWith("@")) {
+      methodStart -= 1;
+    }
+    return { start: methodStart, end: methodEnd, indent: indent, name: name };
+  }
+
+  /** Контекст метода: только уже объявленная часть класса до текущего задания. */
   function enclosingClass(source, fn) {
     var address = fn.split(".");
     if (address.length !== 2) return null;
@@ -441,35 +470,14 @@ window.addEventListener("message", function (event) {
       }
     }
 
-    var methodHead = new RegExp("^(\\s*)(?:async\\s+)?def\\s+" + address[1] + "\\s*\\(");
-    var methodStart = -1;
-    for (var k = start + 1; k < end; k += 1) {
-      if (methodHead.test(lines[k])) { methodStart = k; break; }
-    }
-    if (methodStart === -1) return null;
+    var current = methodSpan(lines, start, end, address[1]);
+    if (!current) return null;
 
-    var methodIndent = (methodHead.exec(lines[methodStart]) || ["", ""])[1];
-    var methodEnd = end;
-    for (var m = methodStart + 1; m < end; m += 1) {
-      if (lines[m].trim() === "") continue;
-      var indent = (/^(\s*)/.exec(lines[m]) || ["", ""])[1];
-      if (indent.length < methodIndent.length ||
-          (indent.length === methodIndent.length && /^\s*(?:@|async\s+def\s|def\s)/.test(lines[m]))) {
-        methodEnd = m;
-        break;
-      }
-    }
-
-    // Декораторы целевого метода тоже относятся к редактируемому фрагменту.
-    while (methodStart > start + 1 &&
-           lines[methodStart - 1].slice(0, methodIndent.length) === methodIndent &&
-           lines[methodStart - 1].trim().startsWith("@")) {
-      methodStart -= 1;
-    }
-
-    var context = lines.slice(start, methodStart)
-      .concat([methodIndent + "# Метод " + address[1] + " редактируется ниже."])
-      .concat(lines.slice(methodEnd, end));
+    // Нижняя часть класса часто уже относится к следующим шагам. Например,
+    // на _transition не нужны заготовки run/resume, а на Budget.exceeded нужны
+    // только поля и объявленный выше remaining_seconds.
+    var context = lines.slice(start, current.start)
+      .concat([current.indent + "# Метод " + address[1] + " редактируется ниже."]);
     while (context.length > 1 && context[context.length - 1].trim() === "") context.pop();
     return context.join("\n");
   }
