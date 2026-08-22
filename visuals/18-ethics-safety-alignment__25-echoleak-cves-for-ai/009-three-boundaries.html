@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Три независимые границы Scope Violation</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #68738a;
+      --line: #9aa5b8;
+      --node: #eef2f8;
+      --danger: #c43d4d;
+      --danger-soft: #f7dce1;
+      --safe: #16805c;
+      --safe-soft: #d8f1e7;
+      --disabled: #cbd2de;
+      --border: #d4dae4;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #18202d;
+        --ink: #edf2fa;
+        --muted: #a8b3c5;
+        --line: #78859a;
+        --node: #222c3b;
+        --danger: #ff7585;
+        --danger-soft: #512d38;
+        --safe: #63d5ad;
+        --safe-soft: #193f36;
+        --disabled: #536074;
+        --border: #354155;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      max-width: 1160px;
+      margin: auto;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .diagram {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .route,
+    .boundary,
+    .switch-track,
+    .stop-mark,
+    .divider {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route-breached,
+    .boundary-breached,
+    .stop-mark {
+      stroke: var(--danger);
+    }
+
+    .route-disabled,
+    .divider {
+      stroke: var(--disabled);
+    }
+
+    .boundary-closed {
+      stroke: var(--safe);
+    }
+
+    .arrow-breached {
+      fill: var(--danger);
+    }
+
+    .node-circle {
+      fill: var(--node);
+      stroke: var(--line);
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node-circle.privileged {
+      fill: var(--danger-soft);
+      stroke: var(--danger);
+    }
+
+    .node-circle.external {
+      fill: var(--safe-soft);
+      stroke: var(--safe);
+    }
+
+    .switch-track.breached {
+      stroke: var(--danger-soft);
+    }
+
+    .switch-track.closed {
+      stroke: var(--safe-soft);
+    }
+
+    .switch-knob.breached {
+      fill: var(--danger);
+    }
+
+    .switch-knob.closed {
+      fill: var(--safe);
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .switch-name {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .switch-state,
+    .node-kicker {
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .switch-state.breached {
+      fill: var(--danger);
+    }
+
+    .switch-state.closed {
+      fill: var(--safe);
+    }
+
+    .node-name {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .boundary-name {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .boundary-name.breached {
+      fill: var(--danger);
+    }
+
+    .boundary-name.closed {
+      fill: var(--safe);
+    }
+
+    .boundary-label {
+      font-size: 16px;
+    }
+
+    .summary-main {
+      fill: var(--danger);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .summary-detail {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .fallback {
+      max-width: 1160px;
+      margin: auto;
+      background: var(--panel);
+      color: var(--ink);
+      border: 1px solid var(--border);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Три независимые границы Scope Violation</h1>
+
+    <svg
+      id="scopeDiagram"
+      class="diagram"
+      viewBox="0 0 1160 430"
+      width="1160"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagramTitle diagramDescription">
+      <title id="diagramTitle">Три независимые границы Scope Violation</title>
+      <desc id="diagramDescription">
+        Недоверенное письмо проходит границу извлечения, модель получает доступ
+        к привилегированному почтовому ящику, но закрытая граница выхода
+        останавливает вывод секрета в сеть.
+      </desc>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать три последовательные независимые границы:
+      извлечение недоверенного письма, доступ модели к привилегированному
+      почтовому ящику и вывод секрета в сеть. Первые две нарушены, а последняя
+      закрыта.
+    </p>
+
+    <noscript>
+      <p class="fallback">
+        Три независимые границы: извлечение недоверенного письма, доступ модели
+        к привилегированному почтовому ящику и вывод секрета в сеть. Первые две
+        нарушены, а выход в сеть закрыт.
+      </p>
+    </noscript>
+  </main>
+
+  <script>
+    const DATA = [{
+      switches: [
+        {
+          x: 225,
+          name: "ВХОД",
+          state: "НАРУШЕНА",
+          status: "breached",
+          nameY: 28,
+          trackY: 56,
+          trackStart: 193,
+          trackEnd: 257,
+          knobX: 247,
+          knobRadius: 9,
+          stateY: 88
+        },
+        {
+          x: 535,
+          name: "ДОСТУП",
+          state: "НАРУШЕНА",
+          status: "breached",
+          nameY: 28,
+          trackY: 56,
+          trackStart: 503,
+          trackEnd: 567,
+          knobX: 557,
+          knobRadius: 9,
+          stateY: 88
+        },
+        {
+          x: 860,
+          name: "ВЫХОД",
+          state: "ЗАКРЫТА",
+          status: "closed",
+          nameY: 28,
+          trackY: 56,
+          trackStart: 828,
+          trackEnd: 892,
+          knobX: 838,
+          knobRadius: 9,
+          stateY: 88
+        }
+      ],
+      nodes: [
+        {
+          x: 70,
+          y: 174,
+          radius: 40,
+          kicker: "НЕДОВЕРЕННОЕ",
+          kickerY: 119,
+          name: "ПИСЬМО",
+          nameY: 179,
+          className: ""
+        },
+        {
+          x: 370,
+          y: 174,
+          radius: 40,
+          kicker: "КОНТЕКСТ",
+          kickerY: 119,
+          name: "МОДЕЛЬ",
+          nameY: 179,
+          className: ""
+        },
+        {
+          x: 690,
+          y: 174,
+          radius: 44,
+          kicker: "ПРИВИЛЕГИЯ",
+          kickerY: 115,
+          name: "ПОЧТА",
+          nameY: 179,
+          className: "privileged"
+        },
+        {
+          x: 1040,
+          y: 174,
+          radius: 40,
+          kicker: "ВНЕШНЯЯ ОБЛАСТЬ",
+          kickerY: 119,
+          name: "СЕТЬ",
+          nameY: 179,
+          className: "external"
+        }
+      ],
+      routes: [
+        {
+          status: "breached",
+          line: { x1: 110, y1: 174, x2: 320, y2: 174 },
+          arrow: [
+            { x: 330, y: 174 },
+            { x: 316, y: 165 },
+            { x: 316, y: 183 }
+          ]
+        },
+        {
+          status: "breached",
+          line: { x1: 410, y1: 174, x2: 632, y2: 174 },
+          arrow: [
+            { x: 646, y: 174 },
+            { x: 630, y: 165 },
+            { x: 630, y: 183 }
+          ]
+        },
+        {
+          status: "breached",
+          line: { x1: 734, y1: 174, x2: 834, y2: 174 },
+          arrow: [
+            { x: 848, y: 174 },
+            { x: 832, y: 165 },
+            { x: 832, y: 183 }
+          ]
+        },
+        {
+          status: "disabled",
+          line: { x1: 880, y1: 174, x2: 1000, y2: 174 }
+        }
+      ],
+      boundaries: [
+        {
+          x: 225,
+          status: "breached",
+          segments: [
+            { x1: 225, y1: 105, x2: 225, y2: 151 },
+            { x1: 225, y1: 197, x2: 225, y2: 238 }
+          ],
+          name: "ГРАНИЦА ВХОДА",
+          nameY: 263,
+          labelLines: [
+            { text: "извлечение", y: 289 },
+            { text: "недоверенного письма", y: 313 }
+          ]
+        },
+        {
+          x: 535,
+          status: "breached",
+          segments: [
+            { x1: 535, y1: 105, x2: 535, y2: 151 },
+            { x1: 535, y1: 197, x2: 535, y2: 238 }
+          ],
+          name: "ГРАНИЦА ДОСТУПА",
+          nameY: 263,
+          labelLines: [
+            { text: "доступ модели к", y: 289 },
+            { text: "привилегированному", y: 313 },
+            { text: "почтовому ящику", y: 337 }
+          ]
+        },
+        {
+          x: 860,
+          status: "closed",
+          segments: [
+            { x1: 860, y1: 105, x2: 860, y2: 238 }
+          ],
+          stop: [
+            { x1: 850, y1: 164, x2: 870, y2: 184 },
+            { x1: 870, y1: 164, x2: 850, y2: 184 }
+          ],
+          name: "ГРАНИЦА ВЫХОДА",
+          nameY: 263,
+          labelLines: [
+            { text: "вывод секрета", y: 289 },
+            { text: "в сеть", y: 313 }
+          ]
+        }
+      ],
+      divider: { x1: 105, y1: 351, x2: 1055, y2: 351 },
+      summary: [
+        {
+          text: "Две границы уже нарушены — цепочка остановлена только на выходе",
+          x: 580,
+          y: 381,
+          className: "summary-main"
+        },
+        {
+          text: "Зелёный выход не исправляет ни вход, ни доступ",
+          x: 580,
+          y: 407,
+          className: "summary-detail"
+        }
+      ]
+    }];
+
+    const canvas = Object.freeze({
+      width: 1160,
+      height: 430
+    });
+
+    const origin = Object.freeze({
+      x: 30,
+      y: 12
+    });
+
+    const scale = Object.freeze({
+      x: 1,
+      y: 1
+    });
+
+    const lineThickness = Object.freeze({
+      thin: 2,
+      route: 4,
+      boundary: 5,
+      switch: 14,
+      stop: 5
+    });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("scopeDiagram");
+      const fallback = document.getElementById("fallback");
+      const geometry = DATA.find(item => item.switches);
+      const namespace = "http://www.w3.org/2000/svg";
+      const coordinateOrigin = Object.freeze({
+        x: sx(0),
+        y: sy(0)
+      });
+
+      if (!svg || !fallback || !geometry || !canvas.width || !canvas.height) {
+        throw new Error("Недоступны данные схемы");
+      }
+
+      const make = (tag, attributes, content) => {
+        const element = document.createElementNS(namespace, tag);
+
+        Object.entries(attributes).forEach(([name, value]) => {
+          if (value !== "") {
+            element.setAttribute(name, String(value));
+          }
+        });
+
+        if (content !== undefined) {
+          element.textContent = content;
+        }
+
+        svg.appendChild(element);
+        return element;
+      };
+
+      const drawLine = (line, className, thickness) => make("line", {
+        x1: sx(line.x1),
+        y1: sy(line.y1),
+        x2: sx(line.x2),
+        y2: sy(line.y2),
+        class: className,
+        "stroke-width": thickness
+      });
+
+      const drawText = (text, x, y, className) => make("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": "middle"
+      }, text);
+
+      geometry.routes.forEach(route => {
+        drawLine(
+          route.line,
+          `route route-${route.status}`,
+          lineThickness.route
+        );
+
+        if (route.arrow) {
+          make("polygon", {
+            points: route.arrow
+              .map(point => `${sx(point.x)},${sy(point.y)}`)
+              .join(" "),
+            class: `arrow-${route.status}`
+          });
+        }
+      });
+
+      geometry.boundaries.forEach(boundary => {
+        boundary.segments.forEach(segment => {
+          drawLine(
+            segment,
+            `boundary boundary-${boundary.status}`,
+            lineThickness.boundary
+          );
+        });
+
+        if (boundary.stop) {
+          boundary.stop.forEach(segment => {
+            drawLine(segment, "stop-mark", lineThickness.stop);
+          });
+        }
+      });
+
+      geometry.nodes.forEach(node => {
+        make("circle", {
+          cx: sx(node.x),
+          cy: sy(node.y),
+          r: sx(node.radius) - coordinateOrigin.x,
+          class: `node-circle ${node.className}`,
+          "stroke-width": lineThickness.thin
+        });
+
+        drawText(
+          node.kicker,
+          node.x,
+          node.kickerY,
+          "node-kicker"
+        );
+
+        drawText(
+          node.name,
+          node.x,
+          node.nameY,
+          "node-name"
+        );
+      });
+
+      geometry.switches.forEach(control => {
+        drawText(
+          control.name,
+          control.x,
+          control.nameY,
+          "switch-name"
+        );
+
+        drawLine(
+          {
+            x1: control.trackStart,
+            y1: control.trackY,
+            x2: control.trackEnd,
+            y2: control.trackY
+          },
+          `switch-track ${control.status}`,
+          lineThickness.switch
+        );
+
+        make("circle", {
+          cx: sx(control.knobX),
+          cy: sy(control.trackY),
+          r: sx(control.knobRadius) - coordinateOrigin.x,
+          class: `switch-knob ${control.status}`
+        });
+
+        drawText(
+          control.state,
+          control.x,
+          control.stateY,
+          `switch-state ${control.status}`
+        );
+      });
+
+      geometry.boundaries.forEach(boundary => {
+        drawText(
+          boundary.name,
+          boundary.x,
+          boundary.nameY,
+          `boundary-name ${boundary.status}`
+        );
+
+        boundary.labelLines.forEach(line => {
+          drawText(
+            line.text,
+            boundary.x,
+            line.y,
+            "boundary-label"
+          );
+        });
+      });
+
+      drawLine(
+        geometry.divider,
+        "divider",
+        lineThickness.thin
+      );
+
+      geometry.summary.forEach(line => {
+        drawText(
+          line.text,
+          line.x,
+          line.y,
+          line.className
+        );
+      });
+    } catch (error) {
+      const svg = document.getElementById("scopeDiagram");
+      const fallback = document.getElementById("fallback");
+
+      if (svg) {
+        svg.setAttribute("hidden", "");
+      }
+
+      if (fallback) {
+        fallback.removeAttribute("hidden");
+      }
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

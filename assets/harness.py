@@ -9,6 +9,8 @@
 библиотеки Pyodide хватает на все упражнения: numpy и прочего в них нет.
 """
 
+import contextlib
+import io
 import inspect
 import json
 import math
@@ -251,8 +253,8 @@ def select_tests(names, fn, functions, module=None):
     return chosen
 
 
-def run(code, fn, functions, workdir="/exercise"):
-    """Пишет код учащегося на диск и гоняет по нему тесты упражнения.
+def _run_report(code, fn, functions, workdir):
+    """Пишет код учащегося на диск и возвращает отчёт о тестах.
 
     Каталог — аргумент, чтобы прогонщик можно было проверить обычным Python,
     а не только внутри браузера.
@@ -271,15 +273,13 @@ def run(code, fn, functions, workdir="/exercise"):
     try:
         module = __import__("test_exercise")
     except Exception as error:  # noqa: BLE001 — учащемуся важна причина, любая
-        return json.dumps(
-            {
-                "loadError": "".join(
-                    traceback.format_exception_only(type(error), error)
-                ).strip(),
-                "results": [],
-                "filtered": False,
-            }
-        )
+        return {
+            "loadError": "".join(
+                traceback.format_exception_only(type(error), error)
+            ).strip(),
+            "results": [],
+            "filtered": False,
+        }
 
     names = [name for name in dir(module) if name.startswith("test_")]
     names.sort()
@@ -309,7 +309,23 @@ def run(code, fn, functions, workdir="/exercise"):
             message = "".join(traceback.format_exception_only(type(error), error)).strip()
             results.append({"name": name, "passed": False, "message": message})
 
-    return json.dumps({"loadError": None, "results": results, "filtered": filtered})
+    return {"loadError": None, "results": results, "filtered": filtered}
+
+
+def run(code, fn, functions, workdir="/exercise"):
+    """Гоняет тесты и возвращает JSON вместе с консольным выводом Python.
+
+    stdout и stderr направлены в один поток: `print`, предупреждения и ручная
+    отладка должны приехать в браузер в том же порядке, в котором появились.
+    Перехват охватывает и импорт файла, и сами тесты — вывод до падения не
+    теряется даже при синтаксической ошибке или красном тесте.
+    """
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        report = _run_report(code, fn, functions, workdir)
+    report["output"] = output.getvalue()
+    return json.dumps(report)
 
 
 def run_json(payload):
