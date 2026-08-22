@@ -56,6 +56,8 @@ export function parseBenchOutput(stdout: string): BenchReport {
 export function runBench(options: {
   dir: string;
   fn?: string;
+  /** Файл упражнения в каталожной форме: main.py, hooks.py. */
+  module?: string;
   python?: string;
   timeoutMs?: number;
   /**
@@ -69,6 +71,9 @@ export function runBench(options: {
   const timeoutMs = options.timeoutMs ?? BENCH_TIMEOUT_MS;
   const args = [path.join(process.cwd(), "scripts", "bench.py"), options.dir];
   if (options.fn) args.push("--fn", options.fn);
+  // Имя модуля, а не путь: скрипт сам знает, где в упражнении лежат файлы
+  // человека и эталона, и путь из запроса ему передавать незачем.
+  if (options.module) args.push("--module", options.module);
 
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted) {

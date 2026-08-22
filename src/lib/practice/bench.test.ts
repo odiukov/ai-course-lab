@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { parseBenchOutput, runBench } from "./bench";
 
@@ -56,5 +57,51 @@ describe("runBench", () => {
     await expect(
       runBench({ dir: process.cwd(), python: FAKE, signal: AbortSignal.abort() }),
     ).rejects.toMatchObject({ name: "PracticeError" });
+  });
+});
+
+// Свой, отдельный от tests/fixtures/practice/fake-bench.mjs рекордер — как в
+// run-tests.test.ts для fake-python.mjs. Общая фикстура здесь не годится: она
+// только эхом отдаёт готовый отчёт и ничего не знает про свои аргументы, а
+// подмешивать в неё запись argv означало бы связывать чужую фикстуру с
+// проверкой, которая ей не нужна. Рекордер печатает валидный минимальный
+// отчёт (а не мусор), чтобы runBench не отклонил промис и проверка аргументов
+// работала одним и тем же путём независимо от того, передан флаг или нет.
+function makeArgvRecorder(): { python: string; argvFile: string } {
+  const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-fake-bench-"));
+  const argvFile = path.join(scriptDir, "argv.json");
+  const python = path.join(scriptDir, "fake-bench-argv.mjs");
+  fs.writeFileSync(
+    python,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+
+fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify({ args: process.argv.slice(2) }), "utf8");
+process.stdout.write(JSON.stringify({
+  exercise: "x",
+  functions: [],
+  ruff: { available: false, findings: [] },
+}));
+`,
+    "utf8",
+  );
+  fs.chmodSync(python, 0o755);
+  return { python, argvFile };
+}
+
+describe("runBench: передаёт имя модуля скрипту", () => {
+  it("передаёт скрипту имя модуля упражнения", async () => {
+    const { python, argvFile } = makeArgvRecorder();
+    await runBench({ dir: process.cwd(), python, module: "main.py" });
+    const call = JSON.parse(fs.readFileSync(argvFile, "utf8"));
+    expect(call.args).toContain("--module");
+    expect(call.args).toContain("main.py");
+  });
+
+  it("без module флаг не передаётся вовсе — одно-файловый вызов не меняется", async () => {
+    const { python, argvFile } = makeArgvRecorder();
+    await runBench({ dir: process.cwd(), python });
+    const call = JSON.parse(fs.readFileSync(argvFile, "utf8"));
+    expect(call.args).not.toContain("--module");
   });
 });

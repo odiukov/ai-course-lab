@@ -6,6 +6,7 @@ import { loadConfig } from "@/lib/config";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStep } from "@/lib/content/step-file";
 import { extractFunction, readExerciseFiles } from "@/lib/exercise/file";
+import { readExerciseTree, resolveExerciseFile } from "@/lib/exercise/tree";
 import { formatMetrics, formatRuff, formatTests, reviewCode } from "@/lib/generate/review-code";
 import { runBench } from "@/lib/practice/bench";
 import { addChatMessage, openChatSession } from "@/lib/progress/chat";
@@ -60,6 +61,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const mineCode = extractFunction(exercise.code, step.exercise_fn) ?? exercise.code;
   const fn = step.exercise_fn;
 
+  // Каталожная форма держит файлы человека и эталона не в корне, а в
+  // exercise/ и solution/ — bench.py нужно явно назвать модуль, иначе он
+  // возьмёт устаревший корневой exercise.py/solution.py. Имя того же файла,
+  // что и у тестов/reset/recall — resolveExerciseFile, а не сырой
+  // step.exercise_file: он же решает случай, когда шаг файл не назвал.
+  const tree = readExerciseTree(config.sourceDir, ref);
+  // Не называем переменную module: next/eslint запрещает — это зарезервированное
+  // имя CJS-модуля, и присвоение ему маскирует реальный module в области видимости.
+  const benchModule = tree?.multi ? resolveExerciseFile(tree, fn, step.exercise_file) : undefined;
+
   const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
   return sseStream(async (send) => {
@@ -68,6 +79,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const report = await runBench({
       dir: set.dir,
       fn,
+      module: benchModule,
       python: config.python,
       signal: request.signal,
     });

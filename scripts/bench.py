@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Сравнение exercise.py с solution.py. Печатает JSON в stdout.
 
-    python3 scripts/bench.py <каталог-упражнения> [--fn transpose]
+    python3 scripts/bench.py <каталог-упражнения> [--fn transpose] [--module main.py]
 
 Метрики: строки, циклы, вложенность, ветвления по AST и медианное время одного
 вызова в микросекундах на входах из bench.py упражнения. Рядом гоняется ruff
@@ -276,11 +276,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory")
     parser.add_argument("--fn", default=None)
+    parser.add_argument(
+        "--module",
+        default=None,
+        help="Файл упражнения в каталожной форме: main.py, hooks.py. "
+             "Без него берётся exercise.py в корне каталога.",
+    )
     args = parser.parse_args()
 
     lesson_dir = Path(args.directory).resolve()
-    mine_path = lesson_dir / "exercise.py"
-    ref_path = lesson_dir / "solution.py"
+    if args.module:
+        mine_path = lesson_dir / "exercise" / args.module
+        ref_path = lesson_dir / "solution" / args.module
+    else:
+        mine_path = lesson_dir / "exercise.py"
+        ref_path = lesson_dir / "solution.py"
     for path in (mine_path, ref_path):
         if not path.exists():
             print(json.dumps({"error": f"нет файла {path}"}), file=sys.stderr)
