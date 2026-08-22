@@ -217,3 +217,79 @@ describe("runTests", () => {
     }
   });
 });
+
+// Собственная подделка интерпретатора для проверки PYTHONPATH и testFile —
+// НЕ tests/fixtures/practice/fake-python.mjs. В той фикстуре сейчас лежит
+// чужая незакоммиченная работа (отбор тестов по FAKE_PYTHON_TEST_NAMES), и
+// дописывать туда свои строки — риск закоммитить файл по частям и затереть
+// чужой прогресс. Поэтому здесь — свой крошечный скрипт во временном
+// каталоге: он не гоняет настоящий pytest, а просто записывает полученные
+// аргументы и окружение в argv.json (рядом с cwd прогона, то есть в dir) и
+// печатает минимальный валидный junit-xml, чтобы runTests разобрал результат
+// и не упал.
+function makeFakePython(): string {
+  const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-fake-python-"));
+  const file = path.join(scriptDir, "fake-python.mjs");
+  fs.writeFileSync(
+    file,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+const junitIndex = args.indexOf("--junit-xml");
+const junit = junitIndex === -1 ? null : args[junitIndex + 1];
+
+// argv.json пишется в cwd прогона (раннер задаёт cwd: dir), а не рядом с
+// junit-отчётом: каталог под junit-отчёт раннер удаляет сразу после прогона.
+fs.writeFileSync(
+  path.join(process.cwd(), "argv.json"),
+  JSON.stringify({ args, env: process.env }),
+  "utf8",
+);
+
+if (junit) {
+  fs.writeFileSync(
+    junit,
+    '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" tests="0"></testsuite></testsuites>',
+    "utf8",
+  );
+}
+`,
+    "utf8",
+  );
+  fs.chmodSync(file, 0o755);
+  return file;
+}
+
+describe("runTests: каталог файлов человека попадает в PYTHONPATH", () => {
+  it("добавляет каталог файлов человека в PYTHONPATH и передаёт путь тестового файла", async () => {
+    const python = makeFakePython();
+    const dir = makeDir();
+    const nested = path.join(dir, "exercise");
+    fs.mkdirSync(nested, { recursive: true });
+    const testFile = path.join(dir, "test_exercise.py");
+
+    const outcome = await runTests({ dir, python, pythonPath: nested, testFile });
+
+    const call = JSON.parse(fs.readFileSync(path.join(dir, "argv.json"), "utf8"));
+    expect(call.env.PYTHONPATH.split(path.delimiter)).toContain(nested);
+    expect(call.args).toContain(testFile);
+    expect(outcome.passed).toBeGreaterThanOrEqual(0);
+  });
+
+  it("не затирает PYTHONPATH, уже заданный в окружении, а дописывает его первым по порядку", async () => {
+    const python = makeFakePython();
+    const dir = makeDir();
+    const nested = path.join(dir, "exercise");
+    fs.mkdirSync(nested, { recursive: true });
+    process.env.PYTHONPATH = "/pre-existing";
+    try {
+      await runTests({ dir, python, pythonPath: nested });
+      const call = JSON.parse(fs.readFileSync(path.join(dir, "argv.json"), "utf8"));
+      expect(call.env.PYTHONPATH.split(path.delimiter)).toEqual([nested, "/pre-existing"]);
+    } finally {
+      delete process.env.PYTHONPATH;
+    }
+  });
+});

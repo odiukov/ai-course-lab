@@ -21,6 +21,10 @@ export interface RunTestsOptions {
   functions?: string[];
   python?: string;
   timeoutMs?: number;
+  /** Каталог, который добавляется в PYTHONPATH: файлы человека в каталожной форме. */
+  pythonPath?: string;
+  /** Путь тестового файла, если он не в cwd прогона. */
+  testFile?: string;
 }
 
 /**
@@ -69,13 +73,30 @@ function spawnOnce(opts: {
   filter?: string;
   junit: string;
   timeoutMs: number;
+  pythonPath?: string;
+  testFile?: string;
 }): Promise<RawRun> {
   const junit = opts.junit;
   const args = ["-m", "pytest", "-q", "--no-header", "--junit-xml", junit];
+  if (opts.testFile) args.push(opts.testFile);
   if (opts.filter) args.push("-k", opts.filter);
 
+  // PYTHONPATH, а не cwd: тесты курса лежат в каталоге упражнения и
+  // импортируют модули по имени (`from main import ...`). Файлы человека в
+  // каталожной форме живут в exercise/, и без этого пути pytest подхватил бы
+  // либо ничего, либо соседний solution/. Существующее значение сохраняется:
+  // затирать окружение машины ради своей строки нельзя.
+  const env = opts.pythonPath
+    ? {
+        ...process.env,
+        PYTHONPATH: [opts.pythonPath, process.env.PYTHONPATH]
+          .filter((part) => part && part.length > 0)
+          .join(path.delimiter),
+      }
+    : process.env;
+
   return new Promise((resolve, reject) => {
-    const child = spawn(opts.python, args, { cwd: opts.dir, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(opts.python, args, { cwd: opts.dir, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -128,6 +149,8 @@ async function spawnPytest(opts: {
   dir: string;
   filter?: string;
   timeoutMs: number;
+  pythonPath?: string;
+  testFile?: string;
 }): Promise<RawRun> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lab-junit-"));
   try {
@@ -162,7 +185,14 @@ export async function runTests(options: RunTestsOptions): Promise<TestRunResult>
   const filter = options.fn ? buildTestFilter(options.fn, options.functions) : undefined;
 
   const first = toOutcome(
-    await spawnPytest({ python, dir: options.dir, filter, timeoutMs }),
+    await spawnPytest({
+      python,
+      dir: options.dir,
+      filter,
+      timeoutMs,
+      pythonPath: options.pythonPath,
+      testFile: options.testFile,
+    }),
     python,
   );
 
@@ -179,7 +209,16 @@ export async function runTests(options: RunTestsOptions): Promise<TestRunResult>
   // Соглашение об именах тестов нарушено в этом упражнении: фильтр не выбрал
   // ничего. Молча показать «0 из 0 зелёные» нельзя, гнать пустоту тоже —
   // гоняем весь файл и говорим об этом прямым текстом.
-  const full = toOutcome(await spawnPytest({ python, dir: options.dir, timeoutMs }), python);
+  const full = toOutcome(
+    await spawnPytest({
+      python,
+      dir: options.dir,
+      timeoutMs,
+      pythonPath: options.pythonPath,
+      testFile: options.testFile,
+    }),
+    python,
+  );
   return {
     ...full,
     filtered: false,
