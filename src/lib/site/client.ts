@@ -213,6 +213,8 @@ export const EXERCISE_SCRIPT = `
   var solutionBox = document.querySelector("[data-solution]");
   var status = document.querySelector("[data-run-status]");
   var results = document.querySelector("[data-results]");
+  var contextPanel = document.querySelector("[data-context-panel]");
+  var contextBox = document.querySelector("[data-context]");
   if (!area || !runButton) return;
 
   var activeFile = data.file ||
@@ -303,6 +305,30 @@ export const EXERCISE_SCRIPT = `
     };
   }
 
+  /** Контекст метода: весь класс с полями и уже готовыми соседними методами. */
+  function enclosingClass(source, fn) {
+    var address = fn.split(".");
+    if (address.length !== 2) return null;
+
+    var lines = source.split("\\n");
+    var classHead = new RegExp("^class\\\\s+" + address[0] + "(?:\\\\s*\\\\(|\\\\s*:)");
+    var start = -1;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (classHead.test(lines[i])) { start = i; break; }
+    }
+    if (start === -1) return null;
+
+    var end = lines.length;
+    for (var j = start + 1; j < lines.length; j += 1) {
+      if (/^(?:async\\s+def\\s|def\\s|class\\s)/.test(lines[j])) {
+        end = j;
+        break;
+      }
+    }
+    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
+    return lines.slice(start, end).join("\\n");
+  }
+
   function join(source, fn, code) {
     var parts = split(source, fn);
     if (!parts) return source;
@@ -347,6 +373,11 @@ export const EXERCISE_SCRIPT = `
     full = saved === null ? source : saved;
 
     var parts = split(full, data.fn);
+    var classSource = enclosingClass(full, data.fn);
+    if (contextPanel && contextBox && classSource) {
+      contextBox.textContent = classSource;
+      contextPanel.hidden = false;
+    }
     // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
     // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
     // или чужим кодом.

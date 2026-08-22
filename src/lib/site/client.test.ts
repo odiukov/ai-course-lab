@@ -294,6 +294,9 @@ describe("практика", () => {
     expect(value).toBe("    def exceeded(self):\n        raise NotImplementedError");
     expect(value).not.toContain("class Budget");
     expect(value).not.toContain("untouched");
+    expect(pick(window, "[data-context-panel]").hidden).toBe(false);
+    expect(pick(window, "[data-context]").textContent).toContain("class Budget:");
+    expect(pick(window, "[data-context]").textContent).toContain("def untouched(self):");
   });
 
 

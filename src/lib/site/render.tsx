@@ -179,7 +179,11 @@ function renderPractice(block: LessonBlock, options: RenderOptions): string {
 
   return `<section class="practice-panel">
 <h2 class="practice-title">Практика: <code>${escapeHtml(fn)}</code></h2>
-<p class="practice-hint">Здесь только функция этого шага — остальной файл упражнения подставится при запуске. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<p class="practice-hint">Редактируется только функция этого шага — остальной файл упражнения подставится при запуске. Для метода ниже также показан контекст класса: его поля и готовые методы. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
+<details class="practice-context" data-context-panel open hidden>
+<summary>Контекст класса — только для чтения</summary>
+<pre class="solution" data-context></pre>
+</details>
 <textarea class="code-input" data-code spellcheck="false" rows="18"></textarea>
 <div class="practice-actions">
 <button type="button" class="nav-button is-primary" data-run>Запустить тесты</button>

@@ -157,6 +157,8 @@ describe("renderStepPage", () => {
     );
 
     expect(html).toContain("data-code");
+    expect(html).toContain("data-context-panel");
+    expect(html).toContain("data-context");
     expect(html).toContain("data-run");
     expect(html).toContain('"fn":"magnitude"');
     expect(html).toContain('"functions":["magnitude","dot"]');
