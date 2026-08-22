@@ -102,16 +102,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
   return sseStream(async (send) => {
-    // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без
-    // сигнала закрытая вкладка оставляет python молотить до двух минут.
-    const report = await runBench({
-      dir: set.dir,
-      fn,
-      module: benchModule,
-      python: config.python,
-      signal: request.signal,
-    });
-    send("bench", report);
+    // Замер — это СРАВНЕНИЕ с эталоном: и таблица «ты / эталон», и ratio, и
+    // status собираются из пары чисел, а отчёт bench.py требует ref у каждой
+    // функции. У файла без эталона (tree.ts разрешает solutionPath: null —
+    // вспомогательный модуль, которого в solution/ нет) сравнивать не с чем,
+    // и bench.py честно выходит с кодом 2 на отсутствующий файл. Раньше это
+    // роняло весь разбор до того, как соберётся промпт.
+    //
+    // Починка на стороне маршрута, а не bench.py: «эталона нет» — решение об
+    // ухудшении, а не про измерение, и маршрут его уже принимает выше (код
+    // эталона деградирует до «(эталона нет)»). Дать bench.py терпеть
+    // отсутствие эталона значило бы протащить nullable ref через схему
+    // отчёта, таблицу метрик и формат для промпта — то есть переучить на
+    // «эталона может не быть» всё, что построено вокруг сравнения.
+    // Поэтому здесь замер просто не запускается, а промпт говорит это прямо.
+    const report = solutionPath
+      ? // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без
+        // сигнала закрытая вкладка оставляет python молотить до двух минут.
+        await runBench({
+          dir: set.dir,
+          fn,
+          module: benchModule,
+          python: config.python,
+          signal: request.signal,
+        })
+      : null;
+    if (report) send("bench", report);
 
     const text = await reviewCode({
       request: {
@@ -128,8 +144,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           filtered: run.filtered,
           warning: run.warning,
         }),
-        metrics: formatMetrics(report.functions.find((item) => item.fn === fn)),
-        ruff: formatRuff(report.ruff, fn),
+        // Без эталона это не «замер не удался» (так formatMetrics отвечает на
+        // сорванное измерение), а «мерить было не с чем» — разница для агента
+        // существенная: в первом случае он ищет причину сбоя, во втором просто
+        // разбирает код без чисел.
+        metrics: report
+          ? formatMetrics(report.functions.find((item) => item.fn === fn))
+          : "(эталона нет — сравнивать не с чем)",
+        ruff: report ? formatRuff(report.ruff, fn) : "(линтер не запускался: замер не шёл)",
       },
       deps,
       onEvent: (event) => {
