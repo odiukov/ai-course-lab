@@ -269,12 +269,14 @@ describe("практика", () => {
       "import time",
       "",
       "class Budget:",
+      "    max_turns: int = 8",
       "    def exceeded(self):",
       "        raise NotImplementedError",
       "",
       "    def untouched(self):",
       "        return 1",
       "",
+      "@dataclass",
       "class HarnessLoop:",
       "    pass",
       "",
@@ -297,6 +299,10 @@ describe("практика", () => {
     expect(pick(window, "[data-context-panel]").hidden).toBe(false);
     expect(pick(window, "[data-context]").textContent).toContain("class Budget:");
     expect(pick(window, "[data-context]").textContent).toContain("def untouched(self):");
+    expect(pick(window, "[data-context]").textContent).toContain("max_turns: int = 8");
+    expect(pick(window, "[data-context]").textContent).not.toContain("def exceeded(self):");
+    expect(pick(window, "[data-context]").textContent).not.toContain("raise NotImplementedError");
+    expect(pick(window, "[data-context]").textContent).not.toContain("@dataclass");
   });
 
 
