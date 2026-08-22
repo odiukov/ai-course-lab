@@ -247,7 +247,7 @@ describe("практика", () => {
     const methodPanel = {
       slug: "p19-l20-loop",
       multi: true,
-      functions: ["Budget.exceeded"],
+      functions: ["Budget.exceeded", "Budget.future"],
       targets: [{
         file: "main.py",
         fn: "Budget.exceeded",
@@ -270,11 +270,14 @@ describe("практика", () => {
       "",
       "class Budget:",
       "    max_turns: int = 8",
+      "    def untouched(self):",
+      "        return 1",
+      "",
       "    def exceeded(self):",
       "        raise NotImplementedError",
       "",
-      "    def untouched(self):",
-      "        return 1",
+      "    def future(self):",
+      "        raise NotImplementedError",
       "",
       "@dataclass",
       "class HarnessLoop:",
@@ -298,10 +301,11 @@ describe("практика", () => {
     expect(value).not.toContain("untouched");
     expect(pick(window, "[data-context-panel]").hidden).toBe(false);
     expect(pick(window, "[data-context]").textContent).toContain("class Budget:");
-    expect(pick(window, "[data-context]").textContent).toContain("def untouched(self):");
     expect(pick(window, "[data-context]").textContent).toContain("max_turns: int = 8");
+    expect(pick(window, "[data-context]").textContent).toContain("def untouched(self):");
     expect(pick(window, "[data-context]").textContent).not.toContain("def exceeded(self):");
     expect(pick(window, "[data-context]").textContent).not.toContain("raise NotImplementedError");
+    expect(pick(window, "[data-context]").textContent).not.toContain("def future(self):");
     expect(pick(window, "[data-context]").textContent).not.toContain("@dataclass");
   });
 
