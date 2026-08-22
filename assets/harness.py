@@ -19,6 +19,7 @@ import re
 import sys
 import traceback
 import types
+import unittest
 
 # Значения по умолчанию у pytest.approx.
 DEFAULT_REL = 1e-6
@@ -312,6 +313,116 @@ def _run_report(code, fn, functions, workdir):
     return {"loadError": None, "results": results, "filtered": filtered}
 
 
+class RecordingResult(unittest.TestResult):
+    """Переводит unittest.TestCase в тот же короткий отчёт, что pytest-функции."""
+
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    @staticmethod
+    def _name(test):
+        return test.id().split(".", 1)[-1]
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        self.records.append({"name": self._name(test), "passed": True, "message": ""})
+
+    def addFailure(self, test, error):
+        super().addFailure(test, error)
+        message = "".join(traceback.format_exception_only(error[0], error[1])).strip()
+        self.records.append({"name": self._name(test), "passed": False, "message": message})
+
+    def addError(self, test, error):
+        super().addError(test, error)
+        message = "".join(traceback.format_exception_only(error[0], error[1])).strip()
+        self.records.append({"name": self._name(test), "passed": False, "message": message})
+
+
+def _write_files(workdir, files):
+    for name, source in files.items():
+        target = os.path.join(workdir, name)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w") as handle:
+            handle.write(source)
+
+
+def _run_function(module, name):
+    test = getattr(module, name)
+    try:
+        started = run_autouse(module)
+        values, requested = resolve_fixtures(module, test)
+        started.extend(requested)
+        try:
+            test(*values)
+        finally:
+            for generator in started:
+                generator.close()
+        return {"name": name, "passed": True, "message": ""}
+    except Exception as error:
+        message = "".join(traceback.format_exception_only(type(error), error)).strip()
+        return {"name": name, "passed": False, "message": message}
+
+
+def _run_report_files(files, tests, test_nodes, workdir):
+    """Гоняет точные node IDs многофайловой лаборатории, включая unittest."""
+
+    _write_files(workdir, files)
+    _write_files(workdir, tests)
+    install_pytest_stub()
+    if workdir not in sys.path:
+        sys.path.insert(0, workdir)
+
+    module_names = {
+        os.path.splitext(name)[0]
+        for name in list(files) + list(tests)
+        if os.path.dirname(name) == ""
+    }
+    for name in module_names:
+        sys.modules.pop(name, None)
+
+    loaded = {}
+    results = []
+    try:
+        for node in test_nodes:
+            parts = node.split("::")
+            module_name = os.path.splitext(parts[0])[0]
+            module = loaded.get(module_name)
+            if module is None:
+                module = __import__(module_name)
+                loaded[module_name] = module
+
+            if len(parts) == 1:
+                suite = unittest.defaultTestLoader.loadTestsFromModule(module)
+                recording = RecordingResult()
+                suite.run(recording)
+                results.extend(recording.records)
+                results.extend(
+                    _run_function(module, name)
+                    for name in sorted(item for item in dir(module) if item.startswith("test_"))
+                    if callable(getattr(module, name))
+                )
+            elif len(parts) == 2:
+                results.append(_run_function(module, parts[1]))
+            elif len(parts) == 3:
+                suite = unittest.defaultTestLoader.loadTestsFromName(
+                    "{}.{}".format(parts[1], parts[2]), module
+                )
+                recording = RecordingResult()
+                suite.run(recording)
+                results.extend(recording.records)
+            else:
+                raise ValueError("неподдерживаемый node ID: {}".format(node))
+    except Exception as error:
+        return {
+            "loadError": "".join(traceback.format_exception_only(type(error), error)).strip(),
+            "results": [],
+            "filtered": False,
+        }
+
+    return {"loadError": None, "results": results, "filtered": True}
+
+
 def run(code, fn, functions, workdir="/exercise"):
     """Гоняет тесты и возвращает JSON вместе с консольным выводом Python.
 
@@ -336,4 +447,15 @@ def run_json(payload):
     """
 
     request = json.loads(payload)
+    if request.get("files") is not None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            report = _run_report_files(
+                request["files"],
+                request.get("tests") or {},
+                request.get("testNodes") or [],
+                "/exercise",
+            )
+        report["output"] = output.getvalue()
+        return json.dumps(report)
     return run(request["code"], request.get("fn"), request.get("functions") or [])

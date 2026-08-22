@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Последовательность слоёв и параллелизм классификаторов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --panel: whitesmoke;
+    --card: white;
+    --text: darkslategray;
+    --muted: slategray;
+    --line: royalblue;
+    --parallel: mediumseagreen;
+    --wait: darkgray;
+    --accent: darkorange;
+    --danger: crimson;
+    --soft-blue: aliceblue;
+    --soft-green: honeydew;
+    --soft-orange: oldlace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    background: var(--page);
+    color: var(--text);
+  }
+
+  body {
+    margin: unset;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--page);
+  }
+
+  figcaption {
+    padding: 12px 16px 8px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--page);
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 16px;
+  }
+
+  .small { font-size: 14px; }
+  .strong { font-weight: bold; }
+  .muted { fill: var(--muted); }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .input-card { fill: var(--soft-blue); }
+  .output-card { fill: var(--soft-orange); }
+  .parallel-card {
+    fill: var(--soft-green);
+    stroke: var(--parallel);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--muted);
+    stroke-width: 2px;
+  }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .branch {
+    fill: none;
+    stroke: var(--parallel);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .wait {
+    fill: none;
+    stroke: var(--wait);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .duration {
+    fill: var(--parallel);
+    stroke: var(--parallel);
+    stroke-width: 2px;
+  }
+
+  .duration-text {
+    fill: white;
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .join {
+    fill: var(--accent);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .result {
+    fill: var(--soft-orange);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .not-sum {
+    fill: var(--danger);
+    font-weight: bold;
+  }
+
+  #fallback {
+    padding: 16px;
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10151d;
+      --panel: #171f2a;
+      --card: #202a37;
+      --text: #edf3fa;
+      --muted: #aab6c4;
+      --line: #79a9ff;
+      --parallel: #58d69b;
+      --wait: #8995a3;
+      --accent: #ffb45b;
+      --danger: #ff7f91;
+      --soft-blue: #182b45;
+      --soft-green: #17372d;
+      --soft-orange: #3b2b19;
+    }
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Последовательность слоёв и параллелизм классификаторов</figcaption>
+  <svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Входная проверка выполняется перед генерацией, выходная — после неё. Три классификатора внутри входного слоя работают параллельно, поэтому слой занимает 120 миллисекунд, а не 270.">
+    <title>Последовательные этапы и параллельные классификаторы</title>
+    <desc>Строгая последовательность: запрос, входная проверка, генерация, выходная проверка, выдача. Внутри входной проверки одновременно работают OpenAI Moderation, Llama Guard и Perspective.</desc>
+    <g id="drawing"></g>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать строгую последовательность входной проверки, генерации и выходной проверки, а внутри слоя — три параллельных классификатора: 90, 120 и 60 мс дают общую задержку 120 мс, а не 270 мс.</p>
+</figure>
+
+<script>
+const data = [{
+  zero: 0,
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  radius: 12,
+  head: { back: 12, half: 7 },
+  dash: "7 7",
+
+  stages: [
+    { x: 40, y: 54, w: 150, h: 72, cls: "card", a: "Запрос", b: "один текст" },
+    { x: 245, y: 54, w: 190, h: 72, cls: "card input-card", a: "Входная проверка", b: "до генерации" },
+    { x: 500, y: 54, w: 190, h: 72, cls: "card", a: "Генерация", b: "создаёт ответ" },
+    { x: 755, y: 54, w: 190, h: 72, cls: "card output-card", a: "Выходная проверка", b: "после генерации" },
+    { x: 1010, y: 54, w: 150, h: 72, cls: "card", a: "Выдача", b: "готовый ответ" }
+  ],
+
+  stageText: { mainY: 82, subY: 106 },
+  sequenceLabel: { x: 600, y: 28, text: "Строгая последовательность по данным →" },
+  stageArrows: [
+    { x1: 190, y1: 90, x2: 245, y2: 90 },
+    { x1: 435, y1: 90, x2: 500, y2: 90 },
+    { x1: 690, y1: 90, x2: 755, y2: 90 },
+    { x1: 945, y1: 90, x2: 1010, y2: 90 }
+  ],
+
+  expansion: { x1: 340, y1: 126, x2: 340, y2: 166 },
+  panel: { x: 40, y: 166, w: 1120, h: 264 },
+  panelTitle: { x: 60, y: 191, text: "Внутри входного слоя: независимые проверки стартуют одновременно" },
+
+  source: { x: 68, y: 230, w: 130, h: 136 },
+  sourceText: [
+    { x: 133, y: 275, text: "Одна копия", cls: "strong" },
+    { x: 133, y: 300, text: "текста", cls: "strong" },
+    { x: 133, y: 331, text: "для всех", cls: "small muted" }
+  ],
+
+  fork: { x: 230, top: 239, mid: 299, bottom: 359, r: 7 },
+  forkLabel: { x: 230, y: 211, text: "общий старт" },
+  sourceLine: { x1: 198, y1: 299, x2: 230, y2: 299 },
+  forkLines: [
+    { x1: 230, y1: 239, x2: 290, y2: 239 },
+    { x1: 230, y1: 299, x2: 290, y2: 299 },
+    { x1: 230, y1: 359, x2: 290, y2: 359 }
+  ],
+
+  classifiers: [
+    {
+      x: 290, y: 220, w: 255, h: 38, tx: 310, ty: 244,
+      name: "OpenAI Moderation", barX: 570, barY: 231, barW: 90,
+      barH: 16, time: "90 мс", end: 660
+    },
+    {
+      x: 290, y: 280, w: 255, h: 38, tx: 310, ty: 304,
+      name: "Llama Guard", barX: 570, barY: 291, barW: 120,
+      barH: 16, time: "120 мс", end: 690
+    },
+    {
+      x: 290, y: 340, w: 255, h: 38, tx: 310, ty: 364,
+      name: "Perspective", barX: 570, barY: 351, barW: 60,
+      barH: 16, time: "60 мс", end: 630
+    }
+  ],
+
+  classifierToBars: [
+    { x1: 545, y1: 239, x2: 570, y2: 239 },
+    { x1: 545, y1: 299, x2: 570, y2: 299 },
+    { x1: 545, y1: 359, x2: 570, y2: 359 }
+  ],
+
+  join: { x: 720, top: 239, mid: 299, bottom: 359, r: 7 },
+  joinLabel: { x: 720, y: 211, text: "ждём самого медленного" },
+  waits: [
+    { x1: 660, y1: 239, x2: 720, y2: 239 },
+    { x1: 690, y1: 299, x2: 720, y2: 299 },
+    { x1: 630, y1: 359, x2: 720, y2: 359 }
+  ],
+
+  mergeArrow: { x1: 720, y1: 299, x2: 780, y2: 299 },
+  rule: { x: 780, y: 246, w: 220, h: 106 },
+  ruleText: [
+    { x: 890, y: 271, text: "Правило объединения", cls: "strong" },
+    { x: 890, y: 299, text: "пропустить · отказать", cls: "small" },
+    { x: 890, y: 323, text: "очистить · человеку", cls: "small" }
+  ],
+
+  result: { x: 1025, y: 246, w: 110, h: 106 },
+  resultText: [
+    { x: 1080, y: 278, text: "Задержка", cls: "small" },
+    { x: 1080, y: 304, text: "120 мс", cls: "strong" },
+    { x: 1080, y: 329, text: "не 270 мс", cls: "small not-sum" }
+  ],
+  ruleArrow: { x1: 1000, y1: 299, x2: 1025, y2: 299 },
+
+  note: {
+    x: 60, y: 407,
+    text: "Параллельный слой занимает максимум из 90, 120 и 60 мс — не их сумму."
+  }
+}];
+
+const [d] = data;
+const origin = Object.freeze({ x: d.origin.x, y: d.origin.y });
+const scale = Object.freeze({ x: d.scale.x, y: d.scale.y });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const ns = svg.namespaceURI;
+
+  function node(tag, attrs, text) {
+    const item = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+    if (text !== undefined) item.textContent = text;
+    drawing.appendChild(item);
+    return item;
+  }
+
+  function rect(item, cls) {
+    return node("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x + item.w) - sx(item.x),
+      height: sy(item.y + item.h) - sy(item.y),
+      rx: sx(d.radius) - sx(d.zero),
+      ry: sy(d.radius) - sy(d.zero),
+      class: cls
+    });
+  }
+
+  function text(item, anchor) {
+    return node("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      "text-anchor": anchor,
+      class: item.cls || ""
+    }, item.text);
+  }
+
+  function line(item, cls) {
+    return node("line", {
+      x1: sx(item.x1),
+      y1: sy(item.y1),
+      x2: sx(item.x2),
+      y2: sy(item.y2),
+      class: cls
+    });
+  }
+
+  function arrow(item, cls) {
+    line(item, cls);
+    node("polygon", {
+      points:
+        sx(item.x2) + "," + sy(item.y2) + " " +
+        sx(item.x2 - d.head.back) + "," + sy(item.y2 - d.head.half) + " " +
+        sx(item.x2 - d.head.back) + "," + sy(item.y2 + d.head.half),
+      class: cls
+    });
+  }
+
+  text(d.sequenceLabel, "middle");
+
+  d.stages.forEach(stage => {
+    rect(stage, stage.cls);
+    text({ x: stage.x + stage.w / d.scale.x / (d.scale.x + d.scale.x), y: d.stageText.mainY, text: stage.a, cls: "strong" }, "middle");
+    text({ x: stage.x + stage.w / d.scale.x / (d.scale.x + d.scale.x), y: d.stageText.subY, text: stage.b, cls: "small muted" }, "middle");
+  });
+
+  d.stageArrows.forEach(item => arrow(item, "flow"));
+
+  const expansion = line(d.expansion, "wait");
+  expansion.setAttribute("stroke-dasharray", d.dash);
+
+  rect(d.panel, "panel");
+  text(d.panelTitle, "start");
+
+  rect(d.source, "card");
+  d.sourceText.forEach(item => text(item, "middle"));
+
+  line(d.sourceLine, "branch");
+  line({ x1: d.fork.x, y1: d.fork.top, x2: d.fork.x, y2: d.fork.bottom }, "branch");
+  d.forkLines.forEach(item => arrow(item, "branch"));
+  node("circle", {
+    cx: sx(d.fork.x),
+    cy: sy(d.fork.mid),
+    r: sx(d.fork.r) - sx(d.zero),
+    class: "duration"
+  });
+  text(d.forkLabel, "middle");
+
+  d.classifiers.forEach(item => {
+    rect(item, "card parallel-card");
+    text({ x: item.tx, y: item.ty, text: item.name, cls: "strong" }, "start");
+    node("rect", {
+      x: sx(item.barX),
+      y: sy(item.barY),
+      width: sx(item.barX + item.barW) - sx(item.barX),
+      height: sy(item.barY + item.barH) - sy(item.barY),
+      rx: sx(item.barH) - sx(d.zero),
+      ry: sy(item.barH) - sy(d.zero),
+      class: "duration"
+    });
+    text({
+      x: item.barX + item.barW / (d.scale.x + d.scale.x),
+      y: item.barY + item.barH / (d.scale.y + d.scale.y),
+      text: item.time,
+      cls: "duration-text"
+    }, "middle");
+  });
+
+  d.classifierToBars.forEach(item => line(item, "branch"));
+  d.waits.forEach(item => {
+    const waiting = line(item, "wait");
+    waiting.setAttribute("stroke-dasharray", d.dash);
+  });
+
+  line({ x1: d.join.x, y1: d.join.top, x2: d.join.x, y2: d.join.bottom }, "branch");
+  node("circle", {
+    cx: sx(d.join.x),
+    cy: sy(d.join.mid),
+    r: sx(d.join.r) - sx(d.zero),
+    class: "join"
+  });
+  text(d.joinLabel, "middle");
+
+  arrow(d.mergeArrow, "flow");
+  rect(d.rule, "card");
+  d.ruleText.forEach(item => text(item, "middle"));
+
+  arrow(d.ruleArrow, "flow");
+  rect(d.result, "result");
+  d.resultText.forEach(item => text(item, "middle"));
+
+  text(d.note, "start");
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

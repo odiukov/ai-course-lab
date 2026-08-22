@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Реализуем ring allreduce: два прохода, единая сумма на всех рангах и корректное дополнение неделимого тензора — Collective Ops From Scratch</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/">← Collective Ops From Scratch</a>
+<span class="counter" data-counter>3 / 11</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем четыре коллективные операции и сверяем их с gloo</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем контракт кольцевого обмена</span></a></li>
+<li><a class="toc-link is-current" data-step="003-ring" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/003-ring/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Реализуем ring allreduce: два прохода, единая сумма на всех рангах и корректное дополнение неделимого тензора</span></a></li>
+<li><a class="toc-link" data-step="004-tree-seam" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/004-tree-seam/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Переходим от кольца к дереву распространения</span></a></li>
+<li><a class="toc-link" data-step="005-broadcast" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/005-broadcast/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Реализуем broadcast: значение src достигает каждого ранга, отправители уже владеют им, неполное дерево не теряет ранги</span></a></li>
+<li><a class="toc-link" data-step="006-rotation" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/006-rotation/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Прокручиваем шарды по кольцу без редукции</span></a></li>
+<li><a class="toc-link" data-step="007-allgather" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/007-allgather/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Реализуем allgather: сохраняем порядок рангов, передаём ровно один шард за шаг и обрабатываем world_size=1</span></a></li>
+<li><a class="toc-link" data-step="008-first-pass" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/008-first-pass/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Выделяем reduce-scatter как первую половину allreduce</span></a></li>
+<li><a class="toc-link" data-step="009-reduce-scatter" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/009-reduce-scatter/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Реализуем reduce-scatter: каждому рангу возвращается его сумма-шард, а неделимый вход отклоняется</span></a></li>
+<li><a class="toc-link" data-step="010-run" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/010-run/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Сверяем четыре примитива с gloo и проверяем счётчик байт</span></a></li>
+<li><a class="toc-link" data-step="011-quiz" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/011-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Выбираем коллективную операцию и топологию по контракту, задержке и объёму обмена</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Реализуем ring allreduce: два прохода, единая сумма на всех рангах и корректное дополнение неделимого тензора</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Возьми тензор из 10 элементов и запусти функцию на четырёх рангах. Разделить его поровну нельзя: если потерять два остаточных элемента, итоговая сумма будет незаметно обрезана. Поэтому сначала распрями тензор, увеличь длину до 12 нулями и получи четыре куска по три элемента. Нули безопасны: при сложении они не меняют результат.</p>
+<p>Теперь реализуй два прохода, связь между которыми разобрана в <a href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/001-result/">шаге 1</a>. Нумеруй шаги reduce-scatter от 1 до <code>N − 1</code>. На шаге <code>s</code> ранг <code>r</code> отправляет кусок с индексом <code>(r − s) mod N</code>, принимает <code>(r − s − 1) mod N</code> и прибавляет принятые значения к одноимённому локальному куску. После последнего обмена у ранга <code>r</code> готова полная сумма куска <code>r</code>.</p>
+<p>Во втором проходе складывать уже ничего не нужно. На первом шаге каждый ранг отправляет собственный готовый кусок, затем — только что полученный. Иными словами, на шаге <code>s</code> отправляется кусок <code>(r − s + 1) mod N</code>, а принимается <code>(r − s) mod N</code>. Записывай его в соответствующее место результирующего буфера. Для каждого обмена соблюдай контракт из <a href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/002-contract-check/">шага 2</a>: исходящий кусок нельзя менять, пока передача не завершилась.</p>
+<p>После <code>N − 1</code> шагов allgather у каждого ранга лежат все суммированные куски. Склей их, отбрось добавленные нули, восстанови исходную форму и сохрани тип данных и устройство тензора. Проверь также случай одного ранга: оба цикла будут пустыми, но функция всё равно должна вернуть корректный результат.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Четыре садовника делят 10 грядок на участки по три, поэтому две грядки временно считают пустыми. В первом круге каждый собирает общий расход семян для одного участка. Во втором они разносят готовые ведомости соседям. Когда ведомости есть у всех, пустые грядки вычёркивают — реальные десять при этом не потерялись.</p>
+</blockquote></div>
+
+
+<p class="practice">Практика: функция <code>ring_allreduce</code>. Упражнение к этому уроку не выложено.</p>
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/002-contract-check/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__76-collective-ops-from-scratch/004-tree-seam/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__76-collective-ops-from-scratch","stepId":"003-ring","number":3,"plannedCount":11}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>
