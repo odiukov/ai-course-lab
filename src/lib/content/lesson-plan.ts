@@ -102,6 +102,14 @@ export function validatePlan(
         errors.push(`Шаг ${step.id}: функция ${step.exercise_fn} отсутствует в упражнении`);
       } else if (step.exercise_file && !knownFiles.has(step.exercise_file)) {
         errors.push(`Шаг ${step.id}: в упражнении нет файла ${step.exercise_file}`);
+      } else if (step.exercise_file && !files.includes(step.exercise_file)) {
+        // Файл существует в упражнении, но не в НЁМ объявлена эта функция —
+        // ошибка другая, чем «файла нет вовсе», и человеку нужен не тот же
+        // текст, а адрес, где функция на самом деле лежит.
+        errors.push(
+          `Шаг ${step.id}: в файле ${step.exercise_file} нет функции ${step.exercise_fn} — ` +
+            `она есть в ${[...files].sort().join(", ")}`,
+        );
       } else if (!step.exercise_file && files.length > 1) {
         // Одно имя в двух файлах — это две разные задачи, и шаг обязан сказать,
         // о какой он. Угадать нельзя: и тесты, и сброс, и recall пишут в файл.
@@ -112,8 +120,15 @@ export function validatePlan(
       } else {
         file = step.exercise_file ?? files[0];
         if (used.has(key(file, step.exercise_fn))) {
+          // Имя файла в сообщении имеет смысл только когда оно различает
+          // задачи: у одно-файлового упражнения (files.length === 1) файл
+          // один и подразумевается, и текст ошибки остаётся тем же, что и
+          // до пары «файл + функция» — тем же принципом, что и у сообщения
+          // о непокрытой функции ниже.
           errors.push(
-            `Шаг ${step.id}: функция ${step.exercise_fn} в ${file} уже занята другим шагом`,
+            files.length > 1
+              ? `Шаг ${step.id}: функция ${step.exercise_fn} в ${file} уже занята другим шагом`
+              : `Шаг ${step.id}: функция ${step.exercise_fn} уже занята другим шагом`,
           );
         }
         // recall обещает карточку «вот как ты написал это в прошлый раз», и
