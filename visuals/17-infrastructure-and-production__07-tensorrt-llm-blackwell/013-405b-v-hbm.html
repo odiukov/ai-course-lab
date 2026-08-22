@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как NVFP4 переносит узкое место с весов на KV-кэш</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #657087;
+    --grid: #d9dfeb;
+    --bf16: #64748b;
+    --fp8: #3b82f6;
+    --nvfp4: #7c3aed;
+    --kv: #f59e0b;
+    --kv-soft: #fff1cf;
+    --node: #e8f7ef;
+    --node-line: #23865b;
+    --shadow: rgba(32, 46, 72, .09);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101522;
+      --panel: #171e2e;
+      --text: #edf2ff;
+      --muted: #a7b1c5;
+      --grid: #354057;
+      --bf16: #94a3b8;
+      --fp8: #60a5fa;
+      --nvfp4: #a78bfa;
+      --kv: #fbbf24;
+      --kv-soft: #382d17;
+      --node: #153629;
+      --node-line: #5bd09b;
+      --shadow: rgba(0, 0, 0, .25);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  .title {
+    padding: 12px 22px 4px;
+    font-size: 22px;
+    font-weight: 760;
+    line-height: 1.2;
+    letter-spacing: -.02em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 438px;
+    overflow: visible;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 2;
+    filter: drop-shadow(0 4px 9px var(--shadow));
+  }
+
+  .panel-title {
+    fill: var(--text);
+    font-size: 18px;
+    font-weight: 740;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 540;
+  }
+
+  .label {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 680;
+  }
+
+  .value {
+    fill: var(--text);
+    font-size: 17px;
+    font-weight: 780;
+  }
+
+  .bar-bg {
+    fill: var(--grid);
+    opacity: .55;
+  }
+
+  .bf16 { fill: var(--bf16); }
+  .fp8 { fill: var(--fp8); }
+  .nvfp4 { fill: var(--nvfp4); }
+  .kv { fill: var(--kv); }
+  .kv-soft { fill: var(--kv-soft); }
+
+  .guide {
+    stroke: var(--grid);
+    stroke-width: 2;
+    stroke-dasharray: 6 7;
+  }
+
+  .shift {
+    stroke: var(--kv);
+    stroke-width: 3;
+    fill: none;
+    stroke-linecap: round;
+  }
+
+  .node {
+    fill: var(--node);
+    stroke: var(--node-line);
+    stroke-width: 2;
+  }
+
+  .node-text {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: 760;
+  }
+
+  .node-sub {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 560;
+  }
+
+  .status-pill {
+    fill: var(--kv-soft);
+    stroke: var(--kv);
+    stroke-width: 2;
+  }
+
+  .status-text {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: 720;
+  }
+
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 4fr);
+    align-items: center;
+    gap: 14px;
+    padding: 0 34px 10px;
+    background: var(--bg);
+  }
+
+  .controls label {
+    font-size: 14px;
+    font-weight: 720;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--kv);
+    cursor: ew-resize;
+  }
+
+  @media (max-width: 680px) {
+    .title { font-size: 18px; }
+    .controls { grid-template-columns: 1fr; gap: 3px; }
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <div class="title" id="diagram-title">Как NVFP4 переносит узкое место с весов на KV-кэш</div>
+  <svg id="diagram" viewBox="0 0 1200 460" width="1200" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Сравнение памяти весов модели 405B, растущего FP8 KV-кэша и ёмкости узла GB200 NVL72"></svg>
+  <div class="controls">
+    <label id="context-label" for="context">Контекст: 128k</label>
+    <input id="context" type="range" aria-label="Длина контекста">
+  </div>
+</figure>
+
+<script>
+const data = [{
+  zero: 0,
+  canvas: { width: 1200, height: 460 },
+  radius: 13,
+  panel: {
+    y: 15, height: 300,
+    left: { x: 34, width: 378 },
+    right: { x: 432, width: 734 }
+  },
+  weights: {
+    title: { x: 62, y: 48 },
+    subtitle: { x: 62, y: 73 },
+    rows: [
+      { name: "BF16", value: "810 ГБ", amount: 810, y: 112, cls: "bf16" },
+      { name: "FP8", value: "405 ГБ", amount: 405, y: 181, cls: "fp8" },
+      { name: "NVFP4", value: "202,5 ГБ", amount: 202.5, y: 250, cls: "nvfp4" }
+    ],
+    labelX: 102,
+    barX: 126,
+    maxWidth: 238,
+    barHeight: 26,
+    valueGap: 10,
+    baselineY: 292
+  },
+  cache: {
+    title: { x: 460, y: 48 },
+    subtitle: { x: 460, y: 73 },
+    weight: { x: 476, y: 146, width: 156, height: 70 },
+    kv: { x: 676, y: 146, minWidth: 42, maxWidth: 424, height: 70 },
+    labelsY: 137,
+    innerY: 187,
+    fixedGuideY1: 125,
+    fixedGuideY2: 239,
+    arrow: {
+      x1: 548, y1: 104, x2: 792, y2: 104,
+      head: 13, wing: 8,
+      labelX: 670, labelY: 94
+    },
+    status: { x: 491, y: 257, width: 638, height: 38 },
+    threshold: 0.4
+  },
+  node: {
+    x: 34, y: 335, width: 1132, height: 98,
+    titleX: 62, titleY: 365,
+    subX: 62, subY: 390,
+    weight: { x: 330, y: 354, width: 190, height: 58 },
+    cache: { x: 542, y: 354, width: 594, height: 58 },
+    weightTextX: 425, cacheTextX: 839,
+    textY: 379, subY: 398
+  },
+  context: {
+    min: 0,
+    max: 128000,
+    step: 1000,
+    initial: 128000
+  },
+  fallback: { x: 50, y: 100 },
+  text: {
+    weightsTitle: "Память весов модели 405B",
+    weightsSub: "Фиксированный объём",
+    cacheTitle: "Отдельный потребитель: FP8 KV-кэш",
+    cacheSub: "Растёт с контекстом и числом последовательностей",
+    fixed: "Веса",
+    fixedSub: "NVFP4 · 202,5 ГБ",
+    cache: "FP8 KV-кэш",
+    shift: "узкое место смещается",
+    nodeTitle: "GB200 NVL72",
+    nodeSub: "более 13 ТБ HBM на узел",
+    room: "пространство под растущий KV-кэш",
+    notScale: "схематично, не в масштабе",
+    contextFull: "Контекст: 128k",
+    contextShort: "Контекст: короче 128k",
+    kvLeading: "KV-кэш становится крупнейшим блоком",
+    weightsLeading: "Веса пока остаются крупнейшим блоком",
+    caveat: "Точка пересечения зависит от модели, контекста и батча",
+    fallback: "Схема должна была показать: веса 405B занимают 810 ГБ в BF16, 405 ГБ в FP8 и 202,5 ГБ в NVFP4; FP8 KV-кэш растёт с контекстом до 128k, а узел GB200 NVL72 имеет более 13 ТБ HBM."
+  }
+}];
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 1, y: 1 };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const d = data[0];
+  const svg = document.getElementById("diagram");
+  const slider = document.getElementById("context");
+  const contextLabel = document.getElementById("context-label");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const add = (tag, attrs, text, parent = svg) => {
+    const el = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    if (text !== undefined) el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  };
+
+  const rect = (box, cls, parent = svg) => add("rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: sx(box.x + box.width) - sx(box.x),
+    height: sy(box.y + box.height) - sy(box.y),
+    rx: sx(d.radius) - sx(d.zero),
+    class: cls
+  }, undefined, parent);
+
+  const text = (x, y, value, cls, anchor = "start", parent = svg) => add("text", {
+    x: sx(x),
+    y: sy(y),
+    class: cls,
+    "text-anchor": anchor
+  }, value, parent);
+
+  const line = (x1, y1, x2, y2, cls, parent = svg) => add("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: cls
+  }, undefined, parent);
+
+  rect({
+    x: d.panel.left.x, y: d.panel.y,
+    width: d.panel.left.width, height: d.panel.height
+  }, "panel");
+  rect({
+    x: d.panel.right.x, y: d.panel.y,
+    width: d.panel.right.width, height: d.panel.height
+  }, "panel");
+
+  text(d.weights.title.x, d.weights.title.y, d.text.weightsTitle, "panel-title");
+  text(d.weights.subtitle.x, d.weights.subtitle.y, d.text.weightsSub, "small");
+
+  d.weights.rows.forEach(row => {
+    const width = d.weights.maxWidth * row.amount / d.weights.rows[0].amount;
+    text(d.weights.labelX, row.y + d.weights.barHeight / 1.45, row.name, "label", "end");
+    rect({
+      x: d.weights.barX, y: row.y,
+      width: d.weights.maxWidth, height: d.weights.barHeight
+    }, "bar-bg");
+    rect({
+      x: d.weights.barX, y: row.y,
+      width, height: d.weights.barHeight
+    }, row.cls);
+    text(
+      d.weights.barX + width + d.weights.valueGap,
+      row.y + d.weights.barHeight / 1.45,
+      row.value, "value"
+    );
+  });
+
+  line(
+    d.weights.barX, d.weights.baselineY,
+    d.weights.barX + d.weights.maxWidth, d.weights.baselineY,
+    "guide"
+  );
+
+  text(d.cache.title.x, d.cache.title.y, d.text.cacheTitle, "panel-title");
+  text(d.cache.subtitle.x, d.cache.subtitle.y, d.text.cacheSub, "small");
+
+  rect(d.cache.weight, "nvfp4");
+  text(
+    d.cache.weight.x + d.cache.weight.width / 2,
+    d.cache.innerY - 8,
+    d.text.fixed, "label", "middle"
+  );
+  text(
+    d.cache.weight.x + d.cache.weight.width / 2,
+    d.cache.innerY + 14,
+    d.text.fixedSub, "small", "middle"
+  );
+
+  line(
+    d.cache.weight.x + d.cache.weight.width,
+    d.cache.fixedGuideY1,
+    d.cache.weight.x + d.cache.weight.width,
+    d.cache.fixedGuideY2,
+    "guide"
+  );
+
+  const arrow = d.cache.arrow;
+  line(arrow.x1, arrow.y1, arrow.x2, arrow.y2, "shift");
+  add("polygon", {
+    points: [
+      `${sx(arrow.x2)},${sy(arrow.y2)}`,
+      `${sx(arrow.x2 - arrow.head)},${sy(arrow.y2 - arrow.wing)}`,
+      `${sx(arrow.x2 - arrow.head)},${sy(arrow.y2 + arrow.wing)}`
+    ].join(" "),
+    class: "kv"
+  });
+  text(arrow.labelX, arrow.labelY, d.text.shift, "label", "middle");
+
+  const kvGroup = add("g", {});
+  const kvRect = rect({
+    x: d.cache.kv.x, y: d.cache.kv.y,
+    width: d.cache.kv.maxWidth, height: d.cache.kv.height
+  }, "kv", kvGroup);
+  const kvText = text(
+    d.cache.kv.x + d.cache.kv.maxWidth / 2,
+    d.cache.innerY,
+    d.text.cache, "label", "middle", kvGroup
+  );
+
+  rect(d.cache.status, "status-pill");
+  const statusText = text(
+    d.cache.status.x + d.cache.status.width / 2,
+    d.cache.status.y + d.cache.status.height / 2 + 5,
+    d.text.kvLeading, "status-text", "middle"
+  );
+  text(
+    d.cache.status.x + d.cache.status.width / 2,
+    d.cache.status.y + d.cache.status.height + 18,
+    d.text.caveat, "small", "middle"
+  );
+
+  rect({
+    x: d.node.x, y: d.node.y,
+    width: d.node.width, height: d.node.height
+  }, "node");
+  text(d.node.titleX, d.node.titleY, d.text.nodeTitle, "node-text");
+  text(d.node.subX, d.node.subY, d.text.nodeSub, "node-text");
+
+  rect(d.node.weight, "nvfp4");
+  text(d.node.weightTextX, d.node.textY, "NVFP4 · 202,5 ГБ", "label", "middle");
+  text(d.node.weightTextX, d.node.subY, "веса 405B", "small", "middle");
+
+  rect(d.node.cache, "kv-soft");
+  text(d.node.cacheTextX, d.node.textY, d.text.room, "label", "middle");
+  text(d.node.cacheTextX, d.node.subY, d.text.notScale, "node-sub", "middle");
+
+  slider.min = d.context.min;
+  slider.max = d.context.max;
+  slider.step = d.context.step;
+  slider.value = d.context.initial;
+
+  const update = () => {
+    const value = Number(slider.value);
+    const ratio = value / d.context.max;
+    const width = d.cache.kv.minWidth +
+      (d.cache.kv.maxWidth - d.cache.kv.minWidth) * ratio;
+
+    kvRect.setAttribute("width", sx(d.cache.kv.x + width) - sx(d.cache.kv.x));
+    kvText.setAttribute("x", sx(d.cache.kv.x + width / 2));
+    kvText.textContent = width > d.cache.kv.minWidth * 2 ? d.text.cache : "KV";
+
+    const full = value === d.context.max;
+    contextLabel.textContent = full ? d.text.contextFull : d.text.contextShort;
+    statusText.textContent = ratio >= d.cache.threshold
+      ? d.text.kvLeading
+      : d.text.weightsLeading;
+  };
+
+  slider.addEventListener("input", update);
+  update();
+} catch (error) {
+  const d = data[0];
+  const svg = document.getElementById("diagram");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  fallback.setAttribute("x", sx(d.fallback.x));
+  fallback.setAttribute("y", sy(d.fallback.y));
+  fallback.setAttribute("class", "label");
+  fallback.setAttribute("font-size", "18");
+  fallback.textContent = d.text.fallback;
+  svg.appendChild(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Один поток спанов для шлюза, оценок и анализа</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #4b607d;
+      --flow: #2868d8;
+      --source-fill: #edf3ff;
+      --span-fill: #e5f6f2;
+      --span-accent: #087f69;
+      --gateway-fill: #fff3d8;
+      --gateway-accent: #c76a00;
+      --eval-fill: #f1eaff;
+      --eval-accent: #7650c7;
+      --lake-fill: #e8f4ff;
+      --lake-accent: #1673a8;
+      --chip-fill: #ffffff;
+      --chip-line: #9ba8ba;
+      --note-fill: #edf1f6;
+      --frame: #c7d0dd;
+      --error: #9d2f2f;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10151f;
+        --panel: #151c28;
+        --ink: #eef3fb;
+        --muted: #b1bdd0;
+        --line: #91a2bb;
+        --flow: #76a8ff;
+        --source-fill: #1d2a43;
+        --span-fill: #153830;
+        --span-accent: #57d4b7;
+        --gateway-fill: #3c2c15;
+        --gateway-accent: #ffb655;
+        --eval-fill: #302542;
+        --eval-accent: #bc9bff;
+        --lake-fill: #173246;
+        --lake-accent: #68c6f4;
+        --chip-fill: #1b2432;
+        --chip-line: #617087;
+        --note-fill: #202a39;
+        --frame: #405069;
+        --error: #ff9a9a;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      background: var(--page);
+    }
+
+    h1 {
+      color: var(--ink);
+      font-size: 21px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--panel);
+      border: 1px solid var(--frame);
+    }
+
+    svg text {
+      fill: var(--ink);
+      user-select: none;
+    }
+
+    .card {
+      stroke: var(--line);
+      fill: var(--panel);
+    }
+
+    .source-card {
+      fill: var(--source-fill);
+    }
+
+    .span-card {
+      fill: var(--span-fill);
+      stroke: var(--span-accent);
+    }
+
+    .gateway-card {
+      fill: var(--gateway-fill);
+    }
+
+    .eval-card {
+      fill: var(--eval-fill);
+    }
+
+    .lake-card {
+      fill: var(--lake-fill);
+    }
+
+    .gateway-accent {
+      fill: var(--gateway-accent);
+    }
+
+    .eval-accent {
+      fill: var(--eval-accent);
+    }
+
+    .lake-accent {
+      fill: var(--lake-accent);
+    }
+
+    .hub {
+      fill: var(--flow);
+      stroke: var(--flow);
+    }
+
+    .chip {
+      fill: var(--chip-fill);
+      stroke: var(--chip-line);
+    }
+
+    .note {
+      fill: var(--note-fill);
+      stroke: var(--frame);
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--flow);
+      stroke-linecap: square;
+      stroke-linejoin: miter;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arrow {
+      fill: var(--flow);
+      stroke: var(--flow);
+      stroke-linejoin: miter;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .eyebrow {
+      fill: var(--muted);
+      font-weight: bold;
+    }
+
+    .heading {
+      font-weight: bold;
+    }
+
+    .detail {
+      fill: var(--muted);
+    }
+
+    .field {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .flow-label {
+      fill: var(--flow);
+      font-weight: bold;
+    }
+
+    .note-label {
+      fill: var(--muted);
+    }
+
+    #fallback {
+      color: var(--error);
+      font-size: 16px;
+    }
+
+    noscript {
+      color: var(--error);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Один OTel GenAI-спан — несколько независимых читателей</h1>
+
+    <svg id="diagram"
+         viewBox="0 0 1200 430"
+         width="1200"
+         height="430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">
+        LLM-вызов создаёт один спан OpenTelemetry GenAI. Копии одного потока
+        независимо поступают в шлюз, платформу оценки и долговременное хранилище.
+      </desc>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать: один LLM-вызов выпускает один OTel GenAI-спан,
+      а его копии независимо читают шлюз, платформа оценки и data lake.
+    </p>
+
+    <noscript>
+      Схема: один LLM-вызов создаёт один OTel GenAI-спан; копии спана поступают
+      в Helicone или Portkey, Phoenix или Langfuse и Iceberg для анализа через
+      Arize AX или DuckDB.
+    </noscript>
+  </main>
+
+  <script>
+    const data = [
+      {
+        kind: "config",
+        origin: { x: 18, y: 8 },
+        scale: { x: 1, y: 1 },
+        strokeWidth: 2,
+        fineWidth: 1,
+        font: {
+          eyebrow: 13,
+          heading: 21,
+          body: 16,
+          field: 14,
+          flow: 13,
+          note: 15
+        }
+      },
+
+      { kind: "rect", className: "card source-card", box: [18, 137, 205, 257] },
+      { kind: "rect", className: "card span-card", box: [280, 97, 510, 297] },
+
+      { kind: "rect", className: "card gateway-card", box: [650, 27, 1145, 117] },
+      { kind: "rect", className: "gateway-accent", box: [650, 27, 660, 117] },
+
+      { kind: "rect", className: "card eval-card", box: [650, 152, 1145, 242] },
+      { kind: "rect", className: "eval-accent", box: [650, 152, 660, 242] },
+
+      { kind: "rect", className: "card lake-card", box: [650, 277, 1145, 382] },
+      { kind: "rect", className: "lake-accent", box: [650, 277, 660, 382] },
+
+      { kind: "rect", className: "chip", box: [302, 181, 488, 211] },
+      { kind: "rect", className: "chip", box: [302, 220, 488, 250] },
+      { kind: "rect", className: "chip", box: [302, 259, 488, 281] },
+
+      { kind: "rect", className: "hub", box: [563, 191, 577, 205] },
+      { kind: "rect", className: "note", box: [244, 394, 956, 418] },
+
+      {
+        kind: "line",
+        className: "flow",
+        points: [[205, 197], [280, 197]]
+      },
+      {
+        kind: "line",
+        className: "flow",
+        points: [[510, 197], [570, 197]]
+      },
+      {
+        kind: "line",
+        className: "flow",
+        points: [[570, 72], [570, 322]]
+      },
+      {
+        kind: "line",
+        className: "flow",
+        points: [[570, 72], [650, 72]]
+      },
+      {
+        kind: "line",
+        className: "flow",
+        points: [[570, 197], [650, 197]]
+      },
+      {
+        kind: "line",
+        className: "flow",
+        points: [[570, 322], [650, 322]]
+      },
+
+      {
+        kind: "polygon",
+        className: "arrow",
+        points: [[280, 197], [267, 189], [267, 205]]
+      },
+      {
+        kind: "polygon",
+        className: "arrow",
+        points: [[650, 72], [637, 64], [637, 80]]
+      },
+      {
+        kind: "polygon",
+        className: "arrow",
+        points: [[650, 197], [637, 189], [637, 205]]
+      },
+      {
+        kind: "polygon",
+        className: "arrow",
+        points: [[650, 322], [637, 314], [637, 330]]
+      },
+
+      {
+        kind: "text",
+        className: "eyebrow",
+        at: [111, 160],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "eyebrow",
+        value: "ИСТОЧНИК"
+      },
+      {
+        kind: "text",
+        className: "heading",
+        at: [111, 194],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "heading",
+        value: "LLM-вызов"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [111, 226],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "body",
+        value: "ответ пользователю"
+      },
+
+      {
+        kind: "text",
+        className: "eyebrow",
+        at: [395, 123],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "eyebrow",
+        value: "ЕДИНЫЙ КОНТРАКТ"
+      },
+      {
+        kind: "text",
+        className: "heading",
+        at: [395, 156],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "heading",
+        value: "один OTel GenAI-спан"
+      },
+      {
+        kind: "text",
+        className: "field",
+        at: [395, 201],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "field",
+        value: "gen_ai.request.model"
+      },
+      {
+        kind: "text",
+        className: "field",
+        at: [395, 240],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "field",
+        value: "gen_ai.usage.input_tokens"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [395, 276],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "field",
+        value: "задержка • характеристики"
+      },
+
+      {
+        kind: "text",
+        className: "flow-label",
+        at: [214, 197],
+        offset: [0, -14],
+        anchor: "start",
+        font: "flow",
+        value: "создаёт один раз"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [242, 197],
+        offset: [0, 20],
+        anchor: "middle",
+        font: "flow",
+        value: "телеметрия"
+      },
+      {
+        kind: "text",
+        className: "flow-label",
+        at: [570, 42],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "flow",
+        value: "один поток спанов"
+      },
+      {
+        kind: "text",
+        className: "flow-label",
+        at: [582, 72],
+        offset: [0, -13],
+        anchor: "start",
+        font: "flow",
+        value: "копия"
+      },
+      {
+        kind: "text",
+        className: "flow-label",
+        at: [582, 197],
+        offset: [0, -13],
+        anchor: "start",
+        font: "flow",
+        value: "копия"
+      },
+      {
+        kind: "text",
+        className: "flow-label",
+        at: [582, 322],
+        offset: [0, -13],
+        anchor: "start",
+        font: "flow",
+        value: "копия"
+      },
+
+      {
+        kind: "text",
+        className: "eyebrow",
+        at: [685, 49],
+        offset: [0, 0],
+        anchor: "start",
+        font: "eyebrow",
+        value: "ПОВСЕДНЕВНАЯ РАБОТА"
+      },
+      {
+        kind: "text",
+        className: "heading",
+        at: [685, 78],
+        offset: [0, 0],
+        anchor: "start",
+        font: "heading",
+        value: "Helicone или Portkey"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [685, 103],
+        offset: [0, 0],
+        anchor: "start",
+        font: "body",
+        value: "расходы • контроль запросов"
+      },
+
+      {
+        kind: "text",
+        className: "eyebrow",
+        at: [685, 174],
+        offset: [0, 0],
+        anchor: "start",
+        font: "eyebrow",
+        value: "ОЦЕНКА КАЧЕСТВА"
+      },
+      {
+        kind: "text",
+        className: "heading",
+        at: [685, 203],
+        offset: [0, 0],
+        anchor: "start",
+        font: "heading",
+        value: "Phoenix или Langfuse"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [685, 228],
+        offset: [0, 0],
+        anchor: "start",
+        font: "body",
+        value: "те же спаны + оценки • регрессии"
+      },
+
+      {
+        kind: "text",
+        className: "eyebrow",
+        at: [685, 299],
+        offset: [0, 0],
+        anchor: "start",
+        font: "eyebrow",
+        value: "ДОЛГОВРЕМЕННЫЙ АНАЛИЗ"
+      },
+      {
+        kind: "text",
+        className: "heading",
+        at: [685, 328],
+        offset: [0, 0],
+        anchor: "start",
+        font: "heading",
+        value: "data lake Iceberg"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [685, 353],
+        offset: [0, 0],
+        anchor: "start",
+        font: "body",
+        value: "Arize AX или DuckDB"
+      },
+      {
+        kind: "text",
+        className: "detail",
+        at: [685, 375],
+        offset: [0, 0],
+        anchor: "start",
+        font: "body",
+        value: "исследование через месяцы"
+      },
+
+      {
+        kind: "text",
+        className: "note-label",
+        at: [600, 411],
+        offset: [0, 0],
+        anchor: "middle",
+        font: "note",
+        value: "Назначения независимы: отказ аналитики не останавливает ответ пользователю"
+      }
+    ];
+
+    const [config, ...items] = data;
+    const origin = Object.freeze(config.origin);
+    const scale = Object.freeze(config.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    try {
+      const make = name => document.createElementNS(namespace, name);
+
+      const setLineStyle = element => {
+        element.setAttribute("stroke-width", String(config.strokeWidth));
+      };
+
+      const renderRect = item => {
+        const [xStart, yStart, xEnd, yEnd] = item.box;
+        const element = make("rect");
+        element.setAttribute("x", String(sx(xStart)));
+        element.setAttribute("y", String(sy(yStart)));
+        element.setAttribute("width", String(sx(xEnd) - sx(xStart)));
+        element.setAttribute("height", String(sy(yEnd) - sy(yStart)));
+        element.setAttribute("class", item.className);
+        element.setAttribute("stroke-width", String(config.fineWidth));
+        svg.appendChild(element);
+      };
+
+      const renderLine = item => {
+        const element = make("polyline");
+        element.setAttribute(
+          "points",
+          item.points.map(point => {
+            const [x, y] = point;
+            return `${sx(x)},${sy(y)}`;
+          }).join(" ")
+        );
+        element.setAttribute("class", item.className);
+        setLineStyle(element);
+        svg.appendChild(element);
+      };
+
+      const renderPolygon = item => {
+        const element = make("polygon");
+        element.setAttribute(
+          "points",
+          item.points.map(point => {
+            const [x, y] = point;
+            return `${sx(x)},${sy(y)}`;
+          }).join(" ")
+        );
+        element.setAttribute("class", item.className);
+        element.setAttribute("stroke-width", String(config.fineWidth));
+        svg.appendChild(element);
+      };
+
+      const renderText = item => {
+        const [x, y] = item.at;
+        const [dx, dy] = item.offset;
+        const element = make("text");
+        element.setAttribute("x", String(sx(x)));
+        element.setAttribute("y", String(sy(y)));
+        element.setAttribute("dx", String(dx));
+        element.setAttribute("dy", String(dy));
+        element.setAttribute("text-anchor", item.anchor);
+        element.setAttribute("class", item.className);
+        element.setAttribute("font-size", String(config.font[item.font]));
+        element.textContent = item.value;
+        svg.appendChild(element);
+      };
+
+      items.filter(item => item.kind === "rect").forEach(renderRect);
+      items.filter(item => item.kind === "line").forEach(renderLine);
+      items.filter(item => item.kind === "polygon").forEach(renderPolygon);
+      items.filter(item => item.kind === "text").forEach(renderText);
+    } catch (error) {
+      svg.replaceChildren();
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

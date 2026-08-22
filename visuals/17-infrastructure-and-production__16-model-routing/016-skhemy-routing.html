@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как запрос проходит через маршруты</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:white;
+  --panel:ghostwhite;
+  --ink:midnightblue;
+  --muted:slategray;
+  --line:lightslategray;
+  --request:aliceblue;
+  --decision:lemonchiffon;
+  --cheap:honeydew;
+  --frontier:lavender;
+  --reward:mistyrose;
+  --output:azure;
+  --accent:royalblue;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:midnightblue;
+    --panel:darkslateblue;
+    --ink:white;
+    --muted:lightgray;
+    --line:lightslategray;
+    --request:darkslategray;
+    --decision:darkgoldenrod;
+    --cheap:seagreen;
+    --frontier:slateblue;
+    --reward:brown;
+    --output:teal;
+    --accent:lightskyblue;
+  }
+}
+html,body{background:var(--page);color:var(--ink);}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+h1{font-size:20px;font-weight:bold;color:var(--ink);}
+svg{display:block;width:100%;height:auto;background:var(--page);}
+.panel{fill:var(--panel);stroke:var(--line);stroke-width:1;}
+.rule{stroke:var(--line);stroke-width:1;}
+.flow{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.arrowhead{fill:var(--accent);}
+.node{stroke:var(--line);stroke-width:1;}
+.request{fill:var(--request);}
+.decision{fill:var(--decision);}
+.cheap{fill:var(--cheap);}
+.frontier{fill:var(--frontier);}
+.reward{fill:var(--reward);}
+.output{fill:var(--output);}
+.fork{fill:var(--accent);stroke:var(--panel);stroke-width:2;}
+.title{fill:var(--ink);font-size:18px;font-weight:bold;}
+.note{fill:var(--muted);font-size:12px;}
+.label{fill:var(--ink);font-size:14px;font-weight:bold;}
+.route{fill:var(--muted);font-size:12px;}
+.metric{fill:var(--accent);font-size:13px;font-weight:bold;}
+.caption{fill:var(--ink);font-size:13px;font-weight:bold;}
+#error{color:var(--ink);font-size:14px;}
+</style>
+</head>
+<body>
+<h1 id="heading">Как запрос проходит через pre-route, cascade и ensemble</h1>
+<svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+  role="img" aria-labelledby="heading description">
+  <desc id="description">Три параллельных маршрута одного запроса: выбор модели заранее, эскалация после дешёвой модели и сравнение двух параллельных ответов.</desc>
+</svg>
+<p id="error" hidden>Схема должна была показать pre-route с быстрым классификатором, cascade с редкой эскалацией и ensemble с параллельным вызовом двух моделей.</p>
+<script>
+const DATA=Object.freeze({
+  zero:0, one:1, half:0.5, negativePair:-2,
+  canvas:{w:1200,h:450},
+  layout:{edge:12,top:8,panelW:376,panelH:432,gap:12,ruleY:56,
+    radius:12,nodeRadius:9,arrow:9,wing:5,dot:5,headingPad:14},
+  text:{
+    panelY:27,noteY:47,captionY:424,
+    preTitle:"PRE-ROUTE",preNote:"выбор до основной модели",
+    cascadeTitle:"CASCADE",cascadeNote:"выбор после первой попытки",
+    ensembleTitle:"ENSEMBLE",ensembleNote:"соревнование двух ответов"
+  },
+  panels:[
+    {x:12,title:"PRE-ROUTE",note:"выбор до основной модели"},
+    {x:412,title:"CASCADE",note:"выбор после первой попытки"},
+    {x:812,title:"ENSEMBLE",note:"соревнование двух ответов"}
+  ],
+  pre:{
+    request:{x:116,y:69,w:168,h:36,label:"Одинаковый запрос",kind:"request"},
+    classifier:{x:96,y:118,w:208,h:46,label:"Классификатор · 5–10 мс",kind:"decision"},
+    diamond:{cx:200,cy:220,w:126,h:62,label:"Куда направить?"},
+    cheap:{x:38,y:278,w:146,h:42,label:"Дешёвая модель",kind:"cheap"},
+    frontier:{x:216,y:278,w:146,h:42,label:"Frontier-модель",kind:"frontier"},
+    output:{x:120,y:357,w:160,h:36,label:"Один ответ",kind:"output"},
+    flows:[
+      [[200,105],[200,118]],
+      [[200,164],[200,189]],
+      [[137,220],[111,250],[111,278]],
+      [[263,220],[289,250],[289,278]],
+      [[111,320],[111,339],[168,357]],
+      [[289,320],[289,339],[232,357]]
+    ],
+    labels:[
+      {x:76,y:245,text:"ровно одна модель",anchor:"start",kind:"route"}
+    ],
+    caption:"Второй генерации нет"
+  },
+  cascade:{
+    request:{x:516,y:69,w:168,h:36,label:"Одинаковый запрос",kind:"request"},
+    cheap:{x:521,y:120,w:158,h:42,label:"Дешёвая модель",kind:"cheap"},
+    diamond:{cx:600,cy:211,w:126,h:62,label:"Ответ уверен?"},
+    frontier:{x:621,y:280,w:150,h:42,label:"Frontier-модель",kind:"frontier"},
+    output:{x:520,y:357,w:160,h:36,label:"Итоговый ответ",kind:"output"},
+    flows:[
+      [[600,105],[600,120]],
+      [[600,162],[600,180]],
+      [[537,211],[496,246],[496,326],[560,357]],
+      [[663,211],[696,246],[696,280]],
+      [[696,322],[696,337],[640,357]]
+    ],
+    labels:[
+      {x:548,y:250,text:"уверенно",anchor:"end",kind:"route"},
+      {x:548,y:270,text:"≈ 1,2× медианы",anchor:"end",kind:"metric"},
+      {x:652,y:244,text:"низкая уверенность",anchor:"start",kind:"route"},
+      {x:652,y:263,text:"≈ 10% запросов",anchor:"start",kind:"metric"},
+      {x:708,y:343,text:"≈ 2×",anchor:"start",kind:"metric"}
+    ],
+    caption:"Сильная модель — только при эскалации"
+  },
+  ensemble:{
+    request:{x:916,y:69,w:168,h:36,label:"Одинаковый запрос",kind:"request"},
+    fork:{cx:1000,cy:131},
+    cheap:{x:828,y:166,w:150,h:42,label:"Дешёвая модель",kind:"cheap"},
+    frontier:{x:1022,y:166,w:150,h:42,label:"Frontier-модель",kind:"frontier"},
+    reward:{x:890,y:273,w:220,h:44,label:"Reward-модель выбирает",kind:"reward"},
+    output:{x:920,y:357,w:160,h:36,label:"Лучший ответ",kind:"output"},
+    flows:[
+      [[1000,105],[1000,126]],
+      [[996,135],[903,166]],
+      [[1004,135],[1097,166]],
+      [[903,208],[903,242],[950,273]],
+      [[1097,208],[1097,242],[1050,273]],
+      [[1000,317],[1000,357]]
+    ],
+    labels:[
+      {x:1000,y:151,text:"одновременно",anchor:"middle",kind:"metric"},
+      {x:1000,y:336,text:"сравнение ответов",anchor:"middle",kind:"route"}
+    ],
+    caption:"Оплата обеих генераций и оценки"
+  }
+});
+const origin=Object.freeze({x:0,y:0});
+const scale=Object.freeze({x:1,y:1});
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const NS=svg.namespaceURI;
+  const heading=document.getElementById("heading");
+  const px=value=>`${value}px`;
+  document.body.style.margin=px(sx(DATA.zero));
+  heading.style.margin=px(sx(DATA.zero));
+  heading.style.paddingTop=px(sy(DATA.layout.headingPad));
+  heading.style.paddingBottom=px(sy(DATA.layout.headingPad));
+  heading.style.paddingLeft=px(sx(DATA.layout.headingPad));
+  heading.style.paddingRight=px(sx(DATA.layout.headingPad));
+
+  const el=(name,attrs,content)=>{
+    const node=document.createElementNS(NS,name);
+    Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,value));
+    if(content!==undefined) node.textContent=content;
+    return node;
+  };
+  const add=node=>svg.appendChild(node);
+  const rect=(box,extraClass)=>{
+    const radius=DATA.layout.nodeRadius;
+    add(el("rect",{
+      x:sx(box.x),y:sy(box.y),
+      width:sx(box.x+box.w)-sx(box.x),
+      height:sy(box.y+box.h)-sy(box.y),
+      rx:sx(box.x+radius)-sx(box.x),
+      ry:sy(box.y+radius)-sy(box.y),
+      class:extraClass
+    }));
+  };
+  const text=(x,y,value,className,anchor)=>{
+    add(el("text",{
+      x:sx(x),y:sy(y),class:className,
+      "text-anchor":anchor,
+      "dominant-baseline":"middle"
+    },value));
+  };
+  const node=box=>{
+    rect(box,`node ${box.kind}`);
+    text(box.x+box.w*DATA.half,box.y+box.h*DATA.half,
+      box.label,"label","middle");
+  };
+  const diamond=item=>{
+    const hw=item.w*DATA.half;
+    const hh=item.h*DATA.half;
+    const points=[
+      [item.cx,item.cy-hh],[item.cx+hw,item.cy],
+      [item.cx,item.cy+hh],[item.cx-hw,item.cy]
+    ].map(([x,y])=>`${sx(x)},${sy(y)}`).join(" ");
+    add(el("polygon",{points,class:"node decision"}));
+    text(item.cx,item.cy,item.label,"label","middle");
+  };
+  const arrow=points=>{
+    const linePoints=points.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" ");
+    add(el("polyline",{points:linePoints,class:"flow"}));
+    const [a,b]=points.slice(DATA.negativePair);
+    const dx=b[DATA.one]-a[DATA.one];
+    const dy=b[DATA.zero]-a[DATA.zero];
+    const length=Math.hypot(dx,dy)||DATA.one;
+    const ux=dx/length;
+    const uy=dy/length;
+    const backX=b[DATA.one]-ux*DATA.layout.arrow;
+    const backY=b[DATA.zero]-uy*DATA.layout.arrow;
+    const left=[
+      backX-uy*DATA.layout.wing,
+      backY+ux*DATA.layout.wing
+    ];
+    const right=[
+      backX+uy*DATA.layout.wing,
+      backY-ux*DATA.layout.wing
+    ];
+    const tip=[
+      `${sx(b[DATA.one])},${sy(b[DATA.zero])}`,
+      `${sx(left[DATA.zero])},${sy(left[DATA.one])}`,
+      `${sx(right[DATA.zero])},${sy(right[DATA.one])}`
+    ].join(" ");
+    add(el("polygon",{points:tip,class:"arrowhead"}));
+  };
+  const panel=item=>{
+    const box={
+      x:item.x,y:DATA.layout.top,
+      w:DATA.layout.panelW,h:DATA.layout.panelH
+    };
+    rect(box,"panel");
+    add(el("line",{
+      x1:sx(item.x),y1:sy(DATA.layout.ruleY),
+      x2:sx(item.x+DATA.layout.panelW),y2:sy(DATA.layout.ruleY),
+      class:"rule"
+    }));
+    text(item.x+DATA.layout.panelW*DATA.half,
+      DATA.text.panelY,item.title,"title","middle");
+    text(item.x+DATA.layout.panelW*DATA.half,
+      DATA.text.noteY,item.note,"note","middle");
+  };
+  const routeLabels=items=>items.forEach(item=>
+    text(item.x,item.y,item.text,item.kind,item.anchor)
+  );
+  const renderPre=()=>{
+    DATA.pre.flows.forEach(arrow);
+    node(DATA.pre.request);
+    node(DATA.pre.classifier);
+    diamond(DATA.pre.diamond);
+    node(DATA.pre.cheap);
+    node(DATA.pre.frontier);
+    node(DATA.pre.output);
+    routeLabels(DATA.pre.labels);
+    text(DATA.panels[DATA.zero].x+DATA.layout.panelW*DATA.half,
+      DATA.text.captionY,DATA.pre.caption,"caption","middle");
+  };
+  const renderCascade=()=>{
+    DATA.cascade.flows.forEach(arrow);
+    node(DATA.cascade.request);
+    node(DATA.cascade.cheap);
+    diamond(DATA.cascade.diamond);
+    node(DATA.cascade.frontier);
+    node(DATA.cascade.output);
+    routeLabels(DATA.cascade.labels);
+    text(DATA.panels[DATA.one].x+DATA.layout.panelW*DATA.half,
+      DATA.text.captionY,DATA.cascade.caption,"caption","middle");
+  };
+  const renderEnsemble=()=>{
+    DATA.ensemble.flows.forEach(arrow);
+    node(DATA.ensemble.request);
+    add(el("circle",{
+      cx:sx(DATA.ensemble.fork.cx),
+      cy:sy(DATA.ensemble.fork.cy),
+      r:sx(DATA.ensemble.fork.cx+DATA.layout.dot)-sx(DATA.ensemble.fork.cx),
+      class:"fork"
+    }));
+    node(DATA.ensemble.cheap);
+    node(DATA.ensemble.frontier);
+    node(DATA.ensemble.reward);
+    node(DATA.ensemble.output);
+    routeLabels(DATA.ensemble.labels);
+    const lastPanel=DATA.panels[DATA.panels.length-DATA.one];
+    text(lastPanel.x+DATA.layout.panelW*DATA.half,
+      DATA.text.captionY,DATA.ensemble.caption,"caption","middle");
+  };
+
+  DATA.panels.forEach(panel);
+  renderPre();
+  renderCascade();
+  renderEnsemble();
+}catch(error){
+  document.getElementById("diagram").hidden=true;
+  document.getElementById("error").hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

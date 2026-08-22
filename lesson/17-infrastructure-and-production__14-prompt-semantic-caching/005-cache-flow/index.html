@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь запроса через L1 и L2 — Prompt Semantic Caching</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/">← Prompt Semantic Caching</a>
+<span class="counter" data-counter>5 / 37</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-cache-protocol" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/001-cache-protocol/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Почему кэширование — это протокол, а не флажок</span></a></li>
+<li><a class="toc-link" data-step="002-two-levels" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/002-two-levels/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Два уровня экономии: дешёвый вызов L2 и отсутствие вызова L1</span></a></li>
+<li><a class="toc-link" data-step="003-level-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/003-level-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Определяем, какой уровень кэша сработал</span></a></li>
+<li><a class="toc-link" data-step="004-provider-prefix" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/004-provider-prefix/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">От известного переиспользования KV к кэшу на стороне провайдера</span></a></li>
+<li><a class="toc-link is-current" data-step="005-cache-flow" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/005-cache-flow/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Путь запроса через L1 и L2</span></a></li>
+<li><a class="toc-link" data-step="006-anthropic-control" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/006-anthropic-control/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Явная граница cache_control и два TTL Anthropic</span></a></li>
+<li><a class="toc-link" data-step="007-provider-differences" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/007-provider-differences/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Автокэш OpenAI, отдельный API Gemini и self-hosted-кэш</span></a></li>
+<li><a class="toc-link" data-step="008-provider-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/008-provider-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Выбираем способ включения и проверки provider cache</span></a></li>
+<li><a class="toc-link" data-step="009-semantic-cache" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/009-semantic-cache/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Как семантический кэш останавливает запрос до вызова LLM</span></a></li>
+<li><a class="toc-link" data-step="010-cosine-rule" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/010-cosine-rule/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Применяем известную косинусную близость как меру сходства запросов</span></a></li>
+<li><a class="toc-link" data-step="011-code-cosine" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/011-code-cosine/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Пишем cosine</span></a></li>
+<li><a class="toc-link" data-step="012-nearest-threshold" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/012-nearest-threshold/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Ищем ближайшую запись и отделяем кандидата от попадания порогом</span></a></li>
+<li><a class="toc-link" data-step="013-code-nearest" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/013-code-nearest/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Пишем nearest_entry</span></a></li>
+<li><a class="toc-link" data-step="014-lookup-contract" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/014-lookup-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Контракт semantic lookup: нормализация, эмбеддинг и безопасный ответ</span></a></li>
+<li><a class="toc-link" data-step="015-code-lookup" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/015-code-lookup/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Пишем semantic_lookup</span></a></li>
+<li><a class="toc-link" data-step="016-threshold-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/016-threshold-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Разбираем попадание и промах около порога 0.95</span></a></li>
+<li><a class="toc-link" data-step="017-cache-loop" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/017-cache-loop/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Цикл L1: вернуть hit или вызвать LLM и сохранить miss</span></a></li>
+<li><a class="toc-link" data-step="018-code-run-cache" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/018-code-run-cache/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Пишем run_semantic_cache</span></a></li>
+<li><a class="toc-link" data-step="019-hit-vs-accuracy" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/019-hit-vs-accuracy/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Почему точность совпадений не равна доле попаданий</span></a></li>
+<li><a class="toc-link" data-step="020-stats-telemetry" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/020-stats-telemetry/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Какие счётчики показывают реальную пользу семантического кэша</span></a></li>
+<li><a class="toc-link" data-step="021-code-stats" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/021-code-stats/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Пишем cache_stats</span></a></li>
+<li><a class="toc-link" data-step="022-traffic-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/022-traffic-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Сравниваем свободный чат, код и структурированный FAQ</span></a></li>
+<li><a class="toc-link" data-step="023-prefix-billing" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/023-prefix-billing/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Превращаем известный общий префикс в число оплачиваемых cached tokens</span></a></li>
+<li><a class="toc-link" data-step="024-code-prefix" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/024-code-prefix/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Пишем common_prefix_tokens</span></a></li>
+<li><a class="toc-link" data-step="025-dynamic-trap" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/025-dynamic-trap/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Как ранняя динамика обнуляет точное совпадение префикса</span></a></li>
+<li><a class="toc-link" data-step="026-prefix-layout" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/026-prefix-layout/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Перестраиваем промпт: статичное сверху, динамическое снизу</span></a></li>
+<li><a class="toc-link" data-step="027-dynamic-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/027-dynamic-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Находим байты, которые разрушают кэшируемый префикс</span></a></li>
+<li><a class="toc-link" data-step="028-request-economics" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/028-request-economics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Считаем стоимость L2-запроса из свежих, записанных и прочитанных токенов</span></a></li>
+<li><a class="toc-link" data-step="029-code-l2-cost" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/029-code-l2-cost/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Пишем l2_request_cost</span></a></li>
+<li><a class="toc-link" data-step="030-ttl-economics" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/030-ttl-economics/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Когда часовой TTL с записью 2x дешевле пяти минут с записью 1.25x</span></a></li>
+<li><a class="toc-link" data-step="031-ttl-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/031-ttl-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Выбираем TTL для запросов раз в две и раз в двадцать минут</span></a></li>
+<li><a class="toc-link" data-step="032-parallel-misses" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/032-parallel-misses/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Почему параллельная волна успевает сделать N записей до первого hit</span></a></li>
+<li><a class="toc-link" data-step="033-code-wave-cost" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/033-code-wave-cost/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Пишем parallel_wave_cost</span></a></li>
+<li><a class="toc-link" data-step="034-warm-first" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/034-warm-first/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Прогреваем префикс до параллельной волны и не ставим 300 мс на критический путь</span></a></li>
+<li><a class="toc-link" data-step="035-batch-stack" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/035-batch-stack/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Перемножаем скидку Batch API и экономию cached input</span></a></li>
+<li><a class="toc-link" data-step="036-cache-auditor" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/036-cache-auditor/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Собираем аудитор кэшируемости промпта и профиля трафика</span></a></li>
+<li><a class="toc-link" data-step="037-final-quiz" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/037-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Итоговая проверка: проектируем двухуровневый кэш и защищаем экономию числами</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Путь запроса через L1 и L2</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты отправляешь в поддержку вопрос: «Можно вернуть покупку без чека?» На схеме запрос сначала попадает не к модели, а в L1. Этот уровень ищет уже сохранённый вопрос с тем же смыслом — например, «Примут ли товар, если чек потерян?».</p>
+<p>Если найден подходящий ответ, путь сразу заканчивается: приложение возвращает его пользователю. До провайдера запрос не дошёл, поэтому вызова модели нет. Именно такое попадание мы отличали в <a href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/003-level-check/">шаге 3</a>.</p>
+<p>А если L1 ничего достаточно похожего не нашёл?</p>
+<p>Тогда запрос уходит провайдеру, где вступает в работу L2. Здесь сравнивается уже не смысл вопроса, а начало промпта: системные инструкции, правила и примеры, которые модель получает перед пользовательским текстом. При совпадении сохранённый префикс переиспользуется, но модель всё равно обрабатывает новый вопрос и генерирует ответ. При промахе она вычисляет и префикс, и продолжение заново.</p>
+<p>Полученный ответ возвращается пользователю и одновременно сохраняется в L1. Поэтому похожий следующий вопрос может завершить путь ещё на первом уровне.</p>
+<p>Смотри на развилку так: L1 решает, нужен ли вызов вообще; L2 — сколько работы останется внутри уже начавшегося вызова. Это и есть разница между двумя видами экономии из <a href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/002-two-levels/">шага 2</a>.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь издательство. Сначала сотрудник ищет в архиве готовую брошюру по твоему запросу: нашёл — сразу выдаёт экземпляр, и редактор не нужен. Не нашёл — передаёт заказ редактору. У того может сохраниться свёрстанный шаблон с обложкой и правилами оформления, но новый текст всё равно придётся написать. Архив готовых брошюр — L1, шаблон редактора — L2.</p>
+</blockquote></div>
+<iframe class="visual" data-visual src="/ai-course-lab/visuals/17-infrastructure-and-production__14-prompt-semantic-caching/005-cache-flow.html" sandbox="allow-scripts" loading="lazy" title="Путь запроса через L1 и L2"></iframe>
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/004-provider-prefix/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/17-infrastructure-and-production__14-prompt-semantic-caching/006-anthropic-control/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"17-infrastructure-and-production__14-prompt-semantic-caching","stepId":"005-cache-flow","number":5,"plannedCount":37}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

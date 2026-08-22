@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как одновременность сдвигает границу окупаемости</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #182230;
+      --muted: #596779;
+      --grid: #9aa8b8;
+      --low: #1877d2;
+      --low-soft: #dceeff;
+      --high: #d15a22;
+      --high-soft: #ffe6d8;
+      --shift: #7c4dcc;
+      --shadow: #d8dee8;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111720;
+        --panel: #18212d;
+        --ink: #eef4fb;
+        --muted: #b5c0ce;
+        --grid: #6e7c8e;
+        --low: #67b7ff;
+        --low-soft: #163c5c;
+        --high: #ff9a69;
+        --high-soft: #56301f;
+        --shift: #c19aff;
+        --shadow: #0b1017;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 14px 16px 12px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 720;
+      letter-spacing: -0.015em;
+    }
+
+    .frame {
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+      box-shadow: 0 2px 12px var(--shadow);
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--panel);
+    }
+
+    .axis {
+      stroke: var(--ink);
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .axis-head {
+      fill: var(--ink);
+    }
+
+    .baseline {
+      stroke: var(--grid);
+      stroke-width: 2;
+      stroke-dasharray: 7 7;
+      fill: none;
+    }
+
+    .threshold-low,
+    .threshold-high {
+      stroke-width: 2;
+      stroke-dasharray: 6 6;
+      fill: none;
+    }
+
+    .threshold-low {
+      stroke: var(--low);
+    }
+
+    .threshold-high {
+      stroke: var(--high);
+    }
+
+    .curve-low,
+    .curve-high {
+      stroke-width: 5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .curve-low {
+      stroke: var(--low);
+    }
+
+    .curve-high {
+      stroke: var(--high);
+    }
+
+    .dot-low,
+    .dot-high {
+      stroke: var(--panel);
+      stroke-width: 3;
+    }
+
+    .dot-low {
+      fill: var(--low);
+    }
+
+    .dot-high {
+      fill: var(--high);
+    }
+
+    .shift {
+      stroke: var(--shift);
+      stroke-width: 3;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .shift-head {
+      fill: var(--shift);
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .baseline-label {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .curve-label {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .curve-label.low {
+      fill: var(--low);
+    }
+
+    .curve-label.high {
+      fill: var(--high);
+    }
+
+    .value-low,
+    .value-high {
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .value-low {
+      fill: var(--low);
+    }
+
+    .value-high {
+      fill: var(--high);
+    }
+
+    .threshold-caption {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .shift-label {
+      fill: var(--shift);
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 550;
+    }
+
+    #fallback {
+      margin: 0;
+      padding: 20px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 17px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Как одновременность сдвигает границу окупаемости</h1>
+    <section class="frame" aria-label="График ускорения EAGLE-3">
+      <svg id="diagram"
+           viewBox="0 0 960 430"
+           preserveAspectRatio="xMidYMid meet"
+           role="img"
+           aria-labelledby="svg-title svg-desc">
+        <title id="svg-title">Сдвиг границы окупаемости при высокой одновременности</title>
+        <desc id="svg-desc">
+          Две кривые ускорения по доле принятых токенов alpha.
+          Для малого батча ускорение начинается при 0.03, а для
+          256 одновременных запросов — при 0.55.
+        </desc>
+      </svg>
+      <p id="fallback" hidden>
+        Схема должна была показать две кривые ускорения по alpha:
+        порог 0.03 для малого батча и порог 0.55 для
+        256 одновременных запросов.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const data = [{
+      bounds: { left: -0.11, right: 1.09, top: 1.68, bottom: -0.32 },
+      axes: {
+        xEnd: { x: 0.99, y: 0 },
+        yEnd: { x: 0, y: 1.58 },
+        xHead: [
+          { x: 0.99, y: 0 },
+          { x: 0.962, y: 0.026 },
+          { x: 0.962, y: -0.026 }
+        ],
+        yHead: [
+          { x: 0, y: 1.58 },
+          { x: -0.014, y: 1.525 },
+          { x: 0.014, y: 1.525 }
+        ]
+      },
+      baseline: {
+        y: 1,
+        start: 0,
+        end: 0.95,
+        tickLeft: -0.012,
+        tickRight: 0.012
+      },
+      curves: [
+        {
+          kind: "low",
+          first: [
+            { x: 0, y: 0.94 },
+            { x: 0.015, y: 0.97 },
+            { x: 0.025, y: 0.99 },
+            { x: 0.03, y: 1 }
+          ],
+          second: [
+            { x: 0.03, y: 1 },
+            { x: 0.15, y: 1.18 },
+            { x: 0.45, y: 1.34 },
+            { x: 0.92, y: 1.42 }
+          ],
+          label: {
+            x: 0.91, y: 1.42, dx: -8, dy: -15,
+            anchor: "end", value: "Малый батч"
+          }
+        },
+        {
+          kind: "high",
+          first: [
+            { x: 0, y: 0.84 },
+            { x: 0.18, y: 0.86 },
+            { x: 0.40, y: 0.92 },
+            { x: 0.55, y: 1 }
+          ],
+          second: [
+            { x: 0.55, y: 1 },
+            { x: 0.67, y: 1.08 },
+            { x: 0.79, y: 1.18 },
+            { x: 0.92, y: 1.26 }
+          ],
+          label: {
+            x: 0.91, y: 1.26, dx: -8, dy: 24,
+            anchor: "end", value: "256 одновременных запросов"
+          }
+        }
+      ],
+      thresholds: [
+        {
+          kind: "low",
+          x: 0.03,
+          y: 1,
+          radius: 0.009,
+          tickBottom: -0.027,
+          tickTop: 0.027,
+          value: {
+            x: 0.03, y: -0.09, dx: 9, dy: 0,
+            anchor: "start", text: "0.03"
+          },
+          caption: {
+            x: 0.03, y: -0.19, dx: 9, dy: 0,
+            anchor: "start", text: "порог малого батча"
+          }
+        },
+        {
+          kind: "high",
+          x: 0.55,
+          y: 1,
+          radius: 0.009,
+          tickBottom: -0.027,
+          tickTop: 0.027,
+          value: {
+            x: 0.55, y: -0.09, dx: 0, dy: 0,
+            anchor: "middle", text: "0.55"
+          },
+          caption: {
+            x: 0.55, y: -0.19, dx: 0, dy: 0,
+            anchor: "middle", text: "порог при нагрузке"
+          }
+        }
+      ],
+      shift: {
+        start: { x: 0.09, y: 0.43 },
+        end: { x: 0.51, y: 0.43 },
+        head: [
+          { x: 0.51, y: 0.43 },
+          { x: 0.482, y: 0.478 },
+          { x: 0.482, y: 0.382 }
+        ],
+        label: {
+          x: 0.30, y: 0.53, dx: 0, dy: 0,
+          anchor: "middle", text: "граница сдвигается вправо"
+        },
+        note: {
+          x: 0.30, y: 0.33, dx: 0, dy: 0,
+          anchor: "middle", text: "базовый decode уже амортизирует чтения"
+        }
+      },
+      labels: {
+        xAxis: {
+          x: 0.98, y: -0.27, dx: 0, dy: 0,
+          anchor: "end", text: "доля принятых токенов, α"
+        },
+        yAxis: {
+          x: 0, y: 1.62, dx: 13, dy: 0,
+          anchor: "start", text: "ускорение S"
+        },
+        baseline: {
+          x: 0.35, y: 1, dx: 0, dy: -12,
+          anchor: "middle", text: "без ускорения · S = 1"
+        }
+      }
+    }];
+
+    const origin = { x: 96, y: 360 };
+    const scale = { x: 790, y: 205 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    const [diagramData] = data;
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    try {
+      const make = (name, attributes = {}) => {
+        const node = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, String(value));
+        }
+        return node;
+      };
+
+      const add = node => {
+        svg.appendChild(node);
+        return node;
+      };
+
+      const drawLine = (a, b, className) => add(make("line", {
+        x1: sx(a.x),
+        y1: sy(a.y),
+        x2: sx(b.x),
+        y2: sy(b.y),
+        class: className
+      }));
+
+      const drawPolygon = (points, className) => add(make("polygon", {
+        points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+        class: className
+      }));
+
+      const drawText = (label, className) => {
+        const node = make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.anchor,
+          class: className
+        });
+        node.textContent = label.text ?? label.value;
+        return add(node);
+      };
+
+      const cubic = points => {
+        const [start, controlOne, controlTwo, end] = points;
+        return [
+          `M ${sx(start.x)} ${sy(start.y)}`,
+          `C ${sx(controlOne.x)} ${sy(controlOne.y)}`,
+          `${sx(controlTwo.x)} ${sy(controlTwo.y)}`,
+          `${sx(end.x)} ${sy(end.y)}`
+        ].join(" ");
+      };
+
+      const bounds = diagramData.bounds;
+      add(make("rect", {
+        x: sx(bounds.left),
+        y: sy(bounds.top),
+        width: sx(bounds.right) - sx(bounds.left),
+        height: sy(bounds.bottom) - sy(bounds.top),
+        fill: "var(--panel)"
+      }));
+
+      const axes = diagramData.axes;
+      drawLine(
+        { x: 0, y: 0 },
+        axes.xEnd,
+        "axis"
+      );
+      drawLine(
+        { x: 0, y: 0 },
+        axes.yEnd,
+        "axis"
+      );
+      drawPolygon(axes.xHead, "axis-head");
+      drawPolygon(axes.yHead, "axis-head");
+
+      const baseline = diagramData.baseline;
+      drawLine(
+        { x: baseline.start, y: baseline.y },
+        { x: baseline.end, y: baseline.y },
+        "baseline"
+      );
+      drawLine(
+        { x: baseline.tickLeft, y: baseline.y },
+        { x: baseline.tickRight, y: baseline.y },
+        "axis"
+      );
+
+      for (const threshold of diagramData.thresholds) {
+        drawLine(
+          { x: threshold.x, y: 0 },
+          { x: threshold.x, y: threshold.y },
+          `threshold-${threshold.kind}`
+        );
+        drawLine(
+          { x: threshold.x, y: threshold.tickBottom },
+          { x: threshold.x, y: threshold.tickTop },
+          "axis"
+        );
+      }
+
+      for (const curve of diagramData.curves) {
+        add(make("path", {
+          d: `${cubic(curve.first)} ${cubic(curve.second)}`,
+          class: `curve-${curve.kind}`
+        }));
+      }
+
+      for (const threshold of diagramData.thresholds) {
+        add(make("circle", {
+          cx: sx(threshold.x),
+          cy: sy(threshold.y),
+          r: sx(threshold.radius) - sx(0),
+          class: `dot-${threshold.kind}`
+        }));
+      }
+
+      const shift = diagramData.shift;
+      drawLine(shift.start, shift.end, "shift");
+      drawPolygon(shift.head, "shift-head");
+      drawText(shift.label, "shift-label");
+      drawText(shift.note, "note");
+
+      for (const curve of diagramData.curves) {
+        drawText(curve.label, `curve-label ${curve.kind}`);
+      }
+
+      for (const threshold of diagramData.thresholds) {
+        drawText(threshold.value, `value-${threshold.kind}`);
+        drawText(threshold.caption, "threshold-caption");
+      }
+
+      drawText(diagramData.labels.xAxis, "axis-label");
+      drawText(diagramData.labels.yAxis, "axis-label");
+      drawText(diagramData.labels.baseline, "baseline-label");
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Почему семикратное ускорение требует полного стека</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5a667c;
+    --line: #8290a8;
+    --accent: #285fd6;
+    --accent-fill: #e8efff;
+    --result: #13745a;
+    --result-fill: #def5ec;
+    --warning: #a04d18;
+    --warning-fill: #fff0df;
+    --note: #6750a4;
+    --note-fill: #f0eaff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --panel: #171d28;
+      --ink: #eef3ff;
+      --muted: #aab5c9;
+      --line: #73809a;
+      --accent: #8db1ff;
+      --accent-fill: #20365f;
+      --result: #67d7af;
+      --result-fill: #173f35;
+      --warning: #ffb378;
+      --warning-fill: #4b2c1b;
+      --note: #c7afff;
+      --note-fill: #332752;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  figure {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    background: var(--panel);
+  }
+
+  .figure-title {
+    padding: 14px 20px 10px;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+
+  svg text {
+    font-family: inherit;
+  }
+
+  .section-label {
+    fill: var(--ink);
+  }
+
+  .caption,
+  .small {
+    fill: var(--muted);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--line);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-line.full {
+    stroke: var(--accent);
+  }
+
+  .flow-line.short {
+    stroke: var(--warning);
+  }
+
+  .arrow-head.full {
+    fill: var(--accent);
+  }
+
+  .arrow-head.short {
+    fill: var(--warning);
+  }
+
+  .node {
+    stroke-linejoin: round;
+  }
+
+  .node.base {
+    fill: var(--panel);
+    stroke: var(--line);
+  }
+
+  .node.factor {
+    fill: var(--accent-fill);
+    stroke: var(--accent);
+  }
+
+  .node.result {
+    fill: var(--result-fill);
+    stroke: var(--result);
+  }
+
+  .node.partial {
+    fill: var(--warning-fill);
+    stroke: var(--warning);
+  }
+
+  .node.note {
+    fill: var(--note-fill);
+    stroke: var(--note);
+  }
+
+  .factor-value {
+    fill: var(--accent);
+  }
+
+  .result-value {
+    fill: var(--result);
+  }
+
+  .partial-value {
+    fill: var(--warning);
+  }
+
+  .note-value {
+    fill: var(--note);
+  }
+
+  .fallback {
+    margin: 0;
+    padding: 20px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 16px;
+    border: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <div class="figure-title" id="diagram-title">
+    Почему семикратное ускорение требует полного стека
+  </div>
+  <div id="stage">
+    <svg
+      id="diagram"
+      viewBox="0 0 1120 450"
+      width="1120"
+      height="450"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Множители ускорения полного стека</title>
+      <desc id="svg-desc">
+        Полная цепочка NVFP4, MTP и разнесённого сервинга даёт ускорение
+        7,2 раза. Ветка без MTP даёт только 3,6 раза.
+      </desc>
+    </svg>
+    <noscript>
+      Полный стек: 2× от FP4, 2× от MTP и 1,8× от разнесения дают 7,2×.
+      Без MTP остаётся 3,6×.
+    </noscript>
+  </div>
+</figure>
+
+<script>
+const data = [
+  {
+    kind: "config",
+    origin: { x: 40, y: 28 },
+    scale: { x: 10, y: 10 },
+    radius: 0.8,
+    lineWidth: 2,
+    font: {
+      section: 18,
+      label: 15,
+      value: 24,
+      formula: 18,
+      small: 13,
+      note: 14
+    },
+    fallback:
+      "Полная цепочка: 2× от FP4, 2× от MTP и 1,8× от разнесения дают 7,2×. Без MTP остаётся только 3,6×."
+  },
+
+  {
+    kind: "text",
+    x: 0,
+    y: 1.8,
+    value: "ПОЛНЫЙ СТЕК",
+    anchor: "start",
+    size: "section",
+    weight: "bold",
+    className: "section-label"
+  },
+  {
+    kind: "text",
+    x: 103,
+    y: 1.8,
+    value: "множители устраняют разные ограничения",
+    anchor: "end",
+    size: "small",
+    weight: "normal",
+    className: "caption"
+  },
+
+  {
+    kind: "arrow",
+    mode: "full",
+    line: [12.8, 8.5, 16.2, 8.5],
+    head: [[17, 8.5], [15.9, 7.9], [15.9, 9.1]]
+  },
+  {
+    kind: "arrow",
+    mode: "full",
+    line: [32.8, 8.5, 36.2, 8.5],
+    head: [[37, 8.5], [35.9, 7.9], [35.9, 9.1]]
+  },
+  {
+    kind: "arrow",
+    mode: "full",
+    line: [52.8, 8.5, 56.2, 8.5],
+    head: [[57, 8.5], [55.9, 7.9], [55.9, 9.1]]
+  },
+  {
+    kind: "arrow",
+    mode: "full",
+    line: [77.8, 8.5, 84.2, 8.5],
+    head: [[85, 8.5], [83.9, 7.9], [83.9, 9.1]]
+  },
+
+  {
+    kind: "node",
+    style: "base",
+    x: 0,
+    y: 5,
+    w: 12,
+    h: 7,
+    cx: 6,
+    texts: [
+      {
+        y: 7.5,
+        value: "Та же",
+        size: "label",
+        weight: "normal",
+        className: "section-label"
+      },
+      {
+        y: 9.5,
+        value: "модель",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "factor",
+    x: 17,
+    y: 5,
+    w: 15,
+    h: 7,
+    cx: 24.5,
+    texts: [
+      {
+        y: 7.2,
+        value: "NVFP4",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 9.7,
+        value: "2×",
+        size: "value",
+        weight: "bold",
+        className: "factor-value"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "factor",
+    x: 37,
+    y: 5,
+    w: 15,
+    h: 7,
+    cx: 44.5,
+    texts: [
+      {
+        y: 7.2,
+        value: "MTP",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 9.7,
+        value: "2×",
+        size: "value",
+        weight: "bold",
+        className: "factor-value"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "factor",
+    x: 57,
+    y: 5,
+    w: 20,
+    h: 7,
+    cx: 67,
+    texts: [
+      {
+        y: 7.2,
+        value: "Разнесение",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 9.7,
+        value: "1,8×",
+        size: "value",
+        weight: "bold",
+        className: "factor-value"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "result",
+    x: 85,
+    y: 5,
+    w: 18,
+    h: 7,
+    cx: 94,
+    texts: [
+      {
+        y: 7.2,
+        value: "ИТОГО",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 9.7,
+        value: "7,2×",
+        size: "value",
+        weight: "bold",
+        className: "result-value"
+      }
+    ]
+  },
+  {
+    kind: "text",
+    x: 94,
+    y: 14.2,
+    value: "2× · 2× · 1,8× = 7,2×",
+    anchor: "middle",
+    size: "formula",
+    weight: "bold",
+    className: "result-value"
+  },
+
+  {
+    kind: "text",
+    x: 0,
+    y: 18.1,
+    value: "ВЕТКА БЕЗ MTP",
+    anchor: "start",
+    size: "section",
+    weight: "bold",
+    className: "section-label"
+  },
+  {
+    kind: "text",
+    x: 103,
+    y: 18.1,
+    value: "один отсутствующий множитель делит результат пополам",
+    anchor: "end",
+    size: "small",
+    weight: "normal",
+    className: "caption"
+  },
+
+  {
+    kind: "arrow",
+    mode: "short",
+    line: [12.8, 25, 16.2, 25],
+    head: [[17, 25], [15.9, 24.4], [15.9, 25.6]]
+  },
+  {
+    kind: "arrow",
+    mode: "short",
+    line: [32.8, 25, 56.2, 25],
+    head: [[57, 25], [55.9, 24.4], [55.9, 25.6]]
+  },
+  {
+    kind: "arrow",
+    mode: "short",
+    line: [77.8, 25, 84.2, 25],
+    head: [[85, 25], [83.9, 24.4], [83.9, 25.6]]
+  },
+  {
+    kind: "text",
+    x: 44.5,
+    y: 22.4,
+    value: "MTP отключён",
+    anchor: "middle",
+    size: "small",
+    weight: "bold",
+    className: "partial-value"
+  },
+
+  {
+    kind: "node",
+    style: "base",
+    x: 0,
+    y: 21.5,
+    w: 12,
+    h: 7,
+    cx: 6,
+    texts: [
+      {
+        y: 24,
+        value: "Та же",
+        size: "label",
+        weight: "normal",
+        className: "section-label"
+      },
+      {
+        y: 26,
+        value: "модель",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "factor",
+    x: 17,
+    y: 21.5,
+    w: 15,
+    h: 7,
+    cx: 24.5,
+    texts: [
+      {
+        y: 23.7,
+        value: "NVFP4",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 26.2,
+        value: "2×",
+        size: "value",
+        weight: "bold",
+        className: "factor-value"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "factor",
+    x: 57,
+    y: 21.5,
+    w: 20,
+    h: 7,
+    cx: 67,
+    texts: [
+      {
+        y: 23.7,
+        value: "Разнесение",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 26.2,
+        value: "1,8×",
+        size: "value",
+        weight: "bold",
+        className: "factor-value"
+      }
+    ]
+  },
+  {
+    kind: "node",
+    style: "partial",
+    x: 85,
+    y: 21.5,
+    w: 18,
+    h: 7,
+    cx: 94,
+    texts: [
+      {
+        y: 23.7,
+        value: "ИТОГО",
+        size: "label",
+        weight: "bold",
+        className: "section-label"
+      },
+      {
+        y: 26.2,
+        value: "3,6×",
+        size: "value",
+        weight: "bold",
+        className: "partial-value"
+      }
+    ]
+  },
+  {
+    kind: "text",
+    x: 94,
+    y: 30.7,
+    value: "2× · 1,8× = 3,6×",
+    anchor: "middle",
+    size: "formula",
+    weight: "bold",
+    className: "partial-value"
+  },
+
+  {
+    kind: "node",
+    style: "note",
+    x: 17,
+    y: 34,
+    w: 68,
+    h: 5.5,
+    cx: 51,
+    texts: [
+      {
+        y: 36,
+        value: "Маршрутизация с учётом кэша",
+        size: "note",
+        weight: "bold",
+        className: "note-value"
+      },
+      {
+        y: 38,
+        value: "сокращает лишние перемещения между пулами",
+        size: "small",
+        weight: "normal",
+        className: "caption"
+      }
+    ]
+  },
+  {
+    kind: "text",
+    x: 87,
+    y: 36.8,
+    value: "Семь раз даёт система,",
+    anchor: "start",
+    size: "note",
+    weight: "bold",
+    className: "section-label"
+  },
+  {
+    kind: "text",
+    x: 87,
+    y: 38.8,
+    value: "а не одна GPU",
+    anchor: "start",
+    size: "note",
+    weight: "bold",
+    className: "section-label"
+  }
+];
+
+const config = data.find(item => item.kind === "config");
+const origin = Object.freeze(config.origin);
+const scale = Object.freeze(config.scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const element = (name, attributes) => {
+    const item = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      item.setAttribute(key, String(value));
+    });
+    return item;
+  };
+
+  const appendText = (parent, spec, x) => {
+    const text = element("text", {
+      x: sx(x),
+      y: sy(spec.y),
+      "text-anchor": spec.anchor || "middle",
+      "dominant-baseline": "middle",
+      "font-size": config.font[spec.size],
+      "font-weight": spec.weight,
+      class: spec.className
+    });
+    text.textContent = spec.value;
+    parent.appendChild(text);
+  };
+
+  data
+    .filter(item => item.kind === "arrow")
+    .forEach(item => {
+      const [x1, y1, x2, y2] = item.line;
+      const line = element("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        "stroke-width": config.lineWidth,
+        class: `flow-line ${item.mode}`
+      });
+      svg.appendChild(line);
+
+      const head = element("polygon", {
+        points: item.head
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" "),
+        class: `arrow-head ${item.mode}`
+      });
+      svg.appendChild(head);
+    });
+
+  data
+    .filter(item => item.kind === "node")
+    .forEach(item => {
+      const group = element("g", {});
+      const rect = element("rect", {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y),
+        rx: sx(config.radius) - sx(0),
+        ry: sy(config.radius) - sy(0),
+        "stroke-width": config.lineWidth,
+        class: `node ${item.style}`
+      });
+      group.appendChild(rect);
+      item.texts.forEach(spec => appendText(group, spec, item.cx));
+      svg.appendChild(group);
+    });
+
+  data
+    .filter(item => item.kind === "text")
+    .forEach(item => appendText(svg, item, item.x));
+} catch (error) {
+  const stage = document.getElementById("stage");
+  const fallback = document.createElement("p");
+  fallback.className = "fallback";
+  fallback.textContent = config.fallback;
+  stage.replaceChildren(fallback);
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Жизненный цикл KV-блока через Connector API</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --soft: #e8edf5;
+    --text: #182230;
+    --muted: #58677a;
+    --line: #52657d;
+    --accent: #e87822;
+    --accent-soft: #fff0dc;
+    --connector: #e9e2ff;
+    --store: #dff3eb;
+    --success: #227a59;
+    --danger: #ad3e48;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151a22;
+      --panel: #202733;
+      --soft: #2b3544;
+      --text: #eef3f8;
+      --muted: #b2bdca;
+      --line: #91a2b8;
+      --accent: #ffad5c;
+      --accent-soft: #513721;
+      --connector: #38304f;
+      --store: #223f38;
+      --success: #72d5ae;
+      --danger: #ff9299;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    padding: 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+  }
+
+  figcaption {
+    padding: 8px 12px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+  }
+
+  .panel, .block, .state, .fallback {
+    stroke: var(--line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .panel { fill: var(--panel); }
+  .block { fill: var(--soft); }
+  .block.hot { fill: var(--accent-soft); stroke: var(--accent); }
+  .connector { fill: var(--connector); }
+  .store { fill: var(--store); }
+  .state { fill: var(--panel); }
+  .state.hot { fill: var(--accent-soft); stroke: var(--accent); }
+  .fallback { fill: var(--panel); stroke: var(--danger); }
+
+  .route, .divider, .leader {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .route.out { stroke: var(--accent); }
+  .route.in { stroke: var(--success); }
+  .route.fail { stroke: var(--danger); }
+  .arrow-out { fill: var(--accent); }
+  .arrow-in { fill: var(--success); }
+  .arrow-neutral { fill: var(--line); }
+  .arrow-fail { fill: var(--danger); }
+
+  text {
+    fill: var(--text);
+    font-size: 14px;
+  }
+
+  .heading {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .label {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .hot-text { fill: var(--accent); }
+  .in-text { fill: var(--success); }
+  .fail-text { fill: var(--danger); }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Жизненный цикл KV-блока через Connector API</figcaption>
+  <svg id="diagram" width="1200" height="470" viewBox="0 0 1200 470"
+       role="img" aria-labelledby="diagram-title diagram-desc"
+       preserveAspectRatio="xMidYMid meet">
+    <desc id="diagram-desc">Промпт на 2000 токенов разделён примерно на 125 блоков по 16 токенов. Один блок вычисляется в HBM, сохраняется через Connector API, вытесняется и позднее возвращается по идентификатору.</desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const data = [{
+  zero: 0,
+  one: 1,
+  two: 2,
+  half: .5,
+  origin: { x: 40, y: 18 },
+  scale: { x: 10, y: 10 },
+  radius: .65,
+  head: 1.15,
+  wing: .62,
+  dash: .65,
+  gap: .42,
+
+  prompt: {
+    x: 0, y: 1.7, w: 112, h: 7.2,
+    titleX: 0, titleY: .5,
+    title: "Промпт: 2000 токенов ≈ 125 блоков × 16 токенов",
+    gridX: 2.4, gridY: 3.1,
+    cols: 25, count: 125, selected: 62,
+    cellW: 4.28, cellH: .88, blockW: 3.92, blockH: .62,
+    labelX: 59, labelY: 7.9,
+    label: "один выбранный блок",
+    routeEndX: 30, routeEndY: 14,
+    routeLabelX: 49, routeLabelY: 11.4,
+    routeLabel: "prefill: вычислен"
+  },
+
+  hbm: {
+    x: 2, y: 14, w: 30, h: 16,
+    titleX: 17, titleY: 16,
+    title: "HBM · рабочий стол GPU",
+    lineX1: 4, lineX2: 30, lineY: 17.6,
+    blockX: 6, blockY: 19.2, blockW: 7.5, blockH: 3,
+    blockTextX: 9.75, blockTextY: 20.7,
+    blockText: "16 токенов",
+    nowX: 15, nowY: 24,
+    now: "нужен модели сейчас",
+    evictX: 17, evictY: 27.5,
+    evict: "после подтверждения: вытеснен"
+  },
+
+  connector: {
+    x: 42, y: 14, w: 25, h: 16,
+    titleX: 54.5, titleY: 16,
+    title: "Connector API",
+    lineX1: 44, lineX2: 65, lineY: 17.6,
+    rows: [
+      { x: 54.5, y: 20.5, text: "сохранить ID + KV" },
+      { x: 54.5, y: 23.7, text: "найти по ID" },
+      { x: 54.5, y: 26.9, text: "загрузить KV" }
+    ]
+  },
+
+  store: {
+    x: 77, y: 14, w: 33, h: 16,
+    titleX: 93.5, titleY: 16,
+    title: "Внешнее хранилище",
+    lineX1: 79, lineX2: 108, lineY: 17.6,
+    blockX: 81, blockY: 19.2, blockW: 7.5, blockH: 3,
+    blockTextX: 84.75, blockTextY: 20.7,
+    blockText: "16 токенов",
+    backendX: 98, backendY: 24,
+    backend: "DRAM · диск · LMCache",
+    idX: 98, idY: 27.3,
+    id: "блок хранится по ID"
+  },
+
+  arrows: [
+    {
+      x1: 32, y1: 18.8, x2: 42, y2: 18.8,
+      kind: "out", labelX: 37, labelY: 17.3,
+      label: "ID + KV-данные", anchor: "middle"
+    },
+    {
+      x1: 67, y1: 18.8, x2: 77, y2: 18.8,
+      kind: "out", labelX: 72, labelY: 17.3,
+      label: "сохранить", anchor: "middle"
+    },
+    {
+      x1: 77, y1: 22.2, x2: 67, y2: 22.2,
+      kind: "neutral", labelX: 72, labelY: 23.5,
+      label: "подтверждение", anchor: "middle"
+    },
+    {
+      x1: 77, y1: 26.5, x2: 67, y2: 26.5,
+      kind: "in", labelX: 72, labelY: 28.2,
+      label: "найти по ID", anchor: "middle"
+    },
+    {
+      x1: 42, y1: 26.5, x2: 32, y2: 26.5,
+      kind: "in", labelX: 37, labelY: 28.2,
+      label: "вернуть в HBM", anchor: "middle"
+    }
+  ],
+
+  stateTitle: { x: 2, y: 32.5, text: "Состояния одного блока" },
+  states: [
+    { x: 2, y: 34, w: 18, h: 4, text: "вычислен", hot: true },
+    { x: 24, y: 34, w: 18, h: 4, text: "сохранён" },
+    { x: 46, y: 34, w: 18, h: 4, text: "вытеснен" },
+    { x: 68, y: 34, w: 18, h: 4, text: "найден" },
+    { x: 90, y: 34, w: 20, h: 4, text: "возвращён", hot: true }
+  ],
+
+  fallback: {
+    x: 22, y: 40.3, w: 68, h: 3.8,
+    textX: 56, textY: 42.2,
+    text: "не найден или загрузка не удалась → prefill заново"
+  },
+
+  error: {
+    x: 56, y: 20,
+    secondY: 23,
+    first: "Не удалось построить схему.",
+    second: "Она должна показать выгрузку KV-блока из HBM и возврат через Connector API."
+  }
+}];
+
+const [scene] = data;
+const origin = scene.origin;
+const scale = scene.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const root = document.getElementById("drawing");
+  const ns = root.namespaceURI;
+
+  const node = (tag, attrs, content) => {
+    const item = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+    if (content !== undefined) item.textContent = content;
+    return item;
+  };
+
+  const add = item => root.appendChild(item);
+
+  const rect = (x, y, w, h, className) => add(node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    rx: sx(scene.radius) - sx(scene.zero),
+    class: className
+  }));
+
+  const text = (x, y, content, className, anchor = "start") => add(node("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, content));
+
+  const line = (x1, y1, x2, y2, className) => add(node("line", {
+    x1: sx(x1), y1: sy(y1),
+    x2: sx(x2), y2: sy(y2),
+    class: className
+  }));
+
+  const arrow = item => {
+    const vx = item.x2 - item.x1;
+    const vy = item.y2 - item.y1;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const baseX = item.x2 - ux * scene.head;
+    const baseY = item.y2 - uy * scene.head;
+    const leftX = baseX - uy * scene.wing;
+    const leftY = baseY + ux * scene.wing;
+    const rightX = baseX + uy * scene.wing;
+    const rightY = baseY - ux * scene.wing;
+    const routeClass = `route ${item.kind}`;
+    const headClass = item.kind === "out" ? "arrow-out"
+      : item.kind === "in" ? "arrow-in"
+      : item.kind === "fail" ? "arrow-fail"
+      : "arrow-neutral";
+    line(item.x1, item.y1, item.x2, item.y2, routeClass);
+    add(node("polygon", {
+      points: `${sx(item.x2)},${sy(item.y2)} ${sx(leftX)},${sy(leftY)} ${sx(rightX)},${sy(rightY)}`,
+      class: headClass
+    }));
+    const labelClass = item.kind === "out" ? "small hot-text"
+      : item.kind === "in" ? "small in-text"
+      : "small";
+    text(item.labelX, item.labelY, item.label, labelClass, item.anchor);
+  };
+
+  const p = scene.prompt;
+  text(p.titleX, p.titleY, p.title, "heading");
+  rect(p.x, p.y, p.w, p.h, "panel");
+
+  for (const index of Array.from({ length: p.count }).keys()) {
+    const column = index % p.cols;
+    const row = Math.floor(index / p.cols);
+    const x = p.gridX + column * p.cellW;
+    const y = p.gridY + row * p.cellH;
+    rect(x, y, p.blockW, p.blockH, index === p.selected ? "block hot" : "block");
+  }
+
+  const selectedColumn = p.selected % p.cols;
+  const selectedRow = Math.floor(p.selected / p.cols);
+  const selectedX = p.gridX + selectedColumn * p.cellW + p.blockW * scene.half;
+  const selectedY = p.gridY + selectedRow * p.cellH + p.blockH;
+  text(p.labelX, p.labelY, p.label, "small hot-text", "start");
+  arrow({
+    x1: selectedX, y1: selectedY,
+    x2: p.routeEndX, y2: p.routeEndY,
+    kind: "out",
+    labelX: p.routeLabelX, labelY: p.routeLabelY,
+    label: p.routeLabel, anchor: "middle"
+  });
+
+  const h = scene.hbm;
+  rect(h.x, h.y, h.w, h.h, "panel");
+  text(h.titleX, h.titleY, h.title, "heading", "middle");
+  line(h.lineX1, h.lineY, h.lineX2, h.lineY, "divider");
+  rect(h.blockX, h.blockY, h.blockW, h.blockH, "block hot");
+  text(h.blockTextX, h.blockTextY, h.blockText, "label hot-text", "middle");
+  text(h.nowX, h.nowY, h.now, "small", "middle");
+  text(h.evictX, h.evictY, h.evict, "small", "middle");
+
+  const c = scene.connector;
+  rect(c.x, c.y, c.w, c.h, "panel connector");
+  text(c.titleX, c.titleY, c.title, "heading", "middle");
+  line(c.lineX1, c.lineY, c.lineX2, c.lineY, "divider");
+  c.rows.forEach(row => text(row.x, row.y, row.text, "small", "middle"));
+
+  const s = scene.store;
+  rect(s.x, s.y, s.w, s.h, "panel store");
+  text(s.titleX, s.titleY, s.title, "heading", "middle");
+  line(s.lineX1, s.lineY, s.lineX2, s.lineY, "divider");
+  rect(s.blockX, s.blockY, s.blockW, s.blockH, "block hot");
+  text(s.blockTextX, s.blockTextY, s.blockText, "label hot-text", "middle");
+  text(s.backendX, s.backendY, s.backend, "small", "middle");
+  text(s.idX, s.idY, s.id, "small", "middle");
+
+  scene.arrows.forEach(arrow);
+
+  text(scene.stateTitle.x, scene.stateTitle.y, scene.stateTitle.text, "heading");
+  scene.states.forEach((state, index, states) => {
+    rect(state.x, state.y, state.w, state.h, state.hot ? "state hot" : "state");
+    text(
+      state.x + state.w * scene.half,
+      state.y + state.h * scene.half,
+      state.text,
+      state.hot ? "label hot-text" : "label",
+      "middle"
+    );
+    if (index < states.length - scene.one) {
+      const next = states[index + scene.one];
+      arrow({
+        x1: state.x + state.w,
+        y1: state.y + state.h * scene.half,
+        x2: next.x,
+        y2: next.y + next.h * scene.half,
+        kind: "neutral",
+        labelX: state.x + state.w,
+        labelY: state.y,
+        label: "",
+        anchor: "middle"
+      });
+    }
+  });
+
+  const f = scene.fallback;
+  rect(f.x, f.y, f.w, f.h, "fallback");
+  text(f.textX, f.textY, f.text, "label fail-text", "middle");
+} catch (error) {
+  const root = document.getElementById("drawing");
+  if (root) {
+    root.replaceChildren();
+    const ns = root.namespaceURI;
+    const first = document.createElementNS(ns, "text");
+    first.setAttribute("x", sx(scene.error.x));
+    first.setAttribute("y", sy(scene.error.y));
+    first.setAttribute("text-anchor", "middle");
+    first.setAttribute("class", "heading fail-text");
+    first.textContent = scene.error.first;
+    root.appendChild(first);
+
+    const second = document.createElementNS(ns, "text");
+    second.setAttribute("x", sx(scene.error.x));
+    second.setAttribute("y", sy(scene.error.secondY));
+    second.setAttribute("text-anchor", "middle");
+    second.setAttribute("class", "small");
+    second.textContent = scene.error.second;
+    root.appendChild(second);
+  }
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

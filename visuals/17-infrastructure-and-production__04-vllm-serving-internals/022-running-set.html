@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как состав RUNNING меняется между шагами decode</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: white;
+    --panel: whitesmoke;
+    --panel-strong: gainsboro;
+    --text: #172033;
+    --muted: #526070;
+    --line: #8793a3;
+    --active: #315fbd;
+    --active-fill: #dbe8ff;
+    --finish: #b73544;
+    --finish-fill: #ffe0e4;
+    --admit: #19704f;
+    --admit-fill: #d8f3e6;
+    --flow: #6543a5;
+    --flow-fill: #eee6ff;
+    --token: #f0b429;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #192231;
+      --panel-strong: #263247;
+      --text: #eef3fb;
+      --muted: #b4bfd0;
+      --line: #748198;
+      --active: #8ab4ff;
+      --active-fill: #203b68;
+      --finish: #ff91a0;
+      --finish-fill: #572b35;
+      --admit: #72d9ad;
+      --admit-fill: #193f35;
+      --flow: #c0a5ff;
+      --flow-fill: #382d58;
+      --token: #ffd166;
+    }
+  }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .title {
+    fill: var(--text);
+    font-size: 21px;
+    font-weight: 750;
+  }
+
+  .subtitle {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .card {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .card-head {
+    fill: var(--panel-strong);
+  }
+
+  .slice-label {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .running-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .04em;
+  }
+
+  .request {
+    fill: var(--active-fill);
+    stroke: var(--active);
+    stroke-width: 2px;
+  }
+
+  .request.finish {
+    fill: var(--finish-fill);
+    stroke: var(--finish);
+  }
+
+  .request.admit {
+    fill: var(--admit-fill);
+    stroke: var(--admit);
+  }
+
+  .request-name {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 750;
+  }
+
+  .request-state {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .finish-text {
+    fill: var(--finish);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .admit-text {
+    fill: var(--admit);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .life {
+    fill: none;
+    stroke: var(--active);
+    stroke-width: 3px;
+  }
+
+  .life.finish {
+    stroke: var(--finish);
+  }
+
+  .life.admit {
+    stroke: var(--admit);
+  }
+
+  .end-dot {
+    fill: var(--finish);
+    stroke: var(--bg);
+    stroke-width: 2px;
+  }
+
+  .start-dot {
+    fill: var(--admit);
+    stroke: var(--bg);
+    stroke-width: 2px;
+  }
+
+  .flow-box {
+    fill: var(--flow-fill);
+    stroke: var(--flow);
+    stroke-width: 2px;
+  }
+
+  .flow-box.release {
+    fill: var(--finish-fill);
+    stroke: var(--finish);
+  }
+
+  .flow-box.admission {
+    fill: var(--admit-fill);
+    stroke: var(--admit);
+  }
+
+  .flow-text {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--flow);
+    stroke-width: 2px;
+  }
+
+  .arrow-head {
+    fill: var(--flow);
+  }
+
+  .boundary-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .legend {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .token-mark {
+    fill: var(--token);
+  }
+
+  .fallback {
+    fill: var(--finish);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<svg id="scene" viewBox="0 0 1120 445" width="1120" height="445"
+     role="img" aria-labelledby="diagram-title diagram-description"
+     preserveAspectRatio="xMidYMid meet">
+  <title id="diagram-title">Как состав RUNNING меняется между шагами decode</title>
+  <desc id="diagram-description">
+    Три последовательные итерации. Запрос A завершается на шаге 137,
+    его KV-блоки освобождаются, и запрос D из WAITING занимает слот
+    уже на шаге 138.
+  </desc>
+  <text id="static-heading" class="title">
+    Как состав RUNNING меняется между шагами decode
+  </text>
+  <g id="drawing"></g>
+</svg>
+
+<script>
+(() => {
+  "use strict";
+
+  const DATA = [{
+    origin: { x: 40, y: 22 },
+    scale: { x: 1, y: 1 },
+    labelPad: 8,
+    title: { x: 0, y: 12 },
+    subtitle: {
+      x: 0, y: 38,
+      text: "Каждый вертикальный срез — состав одного общего forward pass"
+    },
+    card: { y: 62, w: 300, h: 178, headH: 40, innerX: 20, rowW: 260, rowH: 28 },
+    rows: [
+      { y: 129 },
+      { y: 169 },
+      { y: 209 }
+    ],
+    slices: [
+      {
+        x: 0,
+        title: "предыдущий decode",
+        running: "RUNNING: A · B · C",
+        requests: [
+          { name: "A", state: "новый токен", kind: "active" },
+          { name: "B", state: "новый токен", kind: "active" },
+          { name: "C", state: "новый токен", kind: "active" }
+        ]
+      },
+      {
+        x: 340,
+        title: "decode · шаг 137",
+        running: "RUNNING: A · B · C",
+        requests: [
+          { name: "A", state: "EOS после токена", kind: "finish" },
+          { name: "B", state: "новый токен", kind: "active" },
+          { name: "C", state: "новый токен", kind: "active" }
+        ]
+      },
+      {
+        x: 680,
+        title: "decode · шаг 138",
+        running: "RUNNING: D · B · C",
+        requests: [
+          { name: "D", state: "первый токен", kind: "admit" },
+          { name: "B", state: "новый токен", kind: "active" },
+          { name: "C", state: "новый токен", kind: "active" }
+        ]
+      }
+    ],
+    connections: [
+      { fromX: 300, toX: 340, y: 129, kind: "finish" },
+      { fromX: 300, toX: 340, y: 169, kind: "active" },
+      { fromX: 300, toX: 340, y: 209, kind: "active" },
+      { fromX: 640, toX: 680, y: 169, kind: "active" },
+      { fromX: 640, toX: 680, y: 209, kind: "active" }
+    ],
+    finishDot: { x: 640, y: 129, r: 6 },
+    startDot: { x: 680, y: 129, r: 6 },
+    boundary: {
+      x: 660, y: 253,
+      text: "граница итераций: сначала освободить, затем принять, затем считать"
+    },
+    flowY: 286,
+    flowH: 64,
+    flowBoxes: [
+      {
+        x: 0, w: 190, kind: "release",
+        lines: ["A поймал EOS", "на шаге 137"]
+      },
+      {
+        x: 240, w: 210, kind: "release",
+        lines: ["KV-блоки A", "уже свободны"]
+      },
+      {
+        x: 500, w: 220, kind: "admission",
+        lines: ["D из WAITING", "занимает слот"]
+      },
+      {
+        x: 770, w: 200, kind: "normal",
+        lines: ["RUNNING: D · B · C", "decode шага 138"]
+      }
+    ],
+    flowArrows: [
+      { x1: 190, y1: 318, x2: 240, y2: 318 },
+      { x1: 450, y1: 318, x2: 500, y2: 318 },
+      { x1: 720, y1: 318, x2: 770, y2: 318 }
+    ],
+    arrow: { head: 11, wing: 6 },
+    textLines: { firstY: 309, secondY: 329 },
+    legend: {
+      x: 0, y: 382,
+      text: "Горизонталь сохраняет жизнь запроса; вертикальный срез пересобирает компанию участников."
+    },
+    takeaway: {
+      x: 0, y: 410,
+      text: "Батч сохраняется как действие, но меняется как состав."
+    },
+    token: { r: 4, inset: 16 }
+  }];
+
+  const [D] = DATA;
+  const origin = D.origin;
+  const scale = D.scale;
+  const LABEL_PAD = D.labelPad;
+
+  const sx = x => origin.x + x * scale.x;
+  const sy = y => origin.y + y * scale.y;
+
+  const svg = document.getElementById("scene");
+  const drawing = document.getElementById("drawing");
+  const heading = document.getElementById("static-heading");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const node = (name, attrs = {}, text = "") => {
+    const item = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+    if (text) item.textContent = text;
+    return item;
+  };
+
+  const add = item => {
+    drawing.appendChild(item);
+    return item;
+  };
+
+  const rect = (x, y, w, h, className) => add(node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    class: className
+  }));
+
+  const line = (x1, y1, x2, y2, className) => add(node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className
+  }));
+
+  const circle = (x, y, r, className) => add(node("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(r) - sx(0),
+    class: className
+  }));
+
+  const label = (x, y, text, className, anchor = "start", dx = LABEL_PAD, dy = 0) =>
+    add(node("text", {
+      x: sx(x),
+      y: sy(y),
+      dx,
+      dy,
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, text));
+
+  const arrow = spec => {
+    line(spec.x1, spec.y1, spec.x2, spec.y2, "arrow");
+    const vx = spec.x2 - spec.x1;
+    const vy = spec.y2 - spec.y1;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = spec.x2 - ux * D.arrow.head;
+    const by = spec.y2 - uy * D.arrow.head;
+    const px = -uy * D.arrow.wing;
+    const py = ux * D.arrow.wing;
+    add(node("polygon", {
+      points: [
+        `${sx(spec.x2)},${sy(spec.y2)}`,
+        `${sx(bx + px)},${sy(by + py)}`,
+        `${sx(bx - px)},${sy(by - py)}`
+      ].join(" "),
+      class: "arrow-head"
+    }));
+  };
+
+  try {
+    heading.setAttribute("x", sx(D.title.x));
+    heading.setAttribute("y", sy(D.title.y));
+
+    label(
+      D.subtitle.x,
+      D.subtitle.y,
+      D.subtitle.text,
+      "subtitle",
+      "start",
+      0,
+      0
+    );
+
+    D.connections.forEach(connection => {
+      line(
+        connection.fromX,
+        connection.y,
+        connection.toX,
+        connection.y,
+        `life ${connection.kind}`
+      );
+    });
+
+    D.slices.forEach(slice => {
+      rect(slice.x, D.card.y, D.card.w, D.card.h, "card");
+      rect(slice.x, D.card.y, D.card.w, D.card.headH, "card-head");
+
+      label(
+        slice.x + D.card.w / D.scale.x / D.card.w * D.card.w / 2,
+        D.card.y + D.card.headH / 2,
+        slice.title,
+        "slice-label",
+        "middle",
+        0,
+        0
+      );
+
+      label(
+        slice.x + D.card.innerX,
+        D.card.y + D.card.headH + D.labelPad + D.labelPad,
+        slice.running,
+        "running-label",
+        "start",
+        0,
+        0
+      );
+
+      slice.requests.forEach((request, requestIndex) => {
+        const row = D.rows[requestIndex];
+        const rowX = slice.x + D.card.innerX;
+        const rowY = row.y - D.card.rowH / 2;
+        const kindClass = request.kind === "active" ? "" : ` ${request.kind}`;
+
+        rect(rowX, rowY, D.card.rowW, D.card.rowH, `request${kindClass}`);
+
+        label(
+          rowX,
+          row.y,
+          request.name,
+          "request-name",
+          "start",
+          LABEL_PAD,
+          0
+        );
+
+        const stateClass = request.kind === "finish"
+          ? "finish-text"
+          : request.kind === "admit"
+            ? "admit-text"
+            : "request-state";
+
+        label(
+          rowX + D.card.rowW,
+          row.y,
+          request.state,
+          stateClass,
+          "end",
+          -LABEL_PAD,
+          0
+        );
+
+        circle(
+          rowX + D.card.rowW - D.token.inset,
+          row.y,
+          D.token.r,
+          "token-mark"
+        );
+      });
+    });
+
+    circle(
+      D.finishDot.x,
+      D.finishDot.y,
+      D.finishDot.r,
+      "end-dot"
+    );
+
+    circle(
+      D.startDot.x,
+      D.startDot.y,
+      D.startDot.r,
+      "start-dot"
+    );
+
+    label(
+      D.boundary.x,
+      D.boundary.y,
+      D.boundary.text,
+      "boundary-note",
+      "middle",
+      0,
+      0
+    );
+
+    D.flowBoxes.forEach(box => {
+      const boxClass = box.kind === "release"
+        ? "flow-box release"
+        : box.kind === "admission"
+          ? "flow-box admission"
+          : "flow-box";
+
+      rect(box.x, D.flowY, box.w, D.flowH, boxClass);
+
+      label(
+        box.x + box.w / 2,
+        D.textLines.firstY,
+        box.lines.shift(),
+        "flow-text",
+        "middle",
+        0,
+        0
+      );
+
+      label(
+        box.x + box.w / 2,
+        D.textLines.secondY,
+        box.lines.shift(),
+        "flow-text",
+        "middle",
+        0,
+        0
+      );
+    });
+
+    D.flowArrows.forEach(arrow);
+
+    label(
+      D.legend.x,
+      D.legend.y,
+      D.legend.text,
+      "legend",
+      "start",
+      0,
+      0
+    );
+
+    label(
+      D.takeaway.x,
+      D.takeaway.y,
+      D.takeaway.text,
+      "slice-label",
+      "start",
+      0,
+      0
+    );
+  } catch (error) {
+    drawing.replaceChildren();
+    const fallback = node("text", {
+      x: sx(0),
+      y: sy(D.flowY),
+      class: "fallback",
+      "text-anchor": "start"
+    }, "Схема должна показать: A завершается на шаге 137, его KV-блоки освобождаются, а D занимает слот на шаге 138.");
+    drawing.appendChild(fallback);
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как три запроса делят одну ветку KV-кэша</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --ink: #172033;
+      --muted-ink: #596579;
+      --frame: #c7d0df;
+      --shared-fill: #e5f2ff;
+      --shared-stroke: #1769c2;
+      --shared-line: #2684e5;
+      --banner-fill: #d8edff;
+      --banner-stroke: #1769c2;
+      --alternate-fill: #eef1f5;
+      --alternate-stroke: #8290a4;
+      --alternate-line: #a1adbd;
+      --alice-fill: #e2f7ed;
+      --alice-stroke: #16845a;
+      --bob-fill: #f0e9ff;
+      --bob-stroke: #7951bd;
+      --carol-fill: #fff0dc;
+      --carol-stroke: #c76b19;
+      --junction: #314158;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101723;
+        --ink: #eef4ff;
+        --muted-ink: #adb9ca;
+        --frame: #344258;
+        --shared-fill: #102f50;
+        --shared-stroke: #69b4ff;
+        --shared-line: #59aaff;
+        --banner-fill: #153b61;
+        --banner-stroke: #69b4ff;
+        --alternate-fill: #202a38;
+        --alternate-stroke: #7f8da2;
+        --alternate-line: #68768a;
+        --alice-fill: #123c30;
+        --alice-stroke: #5dd2a5;
+        --bob-fill: #30234a;
+        --bob-stroke: #ba9aff;
+        --carol-fill: #452d18;
+        --carol-stroke: #ffad61;
+        --junction: #d9e5f7;
+      }
+    }
+
+    html,
+    body,
+    figure {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body,
+    figure,
+    figcaption {
+      margin: unset;
+    }
+
+    figure {
+      display: grid;
+      width: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figcaption {
+      font-size: 22px;
+      font-weight: bold;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--page);
+    }
+
+    .edge {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .edge-shared {
+      stroke: var(--shared-line);
+      stroke-width: 7px;
+    }
+
+    .edge-alternate {
+      stroke: var(--alternate-line);
+      stroke-width: 3px;
+    }
+
+    .edge-alice {
+      stroke: var(--alice-stroke);
+      stroke-width: 4px;
+    }
+
+    .edge-bob {
+      stroke: var(--bob-stroke);
+      stroke-width: 4px;
+    }
+
+    .edge-carol {
+      stroke: var(--carol-stroke);
+      stroke-width: 4px;
+    }
+
+    .node,
+    .banner {
+      stroke-width: 2px;
+    }
+
+    .node-shared {
+      fill: var(--shared-fill);
+      stroke: var(--shared-stroke);
+    }
+
+    .node-alternate {
+      fill: var(--alternate-fill);
+      stroke: var(--alternate-stroke);
+    }
+
+    .node-alice {
+      fill: var(--alice-fill);
+      stroke: var(--alice-stroke);
+    }
+
+    .node-bob {
+      fill: var(--bob-fill);
+      stroke: var(--bob-stroke);
+    }
+
+    .node-carol {
+      fill: var(--carol-fill);
+      stroke: var(--carol-stroke);
+    }
+
+    .banner {
+      fill: var(--banner-fill);
+      stroke: var(--banner-stroke);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 17px;
+      pointer-events: none;
+    }
+
+    .label {
+      font-weight: bold;
+    }
+
+    .metric {
+      font-size: 16px;
+    }
+
+    .eyebrow {
+      fill: var(--shared-stroke);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .sum {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .annotation {
+      fill: var(--muted-ink);
+      font-size: 16px;
+    }
+
+    .junction {
+      fill: var(--junction);
+    }
+
+    #fallback {
+      color: var(--muted-ink);
+      font-size: 17px;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-caption">
+    <figcaption id="diagram-caption">
+      Как три запроса делят одну ветку KV-кэша
+    </figcaption>
+
+    <svg
+      id="tree"
+      viewBox="0 0 1140 440"
+      width="1140"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Radix tree общего KV-кэша</title>
+      <desc id="svg-desc">
+        Системный префикс и doc A образуют одну общую ветку на 155 блоков.
+        После неё расходятся отдельные вопросы Alice, Bob и Carol. От
+        системного префикса также отходит ветка doc B на 33 блока.
+      </desc>
+      <g id="diagram"></g>
+    </svg>
+
+    <p id="fallback" role="status">
+      Схема должна показать общий системный префикс на 124 блока, ветку
+      doc A на 31 блок и три отдельных вопроса: Alice на 5 блоков, Bob на
+      6 блоков и Carol на 4 блока. Рядом отходит ветка doc B на 33 блока.
+    </p>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze([
+      {
+        kind: "config",
+        zero: 0,
+        origin: { x: 30, y: 18 },
+        scale: { x: 9.5, y: 9.5 },
+        radius: 1.25
+      },
+
+      {
+        kind: "panel",
+        x: 18,
+        y: 0.5,
+        w: 57,
+        h: 6.5,
+        className: "banner",
+        lines: [
+          {
+            x: 46.5,
+            y: 2.8,
+            text: "ОДНА ОБЩАЯ ВЕТКА",
+            anchor: "middle",
+            className: "eyebrow"
+          },
+          {
+            x: 46.5,
+            y: 5.4,
+            text: "124 + 31 = 155 блоков",
+            anchor: "middle",
+            className: "sum"
+          }
+        ]
+      },
+
+      {
+        kind: "edge",
+        className: "edge edge-shared",
+        points: [
+          { x: 12, y: 22 },
+          { x: 18, y: 22 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-shared",
+        points: [
+          { x: 47, y: 22 },
+          { x: 51, y: 22 },
+          { x: 51, y: 18.5 },
+          { x: 56, y: 18.5 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-alternate",
+        points: [
+          { x: 47, y: 22 },
+          { x: 51, y: 22 },
+          { x: 51, y: 37.25 },
+          { x: 56, y: 37.25 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-shared",
+        points: [
+          { x: 75, y: 18.5 },
+          { x: 80, y: 18.5 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-alice",
+        points: [
+          { x: 80, y: 18.5 },
+          { x: 82.5, y: 18.5 },
+          { x: 82.5, y: 11.75 },
+          { x: 87, y: 11.75 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-bob",
+        points: [
+          { x: 80, y: 18.5 },
+          { x: 82.5, y: 18.5 },
+          { x: 82.5, y: 20.75 },
+          { x: 87, y: 20.75 }
+        ]
+      },
+      {
+        kind: "edge",
+        className: "edge edge-carol",
+        points: [
+          { x: 80, y: 18.5 },
+          { x: 82.5, y: 18.5 },
+          { x: 82.5, y: 29.75 },
+          { x: 87, y: 29.75 }
+        ]
+      },
+
+      {
+        kind: "node",
+        x: 0,
+        y: 18,
+        w: 12,
+        h: 8,
+        className: "node node-shared",
+        lines: [
+          {
+            x: 6,
+            y: 22.7,
+            text: "корень",
+            anchor: "middle",
+            className: "label"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        x: 18,
+        y: 14,
+        w: 29,
+        h: 16,
+        className: "node node-shared",
+        lines: [
+          {
+            x: 32.5,
+            y: 20.7,
+            text: "системный префикс",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 32.5,
+            y: 25.3,
+            text: "124 блока",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        x: 56,
+        y: 13,
+        w: 19,
+        h: 11,
+        className: "node node-shared",
+        lines: [
+          {
+            x: 65.5,
+            y: 17.4,
+            text: "doc A",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 65.5,
+            y: 21.5,
+            text: "31 блок",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        x: 56,
+        y: 32,
+        w: 19,
+        h: 10.5,
+        className: "node node-alternate",
+        lines: [
+          {
+            x: 65.5,
+            y: 36.3,
+            text: "doc B",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 65.5,
+            y: 40.3,
+            text: "33 блока",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "junction",
+        x: 80,
+        y: 18.5,
+        r: 0.72,
+        className: "junction"
+      },
+      {
+        kind: "node",
+        x: 87,
+        y: 8,
+        w: 25,
+        h: 7.5,
+        className: "node node-alice",
+        lines: [
+          {
+            x: 99.5,
+            y: 11.2,
+            text: "вопрос Alice",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 99.5,
+            y: 14.1,
+            text: "5 блоков",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        x: 87,
+        y: 17,
+        w: 25,
+        h: 7.5,
+        className: "node node-bob",
+        lines: [
+          {
+            x: 99.5,
+            y: 20.2,
+            text: "вопрос Bob",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 99.5,
+            y: 23.1,
+            text: "6 блоков",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        x: 87,
+        y: 26,
+        w: 25,
+        h: 7.5,
+        className: "node node-carol",
+        lines: [
+          {
+            x: 99.5,
+            y: 29.2,
+            text: "вопрос Carol",
+            anchor: "middle",
+            className: "label"
+          },
+          {
+            x: 99.5,
+            y: 32.1,
+            text: "4 блока",
+            anchor: "middle",
+            className: "metric"
+          }
+        ]
+      },
+      {
+        kind: "text",
+        x: 99.5,
+        y: 40.5,
+        text: "вопросы хранятся отдельно",
+        anchor: "middle",
+        className: "annotation"
+      }
+    ]);
+
+    const [CONFIG, ...ITEMS] = DATA;
+    const origin = Object.freeze(CONFIG.origin);
+    const scale = Object.freeze(CONFIG.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const stage = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+
+    function makeElement(name, attributes, content) {
+      const element = document.createElementNS(SVG_NS, name);
+
+      for (const [attribute, value] of Object.entries(attributes)) {
+        element.setAttribute(attribute, String(value));
+      }
+
+      if (content !== undefined) {
+        element.textContent = content;
+      }
+
+      return element;
+    }
+
+    function makeText(line) {
+      return makeElement(
+        "text",
+        {
+          x: sx(line.x),
+          y: sy(line.y),
+          "text-anchor": line.anchor,
+          class: line.className
+        },
+        line.text
+      );
+    }
+
+    try {
+      const drawing = makeElement("g", {
+        "aria-hidden": "true"
+      });
+
+      for (const item of ITEMS) {
+        if (item.kind === "edge") {
+          const points = item.points
+            .map(point => `${sx(point.x)},${sy(point.y)}`)
+            .join(" ");
+
+          drawing.appendChild(
+            makeElement("polyline", {
+              points,
+              class: item.className
+            })
+          );
+        }
+
+        if (item.kind === "panel" || item.kind === "node") {
+          drawing.appendChild(
+            makeElement("rect", {
+              x: sx(item.x),
+              y: sy(item.y),
+              width: sx(item.w) - sx(CONFIG.zero),
+              height: sy(item.h) - sy(CONFIG.zero),
+              rx: sx(CONFIG.radius) - sx(CONFIG.zero),
+              ry: sy(CONFIG.radius) - sy(CONFIG.zero),
+              class: item.className
+            })
+          );
+
+          for (const line of item.lines) {
+            drawing.appendChild(makeText(line));
+          }
+        }
+
+        if (item.kind === "junction") {
+          drawing.appendChild(
+            makeElement("circle", {
+              cx: sx(item.x),
+              cy: sy(item.y),
+              r: sx(item.r) - sx(CONFIG.zero),
+              class: item.className
+            })
+          );
+        }
+
+        if (item.kind === "text") {
+          drawing.appendChild(makeText(item));
+        }
+      }
+
+      stage.appendChild(drawing);
+      fallback.hidden = true;
+    } catch (error) {
+      fallback.textContent =
+        "Схема должна показать одну общую ветку: системный префикс на 124 блока и doc A на 31 блок. После 155 общих блоков расходятся вопросы Alice на 5 блоков, Bob на 6 блоков и Carol на 4 блока; рядом находится ветка doc B на 33 блока.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

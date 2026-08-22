@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как память становится фактическим потолком decode</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --surface: #ffffff;
+      --surface-soft: #f1f4f8;
+      --text: #172033;
+      --muted: #5e6879;
+      --line: #cbd3df;
+      --track: #e3e8ef;
+      --slow: #d34b4b;
+      --medium: #d58a20;
+      --fast: #288b70;
+      --accent: #3568d4;
+      --accent-soft: #e9efff;
+      --input: #f2f5fa;
+      --shadow: #d9dfe8;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141c;
+        --surface: #171d28;
+        --surface-soft: #1d2532;
+        --text: #edf1f7;
+        --muted: #aab4c3;
+        --line: #465165;
+        --track: #303a49;
+        --slow: #ff7770;
+        --medium: #f2b450;
+        --fast: #5dd0aa;
+        --accent: #83a8ff;
+        --accent-soft: #253454;
+        --input: #202938;
+        --shadow: #0b0e14;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      background: var(--surface);
+      border: 2px solid var(--line);
+      box-shadow: 0 3px 0 var(--shadow);
+      overflow: hidden;
+    }
+
+    .figure-title {
+      margin: 0;
+      padding: 16px 22px 9px;
+      color: var(--text);
+      font-size: 22px;
+      font-weight: 750;
+      line-height: 27px;
+      letter-spacing: -0.2px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 458px;
+      background: var(--surface);
+    }
+
+    text {
+      fill: var(--text);
+      font-family: inherit;
+    }
+
+    .eyebrow {
+      fill: var(--accent);
+      font-size: 20px;
+      font-weight: 750;
+    }
+
+    .section-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: 0.2px;
+    }
+
+    .band-label {
+      font-size: 19px;
+      font-weight: 750;
+    }
+
+    .time-label {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .slow-text {
+      fill: var(--slow);
+    }
+
+    .medium-text {
+      fill: var(--medium);
+    }
+
+    .fast-text {
+      fill: var(--fast);
+    }
+
+    .track {
+      stroke: var(--track);
+      stroke-width: 10px;
+      stroke-linecap: round;
+    }
+
+    .bar-slow,
+    .bar-medium,
+    .bar-fast {
+      stroke-width: 10px;
+      stroke-linecap: round;
+    }
+
+    .bar-slow {
+      stroke: var(--slow);
+    }
+
+    .bar-medium {
+      stroke: var(--medium);
+    }
+
+    .bar-fast {
+      stroke: var(--fast);
+    }
+
+    .divider {
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .input-box {
+      fill: var(--input);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .max-box {
+      fill: var(--surface-soft);
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .output-box {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--accent);
+    }
+
+    .box-title {
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .box-note {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 550;
+    }
+
+    .max-label {
+      fill: var(--accent);
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .output-title {
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .output-note {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .formula {
+      fill: var(--accent);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 18px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1 class="figure-title">Как память становится фактическим потолком decode</h1>
+
+    <svg
+      viewBox="0 0 1040 450"
+      width="1040"
+      height="450"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Сравнение времени чтения весов модели 7B Q4</title>
+      <desc id="svg-description">
+        Чтение 3,5 ГБ занимает 70 мс при 50 ГБ/с, около 40 мс при
+        90 ГБ/с и 1,2 мс при 3 ТБ/с. Время токена определяется максимумом
+        времени памяти и времени вычислений.
+      </desc>
+      <g id="scene"></g>
+    </svg>
+  </main>
+
+  <script>
+    const rowData = [
+      [
+        "50 ГБ/с",
+        "70 мс",
+        [0, 86],
+        [180, 86],
+        [650, 86],
+        [672, 86],
+        "bar-slow",
+        "slow-text"
+      ],
+      [
+        "90 ГБ/с",
+        "около 40 мс",
+        [0, 151],
+        [180, 151],
+        [449, 151],
+        [471, 151],
+        "bar-medium",
+        "medium-text"
+      ],
+      [
+        "3 ТБ/с",
+        "1,2 мс",
+        [0, 216],
+        [180, 216],
+        [188, 216],
+        [210, 216],
+        "bar-fast",
+        "fast-text"
+      ]
+    ];
+
+    const fixedTextData = [
+      [
+        "eyebrow",
+        "7B Q4 · 3,5 ГБ весов читаются для каждого токена",
+        [0, 12],
+        "start"
+      ],
+      [
+        "section-label",
+        "Пропускная способность",
+        [0, 48],
+        "start"
+      ],
+      [
+        "section-label",
+        "Время чтения одного набора весов",
+        [180, 48],
+        "start"
+      ],
+      [
+        "section-label",
+        "Итог выбирает более медленная часть",
+        [0, 278],
+        "start"
+      ],
+      [
+        "box-title",
+        "Время памяти",
+        [110, 320],
+        "middle"
+      ],
+      [
+        "box-note",
+        "чтение весов",
+        [110, 337],
+        "middle"
+      ],
+      [
+        "box-title",
+        "Время вычислений",
+        [110, 380],
+        "middle"
+      ],
+      [
+        "box-note",
+        "работа ускорителя",
+        [110, 397],
+        "middle"
+      ],
+      [
+        "max-label",
+        "max",
+        [460, 358],
+        "middle"
+      ],
+      [
+        "output-title",
+        "Итоговое время токена",
+        [800, 344],
+        "middle"
+      ],
+      [
+        "output-note",
+        "память задаёт потолок, если она дольше",
+        [800, 368],
+        "middle"
+      ],
+      [
+        "formula",
+        "T токена = max(T памяти, T вычислений)",
+        [468, 424],
+        "middle"
+      ]
+    ];
+
+    const lineData = [
+      [[0, 255], [936, 255], "divider"]
+    ];
+
+    const boxData = [
+      [[0, 298, 220, 344], "input-box"],
+      [[0, 358, 220, 404], "input-box"],
+      [[665, 310, 936, 388], "output-box"]
+    ];
+
+    const polygonData = [
+      [
+        [[395, 351], [460, 298], [525, 351], [460, 404]],
+        "max-box"
+      ]
+    ];
+
+    const arrowData = [
+      [
+        [[220, 321], [393, 337]],
+        [[414, 339], [393, 327], [393, 349]]
+      ],
+      [
+        [[220, 381], [393, 365]],
+        [[414, 363], [393, 353], [393, 375]]
+      ],
+      [
+        [[525, 351], [646, 351]],
+        [[665, 351], [646, 340], [646, 362]]
+      ]
+    ];
+
+    const trackData = [
+      [[180, 86], [650, 86]],
+      [[180, 151], [650, 151]],
+      [[180, 216], [650, 216]]
+    ];
+
+    const fallbackData = [
+      [0, 72],
+      "Схема: 3,5 ГБ читаются за 70 мс, около 40 мс или 1,2 мс; время токена равно максимуму времени памяти и вычислений."
+    ];
+
+    const origin = Object.freeze([52, 14]);
+    const scale = Object.freeze([1, 1]);
+
+    const [originX, originY] = origin;
+    const [scaleX, scaleY] = scale;
+
+    const sx = x => originX + x * scaleX;
+    const sy = y => originY + y * scaleY;
+
+    const namespace = "http://www.w3.org/2000/svg";
+    const sceneNode = document.getElementById("scene");
+
+    function element(name, attributes, content) {
+      const node = document.createElementNS(namespace, name);
+
+      for (const [attribute, value] of Object.entries(attributes)) {
+        node.setAttribute(attribute, value);
+      }
+
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+
+      return node;
+    }
+
+    function appendLine(parent, endpoints, className) {
+      const [[xStart, yStart], [xEnd, yEnd]] = endpoints;
+      parent.appendChild(element("line", {
+        x1: sx(xStart),
+        y1: sy(yStart),
+        x2: sx(xEnd),
+        y2: sy(yEnd),
+        class: className
+      }));
+    }
+
+    function appendPolygon(parent, points, className) {
+      const mapped = [];
+
+      for (const [x, y] of points) {
+        mapped.push(`${sx(x)},${sy(y)}`);
+      }
+
+      parent.appendChild(element("polygon", {
+        points: mapped.join(" "),
+        class: className
+      }));
+    }
+
+    function appendBox(parent, bounds, className) {
+      const [left, top, right, bottom] = bounds;
+      appendPolygon(parent, [
+        [left, top],
+        [right, top],
+        [right, bottom],
+        [left, bottom]
+      ], className);
+    }
+
+    function appendText(parent, className, content, point, anchor) {
+      const [x, y] = point;
+      parent.appendChild(element("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, content));
+    }
+
+    try {
+      for (const endpoints of trackData) {
+        appendLine(sceneNode, endpoints, "track");
+      }
+
+      for (const row of rowData) {
+        const [
+          bandwidth,
+          duration,
+          labelPoint,
+          barStart,
+          barEnd,
+          durationPoint,
+          barClass,
+          durationClass
+        ] = row;
+
+        appendText(sceneNode, "band-label", bandwidth, labelPoint, "start");
+        appendLine(sceneNode, [barStart, barEnd], barClass);
+        appendText(
+          sceneNode,
+          `time-label ${durationClass}`,
+          duration,
+          durationPoint,
+          "start"
+        );
+      }
+
+      for (const [endpoints, className] of lineData) {
+        appendLine(sceneNode, endpoints, className);
+      }
+
+      for (const [bounds, className] of boxData) {
+        appendBox(sceneNode, bounds, className);
+      }
+
+      for (const [points, className] of polygonData) {
+        appendPolygon(sceneNode, points, className);
+      }
+
+      for (const [shaft, head] of arrowData) {
+        appendLine(sceneNode, shaft, "flow");
+        appendPolygon(sceneNode, head, "arrow-head");
+      }
+
+      for (const [className, content, point, anchor] of fixedTextData) {
+        appendText(sceneNode, className, content, point, anchor);
+      }
+    } catch (error) {
+      while (sceneNode.firstChild) {
+        sceneNode.removeChild(sceneNode.firstChild);
+      }
+
+      const [fallbackPoint, fallbackText] = fallbackData;
+      const [fallbackX, fallbackY] = fallbackPoint;
+
+      sceneNode.appendChild(element("text", {
+        x: sx(fallbackX),
+        y: sy(fallbackY),
+        class: "fallback",
+        "text-anchor": "start",
+        "dominant-baseline": "middle"
+      }, fallbackText));
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

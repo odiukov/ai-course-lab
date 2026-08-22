@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KV-кэш как перемещаемый ресурс: HBM, DRAM и дисковый уровень — Vllm Production Stack Lmcache</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/">← Vllm Production Stack Lmcache</a>
+<span class="counter" data-counter>3 / 40</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-povtornyi-prefill" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/001-povtornyi-prefill/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Почему вытеснение KV превращается в повторный prefill</span></a></li>
+<li><a class="toc-link" data-step="002-tsena-povtora" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/002-tsena-povtora/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Считаем потерянные 600 мс GPU на повторяющемся запросе</span></a></li>
+<li><a class="toc-link is-current" data-step="003-ierarkhiya-kv" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/003-ierarkhiya-kv/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">KV-кэш как перемещаемый ресурс: HBM, DRAM и дисковый уровень</span></a></li>
+<li><a class="toc-link" data-step="004-put-kv" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/004-put-kv/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Как KV покидает GPU и возвращается к запросу</span></a></li>
+<li><a class="toc-link" data-step="005-sloi-steka" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/005-sloi-steka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Пять слоёв production-stack и ответственность каждого</span></a></li>
+<li><a class="toc-link" data-step="006-arkhitektura-steka" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/006-arkhitektura-steka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Путь запроса через production-stack</span></a></li>
+<li><a class="toc-link" data-step="007-sobytiya-kv" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/007-sobytiya-kv/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Как события KV связывают движки с уже знакомым cache-aware-роутером</span></a></li>
+<li><a class="toc-link" data-step="008-otvetstvennost-sloev" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/008-otvetstvennost-sloev/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Определяем слой по симптому: промах маршрутизации, вытеснение или слепая зона метрик</span></a></li>
+<li><a class="toc-link" data-step="009-connector-api" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/009-connector-api/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Connector API: единый контракт выгрузки и загрузки KV-блоков</span></a></li>
+<li><a class="toc-link" data-step="010-zhizn-bloka" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/010-zhizn-bloka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Жизненный цикл KV-блока через Connector API</span></a></li>
+<li><a class="toc-link" data-step="011-async-offload" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/011-async-offload/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Что асинхронная выгрузка скрывает, но не делает бесплатным</span></a></li>
+<li><a class="toc-link" data-step="012-async-proverka" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/012-async-proverka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Находим скрытые расходы async-пути: PCIe, CPU и бесполезные записи при низком hit rate</span></a></li>
+<li><a class="toc-link" data-step="013-stoimost-recompute" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/013-stoimost-recompute/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Моделируем время повторного prefill по длине промпта</span></a></li>
+<li><a class="toc-link" data-step="014-recompute-ms" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/014-recompute-ms/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Пишем recompute_ms</span></a></li>
+<li><a class="toc-link" data-step="015-stoimost-restore" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/015-stoimost-restore/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Моделируем восстановление KV по объёму данных и скорости уровня хранения</span></a></li>
+<li><a class="toc-link" data-step="016-restore-ms" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/016-restore-ms/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Пишем restore_ms</span></a></li>
+<li><a class="toc-link" data-step="017-effektivnyi-hit" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/017-effektivnyi-hit/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Считаем ожидаемое время запроса как смесь попаданий и промахов</span></a></li>
+<li><a class="toc-link" data-step="018-effective-hit-ms" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/018-effective-hit-ms/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Пишем effective_hit_ms</span></a></li>
+<li><a class="toc-link" data-step="019-granitsa-vygody" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/019-granitsa-vygody/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Сравниваем восстановление с повторным prefill и находим условие выгоды</span></a></li>
+<li><a class="toc-link" data-step="020-native-ili-lmcache" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/020-native-ili-lmcache/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Локальная native-выгрузка против общего LMCache</span></a></li>
+<li><a class="toc-link" data-step="021-dva-varianta" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/021-dva-varianta/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Один локальный кэш и общий кэш нескольких движков</span></a></li>
+<li><a class="toc-link" data-step="022-sostoyanie-kesha" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/022-sostoyanie-kesha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Задаём ограниченный учебный кэш и его счётчики</span></a></li>
+<li><a class="toc-link" data-step="023-make-cache" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/023-make-cache/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Пишем make_cache</span></a></li>
+<li><a class="toc-link" data-step="024-semantika-lookup" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/024-semantika-lookup/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Различаем попадание, промах и обновление горячести записи</span></a></li>
+<li><a class="toc-link" data-step="025-cache-lookup" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/025-cache-lookup/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Пишем cache_lookup</span></a></li>
+<li><a class="toc-link" data-step="026-zapis-i-vytesnenie" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/026-zapis-i-vytesnenie/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Сохраняем KV и освобождаем место при исчерпании ёмкости</span></a></li>
+<li><a class="toc-link" data-step="027-cache-put" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/027-cache-put/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Пишем cache_put</span></a></li>
+<li><a class="toc-link" data-step="028-odin-zapros" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/028-odin-zapros/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Обслуживаем запрос: восстановить KV или выполнить prefill и сохранить результат</span></a></li>
+<li><a class="toc-link" data-step="029-serve-request" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/029-serve-request/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Пишем serve_request</span></a></li>
+<li><a class="toc-link" data-step="030-potok-zaprosov" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/030-potok-zaprosov/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Проигрываем нагрузку и собираем повторы, восстановления и суммарное время</span></a></li>
+<li><a class="toc-link" data-step="031-run-workload" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/031-run-workload/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Пишем run_workload</span></a></li>
+<li><a class="toc-link" data-step="032-tri-rezhima" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/032-tri-rezhima/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Три режима бенчмарка: KV помещается, приближается к пределу или превышает HBM</span></a></li>
+<li><a class="toc-link" data-step="033-tochka-okupaemosti" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/033-tochka-okupaemosti/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Как выгода меняется с давлением на HBM</span></a></li>
+<li><a class="toc-link" data-step="034-chtenie-benchmarka" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/034-chtenie-benchmarka/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Определяем режим, в котором накладные расходы сменяются выигрышем</span></a></li>
+<li><a class="toc-link" data-step="035-dva-istochnika-vygody" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/035-dva-istochnika-vygody/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Два источника выгоды LMCache: общие префиксы и восстановление вытесненных запросов</span></a></li>
+<li><a class="toc-link" data-step="036-kogda-ne-vklyuchat" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/036-kogda-ne-vklyuchat/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Когда короткий контекст и слабое давление на HBM делают offload лишним</span></a></li>
+<li><a class="toc-link" data-step="037-otkaz-i-fallback" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/037-otkaz-i-fallback/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Высокая доступность LMCache: реплики, Ceph и откат на native offload</span></a></li>
+<li><a class="toc-link" data-step="038-disaggregated-kv" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/038-disaggregated-kv/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Как LMCache дополняет уже знакомые раздельные пулы prefill и decode</span></a></li>
+<li><a class="toc-link" data-step="039-tri-resheniya" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/039-tri-resheniya/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Собираем решение из трёх вариантов: ничего, native CPU offload или LMCache</span></a></li>
+<li><a class="toc-link" data-step="040-itog" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/040-itog/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Итоговая проверка: выбираем KV-offload по нагрузке, задержке и архитектуре кластера</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">KV-кэш как перемещаемый ресурс: HBM, DRAM и дисковый уровень</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>В HBM осталось место либо для KV-кэша приостановленного запроса, либо для нового запроса. Удалишь кэш — получишь повторный prefill из <a href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/001-povtornyi-prefill/">шага 1</a>. Оставишь — не сможешь принять больше работы. Кажется, выбирать приходится только между двумя плохими вариантами.</p>
+<p>Но KV-кэш не обязан навсегда оставаться там, где был создан. LMCache обращается с ним как с перемещаемым объектом: содержимое сохраняется, а физическое место хранения выбирается по тому, насколько скоро оно понадобится.</p>
+<p>Самые «горячие» данные остаются в HBM — быстрой, но тесной памяти GPU. Например, у H100 её 80 ГБ. Временно неактивный, но вероятно нужный снова KV можно держать в CPU DRAM: она медленнее, зато один сокет вмещает 512 ГБ и больше. Ещё более «холодные» данные отправляются на дисковый уровень, обычно быстрый локальный SSD. Там места больше и оно дешевле, но ожидание заметно дольше.</p>
+<p>Важно: при таком переносе KV не превращается обратно в промпт. Это всё те же уже вычисленные состояния модели. Поэтому при повторном использовании ты платишь за чтение и передачу готовых данных, а не за вычисления, цену которых видел в <a href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/002-tsena-povtora/">шаге 2</a>.</p>
+<p>Размещать всё на диске тоже невыгодно: если чтение займёт больше времени, чем новый prefill, кэш проще не сохранять. Значит, уровень выбирают по вероятности повторного использования и цене восстановления.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь театральный реквизит. Предмет для текущей сцены актёр держит в руках — это HBM. Нужный в следующем акте лежит за кулисами — DRAM. Декорацию для завтрашнего спектакля увозят на склад — диск. Доставать всё дальше, зато не приходится каждый раз заново мастерить тот же реквизит.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/002-tsena-povtora/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/17-infrastructure-and-production__18-vllm-production-stack-lmcache/004-put-kv/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"17-infrastructure-and-production__18-vllm-production-stack-lmcache","stepId":"003-ierarkhiya-kv","number":3,"plannedCount":40}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

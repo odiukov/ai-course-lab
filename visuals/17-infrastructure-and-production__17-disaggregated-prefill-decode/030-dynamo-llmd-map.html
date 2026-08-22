@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: ivory;
+    --panel: white;
+    --panel-alt: aliceblue;
+    --ink: midnightblue;
+    --muted: slategray;
+    --border: lightsteelblue;
+    --control: royalblue;
+    --feedback: darkslategray;
+    --prefill: seagreen;
+    --decode: darkorange;
+    --router: mediumpurple;
+    --engine: lavender;
+    --hpa: lightcyan;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101722;
+      --panel: #172233;
+      --panel-alt: #1d2b3d;
+      --ink: gainsboro;
+      --muted: lightsteelblue;
+      --border: slategray;
+      --control: cornflowerblue;
+      --feedback: silver;
+      --prefill: mediumseagreen;
+      --decode: orange;
+      --router: plum;
+      --engine: darkslateblue;
+      --hpa: darkslategray;
+    }
+  }
+
+  html, body, figure { margin: unset; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+  h1 {
+    margin: unset;
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 490px;
+    background: var(--page);
+  }
+  .section { fill: var(--panel); stroke: var(--border); stroke-width: 2px; }
+  .band { fill: var(--panel-alt); stroke: var(--border); stroke-width: 2px; }
+  .node { fill: var(--panel-alt); stroke: var(--border); stroke-width: 2px; }
+  .planner { fill: var(--hpa); stroke: var(--control); stroke-width: 3px; }
+  .prefill { fill: var(--panel); stroke: var(--prefill); stroke-width: 3px; }
+  .decode { fill: var(--panel); stroke: var(--decode); stroke-width: 3px; }
+  .router { fill: var(--panel); stroke: var(--router); stroke-width: 3px; }
+  .engine { fill: var(--engine); stroke: var(--border); stroke-width: 2px; }
+  .control { stroke: var(--control); fill: var(--control); stroke-width: 3px; }
+  .feedback { stroke: var(--feedback); fill: var(--feedback); stroke-width: 2px; }
+  .link { stroke: var(--border); fill: var(--border); stroke-width: 2px; }
+  .divider { stroke: var(--border); stroke-width: 2px; }
+  text { fill: var(--ink); font-size: 14px; }
+  .heading { font-size: 22px; font-weight: 750; }
+  .subheading { fill: var(--muted); font-size: 13px; font-weight: 600; }
+  .node-title { font-size: 16px; font-weight: 750; }
+  .node-note { fill: var(--muted); font-size: 12px; }
+  .arrow-note { fill: var(--muted); font-size: 11px; font-weight: 650; }
+  .footer { font-size: 14px; font-weight: 700; }
+  #fallback {
+    background: var(--panel);
+    color: var(--ink);
+    border: 2px solid var(--border);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Два операционных подхода к одной архитектуре</h1>
+  <svg id="diagram" viewBox="0 0 1200 470" width="1200" height="470"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Dynamo и llm-d: два способа управлять prefill и decode</title>
+    <desc id="svg-desc">Слева единый контур Dynamo измеряет нагрузку и меняет пропорцию пулов. Справа отдельные HPA управляют Kubernetes Services router, prefill и decode.</desc>
+    <g id="drawing"></g>
+  </svg>
+  <div id="fallback" hidden>
+    Схема должна показать единый управляющий контур Dynamo поверх vLLM, SGLang и TensorRT-LLM и отдельные Kubernetes Services с HPA для router, prefill и decode в llm-d.
+  </div>
+</figure>
+
+<script>
+const DATA = {
+  one: 1, two: 2,
+  arrowBack: 11, arrowHalf: 6,
+  lineGap: 17,
+  panels: [
+    { x: 18, y: 12, w: 564, h: 438 },
+    { x: 618, y: 12, w: 564, h: 438 }
+  ],
+  divider: [{ x: 600, y: 24 }, { x: 600, y: 438 }],
+  headings: [
+    { x: 300, y: 40, lines: ["Dynamo · единый контур"], cls: "heading" },
+    { x: 900, y: 40, lines: ["llm-d · Kubernetes-контуры"], cls: "heading" },
+    { x: 300, y: 67, lines: ["измеряет → выбирает → меняет пропорцию"], cls: "subheading" },
+    { x: 900, y: 67, lines: ["каждая роль: своя метрика → свой HPA → свой пул"], cls: "subheading" }
+  ],
+  leftNodes: [
+    { x: 70, y: 92, w: 190, h: 68, cls: "planner",
+      lines: ["Planner Profiler", "измеряет нагрузку"] },
+    { x: 330, y: 92, w: 190, h: 68, cls: "planner",
+      lines: ["SLA Planner", "выбирает пропорцию"] },
+    { x: 88, y: 222, w: 192, h: 72, cls: "prefill",
+      lines: ["Prefill-пул", "длинные промпты"] },
+    { x: 326, y: 222, w: 192, h: 72, cls: "decode",
+      lines: ["Decode-пул", "KV-кэш и токены"] }
+  ],
+  engineBand: { x: 48, y: 334, w: 504, h: 96 },
+  engineTitle: { x: 300, y: 353, lines: ["Исполнительные движки под Dynamo"], cls: "subheading" },
+  engines: [
+    { x: 66, y: 371, w: 140, h: 42, lines: ["vLLM"] },
+    { x: 232, y: 371, w: 140, h: 42, lines: ["SGLang"] },
+    { x: 398, y: 371, w: 136, h: 42, lines: ["TensorRT-LLM"] }
+  ],
+  leftArrows: [
+    { points: [{x:260,y:126},{x:330,y:126}], cls: "control" },
+    { points: [{x:425,y:160},{x:425,y:190},{x:184,y:190},{x:184,y:222}], cls: "control" },
+    { points: [{x:425,y:160},{x:548,y:160},{x:548,y:258},{x:518,y:258}], cls: "control" },
+    { points: [{x:88,y:258},{x:44,y:258},{x:44,y:126},{x:70,y:126}], cls: "feedback" },
+    { points: [{x:422,y:222},{x:422,y:184},{x:215,y:184},{x:215,y:160}], cls: "feedback" },
+    { points: [{x:184,y:294},{x:184,y:318},{x:300,y:318},{x:300,y:334}], cls: "link" },
+    { points: [{x:422,y:294},{x:422,y:318},{x:300,y:318},{x:300,y:334}], cls: "link" }
+  ],
+  leftNotes: [
+    { x: 274, y: 115, lines: ["профиль"], cls: "arrow-note", anchor: "middle" },
+    { x: 53, y: 205, lines: ["сигналы фаз"], cls: "arrow-note", anchor: "start" },
+    { x: 535, y: 180, lines: ["управляющее", "решение"], cls: "arrow-note", anchor: "end" }
+  ],
+  roles: [
+    { x: 637, center: 720, kind: "router", role: "router",
+      signal: "сигнал: поток" },
+    { x: 817, center: 900, kind: "prefill", role: "prefill",
+      signal: "сигнал: очередь" },
+    { x: 997, center: 1080, kind: "decode", role: "decode",
+      signal: "сигнал: KV-кэш" }
+  ],
+  rightLayout: {
+    w: 166, hpaY: 94, hpaH: 70,
+    serviceY: 226, serviceH: 58,
+    poolY: 356, poolH: 54,
+    loopOffset: 12, loopMidY: 320, hpaMidY: 129,
+    downTop: 164, downBottom: 226,
+    serviceBottom: 284, poolTop: 356,
+    decisionY: 194, lifecycleY: 329
+  },
+  footer: {
+    x: 600, y: 445,
+    lines: ["Фазы одинаковы · владелец управляющего решения различается"],
+    cls: "footer"
+  }
+};
+const ORIGIN = { x: 0, y: 0 };
+const SCALE = { x: 1, y: 1 };
+const sx = x => ORIGIN.x + x * SCALE.x;
+const sy = y => ORIGIN.y + y * SCALE.y;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+
+  function add(tag, attrs, parent = root) {
+    const node = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    parent.appendChild(node);
+    return node;
+  }
+
+  function rect(item, cls) {
+    return add("rect", {
+      x: sx(item.x), y: sy(item.y),
+      width: sx(item.x + item.w) - sx(item.x),
+      height: sy(item.y + item.h) - sy(item.y),
+      class: cls
+    });
+  }
+
+  function text(item) {
+    const node = add("text", {
+      x: sx(item.x), y: sy(item.y),
+      class: item.cls || "",
+      "text-anchor": item.anchor || "middle",
+      "dominant-baseline": "middle"
+    });
+    const lines = item.lines;
+    const start = item.y - ((lines.length - DATA.one) * DATA.lineGap) / DATA.two;
+    lines.forEach((line, index) => {
+      const span = add("tspan", {
+        x: sx(item.x),
+        y: sy(start + index * DATA.lineGap)
+      }, node);
+      span.textContent = line;
+    });
+    return node;
+  }
+
+  function node(item, cls = item.cls || "node") {
+    rect(item, cls);
+    const centerX = item.x + item.w / DATA.two;
+    const centerY = item.y + item.h / DATA.two;
+    item.lines.forEach((line, index) => {
+      const count = item.lines.length;
+      text({
+        x: centerX,
+        y: centerY + (index - (count - DATA.one) / DATA.two) * DATA.lineGap,
+        lines: [line],
+        cls: index === ORIGIN.x ? "node-title" : "node-note"
+      });
+    });
+  }
+
+  function arrow(spec) {
+    const points = spec.points;
+    add("polyline", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: spec.cls,
+      fill: "none",
+      "stroke-linejoin": "round",
+      "stroke-linecap": "round"
+    });
+    const tip = points[points.length - DATA.one];
+    const prior = points[points.length - DATA.two];
+    const dx = tip.x - prior.x;
+    const dy = tip.y - prior.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = tip.x - ux * DATA.arrowBack;
+    const baseY = tip.y - uy * DATA.arrowBack;
+    const left = {
+      x: baseX - uy * DATA.arrowHalf,
+      y: baseY + ux * DATA.arrowHalf
+    };
+    const right = {
+      x: baseX + uy * DATA.arrowHalf,
+      y: baseY - ux * DATA.arrowHalf
+    };
+    add("polygon", {
+      points: [tip, left, right]
+        .map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: spec.cls
+    });
+  }
+
+  DATA.panels.forEach(panel => rect(panel, "section"));
+  add("line", {
+    x1: sx(DATA.divider[ORIGIN.x].x),
+    y1: sy(DATA.divider[ORIGIN.x].y),
+    x2: sx(DATA.divider[DATA.one].x),
+    y2: sy(DATA.divider[DATA.one].y),
+    class: "divider"
+  });
+  DATA.headings.forEach(text);
+
+  DATA.leftArrows.forEach(arrow);
+  DATA.leftNodes.forEach(item => node(item));
+  rect(DATA.engineBand, "band");
+  text(DATA.engineTitle);
+  DATA.engines.forEach(item => node(item, "engine"));
+  DATA.leftNotes.forEach(text);
+
+  const layout = DATA.rightLayout;
+  DATA.roles.forEach(role => {
+    const hpa = {
+      x: role.x, y: layout.hpaY, w: layout.w, h: layout.hpaH,
+      lines: [`HPA · ${role.role}`, role.signal]
+    };
+    const service = {
+      x: role.x, y: layout.serviceY, w: layout.w, h: layout.serviceH,
+      lines: [`${role.role} Service`]
+    };
+    const pool = {
+      x: role.x, y: layout.poolY, w: layout.w, h: layout.poolH,
+      lines: [`${role.role}-пул`]
+    };
+
+    arrow({
+      points: [
+        {x:role.center,y:layout.downTop},
+        {x:role.center,y:layout.downBottom}
+      ],
+      cls: "control"
+    });
+    arrow({
+      points: [
+        {x:role.center,y:layout.serviceBottom},
+        {x:role.center,y:layout.poolTop}
+      ],
+      cls: "link"
+    });
+    arrow({
+      points: [
+        {x:role.x,y:layout.poolY + layout.poolH / DATA.two},
+        {x:role.x - layout.loopOffset,y:layout.poolY + layout.poolH / DATA.two},
+        {x:role.x - layout.loopOffset,y:layout.hpaMidY},
+        {x:role.x,y:layout.hpaMidY}
+      ],
+      cls: "feedback"
+    });
+
+    node(hpa, "planner");
+    node(service, role.kind);
+    node(pool, role.kind);
+    text({
+      x: role.center, y: layout.decisionY,
+      lines: ["масштабирует"],
+      cls: "arrow-note"
+    });
+    text({
+      x: role.center, y: layout.lifecycleY,
+      lines: ["свой жизненный цикл"],
+      cls: "arrow-note"
+    });
+  });
+
+  text(DATA.footer);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

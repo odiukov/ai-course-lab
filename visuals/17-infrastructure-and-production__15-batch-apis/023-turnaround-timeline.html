@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Гарантия и распределение времени готовности</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page-bg: #f6f8fb;
+      --canvas-bg: #ffffff;
+      --text: #172033;
+      --muted: #526071;
+      --axis: #667085;
+      --grid: #d6dce5;
+      --curve: #2563eb;
+      --curve-fill: #2563eb24;
+      --typical-fill: #60a5fa30;
+      --typical-edge: #3b82f6;
+      --median: #0f766e;
+      --p99: #7c3aed;
+      --sla: #c2413b;
+      --sla-fill: #16a34a20;
+      --sla-text: #166534;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-bg: #111827;
+        --canvas-bg: #172033;
+        --text: #f3f6fb;
+        --muted: #bac4d2;
+        --axis: #a7b1c2;
+        --grid: #465166;
+        --curve: #73a7ff;
+        --curve-fill: #73a7ff2b;
+        --typical-fill: #60a5fa38;
+        --typical-edge: #8ab8ff;
+        --median: #5eead4;
+        --p99: #c4a7ff;
+        --sla: #ff8b82;
+        --sla-fill: #4ade8030;
+        --sla-text: #9af0b1;
+      }
+    }
+
+    html {
+      background: var(--page-bg);
+    }
+
+    body {
+      margin: unset;
+      background: var(--page-bg);
+      color: var(--text);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    main {
+      background: var(--canvas-bg);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 18px 24px 8px;
+      color: var(--text);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--canvas-bg);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      shape-rendering: geometricPrecision;
+    }
+
+    .axis,
+    .tick,
+    .curve,
+    .marker,
+    .legend-line,
+    .typical-edge {
+      vector-effect: non-scaling-stroke;
+      fill: none;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2px;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1px;
+    }
+
+    .guide {
+      vector-effect: non-scaling-stroke;
+      stroke: var(--grid);
+      stroke-width: 1px;
+      fill: none;
+    }
+
+    .curve-area {
+      fill: var(--curve-fill);
+    }
+
+    .curve {
+      stroke: var(--curve);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .typical-band {
+      fill: var(--typical-fill);
+    }
+
+    .typical-edge {
+      stroke: var(--typical-edge);
+      stroke-width: 2px;
+    }
+
+    .median-marker {
+      stroke: var(--median);
+      stroke-width: 2px;
+    }
+
+    .p99-marker {
+      stroke: var(--p99);
+      stroke-width: 3px;
+    }
+
+    .sla-marker {
+      stroke: var(--sla);
+      stroke-width: 4px;
+    }
+
+    .sla-band {
+      fill: var(--sla-fill);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 16px;
+    }
+
+    .small {
+      font-size: 14px;
+    }
+
+    .tiny {
+      font-size: 13px;
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .typical-text {
+      fill: var(--typical-edge);
+      font-weight: bold;
+    }
+
+    .median-text {
+      fill: var(--median);
+      font-weight: bold;
+    }
+
+    .p99-text {
+      fill: var(--p99);
+      font-weight: bold;
+    }
+
+    .sla-text {
+      fill: var(--sla);
+      font-weight: bold;
+    }
+
+    .contract-text {
+      fill: var(--sla-text);
+      font-weight: bold;
+    }
+
+    .fallback {
+      margin: unset;
+      padding: 24px;
+      color: var(--text);
+      background: var(--canvas-bg);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Готовность batch-заданий: наблюдение и обещание</h1>
+    <svg
+      id="diagram"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <desc id="diagram-description">
+        Временная шкала от нуля до двадцати четырёх часов:
+        типичный диапазон от двух до шести часов, половина заданий готова
+        к четырём часам, P99 приходится на двадцать часов, а граница SLA —
+        на двадцать четыре часа.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    "use strict";
+
+    /*
+      Все точки описаны в координатах одной смысловой плоскости.
+      Экранные координаты получают только sx и sy.
+    */
+    const DATA = Object.freeze({
+      canvas: { width: 960, height: 420 },
+
+      axis: {
+        start: 0,
+        end: 24,
+        y: 0,
+        tickTop: 0.18,
+        tickBottom: -0.18
+      },
+
+      ticks: [
+        { x: 0, text: "0" },
+        { x: 2, text: "2" },
+        { x: 4, text: "4" },
+        { x: 6, text: "6" },
+        { x: 20, text: "20" },
+        { x: 24, text: "24 ч" }
+      ],
+
+      distribution: [
+        { x: 0, y: 0 },
+        { x: 2, y: 4 },
+        { x: 4, y: 6 },
+        { x: 6, y: 4 },
+        { x: 20, y: 0 }
+      ],
+
+      typical: {
+        left: 2,
+        right: 6,
+        bottom: 0,
+        top: 6.45
+      },
+
+      markers: [
+        {
+          x: 4,
+          from: 0,
+          to: 6.45,
+          className: "marker median-marker"
+        },
+        {
+          x: 20,
+          from: 0,
+          to: 6.8,
+          className: "marker p99-marker"
+        },
+        {
+          x: 24,
+          from: -3.1,
+          to: 8.15,
+          className: "marker sla-marker"
+        }
+      ],
+
+      contract: {
+        left: 0,
+        right: 24,
+        top: -2.25,
+        bottom: -3.05
+      },
+
+      guideLines: [
+        { x1: 6, y1: 4, x2: 20, y2: 4 }
+      ],
+
+      labels: [
+        {
+          x: 0,
+          y: 7.35,
+          dx: 0,
+          dy: 0,
+          anchor: "start",
+          text: "Больше завершений",
+          className: "small muted"
+        },
+        {
+          x: 4,
+          y: 7.55,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "Типичный диапазон: 2–6 часов",
+          className: "typical-text"
+        },
+        {
+          x: 7,
+          y: 3.15,
+          dx: 10,
+          dy: 0,
+          anchor: "start",
+          text: "затем готовность редеет",
+          className: "small muted"
+        },
+        {
+          x: 20,
+          y: 6.9,
+          dx: -12,
+          dy: 0,
+          anchor: "end",
+          text: "P99: 20 часов",
+          className: "p99-text"
+        },
+        {
+          x: 20,
+          y: 6.2,
+          dx: -12,
+          dy: 0,
+          anchor: "end",
+          text: "99% заданий готовы",
+          className: "small p99-text"
+        },
+        {
+          x: 24,
+          y: 8.05,
+          dx: -12,
+          dy: 0,
+          anchor: "end",
+          text: "SLA: 24 часа",
+          className: "sla-text"
+        },
+        {
+          x: 24,
+          y: 7.35,
+          dx: -12,
+          dy: 0,
+          anchor: "end",
+          text: "обещанный край",
+          className: "small sla-text"
+        },
+        {
+          x: 4,
+          y: -1.55,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "Половина готова к 4 часам",
+          className: "small median-text"
+        },
+        {
+          x: 12,
+          y: -1.35,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "Время с запуска batch-задания",
+          className: "small muted"
+        },
+        {
+          x: 12,
+          y: -2.65,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "До 24 часов — ожидание в рамках SLA",
+          className: "small contract-text"
+        }
+      ],
+
+      legends: [
+        {
+          x1: 0.35,
+          x2: 1.35,
+          textX: 1.7,
+          y: -3.65,
+          dx: 8,
+          dy: 0,
+          text: "P99 — статистика поведения",
+          lineClass: "legend-line p99-marker",
+          textClass: "tiny p99-text"
+        },
+        {
+          x1: 12.15,
+          x2: 13.15,
+          textX: 13.5,
+          y: -3.65,
+          dx: 8,
+          dy: 0,
+          text: "SLA 24 часа — обещанный край",
+          lineClass: "legend-line sla-marker",
+          textClass: "tiny sla-text"
+        }
+      ]
+    });
+
+    const origin = Object.freeze({ x: 96, y: 286 });
+    const scale = Object.freeze({ x: 32, y: 30 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      svg.setAttribute(
+        "viewBox",
+        `0 0 ${DATA.canvas.width} ${DATA.canvas.height}`
+      );
+      svg.setAttribute("width", DATA.canvas.width);
+      svg.setAttribute("height", DATA.canvas.height);
+
+      const make = (name, attributes = {}) => {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        return element;
+      };
+
+      const add = (parent, child) => {
+        parent.appendChild(child);
+        return child;
+      };
+
+      const line = (pointA, pointB, className) => make("line", {
+        x1: sx(pointA.x),
+        y1: sy(pointA.y),
+        x2: sx(pointB.x),
+        y2: sy(pointB.y),
+        class: className
+      });
+
+      const box = (left, top, right, bottom, className) => make("rect", {
+        x: sx(left),
+        y: sy(top),
+        width: sx(right) - sx(left),
+        height: sy(bottom) - sy(top),
+        class: className
+      });
+
+      const label = specification => {
+        const text = make("text", {
+          x: sx(specification.x),
+          y: sy(specification.y),
+          dx: specification.dx,
+          dy: specification.dy,
+          "text-anchor": specification.anchor,
+          "dominant-baseline": "middle",
+          class: specification.className
+        });
+        text.textContent = specification.text;
+        return text;
+      };
+
+      const layers = {
+        background: add(svg, make("g", { "aria-hidden": "true" })),
+        guides: add(svg, make("g", { "aria-hidden": "true" })),
+        distribution: add(svg, make("g", { "aria-hidden": "true" })),
+        markers: add(svg, make("g", { "aria-hidden": "true" })),
+        axes: add(svg, make("g", { "aria-hidden": "true" })),
+        labels: add(svg, make("g")),
+        legends: add(svg, make("g"))
+      };
+
+      add(
+        layers.background,
+        box(
+          DATA.typical.left,
+          DATA.typical.top,
+          DATA.typical.right,
+          DATA.typical.bottom,
+          "typical-band"
+        )
+      );
+
+      add(
+        layers.background,
+        box(
+          DATA.contract.left,
+          DATA.contract.top,
+          DATA.contract.right,
+          DATA.contract.bottom,
+          "sla-band"
+        )
+      );
+
+      for (const guide of DATA.guideLines) {
+        add(
+          layers.guides,
+          line(
+            { x: guide.x1, y: guide.y1 },
+            { x: guide.x2, y: guide.y2 },
+            "guide"
+          )
+        );
+      }
+
+      const [firstPoint, ...remainingPoints] = DATA.distribution;
+      const finalPoint = DATA.distribution.reduce(
+        (previousPoint, currentPoint) => currentPoint
+      );
+
+      const curveCommands = [
+        `M ${sx(firstPoint.x)} ${sy(firstPoint.y)}`,
+        ...remainingPoints.map(
+          point => `L ${sx(point.x)} ${sy(point.y)}`
+        )
+      ];
+
+      const areaCommands = [
+        ...curveCommands,
+        `L ${sx(finalPoint.x)} ${sy(DATA.axis.y)}`,
+        `L ${sx(firstPoint.x)} ${sy(DATA.axis.y)}`,
+        "Z"
+      ];
+
+      add(
+        layers.distribution,
+        make("path", {
+          d: areaCommands.join(" "),
+          class: "curve-area"
+        })
+      );
+
+      add(
+        layers.distribution,
+        make("path", {
+          d: curveCommands.join(" "),
+          class: "curve"
+        })
+      );
+
+      add(
+        layers.distribution,
+        line(
+          { x: DATA.typical.left, y: DATA.typical.top },
+          { x: DATA.typical.right, y: DATA.typical.top },
+          "typical-edge"
+        )
+      );
+
+      for (const marker of DATA.markers) {
+        add(
+          layers.markers,
+          line(
+            { x: marker.x, y: marker.from },
+            { x: marker.x, y: marker.to },
+            marker.className
+          )
+        );
+      }
+
+      add(
+        layers.axes,
+        line(
+          { x: DATA.axis.start, y: DATA.axis.y },
+          { x: DATA.axis.end, y: DATA.axis.y },
+          "axis"
+        )
+      );
+
+      for (const tick of DATA.ticks) {
+        add(
+          layers.axes,
+          line(
+            { x: tick.x, y: DATA.axis.tickTop },
+            { x: tick.x, y: DATA.axis.tickBottom },
+            "tick"
+          )
+        );
+
+        add(
+          layers.labels,
+          label({
+            x: tick.x,
+            y: DATA.axis.y,
+            dx: 0,
+            dy: 22,
+            anchor: tick.x === DATA.axis.start ? "start"
+              : tick.x === DATA.axis.end ? "end"
+              : "middle",
+            text: tick.text,
+            className: "small muted"
+          })
+        );
+      }
+
+      for (const specification of DATA.labels) {
+        add(layers.labels, label(specification));
+      }
+
+      for (const legend of DATA.legends) {
+        add(
+          layers.legends,
+          line(
+            { x: legend.x1, y: legend.y },
+            { x: legend.x2, y: legend.y },
+            legend.lineClass
+          )
+        );
+
+        add(
+          layers.legends,
+          label({
+            x: legend.textX,
+            y: legend.y,
+            dx: legend.dx,
+            dy: legend.dy,
+            anchor: "start",
+            text: legend.text,
+            className: legend.textClass
+          })
+        );
+      }
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.createElement("p");
+      fallback.className = "fallback";
+      fallback.textContent =
+        "Схема должна была показать шкалу от 0 до 24 часов: " +
+        "типичный диапазон 2–6 часов, половину готовых заданий к 4 часам, " +
+        "P99 на 20 часах и обещанную границу SLA на 24 часах.";
+      svg.replaceWith(fallback);
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

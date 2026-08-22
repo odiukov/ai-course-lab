@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Одна последовательность в разрозненных физических KV-блоках</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: snow;
+    --ink: midnightblue;
+    --muted: slategray;
+    --panel: white;
+    --line: lightslategray;
+    --logical: royalblue;
+    --logical-soft: aliceblue;
+    --physical: seagreen;
+    --physical-soft: honeydew;
+    --empty: gainsboro;
+    --other: lavender;
+    --arrow: darkorange;
+  }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+    font-family: system-ui, sans-serif;
+    color: var(--ink);
+    shape-rendering: geometricPrecision;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  .subtitle {
+    fill: var(--muted);
+    font-size: 15px;
+  }
+
+  .section-label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .card {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .logical-card {
+    fill: var(--logical-soft);
+    stroke: var(--logical);
+    stroke-width: 2px;
+  }
+
+  .physical-card {
+    fill: var(--physical-soft);
+    stroke: var(--physical);
+    stroke-width: 2px;
+  }
+
+  .other-card {
+    fill: var(--other);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .mapping-card {
+    fill: var(--panel);
+    stroke: var(--arrow);
+    stroke-width: 2px;
+  }
+
+  .card-title {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .card-note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .mapping-text {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .slot-used-logical {
+    fill: var(--logical);
+    stroke: var(--logical);
+    stroke-width: 1px;
+  }
+
+  .slot-used-physical {
+    fill: var(--physical);
+    stroke: var(--physical);
+    stroke-width: 1px;
+  }
+
+  .slot-empty {
+    fill: var(--empty);
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .route {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    fill: var(--arrow);
+  }
+
+  .footer {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .fallback {
+    display: none;
+    fill: var(--ink);
+    font-size: 18px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: midnightblue;
+      --ink: white;
+      --muted: lightsteelblue;
+      --panel: darkslategray;
+      --line: slategray;
+      --logical: deepskyblue;
+      --logical-soft: darkslateblue;
+      --physical: mediumaquamarine;
+      --physical-soft: darkgreen;
+      --empty: dimgray;
+      --other: rebeccapurple;
+      --arrow: gold;
+    }
+  }
+</style>
+</head>
+<body>
+<svg id="diagram" viewBox="0 0 1040 510" width="1040" height="510"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Одна последовательность в разрозненных физических KV-блоках</title>
+  <desc id="diagram-desc">Токены от 0 до 39 образуют три логических блока по 16 слотов. Таблица блоков отображает их в физические блоки 7, 2 и 11. В последнем блоке заняты 8 из 16 слотов.</desc>
+  <text id="static-heading" class="title">Одна последовательность — разные места в памяти</text>
+  <g id="plot"></g>
+  <text id="fallback" class="fallback">Схема должна показать: логические токены 0–39 отображаются таблицей в физические блоки 7, 2 и 11; в последнем заняты 8 из 16 слотов.</text>
+</svg>
+
+<script>
+const data = [
+  {
+    origin: [0, 0],
+    scale: [1, 1],
+    unit: 1,
+    title: [32, 35],
+    subtitle: [32, 60],
+    logicalHeading: [32, 88],
+    logicalY: 102,
+    logicalH: 108,
+    logicalTextY: 123,
+    logicalNoteY: 145,
+    logicalSlotY: 164,
+    logicalSlotH: 23,
+    logicalInset: 15,
+    logicalGap: 3,
+    logicalCountY: 199,
+    radius: 9,
+    tableHeading: [32, 239],
+    tableY: 252,
+    tableH: 53,
+    tableTextY: 279,
+    firstConnectorY: 210,
+    firstArrowTipY: 249,
+    physicalHeading: [32, 349],
+    physicalY: 383,
+    physicalH: 91,
+    physicalTextY: 402,
+    physicalNoteY: 421,
+    physicalSlotY: 438,
+    physicalSlotH: 20,
+    physicalInset: 10,
+    physicalGap: 2,
+    routeStartY: 305,
+    routeControlY: 344,
+    routeEndY: 380,
+    headHalfW: 6,
+    headH: 9,
+    footer: [520, 495],
+    zero: 0
+  },
+  [
+    {
+      logical: 0,
+      range: "0–15",
+      used: 16,
+      total: 16,
+      physical: 7,
+      x: 40,
+      width: 290,
+      tableX: 76,
+      tableWidth: 218,
+      title: "Логический блок 0",
+      note: "токены 0–15",
+      count: "16 из 16 слотов заняты"
+    },
+    {
+      logical: 1,
+      range: "16–31",
+      used: 16,
+      total: 16,
+      physical: 2,
+      x: 375,
+      width: 290,
+      tableX: 411,
+      tableWidth: 218,
+      title: "Логический блок 1",
+      note: "токены 16–31",
+      count: "16 из 16 слотов заняты"
+    },
+    {
+      logical: 2,
+      range: "32–39",
+      used: 8,
+      total: 16,
+      physical: 11,
+      x: 710,
+      width: 290,
+      tableX: 746,
+      tableWidth: 218,
+      title: "Логический блок 2",
+      note: "токены 32–39",
+      count: "занято 8 из 16 слотов"
+    }
+  ],
+  [
+    {
+      kind: "physical",
+      id: 2,
+      x: 34,
+      width: 182,
+      used: 16,
+      total: 16,
+      title: "Физический блок 2",
+      note: "логический блок 1"
+    },
+    {
+      kind: "other",
+      x: 232,
+      width: 126,
+      title: "занято",
+      note: "другим запросом"
+    },
+    {
+      kind: "physical",
+      id: 7,
+      x: 374,
+      width: 182,
+      used: 16,
+      total: 16,
+      title: "Физический блок 7",
+      note: "логический блок 0"
+    },
+    {
+      kind: "other",
+      x: 572,
+      width: 126,
+      title: "занято",
+      note: "другим запросом"
+    },
+    {
+      kind: "physical",
+      id: 11,
+      x: 714,
+      width: 292,
+      used: 8,
+      total: 16,
+      title: "Физический блок 11",
+      note: "логический блок 2 · занято 8 из 16"
+    }
+  ],
+  [
+    "40 токенов идут логически подряд: 0–15, затем 16–31, затем 32–39",
+    "Логический порядок токенов",
+    "Таблица блоков: порядок записей важнее физических адресов",
+    "Физический пул KV-блоков",
+    "Последовательность читается по таблице: 7 → 2 → 11"
+  ]
+];
+
+const [layout, logicalBlocks, physicalCells, labels] = data;
+const origin = Object.freeze({x: layout.origin.at(layout.zero), y: layout.origin.at(layout.unit)});
+const scale = Object.freeze({x: layout.scale.at(layout.zero), y: layout.scale.at(layout.unit)});
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const host = document.getElementById("plot");
+  const heading = document.getElementById("static-heading");
+  const fallback = document.getElementById("fallback");
+
+  const make = (name, attributes, text) => {
+    const node = document.createElementNS(svgNamespace, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const addText = (parent, x, y, value, className, anchor) => {
+    parent.appendChild(make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, value));
+  };
+
+  const addRect = (parent, x, y, width, height, className) => {
+    parent.appendChild(make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(layout.radius) - sx(layout.zero),
+      ry: sy(layout.radius) - sy(layout.zero),
+      class: className
+    }));
+  };
+
+  const addArrowHead = (parent, x, y) => {
+    const points = [
+      `${sx(x)},${sy(y)}`,
+      `${sx(x - layout.headHalfW)},${sy(y - layout.headH)}`,
+      `${sx(x + layout.headHalfW)},${sy(y - layout.headH)}`
+    ].join(" ");
+    parent.appendChild(make("polygon", {points, class: "arrow-head"}));
+  };
+
+  const addSlots = (parent, item, y, height, inset, gap, className) => {
+    const available = item.width - inset - inset;
+    const slotWidth = (available - gap * (item.total - layout.unit)) / item.total;
+
+    Array.from({length: item.total}).forEach((unused, index) => {
+      const x = item.x + inset + index * (slotWidth + gap);
+      const slotClass = index < item.used ? className : "slot-empty";
+      parent.appendChild(make("rect", {
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + slotWidth) - sx(x),
+        height: sy(y + height) - sy(y),
+        rx: sx(layout.unit) - sx(layout.zero),
+        ry: sy(layout.unit) - sy(layout.zero),
+        class: slotClass
+      }));
+    });
+  };
+
+  heading.setAttribute("x", sx(layout.title.at(layout.zero)));
+  heading.setAttribute("y", sy(layout.title.at(layout.unit)));
+  fallback.setAttribute("x", sx(layout.title.at(layout.zero)));
+  fallback.setAttribute("y", sy(layout.logicalY));
+
+  addText(host, layout.subtitle.at(layout.zero), layout.subtitle.at(layout.unit),
+    labels.at(layout.zero), "subtitle", "start");
+  addText(host, layout.logicalHeading.at(layout.zero), layout.logicalHeading.at(layout.unit),
+    labels.at(layout.unit), "section-label", "start");
+
+  logicalBlocks.forEach(block => {
+    addRect(host, block.x, layout.logicalY, block.width, layout.logicalH, "logical-card");
+    addText(host, block.x + block.width / block.total, layout.logicalTextY,
+      block.title, "card-title", "start");
+    addText(host, block.x + block.width / block.total, layout.logicalNoteY,
+      block.note, "card-note", "start");
+    addSlots(host, block, layout.logicalSlotY, layout.logicalSlotH,
+      layout.logicalInset, layout.logicalGap, "slot-used-logical");
+    addText(host, block.x + block.width / (layout.unit + layout.unit),
+      layout.logicalCountY, block.count, "card-note", "middle");
+
+    const logicalCenter = block.x + block.width / (layout.unit + layout.unit);
+    const tableCenter = block.tableX + block.tableWidth / (layout.unit + layout.unit);
+
+    host.appendChild(make("path", {
+      d: `M ${sx(logicalCenter)} ${sy(layout.firstConnectorY)}
+          L ${sx(tableCenter)} ${sy(layout.firstArrowTipY)}`,
+      class: "connector"
+    }));
+    addArrowHead(host, tableCenter, layout.firstArrowTipY);
+  });
+
+  addText(host, layout.tableHeading.at(layout.zero), layout.tableHeading.at(layout.unit),
+    labels.at(layout.unit + layout.unit), "section-label", "start");
+
+  logicalBlocks.forEach(block => {
+    addRect(host, block.tableX, layout.tableY, block.tableWidth, layout.tableH, "mapping-card");
+    const center = block.tableX + block.tableWidth / (layout.unit + layout.unit);
+    addText(host, center, layout.tableTextY,
+      `${block.logical} → физический ${block.physical}`, "mapping-text", "middle");
+  });
+
+  const physicalById = new Map();
+  physicalCells.forEach(cell => {
+    if (cell.kind === "physical") physicalById.set(cell.id, cell);
+  });
+
+  logicalBlocks.forEach(block => {
+    const target = physicalById.get(block.physical);
+    const startX = block.tableX + block.tableWidth / (layout.unit + layout.unit);
+    const endX = target.x + target.width / (layout.unit + layout.unit);
+
+    host.appendChild(make("path", {
+      d: `M ${sx(startX)} ${sy(layout.routeStartY)}
+          C ${sx(startX)} ${sy(layout.routeControlY)},
+            ${sx(endX)} ${sy(layout.routeControlY)},
+            ${sx(endX)} ${sy(layout.routeEndY)}`,
+      class: "route"
+    }));
+    addArrowHead(host, endX, layout.routeEndY);
+  });
+
+  addText(host, layout.physicalHeading.at(layout.zero), layout.physicalHeading.at(layout.unit),
+    labels.at(layout.unit + layout.unit + layout.unit), "section-label", "start");
+
+  physicalCells.forEach(cell => {
+    if (cell.kind === "physical") {
+      addRect(host, cell.x, layout.physicalY, cell.width, layout.physicalH, "physical-card");
+      addText(host, cell.x + cell.width / (layout.unit + layout.unit),
+        layout.physicalTextY, cell.title, "card-title", "middle");
+      addText(host, cell.x + cell.width / (layout.unit + layout.unit),
+        layout.physicalNoteY, cell.note, "card-note", "middle");
+      addSlots(host, cell, layout.physicalSlotY, layout.physicalSlotH,
+        layout.physicalInset, layout.physicalGap, "slot-used-physical");
+    } else {
+      addRect(host, cell.x, layout.physicalY, cell.width, layout.physicalH, "other-card");
+      addText(host, cell.x + cell.width / (layout.unit + layout.unit),
+        layout.physicalTextY, cell.title, "card-title", "middle");
+      addText(host, cell.x + cell.width / (layout.unit + layout.unit),
+        layout.physicalNoteY, cell.note, "card-note", "middle");
+    }
+  });
+
+  addText(host, layout.footer.at(layout.zero), layout.footer.at(layout.unit),
+    labels.at(layout.unit + layout.unit + layout.unit + layout.unit), "footer", "middle");
+} catch (error) {
+  const host = document.getElementById("plot");
+  const fallback = document.getElementById("fallback");
+  if (host) host.replaceChildren();
+  if (fallback) fallback.style.display = "block";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

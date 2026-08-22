@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Один локальный кэш и общий кэш нескольких движков</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-alt: #f1f4f9;
+    --ink: #172033;
+    --muted: #5d687c;
+    --line: #8792a6;
+    --divider: #c7ceda;
+    --local: #3267d6;
+    --local-soft: #e4edff;
+    --shared: #168467;
+    --shared-soft: #dcf5ec;
+    --storage: #7557c7;
+    --storage-soft: #eee9ff;
+    --note: #fff4d8;
+    --note-line: #b67b12;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111622;
+      --panel: #192131;
+      --panel-alt: #202a3c;
+      --ink: #edf2ff;
+      --muted: #aeb9ce;
+      --line: #8491aa;
+      --divider: #3b475d;
+      --local: #78a5ff;
+      --local-soft: #21375f;
+      --shared: #5bd3ae;
+      --shared-soft: #173f37;
+      --storage: #b49aff;
+      --storage-soft: #342b57;
+      --note: #3d321b;
+      --note-line: #e1ad47;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 22px;
+    line-height: normal;
+  }
+
+  #fallback {
+    margin: unset;
+    font-size: 16px;
+    color: var(--muted);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 470px;
+    background: var(--bg);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--divider);
+    stroke-width: 2px;
+  }
+
+  .divider {
+    stroke: var(--divider);
+    stroke-width: 2px;
+  }
+
+  .local-box {
+    fill: var(--local-soft);
+    stroke: var(--local);
+    stroke-width: 2px;
+  }
+
+  .shared-box {
+    fill: var(--shared-soft);
+    stroke: var(--shared);
+    stroke-width: 2px;
+  }
+
+  .storage-box {
+    fill: var(--storage-soft);
+    stroke: var(--storage);
+    stroke-width: 2px;
+  }
+
+  .engine {
+    fill: var(--panel-alt);
+    stroke: var(--shared);
+    stroke-width: 2px;
+  }
+
+  .local-line {
+    fill: none;
+    stroke: var(--local);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .shared-line {
+    fill: none;
+    stroke: var(--shared);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bus {
+    fill: none;
+    stroke: var(--shared);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .local-head {
+    fill: var(--local);
+  }
+
+  .shared-head {
+    fill: var(--shared);
+  }
+
+  .chip-line {
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .kv {
+    fill: var(--local);
+  }
+
+  .kv-shared {
+    fill: var(--shared);
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .strong-local {
+    fill: var(--local);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .strong-shared {
+    fill: var(--shared);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .takeaway {
+    fill: var(--note);
+    stroke: var(--note-line);
+    stroke-width: 2px;
+  }
+
+  .takeaway-text {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Один локальный кэш и общий кэш нескольких движков</h1>
+  <p id="fallback">Схема должна показать один vLLM engine с локальной CPU DRAM без сетевого перехода и 16 engines, использующих общий LMCache с DRAM и Ceph.</p>
+  <svg id="diagram" hidden viewBox="0 0 1200 430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Локальный кэш одного движка и общий LMCache</title>
+    <desc id="svg-desc">Слева один vLLM engine обращается только к собственной CPU DRAM без сети. Справа 16 движков подключены через Connector API к общему LMCache, содержащему DRAM и Ceph.</desc>
+  </svg>
+</main>
+
+<script>
+const diagram = {
+  panel: {
+    left:  { x: 24,  y: 18, w: 446, h: 362, r: 16 },
+    right: { x: 500, y: 18, w: 676, h: 362, r: 16 }
+  },
+  divider: { x: 485, top: 28, bottom: 370, dash: 8, gap: 8 },
+  left: {
+    heading: { x: 247, y: 47 },
+    count: { x: 247, y: 77 },
+    engine: { x: 132, y: 102, w: 230, h: 82, r: 12 },
+    engineLabel: { x: 247, y: 130 },
+    engineDetail: { x: 247, y: 158 },
+    cache: { x: 132, y: 240, w: 230, h: 88, r: 12 },
+    cacheLabel: { x: 247, y: 265 },
+    cacheDetail: { x: 247, y: 309 },
+    link: { a: { x: 247, y: 184 }, b: { x: 247, y: 240 } },
+    linkLabel: { x: 268, y: 215 },
+    blocks: [
+      { x: 166, y: 279, w: 32, h: 14, r: 4 },
+      { x: 208, y: 279, w: 32, h: 14, r: 4 },
+      { x: 250, y: 279, w: 32, h: 14, r: 4 },
+      { x: 292, y: 279, w: 32, h: 14, r: 4 }
+    ],
+    caption: { x: 247, y: 354 },
+    subcaption: { x: 247, y: 371 }
+  },
+  right: {
+    heading: { x: 838, y: 47 },
+    count: { x: 650, y: 77 },
+    prefix: { x: 650, y: 92 },
+    engines: [
+      { x: 530, y: 104, w: 42, h: 24, r: 5 },
+      { x: 590, y: 104, w: 42, h: 24, r: 5 },
+      { x: 650, y: 104, w: 42, h: 24, r: 5 },
+      { x: 710, y: 104, w: 42, h: 24, r: 5 },
+      { x: 530, y: 149, w: 42, h: 24, r: 5 },
+      { x: 590, y: 149, w: 42, h: 24, r: 5 },
+      { x: 650, y: 149, w: 42, h: 24, r: 5 },
+      { x: 710, y: 149, w: 42, h: 24, r: 5 },
+      { x: 530, y: 194, w: 42, h: 24, r: 5 },
+      { x: 590, y: 194, w: 42, h: 24, r: 5 },
+      { x: 650, y: 194, w: 42, h: 24, r: 5 },
+      { x: 710, y: 194, w: 42, h: 24, r: 5 },
+      { x: 530, y: 239, w: 42, h: 24, r: 5 },
+      { x: 590, y: 239, w: 42, h: 24, r: 5 },
+      { x: 650, y: 239, w: 42, h: 24, r: 5 },
+      { x: 710, y: 239, w: 42, h: 24, r: 5 }
+    ],
+    rows: [
+      { y: 136, top: 128 },
+      { y: 181, top: 173 },
+      { y: 226, top: 218 },
+      { y: 271, top: 263 }
+    ],
+    columns: [
+      { x: 551 }, { x: 611 }, { x: 671 }, { x: 731 }
+    ],
+    rowStart: 551,
+    trunk: { x: 800, top: 136, bottom: 271 },
+    connector: { a: { x: 800, y: 204 }, b: { x: 885, y: 204 } },
+    connectorLabel: { x: 842, y: 190 },
+    networkLabel: { x: 842, y: 222 },
+    cache: { x: 885, y: 91, w: 265, h: 226, r: 14 },
+    cacheLabel: { x: 1018, y: 118 },
+    dram: { x: 910, y: 137, w: 215, h: 65, r: 9 },
+    dramLabel: { x: 1018, y: 162 },
+    dramDetail: { x: 1018, y: 184 },
+    ceph: { x: 910, y: 230, w: 215, h: 65, r: 9 },
+    cephLabel: { x: 1018, y: 256 },
+    cephDetail: { x: 1018, y: 278 },
+    dramBlocks: [
+      { x: 932, y: 172, w: 25, h: 11, r: 3 },
+      { x: 965, y: 172, w: 25, h: 11, r: 3 },
+      { x: 998, y: 172, w: 25, h: 11, r: 3 },
+      { x: 1031, y: 172, w: 25, h: 11, r: 3 },
+      { x: 1064, y: 172, w: 25, h: 11, r: 3 }
+    ],
+    caption: { x: 838, y: 344 },
+    subcaption: { x: 838, y: 367 }
+  },
+  takeaway: {
+    box: { x: 150, y: 392, w: 900, h: 30, r: 10 },
+    label: { x: 600, y: 407 }
+  },
+  arrow: { length: 13, half: 7 },
+  chip: { inset: 10, yOffset: 12 },
+  zero: 0
+};
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+  const fragment = document.createDocumentFragment();
+
+  const node = (name, attributes, value) => {
+    const element = document.createElementNS(ns, name);
+    Object.entries(attributes).forEach(([key, item]) => element.setAttribute(key, item));
+    if (value !== undefined) element.textContent = value;
+    return element;
+  };
+
+  const rect = (box, className) => node("rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: sx(box.w) - sx(origin.x),
+    height: sy(box.h) - sy(origin.y),
+    rx: sx(box.r) - sx(origin.x),
+    ry: sy(box.r) - sy(origin.y),
+    class: className
+  });
+
+  const line = (a, b, className) => node("line", {
+    x1: sx(a.x),
+    y1: sy(a.y),
+    x2: sx(b.x),
+    y2: sy(b.y),
+    class: className
+  });
+
+  const label = (point, value, className, anchor = "middle") => node("text", {
+    x: sx(point.x),
+    y: sy(point.y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, value);
+
+  const arrowHead = (from, tip, className) => {
+    const dx = tip.x - from.x;
+    const dy = tip.y - from.y;
+    const length = Math.hypot(dx, dy);
+    if (!length) return node("g", {});
+    const ux = dx / length;
+    const uy = dy / length;
+    const base = {
+      x: tip.x - ux * diagram.arrow.length,
+      y: tip.y - uy * diagram.arrow.length
+    };
+    const left = {
+      x: base.x - uy * diagram.arrow.half,
+      y: base.y + ux * diagram.arrow.half
+    };
+    const right = {
+      x: base.x + uy * diagram.arrow.half,
+      y: base.y - ux * diagram.arrow.half
+    };
+    return node("polygon", {
+      points: `${sx(tip.x)},${sy(tip.y)} ${sx(left.x)},${sy(left.y)} ${sx(right.x)},${sy(right.y)}`,
+      class: className
+    });
+  };
+
+  const arrow = (a, b, lineClass, headClass, both) => {
+    const group = node("g", {});
+    group.append(line(a, b, lineClass), arrowHead(a, b, headClass));
+    if (both) group.append(arrowHead(b, a, headClass));
+    return group;
+  };
+
+  fragment.append(
+    rect(diagram.panel.left, "panel"),
+    rect(diagram.panel.right, "panel")
+  );
+
+  const divider = line(
+    { x: diagram.divider.x, y: diagram.divider.top },
+    { x: diagram.divider.x, y: diagram.divider.bottom },
+    "divider"
+  );
+  divider.setAttribute(
+    "stroke-dasharray",
+    `${sx(diagram.divider.dash) - sx(origin.x)} ${sx(diagram.divider.gap) - sx(origin.x)}`
+  );
+  fragment.append(divider);
+
+  fragment.append(
+    label(diagram.left.heading, "ЛОКАЛЬНЫЙ КЭШ", "title"),
+    label(diagram.left.count, "1 vLLM engine", "strong-local"),
+    rect(diagram.left.engine, "local-box"),
+    label(diagram.left.engineLabel, "vLLM engine", "label"),
+    label(diagram.left.engineDetail, "GPU: активные KV-блоки", "small"),
+    rect(diagram.left.cache, "local-box"),
+    label(diagram.left.cacheLabel, "локальная CPU DRAM", "label"),
+    arrow(
+      diagram.left.link.a,
+      diagram.left.link.b,
+      "local-line",
+      "local-head",
+      true
+    ),
+    label(diagram.left.linkLabel, "без сетевого перехода", "small", "start")
+  );
+
+  diagram.left.blocks.forEach(block => fragment.append(rect(block, "kv")));
+  fragment.append(
+    label(diagram.left.cacheDetail, "KV этого engine", "small"),
+    label(diagram.left.caption, "Кэш принадлежит одному движку", "strong-local"),
+    label(diagram.left.subcaption, "другие engines его не видят", "small")
+  );
+
+  fragment.append(
+    label(diagram.right.heading, "ОБЩИЙ КЭШ", "title"),
+    label(diagram.right.count, "16 vLLM engines", "strong-shared"),
+    label(diagram.right.prefix, "одинаковый длинный префикс", "small")
+  );
+
+  diagram.right.rows.forEach(row => {
+    fragment.append(line(
+      { x: diagram.right.rowStart, y: row.y },
+      { x: diagram.right.trunk.x, y: row.y },
+      "shared-line"
+    ));
+  });
+
+  diagram.right.rows.forEach(row => {
+    diagram.right.columns.forEach(column => {
+      fragment.append(line(
+        { x: column.x, y: row.top },
+        { x: column.x, y: row.y },
+        "shared-line"
+      ));
+    });
+  });
+
+  fragment.append(line(
+    { x: diagram.right.trunk.x, y: diagram.right.trunk.top },
+    { x: diagram.right.trunk.x, y: diagram.right.trunk.bottom },
+    "bus"
+  ));
+
+  diagram.right.engines.forEach(engine => {
+    fragment.append(rect(engine, "engine"));
+    fragment.append(line(
+      {
+        x: engine.x + diagram.chip.inset,
+        y: engine.y + diagram.chip.yOffset
+      },
+      {
+        x: engine.x + engine.w - diagram.chip.inset,
+        y: engine.y + diagram.chip.yOffset
+      },
+      "chip-line"
+    ));
+  });
+
+  fragment.append(
+    arrow(
+      diagram.right.connector.a,
+      diagram.right.connector.b,
+      "bus",
+      "shared-head",
+      true
+    ),
+    label(diagram.right.connectorLabel, "Connector API", "small"),
+    label(diagram.right.networkLabel, "сетевой переход", "small"),
+    rect(diagram.right.cache, "shared-box"),
+    label(diagram.right.cacheLabel, "общий LMCache", "strong-shared"),
+    rect(diagram.right.dram, "shared-box"),
+    label(diagram.right.dramLabel, "CPU DRAM", "label"),
+    rect(diagram.right.ceph, "storage-box"),
+    label(diagram.right.cephLabel, "Ceph", "label")
+  );
+
+  diagram.right.dramBlocks.forEach(block => fragment.append(rect(block, "kv-shared")));
+  fragment.append(
+    label(diagram.right.dramDetail, "общие KV-блоки", "small"),
+    label(diagram.right.cephDetail, "общий уровень хранения", "small"),
+    label(diagram.right.caption, "Одна копия доступна всему пулу", "strong-shared"),
+    label(diagram.right.subcaption, "любой engine может сохранить или загрузить KV", "small"),
+    rect(diagram.takeaway.box, "takeaway"),
+    label(
+      diagram.takeaway.label,
+      "Граница доступности: 1 engine — локально · 16 engines — общий LMCache",
+      "takeaway-text"
+    )
+  );
+
+  svg.append(fragment);
+  fallback.hidden = true;
+  svg.hidden = false;
+  svg.setAttribute("aria-hidden", "false");
+} catch (error) {
+  const fallback = document.getElementById("fallback");
+  const svg = document.getElementById("diagram");
+  fallback.hidden = false;
+  fallback.textContent = "Схема: слева один vLLM engine использует собственную CPU DRAM без сети; справа 16 engines обращаются через Connector API к общему LMCache с DRAM и Ceph.";
+  svg.hidden = true;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

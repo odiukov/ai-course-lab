@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Почему alpha нужно измерять на собственном распределении трафика — Eagle3 Speculative Decoding</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/">← Eagle3 Speculative Decoding</a>
+<span class="counter" data-counter>13 / 40</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-prod-focus" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/001-prod-focus/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">От известной механики EAGLE-3 к решению о продакшен-выкате</span></a></li>
+<li><a class="toc-link" data-step="002-memory-bound" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/002-memory-bound/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Почему decode ограничен чтением весов из HBM</span></a></li>
+<li><a class="toc-link" data-step="003-one-vs-five" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/003-one-vs-five/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Одно чтение весов — несколько проверенных токенов</span></a></li>
+<li><a class="toc-link" data-step="004-bottleneck-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/004-bottleneck-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Почему скорость draft-модели сама по себе не доказывает ускорение?</span></a></li>
+<li><a class="toc-link" data-step="005-speedup-model" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/005-speedup-model/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Связываем alpha, длину черновика K и накладные расходы</span></a></li>
+<li><a class="toc-link" data-step="006-expected-speedup" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/006-expected-speedup/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Пишем expected_speedup</span></a></li>
+<li><a class="toc-link" data-step="007-speedup-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/007-speedup-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Проверяем расчёт для K=5, alpha=0.7 и overhead=0.1</span></a></li>
+<li><a class="toc-link" data-step="008-raw-breakeven" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/008-raw-breakeven/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Находим аналитическую точку безубыточности по alpha</span></a></li>
+<li><a class="toc-link" data-step="009-breakeven-alpha" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/009-breakeven-alpha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Пишем breakeven_alpha</span></a></li>
+<li><a class="toc-link" data-step="010-effective-threshold" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/010-effective-threshold/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Почему сырая граница 0.03 превращается в продакшен-порог 0.45–0.55</span></a></li>
+<li><a class="toc-link" data-step="011-concurrency-shift" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/011-concurrency-shift/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Как одновременность сдвигает границу окупаемости</span></a></li>
+<li><a class="toc-link" data-step="012-concurrency-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/012-concurrency-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Почему одна alpha=0.5 может помочь при батче 1 и навредить при батче 256?</span></a></li>
+<li><a class="toc-link is-current" data-step="013-traffic-alpha" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/013-traffic-alpha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">13</span><span class="toc-title">Почему alpha нужно измерять на собственном распределении трафика</span></a></li>
+<li><a class="toc-link" data-step="014-weighted-alpha" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/014-weighted-alpha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">14</span><span class="toc-title">Считаем смешанную alpha для нескольких сегментов запросов</span></a></li>
+<li><a class="toc-link" data-step="015-blended-alpha" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/015-blended-alpha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">15</span><span class="toc-title">Пишем blended_alpha</span></a></li>
+<li><a class="toc-link" data-step="016-segment-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/016-segment-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">16</span><span class="toc-title">Что скрывает общая alpha=0.61 при смеси 70% чата и 30% кода?</span></a></li>
+<li><a class="toc-link" data-step="017-eagle-generations" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/017-eagle-generations/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">17</span><span class="toc-title">Сопоставляем известные поколения EAGLE с alpha и сложностью сервинга</span></a></li>
+<li><a class="toc-link" data-step="018-generations-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/018-generations-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">18</span><span class="toc-title">Чем продакшен-компромиссы classic draft, EAGLE-2 и EAGLE-3 отличаются друг от друга?</span></a></li>
+<li><a class="toc-link" data-step="019-distribution-contract" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/019-distribution-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">19</span><span class="toc-title">Готовим корректные распределения target и draft для симулятора</span></a></li>
+<li><a class="toc-link" data-step="020-normalize" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/020-normalize/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">20</span><span class="toc-title">Пишем normalize</span></a></li>
+<li><a class="toc-link" data-step="021-categorical-sample" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/021-categorical-sample/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">21</span><span class="toc-title">Превращаем случайное число в индекс токена</span></a></li>
+<li><a class="toc-link" data-step="022-sample-index" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/022-sample-index/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">22</span><span class="toc-title">Пишем sample_index</span></a></li>
+<li><a class="toc-link" data-step="023-rejection-correction" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/023-rejection-correction/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">23</span><span class="toc-title">Почему после отказа нужен остаток target-распределения</span></a></li>
+<li><a class="toc-link" data-step="024-residual-distribution" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/024-residual-distribution/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">24</span><span class="toc-title">Пишем residual_distribution</span></a></li>
+<li><a class="toc-link" data-step="025-one-spec-round" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/025-one-spec-round/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">25</span><span class="toc-title">Разбираем один раунд: предложить, проверить, принять или перебросить</span></a></li>
+<li><a class="toc-link" data-step="026-speculative-step" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/026-speculative-step/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">26</span><span class="toc-title">Пишем speculative_step</span></a></li>
+<li><a class="toc-link" data-step="027-many-rounds" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/027-many-rounds/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">27</span><span class="toc-title">Повторяем раунды и собираем alpha, ускорение и хвост задержки</span></a></li>
+<li><a class="toc-link" data-step="028-run-speculative" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/028-run-speculative/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">28</span><span class="toc-title">Пишем run_speculative</span></a></li>
+<li><a class="toc-link" data-step="029-simulator-check" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/029-simulator-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">29</span><span class="toc-title">Какая alpha даёт ускорение 2x и 3x при K=5 и как ответ меняет overhead?</span></a></li>
+<li><a class="toc-link" data-step="030-baseline-benchmark" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/030-baseline-benchmark/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">30</span><span class="toc-title">Фиксируем baseline на целевой одновременности</span></a></li>
+<li><a class="toc-link" data-step="031-explicit-config" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/031-explicit-config/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">31</span><span class="toc-title">Почему speculative_config должен быть осознанным ручным переключателем</span></a></li>
+<li><a class="toc-link" data-step="032-vllm-modes" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/032-vllm-modes/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">32</span><span class="toc-title">Выбираем между draft-моделью, EAGLE и N-gram с учётом chunked prefill</span></a></li>
+<li><a class="toc-link" data-step="033-measure-alpha" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/033-measure-alpha/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">33</span><span class="toc-title">Получаем alpha из accepted_tokens_per_request и K</span></a></li>
+<li><a class="toc-link" data-step="034-release-gate" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/034-release-gate/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">34</span><span class="toc-title">Ставим воротца alpha не ниже 0.55 на продакшен-нагрузке</span></a></li>
+<li><a class="toc-link" data-step="035-p99-diagnosis" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/035-p99-diagnosis/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">35</span><span class="toc-title">Диагностируем рост P99 из-за rejected-draft two-pass</span></a></li>
+<li><a class="toc-link" data-step="036-tail-mitigation" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/036-tail-mitigation/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">36</span><span class="toc-title">Смягчаем хвост настройкой K, маршрутизацией и доменной draft-головой</span></a></li>
+<li><a class="toc-link" data-step="037-no-spec" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/037-no-spec/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">37</span><span class="toc-title">Распознаём нагрузки, на которых спекуляция не успевает окупиться</span></a></li>
+<li><a class="toc-link" data-step="038-rollout-tree" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/038-rollout-tree/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">38</span><span class="toc-title">Дерево решения о включении EAGLE-3</span></a></li>
+<li><a class="toc-link" data-step="039-rollout-plan" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/039-rollout-plan/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">39</span><span class="toc-title">Собираем план выката с метриками, воротцами и откатом</span></a></li>
+<li><a class="toc-link" data-step="040-final-quiz" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/040-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">40</span><span class="toc-title">Итоговая проверка: принимаем решение о выкате EAGLE-3</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Почему alpha нужно измерять на собственном распределении трафика</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты смотришь на отчёт EAGLE-3: на обычных чатах <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0037em">α</span></span></span></span> держится около 0,7. Число выглядит уверенно, и хочется сразу разрешить продакшен-выкат. Но первые реальные запросы приходят от разработчиков и юристов — с кодом, названиями библиотек, номерами договоров и отраслевыми оборотами. На них та же draft-голова может показать уже 0,45.</p>
+<p>Модель не стала медленнее. Изменился язык, который ей приходится продолжать.</p>
+<p>Draft-голова, обученная преимущественно на общих диалогах, хорошо угадывает привычные разговорные продолжения. Доменный трафик устроен иначе: в нём другие слова, конструкции и типичные последовательности токенов. Черновик чаще расходится с target-моделью, поэтому больше токенов отклоняется. Ты всё равно платишь за их генерацию и проверку, но принимаешь меньше полезных токенов.</p>
+<p>Именно поэтому чужая <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0037em">α</span></span></span></span> — не характеристика EAGLE-3 «вообще». Это результат на конкретном наборе запросов. Даже твоя средняя <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0037em">α</span></span></span></span> за день может скрывать проблему: спокойный бытовой чат поднимет показатель, а важный сегмент с кодом окажется в убыточной области. С учётом продакшен-порога из <a href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/010-effective-threshold/">шага 10</a> и влияния батча из <a href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/012-concurrency-check/">шага 12</a> разница между 0,7 и 0,45 способна перевернуть решение о выкате.</p>
+<p>Значит, измерять нужно на репрезентативной выборке собственного трафика — с теми же языками, доменами и типами запросов, которые встретятся после запуска.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Ты выбираешь автодополнение для редакции. На тесте из бытовых писем оно верно заканчивает семь фраз из десяти. Но редакция выпускает договоры и инструкции к оборудованию, где верными оказываются лишь четыре-пять продолжений. Рекламный тест не ошибся — он проверял другой текст. Решение о покупке должен определять материал, который действительно лежит у тебя на столе.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/012-concurrency-check/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/17-infrastructure-and-production__05-eagle3-speculative-decoding/014-weighted-alpha/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"17-infrastructure-and-production__05-eagle3-speculative-decoding","stepId":"013-traffic-alpha","number":13,"plannedCount":40}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

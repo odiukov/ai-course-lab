@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Почему сжатые веса не равны полному потреблению HBM</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f7f9fc;
+      --ink: #172033;
+      --muted: #5d687d;
+      --line: #344057;
+      --line-soft: #cbd3df;
+      --weights: #6d5ce7;
+      --weights-ink: #ffffff;
+      --cache: #16a3a5;
+      --cache-ink: #052f31;
+      --activation: #f1a23a;
+      --activation-ink: #4a2800;
+      --reserve: #e6ebf2;
+      --reserve-ink: #364156;
+      --accent: #df4c73;
+      --card: #fff7e8;
+      --card-line: #e7c77f;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --panel: #181e29;
+        --panel-soft: #202735;
+        --ink: #f1f4fa;
+        --muted: #aab4c6;
+        --line: #d6dcea;
+        --line-soft: #4a556a;
+        --weights: #8374f4;
+        --weights-ink: #ffffff;
+        --cache: #35b9ba;
+        --cache-ink: #062e30;
+        --activation: #f4ad4f;
+        --activation-ink: #3c2200;
+        --reserve: #303949;
+        --reserve-ink: #e6ebf4;
+        --accent: #ff6f91;
+        --card: #29261f;
+        --card-line: #806b3f;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: 16px;
+    }
+
+    .figure {
+      width: min(100%, 1120px);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+
+    .heading {
+      min-height: 72px;
+      padding: 14px 22px 10px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--panel);
+    }
+
+    .eyebrow {
+      margin: 0 0 3px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.18;
+      letter-spacing: -0.02em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 420px;
+      background: var(--panel);
+    }
+
+    svg text {
+      font-family: inherit;
+      fill: var(--ink);
+    }
+
+    .segment {
+      shape-rendering: geometricPrecision;
+    }
+
+    .weights {
+      fill: var(--weights);
+    }
+
+    .cache {
+      fill: var(--cache);
+    }
+
+    .activation {
+      fill: var(--activation);
+    }
+
+    .reserve {
+      fill: var(--reserve);
+    }
+
+    .bar-outline,
+    .capacity,
+    .leader {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .capacity {
+      stroke: var(--line-soft);
+    }
+
+    .used-line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 4;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .card {
+      fill: var(--card);
+      stroke: var(--card-line);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .label {
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .small {
+      font-size: 14px;
+      font-weight: 550;
+    }
+
+    .key {
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    .formula {
+      font-size: 24px;
+      font-weight: 850;
+      letter-spacing: -0.025em;
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .on-weights {
+      fill: var(--weights-ink);
+    }
+
+    .on-cache {
+      fill: var(--cache-ink);
+    }
+
+    .on-activation {
+      fill: var(--activation-ink);
+    }
+
+    .on-reserve {
+      fill: var(--reserve-ink);
+    }
+
+    .accent {
+      fill: var(--accent);
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 24px;
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <header class="heading">
+      <p class="eyebrow">70B · H100 80 ГБ HBM</p>
+      <h1>Сжатые веса — не всё потребление памяти</h1>
+    </header>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 960 392"
+      width="960"
+      height="392"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Состав HBM для 70B-модели на H100</title>
+      <desc id="svg-description">
+        Из 80 ГБ HBM около 35 ГБ занимают веса AWQ INT4, 20 ГБ —
+        KV-кэш, 5 ГБ — активации. Всего занято около 60 ГБ,
+        остаётся 20 ГБ запаса.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать HBM H100 объёмом 80 ГБ: 35 ГБ весов
+      AWQ INT4, 20 ГБ KV-кэша, 5 ГБ активаций, около 60 ГБ занято
+      и 20 ГБ остаётся в запасе.
+    </p>
+  </main>
+
+  <script>
+    (() => {
+      const data = Object.freeze([
+        {
+          kind: "config",
+          canvas: { width: 960, height: 392 },
+          origin: { x: 40, y: 370 },
+          scale: { x: 8, y: 4 },
+          bar: { left: 24, right: 58, bottom: 0, top: 80 },
+          bracket: { inner: 58, outer: 62, bottom: 0, top: 80 },
+          usedGuide: { left: 24, right: 66, level: 60 },
+          activationGuide: { left: 19, right: 24, level: 57.5 },
+          card: { left: 68, right: 113, bottom: 10, top: 43 }
+        },
+        {
+          kind: "segment",
+          id: "weights",
+          from: 0,
+          to: 35,
+          className: "weights",
+          description: "Веса AWQ INT4 — 35 ГБ"
+        },
+        {
+          kind: "segment",
+          id: "cache",
+          from: 35,
+          to: 55,
+          className: "cache",
+          description: "KV-кэш — 20 ГБ"
+        },
+        {
+          kind: "segment",
+          id: "activation",
+          from: 55,
+          to: 60,
+          className: "activation",
+          description: "Активации — 5 ГБ"
+        },
+        {
+          kind: "segment",
+          id: "reserve",
+          from: 60,
+          to: 80,
+          className: "reserve",
+          description: "Свободный запас — 20 ГБ"
+        },
+        {
+          kind: "label",
+          text: "Вся HBM · 80 ГБ",
+          point: { x: 41, y: 83 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "small muted"
+        },
+        {
+          kind: "label",
+          text: "Запас",
+          point: { x: 41, y: 72 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "label on-reserve"
+        },
+        {
+          kind: "label",
+          text: "20 ГБ",
+          point: { x: 41, y: 67 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "key on-reserve"
+        },
+        {
+          kind: "label",
+          text: "Активации · 5 ГБ",
+          point: { x: 19, y: 57.5 },
+          offset: { x: -10, y: 5 },
+          anchor: "end",
+          className: "label"
+        },
+        {
+          kind: "label",
+          text: "KV-кэш · 20 ГБ",
+          point: { x: 41, y: 47 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "label on-cache"
+        },
+        {
+          kind: "label",
+          text: "128 запросов × контекст 2k",
+          point: { x: 41, y: 42 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "small on-cache"
+        },
+        {
+          kind: "label",
+          text: "Веса AWQ INT4",
+          point: { x: 41, y: 21 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "label on-weights"
+        },
+        {
+          kind: "label",
+          text: "35 ГБ",
+          point: { x: 41, y: 14 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "key on-weights"
+        },
+        {
+          kind: "label",
+          text: "≈ 60 ГБ занято",
+          point: { x: 66, y: 60 },
+          offset: { x: 14, y: -8 },
+          anchor: "start",
+          className: "key accent"
+        },
+        {
+          kind: "label",
+          text: "веса — лишь ≈ 58% занятой HBM",
+          point: { x: 66, y: 60 },
+          offset: { x: 14, y: 17 },
+          anchor: "start",
+          className: "small muted"
+        },
+        {
+          kind: "label",
+          text: "Планировать нужно сумму",
+          point: { x: 72, y: 37 },
+          offset: { x: 0, y: 0 },
+          anchor: "start",
+          className: "label"
+        },
+        {
+          kind: "label",
+          text: "35 + 20 + 5 ≈ 60 ГБ",
+          point: { x: 90.5, y: 29 },
+          offset: { x: 0, y: 0 },
+          anchor: "middle",
+          className: "formula"
+        },
+        {
+          kind: "label",
+          text: "AWQ уменьшает только веса.",
+          point: { x: 72, y: 20 },
+          offset: { x: 0, y: 0 },
+          anchor: "start",
+          className: "small muted"
+        },
+        {
+          kind: "label",
+          text: "KV-кэш и активации остаются.",
+          point: { x: 72, y: 15 },
+          offset: { x: 0, y: 0 },
+          anchor: "start",
+          className: "small muted"
+        }
+      ]);
+
+      const config = data.find((item) => item.kind === "config");
+      const origin = Object.freeze(config.origin);
+      const scale = Object.freeze(config.scale);
+      const sx = (x) => origin.x + x * scale.x;
+      const sy = (y) => origin.y - y * scale.y;
+
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function element(name, attributes) {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        return node;
+      }
+
+      function rectangle(bounds, className) {
+        return element("rect", {
+          x: sx(bounds.left),
+          y: sy(bounds.top),
+          width: sx(bounds.right) - sx(bounds.left),
+          height: sy(bounds.bottom) - sy(bounds.top),
+          class: className
+        });
+      }
+
+      function line(points, className) {
+        return element("line", {
+          x1: sx(points.x1),
+          y1: sy(points.y1),
+          x2: sx(points.x2),
+          y2: sy(points.y2),
+          class: className
+        });
+      }
+
+      function label(item) {
+        const node = element("text", {
+          x: sx(item.point.x) + item.offset.x,
+          y: sy(item.point.y) + item.offset.y,
+          "text-anchor": item.anchor,
+          class: item.className
+        });
+        node.textContent = item.text;
+        return node;
+      }
+
+      try {
+        const segments = data.filter((item) => item.kind === "segment");
+        const labels = data.filter((item) => item.kind === "label");
+
+        segments.forEach((segment) => {
+          const node = rectangle(
+            {
+              left: config.bar.left,
+              right: config.bar.right,
+              bottom: segment.from,
+              top: segment.to
+            },
+            `segment ${segment.className}`
+          );
+          const title = element("title", {});
+          title.textContent = segment.description;
+          node.append(title);
+          drawing.append(node);
+        });
+
+        drawing.append(
+          rectangle(config.bar, "bar-outline"),
+          line(
+            {
+              x1: config.bracket.outer,
+              y1: config.bracket.bottom,
+              x2: config.bracket.outer,
+              y2: config.bracket.top
+            },
+            "capacity"
+          ),
+          line(
+            {
+              x1: config.bracket.inner,
+              y1: config.bracket.bottom,
+              x2: config.bracket.outer,
+              y2: config.bracket.bottom
+            },
+            "capacity"
+          ),
+          line(
+            {
+              x1: config.bracket.inner,
+              y1: config.bracket.top,
+              x2: config.bracket.outer,
+              y2: config.bracket.top
+            },
+            "capacity"
+          ),
+          line(
+            {
+              x1: config.activationGuide.left,
+              y1: config.activationGuide.level,
+              x2: config.activationGuide.right,
+              y2: config.activationGuide.level
+            },
+            "leader"
+          ),
+          line(
+            {
+              x1: config.usedGuide.left,
+              y1: config.usedGuide.level,
+              x2: config.usedGuide.right,
+              y2: config.usedGuide.level
+            },
+            "used-line"
+          ),
+          rectangle(config.card, "card")
+        );
+
+        labels.forEach((item) => drawing.append(label(item)));
+      } catch (error) {
+        svg.hidden = true;
+        fallback.hidden = false;
+      }
+    })();
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

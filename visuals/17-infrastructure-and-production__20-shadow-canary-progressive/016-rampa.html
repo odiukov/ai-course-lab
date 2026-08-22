@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Шесть остановок канареечного запуска</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: ivory;
+      --ink: midnightblue;
+      --muted: slategray;
+      --ramp: royalblue;
+      --ramp-soft: lavender;
+      --early: lightcyan;
+      --gate: darkorange;
+      --gate-ink: saddlebrown;
+      --rollback: firebrick;
+      --rollback-soft: mistyrose;
+      --white: white;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      padding: 14px 18px 16px;
+    }
+
+    header {
+      max-width: 1200px;
+      margin: 0 auto 8px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    figure {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      overflow: visible;
+      background: var(--page);
+    }
+
+    .early-zone {
+      fill: var(--early);
+    }
+
+    .later-zone {
+      fill: var(--ramp-soft);
+    }
+
+    .zone-separator {
+      stroke: var(--muted);
+      stroke-linecap: round;
+    }
+
+    .ramp-line {
+      fill: none;
+      stroke: var(--ramp);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .stop-dot {
+      fill: var(--page);
+      stroke: var(--ramp);
+    }
+
+    .stop-dot.important {
+      fill: var(--early);
+    }
+
+    .stop-label {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .stop-caption {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .gate {
+      fill: var(--gate);
+      stroke: var(--gate-ink);
+      stroke-linejoin: round;
+    }
+
+    .gate-check {
+      fill: none;
+      stroke: var(--white);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .gate-label {
+      fill: var(--gate-ink);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .rollback-route,
+    .rollback-rail {
+      fill: none;
+      stroke: var(--rollback);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .rollback-route {
+      stroke-dasharray: 8 7;
+    }
+
+    .rollback-arrow {
+      fill: var(--rollback);
+    }
+
+    .rollback-target {
+      fill: var(--rollback-soft);
+      stroke: var(--rollback);
+    }
+
+    .rollback-target-text,
+    .rollback-label {
+      fill: var(--rollback);
+      font-weight: bold;
+    }
+
+    .rollback-target-text {
+      font-size: 18px;
+    }
+
+    .rollback-label {
+      font-size: 15px;
+    }
+
+    .flow-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .fallback {
+      display: none;
+      margin: 16px auto;
+      max-width: 1200px;
+      padding: 16px;
+      border: 2px solid firebrick;
+      background: mistyrose;
+      color: firebrick;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: midnightblue;
+        --ink: whitesmoke;
+        --muted: lightsteelblue;
+        --ramp: deepskyblue;
+        --ramp-soft: darkslateblue;
+        --early: darkslategray;
+        --gate: orange;
+        --gate-ink: moccasin;
+        --rollback: salmon;
+        --rollback-soft: maroon;
+        --white: white;
+      }
+
+      .fallback {
+        background: maroon;
+        color: mistyrose;
+        border-color: salmon;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="diagram-title">Шесть остановок канареечного запуска</h1>
+    <p id="diagram-summary">На каждой ступени — удержание и ворота проверки; от любых ворот открыт немедленный путь назад к 0%.</p>
+  </header>
+
+  <figure aria-labelledby="diagram-title" aria-describedby="diagram-summary">
+    <svg id="diagram" viewBox="0 0 1200 350" width="1200" height="350"
+         preserveAspectRatio="xMidYMid meet" role="img">
+      <desc>Ступенчатая рампа 1%, 10%, 25%, 50%, 75%, 100%. Между ступенями расположены ворота, от которых ведут пути немедленного отката к 0%.</desc>
+    </svg>
+    <div id="fallback" class="fallback" role="status"></div>
+  </figure>
+
+  <script>
+    const data = Object.freeze([
+      { kind: "origin", point: { x: 70, y: 340 } },
+      { kind: "scale", point: { x: 1, y: 1 } },
+
+      {
+        kind: "style",
+        rampWidth: 8,
+        connectorWidth: 8,
+        routeWidth: 3,
+        railWidth: 5,
+        gateWidth: 2,
+        checkWidth: 3,
+        dotWidth: 4,
+        separatorWidth: 2,
+        dotRadius: 9,
+        targetRadius: 27,
+        gateHalfX: 12,
+        gateHalfY: 14,
+        arrowHalf: 8,
+        arrowBack: 12,
+        midpointDivisor: 2,
+        labelUp: -8,
+        captionDown: 8,
+        gateLabelRight: 17,
+        gateLabelDown: 4,
+        railLabelDown: 8
+      },
+
+      {
+        kind: "zone",
+        className: "early-zone",
+        polygon: [
+          { x: 82, y: 92 },
+          { x: 435, y: 92 },
+          { x: 435, y: 181 },
+          { x: 82, y: 181 }
+        ]
+      },
+      {
+        kind: "zone",
+        className: "later-zone",
+        polygon: [
+          { x: 435, y: 92 },
+          { x: 1124, y: 92 },
+          { x: 1124, y: 326 },
+          { x: 435, y: 326 }
+        ]
+      },
+      {
+        kind: "separator",
+        x1: 435,
+        y1: 90,
+        x2: 435,
+        y2: 326
+      },
+
+      {
+        kind: "stop",
+        x1: 100,
+        x2: 260,
+        y: 115,
+        label: "1%",
+        caption: "первый живой трафик",
+        important: true
+      },
+      {
+        kind: "stop",
+        x1: 260,
+        x2: 430,
+        y: 150,
+        label: "10%",
+        caption: "больше разнообразия",
+        important: true
+      },
+      {
+        kind: "stop",
+        x1: 430,
+        x2: 600,
+        y: 190,
+        label: "25%",
+        caption: "удержать и проверить",
+        important: false
+      },
+      {
+        kind: "stop",
+        x1: 600,
+        x2: 770,
+        y: 230,
+        label: "50%",
+        caption: "удержать и проверить",
+        important: false
+      },
+      {
+        kind: "stop",
+        x1: 770,
+        x2: 940,
+        y: 270,
+        label: "75%",
+        caption: "удержать и проверить",
+        important: false
+      },
+      {
+        kind: "stop",
+        x1: 940,
+        x2: 1110,
+        y: 310,
+        label: "100%",
+        caption: "полный трафик",
+        important: false
+      },
+
+      {
+        kind: "gate",
+        x: 260,
+        y: 132.5,
+        fromY: 115,
+        toY: 150,
+        routeX: 242,
+        label: "ворота"
+      },
+      {
+        kind: "gate",
+        x: 430,
+        y: 170,
+        fromY: 150,
+        toY: 190,
+        routeX: 412,
+        label: "ворота"
+      },
+      {
+        kind: "gate",
+        x: 600,
+        y: 210,
+        fromY: 190,
+        toY: 230,
+        routeX: 582,
+        label: "ворота"
+      },
+      {
+        kind: "gate",
+        x: 770,
+        y: 250,
+        fromY: 230,
+        toY: 270,
+        routeX: 752,
+        label: "ворота"
+      },
+      {
+        kind: "gate",
+        x: 940,
+        y: 290,
+        fromY: 270,
+        toY: 310,
+        routeX: 922,
+        label: "ворота"
+      },
+
+      {
+        kind: "rollback",
+        y: 55,
+        x1: 1110,
+        x2: 104,
+        targetX: 75,
+        targetY: 55,
+        labelX: 590,
+        labelY: 28,
+        label: "НЕМЕДЛЕННЫЙ ОТКАТ К 0%"
+      },
+
+      {
+        kind: "flow",
+        x: 1100,
+        y: 326,
+        text: "расширять только после проверки",
+        dx: 0,
+        dy: -6,
+        anchor: "end"
+      }
+    ]);
+
+    const origin = Object.freeze(data.find(item => item.kind === "origin").point);
+    const scale = Object.freeze(data.find(item => item.kind === "scale").point);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const style = data.find(item => item.kind === "style");
+      const stops = data.filter(item => item.kind === "stop");
+      const gates = data.filter(item => item.kind === "gate");
+      const rollback = data.find(item => item.kind === "rollback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, content) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            node.setAttribute(key, String(value));
+          }
+        });
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+        return node;
+      };
+
+      const points = list =>
+        list.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+      const addLine = (parent, x1, y1, x2, y2, className, width) => {
+        parent.append(make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className,
+          "stroke-width": width
+        }));
+      };
+
+      const addText = (
+        parent,
+        x,
+        y,
+        content,
+        className,
+        anchor,
+        dx,
+        dy
+      ) => {
+        parent.append(make("text", {
+          x: sx(x),
+          y: sy(y),
+          dx,
+          dy,
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content));
+      };
+
+      const backgroundLayer = make("g", { "aria-hidden": "true" });
+      const rollbackLayer = make("g", { "aria-hidden": "true" });
+      const rampLayer = make("g", { "aria-hidden": "true" });
+      const gateLayer = make("g", { "aria-hidden": "true" });
+      const labelLayer = make("g", { "aria-hidden": "true" });
+
+      data.filter(item => item.kind === "zone").forEach(zone => {
+        backgroundLayer.append(make("polygon", {
+          points: points(zone.polygon),
+          class: zone.className
+        }));
+      });
+
+      data.filter(item => item.kind === "separator").forEach(separator => {
+        addLine(
+          backgroundLayer,
+          separator.x1,
+          separator.y1,
+          separator.x2,
+          separator.y2,
+          "zone-separator",
+          style.separatorWidth
+        );
+      });
+
+      gates.forEach(gate => {
+        rollbackLayer.append(make("polyline", {
+          points: points([
+            { x: gate.x, y: gate.y },
+            { x: gate.routeX, y: gate.y },
+            { x: gate.routeX, y: rollback.y }
+          ]),
+          class: "rollback-route",
+          "stroke-width": style.routeWidth
+        }));
+
+        rollbackLayer.append(make("polygon", {
+          points: points([
+            { x: gate.routeX, y: rollback.y },
+            {
+              x: gate.routeX - style.arrowHalf,
+              y: rollback.y + style.arrowBack
+            },
+            {
+              x: gate.routeX + style.arrowHalf,
+              y: rollback.y + style.arrowBack
+            }
+          ]),
+          class: "rollback-arrow"
+        }));
+      });
+
+      addLine(
+        rollbackLayer,
+        rollback.x1,
+        rollback.y,
+        rollback.x2,
+        rollback.y,
+        "rollback-rail",
+        style.railWidth
+      );
+
+      rollbackLayer.append(make("polygon", {
+        points: points([
+          { x: rollback.x2, y: rollback.y },
+          {
+            x: rollback.x2 + style.arrowBack,
+            y: rollback.y + style.arrowHalf
+          },
+          {
+            x: rollback.x2 + style.arrowBack,
+            y: rollback.y - style.arrowHalf
+          }
+        ]),
+        class: "rollback-arrow"
+      }));
+
+      rollbackLayer.append(make("circle", {
+        cx: sx(rollback.targetX),
+        cy: sy(rollback.targetY),
+        r: sx(style.targetRadius) - sx(0),
+        class: "rollback-target",
+        "stroke-width": style.gateWidth
+      }));
+
+      addText(
+        rollbackLayer,
+        rollback.targetX,
+        rollback.targetY,
+        "0%",
+        "rollback-target-text",
+        "middle",
+        0,
+        0
+      );
+
+      addText(
+        labelLayer,
+        rollback.labelX,
+        rollback.labelY,
+        rollback.label,
+        "rollback-label",
+        "middle",
+        0,
+        style.railLabelDown
+      );
+
+      stops.forEach(stop => {
+        addLine(
+          rampLayer,
+          stop.x1,
+          stop.y,
+          stop.x2,
+          stop.y,
+          "ramp-line",
+          style.rampWidth
+        );
+
+        const middleX =
+          (stop.x1 + stop.x2) / style.midpointDivisor;
+
+        rampLayer.append(make("circle", {
+          cx: sx(middleX),
+          cy: sy(stop.y),
+          r: sx(style.dotRadius) - sx(0),
+          class: stop.important ? "stop-dot important" : "stop-dot",
+          "stroke-width": style.dotWidth
+        }));
+
+        addText(
+          labelLayer,
+          middleX,
+          stop.y + style.gateHalfY,
+          stop.label,
+          "stop-label",
+          "middle",
+          0,
+          style.labelUp
+        );
+
+        addText(
+          labelLayer,
+          middleX,
+          stop.y - style.gateHalfY,
+          stop.caption,
+          "stop-caption",
+          "middle",
+          0,
+          style.captionDown
+        );
+      });
+
+      gates.forEach(gate => {
+        addLine(
+          rampLayer,
+          gate.x,
+          gate.fromY,
+          gate.x,
+          gate.toY,
+          "ramp-line",
+          style.connectorWidth
+        );
+
+        gateLayer.append(make("polygon", {
+          points: points([
+            { x: gate.x - style.gateHalfX, y: gate.y },
+            { x: gate.x, y: gate.y + style.gateHalfY },
+            { x: gate.x + style.gateHalfX, y: gate.y },
+            { x: gate.x, y: gate.y - style.gateHalfY }
+          ]),
+          class: "gate",
+          "stroke-width": style.gateWidth
+        }));
+
+        gateLayer.append(make("polyline", {
+          points: points([
+            {
+              x: gate.x - style.arrowHalf,
+              y: gate.y + style.dotRadius
+            },
+            {
+              x: gate.x - style.gateWidth,
+              y: gate.y + style.gateWidth
+            },
+            {
+              x: gate.x + style.arrowHalf,
+              y: gate.y + style.gateHalfY - style.gateWidth
+            }
+          ]),
+          class: "gate-check",
+          "stroke-width": style.checkWidth
+        }));
+
+        addText(
+          labelLayer,
+          gate.x,
+          gate.y,
+          gate.label,
+          "gate-label",
+          "start",
+          style.gateLabelRight,
+          style.gateLabelDown
+        );
+      });
+
+      data.filter(item => item.kind === "flow").forEach(flow => {
+        addText(
+          labelLayer,
+          flow.x,
+          flow.y,
+          flow.text,
+          "flow-label",
+          flow.anchor,
+          flow.dx,
+          flow.dy
+        );
+      });
+
+      svg.append(
+        backgroundLayer,
+        rollbackLayer,
+        rampLayer,
+        gateLayer,
+        labelLayer
+      );
+
+      fallback.style.display = "none";
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.style.display = "none";
+      fallback.style.display = "block";
+      fallback.textContent =
+        "Схема должна была показать ступенчатую рампу 1% → 10% → 25% → 50% → 75% → 100%, ворота между остановками и немедленный путь отката к 0%.";
+    }
+  </script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

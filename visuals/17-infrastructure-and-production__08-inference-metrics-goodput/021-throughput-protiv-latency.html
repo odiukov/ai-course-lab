@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Throughput и задержка при росте нагрузки</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f7f9fc;
+  --panel:#fff;
+  --ink:#172033;
+  --muted:#667085;
+  --grid:#dfe5ee;
+  --axis:#8792a5;
+  --blue:#2474e5;
+  --blue-soft:#e7f0ff;
+  --red:#d9485f;
+  --red-soft:#fdecef;
+  --green:#16845b;
+  --green-soft:#e5f6ef;
+  --amber:#b76b00;
+  --amber-soft:#fff2d8;
+  --focus:#9a5de8;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+figure{
+  margin:0;
+  background:var(--bg);
+  overflow:hidden;
+}
+h1{
+  margin:0;
+  padding:14px 18px 4px;
+  font-size:20px;
+  line-height:1.25;
+  font-weight:700;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  background:var(--bg);
+}
+text{fill:var(--ink);font-size:13px}
+.small{font-size:11px;fill:var(--muted)}
+.label{font-size:12px;font-weight:650}
+.value{font-size:27px;font-weight:760}
+.status{font-size:14px;font-weight:720}
+.axis{stroke:var(--axis);stroke-width:1.5}
+.grid{stroke:var(--grid);stroke-width:1}
+.throughput{fill:none;stroke:var(--blue);stroke-width:4}
+.latency{fill:none;stroke:var(--red);stroke-width:4}
+.guide{stroke:var(--focus);stroke-width:2}
+.plateau{stroke:var(--blue);stroke-width:1.5}
+.hit{fill:transparent;cursor:pointer}
+.tick{fill:var(--panel);stroke:var(--axis);stroke-width:2;cursor:pointer}
+.tick[aria-pressed="true"]{fill:var(--focus);stroke:var(--focus)}
+.handle{fill:var(--panel);stroke:var(--focus);stroke-width:4;pointer-events:none}
+.panel{fill:var(--panel);stroke:var(--grid);stroke-width:1.5}
+.before{fill:var(--blue-soft)}
+.after{fill:var(--red-soft)}
+.good{fill:var(--green)}
+.bad{fill:var(--red)}
+.note-good{fill:var(--green-soft)}
+.note-warn{fill:var(--amber-soft)}
+.fallback{
+  display:none;
+  margin:18px;
+  padding:16px;
+  background:var(--panel);
+  color:var(--ink);
+  font-size:14px;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#111722;
+    --panel:#182130;
+    --ink:#edf2f8;
+    --muted:#a9b4c5;
+    --grid:#344055;
+    --axis:#8290a6;
+    --blue:#65a7ff;
+    --blue-soft:#162d4b;
+    --red:#ff7185;
+    --red-soft:#41212b;
+    --green:#4dcc9a;
+    --green-soft:#173c32;
+    --amber:#ffc267;
+    --amber-soft:#48351b;
+    --focus:#bf8cff;
+  }
+}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Как нагрузка разделяет throughput и пользовательскую задержку</h1>
+  <svg id="chart" viewBox="0 0 960 450" width="960" height="450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Throughput растёт до плато, а P99 задержки после насыщения резко увеличивается"></svg>
+  <div id="fallback" class="fallback">
+    Схема должна была показать: throughput растёт до насыщения и выходит на плато,
+    тогда как P99 задержки из-за очереди резко увеличивается. При 15 000 токенов
+    в секунду goodput может составлять лишь 60%.
+  </div>
+</figure>
+<script>
+const data={
+  chart:{left:0,right:158,bottom:0,top:108,saturation:94},
+  card:{left:169,right:246,bottom:0,top:108},
+  loads:[
+    {value:80,x:42,t:52,p:18},
+    {value:90,x:72,t:76,p:20},
+    {value:100,x:102,t:85,p:31},
+    {value:110,x:132,t:86,p:88}
+  ],
+  throughput:[
+    {x:12,y:30},{x:25,y:34},{x:34,y:46},{x:42,y:52},
+    {x:55,y:66},{x:64,y:72},{x:72,y:76},{x:84,y:82},
+    {x:94,y:84},{x:102,y:85},{x:116,y:86},{x:132,y:86},
+    {x:144,y:86},{x:153,y:86}
+  ],
+  latency:[
+    {x:12,y:17},{x:28,y:18},{x:42,y:18},{x:58,y:19},
+    {x:72,y:20},{x:86,y:23},{x:94,y:26},{x:102,y:31},
+    {x:112,y:44},{x:122,y:64},{x:132,y:88},{x:143,y:99},
+    {x:153,y:103}
+  ],
+  grid:[26,52,78],
+  n:{zero:0,one:1,two:2,three:3,four:4,half:0.5},
+  geom:{
+    arrow:3,arrowBack:5,radius:1.7,handle:2.8,hit:6,
+    corner:3,tick:2.5,railY:-17,labelY:-24,titleY:104,
+    stateY:96,stateTextY:90,plateauY:86,plateauStart:105,
+    cardPad:6,barY:50,barH:8,goodEnd:212,dividerY:69
+  }
+};
+const origin={x:70,y:326};
+const scale={x:3.55,y:2.85};
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y-y*scale.y;
+
+try{
+  const svg=document.getElementById("chart");
+  const NS="http://www.w3.org/2000/svg";
+  const A=(tag,attrs,parent=svg)=>{
+    const el=document.createElementNS(NS,tag);
+    Object.entries(attrs).forEach(([key,value])=>el.setAttribute(key,value));
+    parent.appendChild(el);
+    return el;
+  };
+  const T=(text,x,y,cls="",anchor="start",parent=svg)=>{
+    const el=A("text",{x:sx(x),y:sy(y),"text-anchor":anchor,class:cls},parent);
+    el.textContent=text;
+    return el;
+  };
+  const line=(x1,y1,x2,y2,cls,parent=svg)=>
+    A("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls},parent);
+  const rect=(x1,y1,x2,y2,cls,parent=svg)=>{
+    const top=Math.max(y1,y2),bottom=Math.min(y1,y2);
+    return A("rect",{
+      x:sx(Math.min(x1,x2)),y:sy(top),
+      width:Math.abs(sx(x2)-sx(x1)),height:Math.abs(sy(top)-sy(bottom)),
+      rx:sx(data.geom.corner)-sx(data.n.zero),
+      ry:sy(data.n.zero)-sy(data.geom.corner),class:cls
+    },parent);
+  };
+  const circle=(x,y,r,cls,parent=svg)=>
+    A("circle",{cx:sx(x),cy:sy(y),r:sx(r)-sx(data.n.zero),class:cls},parent);
+  const pathFrom=points=>{
+    const [first,...rest]=points;
+    return `M ${sx(first.x)} ${sy(first.y)} `+
+      rest.map(point=>`L ${sx(point.x)} ${sy(point.y)}`).join(" ");
+  };
+  const arrow=(x1,y1,x2,y2,cls)=>{
+    line(x1,y1,x2,y2,cls);
+    const horizontal=y1===y2;
+    const points=horizontal
+      ?[
+        {x:x2,y:y2},
+        {x:x2-data.geom.arrowBack,y:y2+data.geom.arrow},
+        {x:x2-data.geom.arrowBack,y:y2-data.geom.arrow}
+      ]
+      :[
+        {x:x2,y:y2},
+        {x:x2-data.geom.arrow,y:y2-data.geom.arrowBack},
+        {x:x2+data.geom.arrow,y:y2-data.geom.arrowBack}
+      ];
+    A("polygon",{
+      points:points.map(point=>`${sx(point.x)},${sy(point.y)}`).join(" "),
+      class:cls
+    });
+  };
+
+  rect(
+    data.chart.saturation,data.chart.bottom,
+    data.chart.right,data.chart.top,"after"
+  );
+  rect(
+    data.card.left,data.card.bottom,
+    data.card.right,data.card.top,"panel"
+  );
+
+  data.grid.forEach(y=>{
+    line(data.chart.left,y,data.chart.right,y,"grid");
+  });
+
+  arrow(
+    data.chart.left,data.chart.bottom,
+    data.chart.right,data.chart.bottom,"axis"
+  );
+  arrow(
+    data.chart.left,data.chart.bottom,
+    data.chart.left,data.chart.top,"axis"
+  );
+
+  line(
+    data.chart.saturation,data.chart.bottom,
+    data.chart.saturation,data.chart.top,"guide"
+  );
+
+  T("Уровень метрики · схематично",data.chart.left,data.geom.titleY,"small","start");
+  T("ДО НАСЫЩЕНИЯ",data.chart.saturation-data.geom.cardPad,data.geom.titleY,"label","end");
+  T("ПОСЛЕ",data.chart.saturation+data.geom.cardPad,data.geom.titleY,"label","start");
+  T("дополнительная работа",data.chart.saturation-data.geom.cardPad,99,"small","end");
+  T("растёт очередь",data.chart.saturation+data.geom.cardPad,99,"small","start");
+  T("насыщение",data.chart.saturation,93,"label","middle");
+
+  A("path",{d:pathFrom(data.throughput),class:"throughput"});
+  A("path",{d:pathFrom(data.latency),class:"latency"});
+  line(
+    data.geom.plateauStart,data.geom.plateauY,
+    data.chart.right,data.geom.plateauY,"plateau"
+  );
+
+  line(8,92,16,92,"throughput");
+  T("Throughput",19,90,"label","start");
+  line(8,84,16,84,"latency");
+  T("P99 задержки",19,82,"label","start");
+  T("плато мощности",data.chart.right,80,"small","end");
+  T("ожидание в очереди",data.chart.right,96,"small","end");
+
+  line(
+    data.loads[data.n.zero].x,data.geom.railY,
+    data.loads[data.n.three].x,data.geom.railY,"axis"
+  );
+  T(
+    "Нагрузка, запросов/с",
+    (data.loads[data.n.zero].x+data.loads[data.n.three].x)*data.n.half,
+    data.geom.labelY,"small","middle"
+  );
+
+  const guide=line(
+    data.loads[data.n.zero].x,data.chart.bottom,
+    data.loads[data.n.zero].x,data.loads[data.n.zero].p,"guide"
+  );
+  const tDot=circle(
+    data.loads[data.n.zero].x,data.loads[data.n.zero].t,
+    data.geom.radius,"throughput"
+  );
+  const pDot=circle(
+    data.loads[data.n.zero].x,data.loads[data.n.zero].p,
+    data.geom.radius,"latency"
+  );
+  const handle=circle(
+    data.loads[data.n.zero].x,data.geom.railY,
+    data.geom.handle,"handle"
+  );
+  const status=T("",4,data.geom.stateY,"status","start");
+  const stateText=T("",4,data.geom.stateTextY,"small","start");
+
+  const tickNodes=[];
+  data.loads.forEach((item,index)=>{
+    line(
+      item.x,data.chart.bottom,
+      item.x,data.chart.bottom-data.geom.tick,"axis"
+    );
+    T(String(item.value),item.x,-7,"small","middle");
+    const group=A("g",{
+      role:"button",tabindex:String(data.n.zero),
+      "aria-label":`Нагрузка ${item.value} запросов в секунду`
+    });
+    circle(item.x,data.geom.railY,data.geom.hit,"hit",group);
+    const tick=circle(item.x,data.geom.railY,data.geom.radius,"tick",group);
+    tickNodes.push(tick);
+    group.addEventListener("click",()=>select(index));
+    group.addEventListener("keydown",event=>{
+      if(event.key==="Enter"||event.key===" "){
+        event.preventDefault();
+        select(index);
+      }
+    });
+  });
+
+  const cardX=data.card.left+data.geom.cardPad;
+  T("ОДИНАКОВЫЙ THROUGHPUT",cardX,99,"small","start");
+  T("15 000",cardX,87,"value","start");
+  T("токенов/с",cardX,79,"label","start");
+  rect(
+    cardX,58,data.card.right-data.geom.cardPad,72,"note-good"
+  );
+  T("60% goodput",cardX+4,63,"status","start");
+  T("уложились в ожидание",cardX+4,59,"small","start");
+
+  rect(
+    cardX,data.geom.barY,
+    data.card.right-data.geom.cardPad,
+    data.geom.barY-data.geom.barH,"panel"
+  );
+  rect(
+    cardX,data.geom.barY,
+    data.geom.goodEnd,
+    data.geom.barY-data.geom.barH,"good"
+  );
+  rect(
+    data.geom.goodEnd,data.geom.barY,
+    data.card.right-data.geom.cardPad,
+    data.geom.barY-data.geom.barH,"bad"
+  );
+  T("60%",cardX,37,"label","start");
+  T("40%",data.card.right-data.geom.cardPad,37,"label","end");
+  T("в пределах",cardX,31,"small","start");
+  T("дольше 2 с",data.card.right-data.geom.cardPad,31,"small","end");
+  line(
+    cardX,data.geom.dividerY-47,
+    data.card.right-data.geom.cardPad,
+    data.geom.dividerY-47,"grid"
+  );
+  T("Throughput не показывает,",cardX,15,"small","start");
+  T("что теряют пользователи",cardX,10,"label","start");
+
+  function select(index){
+    const item=data.loads[index];
+    guide.setAttribute("x1",sx(item.x));
+    guide.setAttribute("x2",sx(item.x));
+    guide.setAttribute("y1",sy(data.chart.bottom));
+    guide.setAttribute("y2",sy(item.p));
+    tDot.setAttribute("cx",sx(item.x));
+    tDot.setAttribute("cy",sy(item.t));
+    pDot.setAttribute("cx",sx(item.x));
+    pDot.setAttribute("cy",sy(item.p));
+    handle.setAttribute("cx",sx(item.x));
+    tickNodes.forEach((node,nodeIndex)=>
+      node.setAttribute("aria-pressed",String(nodeIndex===index))
+    );
+    status.textContent=`${item.value} запросов/с`;
+    stateText.textContent=index<data.n.two
+      ?"Нагрузка превращается в выполненную работу"
+      :"Throughput почти не меняется, ожидание растёт";
+  }
+  select(data.n.zero);
+}catch(error){
+  document.getElementById("chart").style.display="none";
+  document.getElementById("fallback").style.display="block";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

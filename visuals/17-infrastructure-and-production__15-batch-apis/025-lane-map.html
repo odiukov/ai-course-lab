@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Карта interactive, semi-interactive и batch</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f7f8fc;
+  --panel:#ffffff;
+  --text:#172033;
+  --muted:#5d6980;
+  --line:#9aa6ba;
+  --interactive:#1769aa;
+  --interactive-bg:#eaf4ff;
+  --semi:#9a5b08;
+  --semi-bg:#fff4dc;
+  --batch:#34734a;
+  --batch-bg:#e9f7ee;
+  --result:#eef1f6;
+  --note:#e8ecf4;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#111722;
+    --panel:#182130;
+    --text:#edf2fb;
+    --muted:#aeb9cb;
+    --line:#66738a;
+    --interactive:#69b8f2;
+    --interactive-bg:#162d43;
+    --semi:#f0b95f;
+    --semi-bg:#3a2b17;
+    --batch:#82cf9e;
+    --batch-bg:#173326;
+    --result:#222d3d;
+    --note:#202b3c;
+  }
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+figure{
+  background:var(--panel);
+  border:1px solid var(--line);
+  padding:14px;
+}
+figcaption{
+  font-size:20px;
+  color:var(--text);
+}
+figcaption span{
+  color:var(--muted);
+  font-size:14px;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:520px;
+  background:var(--panel);
+}
+.band{stroke-width:1px}
+.interactive-band{fill:var(--interactive-bg);stroke:var(--interactive)}
+.semi-band{fill:var(--semi-bg);stroke:var(--semi)}
+.batch-band{fill:var(--batch-bg);stroke:var(--batch)}
+.flow{fill:none;stroke:var(--line);stroke-width:2px}
+.interactive-stroke{fill:none;stroke:var(--interactive);stroke-width:2px}
+.semi-stroke{fill:none;stroke:var(--semi);stroke-width:2px}
+.batch-stroke{fill:none;stroke:var(--batch);stroke-width:2px}
+.interactive-fill{fill:var(--interactive)}
+.semi-fill{fill:var(--semi)}
+.batch-fill{fill:var(--batch)}
+.process{fill:var(--panel);stroke-width:2px}
+.output{fill:var(--result);stroke:var(--line);stroke-width:1px}
+.screen{fill:var(--panel);stroke:var(--text);stroke-width:2px}
+.bodyline{fill:none;stroke:var(--text);stroke-width:2px}
+.label{fill:var(--text);font-size:14px}
+.small{fill:var(--muted);font-size:12px}
+.mode{font-size:15px;font-weight:bold}
+.process-title{fill:var(--text);font-size:13px;font-weight:bold}
+.process-sub{fill:var(--muted);font-size:12px}
+.output-text{fill:var(--text);font-size:13px;font-weight:bold}
+.time{font-size:13px;font-weight:bold}
+.note-box{fill:var(--note);stroke:var(--line);stroke-width:1px}
+.note{fill:var(--text);font-size:13px}
+.fallback{
+  border:1px solid var(--line);
+  padding:16px;
+  color:var(--text);
+  background:var(--note);
+  font-size:14px;
+}
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>
+    <strong>Карта режимов ожидания</strong><br>
+    <span>Главный вопрос: где находится пользователь, пока выполняется работа?</span>
+  </figcaption>
+  <svg id="map" viewBox="0 0 1200 500" width="1200" height="500"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Interactive, semi-interactive и batch</title>
+    <desc id="svg-desc">Три полосы сопоставляют положение пользователя, допустимое ожидание, способ запуска, кэширование и результат.</desc>
+    <g id="drawing"></g>
+  </svg>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать три режима: interactive — пользователь смотрит
+    в экран и получает синхронный ответ с кэшем; semi-interactive — уходит на
+    несколько минут, пока работает асинхронная очередь с запасным синхронным
+    путём; batch — ждёт к утру пакетный результат со сложенным кэшированием.
+  </div>
+</figure>
+<script>
+const DATA=[{
+  zero:0, one:1,
+  origin:{x:0,y:0}, scale:{x:1,y:1},
+  radius:10, head:10, wing:6, lineGap:17,
+  dash:[8,7],
+  band:{x:18,w:1164,h:118,half:59},
+  user:{x:180,screenX:218,screenY:-24,screenW:58,screenH:40,
+        headY:-20,headR:9,shoulderY:-7,bodyY:18,armX:21,footX:13},
+  flow:{inputX:310,processX:475,processW:270,outputX:925,outputW:220},
+  process:{h:68,half:34}, output:{h:72,half:36},
+  offsets:{none:0,left:-8,right:8,above:-8,below:8},
+  branch:{startX:454,lowY:284,riseX:900,endX:925,endY:255},
+  note:{x:18,y:442,w:1164,h:42},
+  rows:[
+    {
+      y:104,kind:"interactive",bandClass:"interactive-band",
+      strokeClass:"interactive-stroke",fillClass:"interactive-fill",
+      mode:["INTERACTIVE","пользователь у экрана"],
+      state:["смотрит в экран","замечает даже короткую паузу"],
+      time:"секунды · синхронно",
+      action:"дописать фразу",
+      title:"СИНХРОННЫЙ ВЫЗОВ",
+      sub:"prompt-кэш · batch не подходит",
+      output:["первые слова","TTFT"],
+      icon:"cache"
+    },
+    {
+      y:234,kind:"semi",bandClass:"semi-band",
+      strokeClass:"semi-stroke",fillClass:"semi-fill",
+      mode:["SEMI-INTERACTIVE","пользователь отошёл"],
+      state:["в другой вкладке","вернётся через несколько минут"],
+      time:"минуты · асинхронно",
+      action:"разобрать большой документ",
+      title:"АСИНХРОННАЯ ОЧЕРЕДЬ",
+      sub:"умеренная индексация для RAG",
+      output:["уведомление","через несколько минут"],
+      icon:"queue"
+    },
+    {
+      y:364,kind:"batch",bandClass:"batch-band",
+      strokeClass:"batch-stroke",fillClass:"batch-fill",
+      mode:["BATCH","пользователь не следит"],
+      state:["не ждёт у экрана","нужен весь результат к утру"],
+      time:"час или к утру · пакет",
+      action:"архив: 50 000 записей",
+      title:"ПАКЕТНАЯ ОБРАБОТКА",
+      sub:"сложенное кэширование",
+      output:["весь результат","через час / к утру"],
+      icon:"stack"
+    }
+  ],
+  labels:{
+    modeX:40,userLabelX:226,arrowLabelX:392,
+    processTitleX:610,outputTextX:1035,
+    modeTop:-34,modeBottom:-15,stateTop:31,stateBottom:48,
+    timeY:-22,actionY:29,processTitleY:-11,processSubY:14,
+    outputTop:-9,outputBottom:11,
+    branchX:675,branchY:286,
+    noteX:600,noteY:463
+  },
+  cache:{x:505,y:118,w:54,h:20,lines:[518,532,546]},
+  queue:{xs:[520,550,580],y:247,r:6,lineX1:596,lineX2:710},
+  stack:{x:514,y:348,w:52,h:22,shift:7},
+  branchLabel:"запасной синхронный путь, если пакет недоступен",
+  noteText:"SLA задаёт допустимое ожидание: секунды → минуты → часы. «Прод» и сложность вычисления режим не выбирают."
+}];
+
+const [D]=DATA;
+const origin=D.origin;
+const scale=D.scale;
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const NS="http://www.w3.org/2000/svg";
+const root=document.getElementById("drawing");
+const svg=document.getElementById("map");
+const fallback=document.getElementById("fallback");
+const [dashLength,dashGap]=D.dash;
+const lx=n=>sx(n)-sx(D.zero);
+const ly=n=>sy(n)-sy(D.zero);
+
+function node(tag,attrs,text){
+  const item=document.createElementNS(NS,tag);
+  Object.entries(attrs).forEach(([key,value])=>item.setAttribute(key,value));
+  if(text!==undefined)item.textContent=text;
+  return item;
+}
+function rect(x,y,w,h,cls,r=D.radius){
+  return node("rect",{x:sx(x),y:sy(y),width:lx(w),height:ly(h),
+    rx:lx(r),ry:ly(r),class:cls});
+}
+function line(x1,y1,x2,y2,cls,dashed=false){
+  const attrs={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls};
+  if(dashed)attrs["stroke-dasharray"]=`${lx(dashLength)} ${lx(dashGap)}`;
+  return node("line",attrs);
+}
+function textAt(x,y,text,cls,anchor="middle",dx=D.offsets.none,dy=D.offsets.none){
+  return node("text",{x:sx(x)+dx,y:sy(y)+dy,class:cls,
+    "text-anchor":anchor,"dominant-baseline":"middle"},text);
+}
+function arrow(x1,y1,x2,y2,strokeClass,fillClass){
+  const group=node("g",{});
+  group.append(line(x1,y1,x2-D.head,y2,strokeClass));
+  group.append(node("polygon",{points:[
+    `${sx(x2)},${sy(y2)}`,
+    `${sx(x2-D.head)},${sy(y2-D.wing)}`,
+    `${sx(x2-D.head)},${sy(y2+D.wing)}`
+  ].join(" "),class:fillClass}));
+  return group;
+}
+function drawUser(y){
+  const u=D.user;
+  const group=node("g",{});
+  group.append(node("circle",{cx:sx(u.x),cy:sy(y+u.headY),
+    r:lx(u.headR),class:"bodyline"}));
+  group.append(line(u.x,y+u.shoulderY,u.x,y+u.bodyY,"bodyline"));
+  group.append(line(u.x-u.armX,y,u.x+u.armX,y,"bodyline"));
+  group.append(line(u.x,y+u.bodyY,u.x-u.footX,y+u.bodyY+u.footX,"bodyline"));
+  group.append(line(u.x,y+u.bodyY,u.x+u.footX,y+u.bodyY+u.footX,"bodyline"));
+  group.append(rect(u.screenX,y+u.screenY,u.screenW,u.screenH,"screen",D.zero));
+  group.append(line(u.screenX+u.screenW/D.one/D.one,
+    y+u.screenY+u.screenH,u.screenX+u.screenW/D.one/D.one,
+    y+u.screenY+u.screenH+u.headR,"bodyline"));
+  group.append(line(u.screenX+u.armX,y+u.screenY+u.screenH+u.headR,
+    u.screenX+u.screenW-u.armX,y+u.screenY+u.screenH+u.headR,"bodyline"));
+  return group;
+}
+function drawProcess(row){
+  const f=D.flow,p=D.process;
+  const group=node("g",{});
+  group.append(rect(f.processX,row.y-p.half,f.processW,p.h,
+    `process ${row.strokeClass}`));
+
+  if(row.icon==="cache"){
+    const c=D.cache;
+    group.append(rect(c.x,row.y-c.y+D.cache.y,c.w,c.h,
+      `process ${row.strokeClass}`,D.zero));
+    c.lines.forEach(x=>group.append(line(x,row.y+D.processSubY,
+      x+D.wing,row.y+D.processSubY,row.strokeClass)));
+  }
+  if(row.icon==="queue"){
+    D.queue.xs.forEach(x=>group.append(node("circle",{
+      cx:sx(x),cy:sy(row.y+D.processSubY),r:lx(D.queue.r),class:row.fillClass
+    })));
+    group.append(line(D.queue.lineX1,row.y+D.processSubY,
+      D.queue.lineX2,row.y+D.processSubY,row.strokeClass));
+  }
+  if(row.icon==="stack"){
+    const s=D.stack;
+    group.append(rect(s.x,row.y-s.y+D.stack.y,s.w,s.h,
+      `process ${row.strokeClass}`,D.zero));
+    group.append(rect(s.x+s.shift,row.y-s.y+D.stack.y-s.shift,s.w,s.h,
+      `process ${row.strokeClass}`,D.zero));
+    group.append(rect(s.x+s.shift+s.shift,row.y-s.y+D.stack.y-s.shift-s.shift,
+      s.w,s.h,`process ${row.strokeClass}`,D.zero));
+  }
+
+  group.append(textAt(D.labels.processTitleX,row.y+D.labels.processTitleY,
+    row.title,"process-title"));
+  group.append(textAt(D.labels.processTitleX,row.y+D.labels.processSubY,
+    row.sub,"process-sub"));
+  return group;
+}
+function drawBranch(row){
+  const b=D.branch;
+  const path=[
+    `M ${sx(b.startX)} ${sy(row.y)}`,
+    `L ${sx(b.startX)} ${sy(b.lowY)}`,
+    `L ${sx(b.riseX)} ${sy(b.lowY)}`,
+    `L ${sx(b.riseX)} ${sy(b.endY)}`,
+    `L ${sx(b.endX-D.head)} ${sy(b.endY)}`
+  ].join(" ");
+  const group=node("g",{});
+  group.append(node("path",{d:path,class:row.strokeClass,
+    "stroke-dasharray":`${lx(dashLength)} ${lx(dashGap)}`}));
+  group.append(node("polygon",{points:[
+    `${sx(b.endX)},${sy(b.endY)}`,
+    `${sx(b.endX-D.head)},${sy(b.endY-D.wing)}`,
+    `${sx(b.endX-D.head)},${sy(b.endY+D.wing)}`
+  ].join(" "),class:row.fillClass}));
+  group.append(textAt(D.labels.branchX,D.labels.branchY,
+    D.branchLabel,"small"));
+  return group;
+}
+function draw(){
+  D.rows.forEach(row=>{
+    const b=D.band,f=D.flow,o=D.output,L=D.labels;
+    root.append(rect(b.x,row.y-b.half,b.w,b.h,`band ${row.bandClass}`));
+    root.append(textAt(L.modeX,row.y+L.modeTop,row.mode.shift(),"mode","start",
+      D.offsets.none,D.offsets.none));
+    root.append(textAt(L.modeX,row.y+L.modeBottom,row.mode.shift(),"small","start"));
+    root.append(drawUser(row.y));
+    root.append(textAt(L.userLabelX,row.y+L.stateTop,row.state.shift(),"label"));
+    root.append(textAt(L.userLabelX,row.y+L.stateBottom,row.state.shift(),"small"));
+
+    root.append(arrow(f.inputX,row.y,f.processX,row.y,
+      row.strokeClass,row.fillClass));
+    root.append(textAt(L.arrowLabelX,row.y+L.timeY,row.time,
+      `time ${row.fillClass}`));
+    root.append(textAt(L.arrowLabelX,row.y+L.actionY,row.action,"small"));
+
+    root.append(drawProcess(row));
+    root.append(arrow(f.processX+f.processW,row.y,f.outputX,row.y,
+      row.strokeClass,row.fillClass));
+    root.append(rect(f.outputX,row.y-o.half,f.outputW,o.h,"output"));
+    root.append(textAt(L.outputTextX,row.y+L.outputTop,
+      row.output.shift(),"output-text"));
+    root.append(textAt(L.outputTextX,row.y+L.outputBottom,
+      row.output.shift(),"small"));
+
+    if(row.kind==="semi")root.append(drawBranch(row));
+  });
+
+  const n=D.note,L=D.labels;
+  root.append(rect(n.x,n.y,n.w,n.h,"note-box",D.radius));
+  root.append(textAt(L.noteX,L.noteY,D.noteText,"note"));
+}
+try{
+  draw();
+}catch(error){
+  svg.hidden=true;
+  fallback.hidden=false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

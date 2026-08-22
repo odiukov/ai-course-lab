@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта трёх слоёв автомасштабирования</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --ink: midnightblue;
+    --muted: slategray;
+    --border: lightslategray;
+    --app: aliceblue;
+    --schedule: lavender;
+    --infra: honeydew;
+    --box: white;
+    --accent: royalblue;
+    --gpu: mediumslateblue;
+    --node: seagreen;
+    --arrow: darkslateblue;
+    --title-bg: ghostwhite;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --ink: whitesmoke;
+      --muted: lightsteelblue;
+      --border: slategray;
+      --app: #172b46;
+      --schedule: #292544;
+      --infra: #18382d;
+      --box: #111827;
+      --accent: deepskyblue;
+      --gpu: mediumpurple;
+      --node: mediumseagreen;
+      --arrow: lightskyblue;
+      --title-bg: #151b27;
+    }
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    width: 100%;
+    background: var(--page);
+    border: thin solid var(--border);
+  }
+
+  h2 {
+    margin: unset;
+    padding: 8px 14px;
+    background: var(--title-bg);
+    border-bottom: thin solid var(--border);
+    color: var(--ink);
+    font-size: 20px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  #fallback {
+    margin: unset;
+    padding: 18px;
+    color: var(--ink);
+    font-size: 15px;
+  }
+
+  .backdrop {
+    fill: var(--page);
+  }
+
+  .layer {
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .application {
+    fill: var(--app);
+  }
+
+  .scheduling {
+    fill: var(--schedule);
+  }
+
+  .infrastructure {
+    fill: var(--infra);
+  }
+
+  .box {
+    fill: var(--box);
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .planner,
+  .scheduler,
+  .provisioner {
+    fill: var(--box);
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+
+  .gpu-frame {
+    fill: var(--box);
+    stroke: var(--gpu);
+    stroke-width: 2.5;
+  }
+
+  .gpu {
+    fill: var(--gpu);
+    stroke: var(--box);
+    stroke-width: 1.5;
+  }
+
+  .node {
+    fill: var(--box);
+    stroke: var(--node);
+    stroke-width: 2.5;
+  }
+
+  .arrow-line {
+    stroke: var(--arrow);
+    stroke-width: 2.5;
+    fill: none;
+  }
+
+  .arrow-head {
+    fill: var(--arrow);
+  }
+
+  text {
+    fill: var(--ink);
+  }
+
+  .layer-name {
+    font-size: 12px;
+    font-weight: bold;
+    fill: var(--accent);
+  }
+
+  .layer-question {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .box-title {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .box-subtitle {
+    font-size: 12px;
+    fill: var(--muted);
+  }
+
+  .arrow-label {
+    font-size: 12px;
+    font-weight: bold;
+    fill: var(--arrow);
+  }
+
+  .gpu-label {
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .footer-label {
+    font-size: 14px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Карта трёх слоёв автомасштабирования</h2>
+  <p id="fallback">
+    Схема показывает цепочку: очередь и KV-кэш требуют новую реплику,
+    KAI Scheduler атомарно размещает её на 8 GPU, а Karpenter при нехватке
+    места добавляет GPU-узел за 45–60 секунд.
+  </p>
+  <svg id="diagram"
+       viewBox="0 0 1000 460"
+       width="1000"
+       height="460"
+       role="img"
+       aria-labelledby="diagram-title diagram-description"
+       hidden>
+    <desc id="diagram-description">
+      Три слоя автомасштабирования: Dynamo Planner или llm-d WVA изменяет
+      число реплик по очереди и KV-кэшу; KAI Scheduler размещает все 8 GPU
+      атомарно; Karpenter добавляет GPU-узел за 45–60 секунд.
+    </desc>
+  </svg>
+</figure>
+
+<script>
+const diagramData = {
+  bounds: { x1: 0, y1: 0, x2: 100, y2: 46 },
+  layers: [
+    {
+      x1: 2, y1: 1, x2: 98, y2: 13.5, className: "application",
+      name: { x: 4, y: 3.2, dx: 0, dy: 0, text: "ПРИКЛАДНОЙ СЛОЙ" },
+      question: { x: 4, y: 6, dx: 0, dy: 0, text: "Сколько реплик нужно?" },
+      note: { x: 4, y: 9, dx: 0, dy: 0, text: "Видит пользовательскую нагрузку" }
+    },
+    {
+      x1: 2, y1: 15.5, x2: 98, y2: 27.5, className: "scheduling",
+      name: { x: 4, y: 17.7, dx: 0, dy: 0, text: "СЛОЙ ПЛАНИРОВАНИЯ" },
+      question: { x: 4, y: 20.5, dx: 0, dy: 0, text: "Где поставить поды?" },
+      note: { x: 4, y: 23.5, dx: 0, dy: 0, text: "Учитывает связанность GPU" }
+    },
+    {
+      x1: 2, y1: 29.5, x2: 98, y2: 41.5, className: "infrastructure",
+      name: { x: 4, y: 31.7, dx: 0, dy: 0, text: "ИНФРАСТРУКТУРА" },
+      question: { x: 4, y: 34.5, dx: 0, dy: 0, text: "Какой узел добавить?" },
+      note: { x: 4, y: 37.5, dx: 0, dy: 0, text: "Управляет вычислительными машинами" }
+    }
+  ],
+  boxes: [
+    { x1: 26, y1: 3, x2: 42, y2: 12, className: "box" },
+    { x1: 49, y1: 3, x2: 68, y2: 12, className: "planner" },
+    { x1: 75, y1: 3, x2: 94, y2: 12, className: "box" },
+
+    { x1: 75, y1: 17, x2: 94, y2: 26, className: "box" },
+    { x1: 49, y1: 17, x2: 68, y2: 26, className: "scheduler" },
+    { x1: 26, y1: 17, x2: 43, y2: 26, className: "gpu-frame" },
+
+    { x1: 26, y1: 31, x2: 43, y2: 40, className: "box" },
+    { x1: 49, y1: 31, x2: 68, y2: 40, className: "provisioner" },
+    { x1: 75, y1: 31, x2: 94, y2: 40, className: "node" }
+  ],
+  gpuTiles: [
+    { x1: 27.3, y1: 19.2, x2: 30.5, y2: 21.3 },
+    { x1: 31.1, y1: 19.2, x2: 34.3, y2: 21.3 },
+    { x1: 34.9, y1: 19.2, x2: 38.1, y2: 21.3 },
+    { x1: 38.7, y1: 19.2, x2: 41.9, y2: 21.3 },
+    { x1: 27.3, y1: 21.9, x2: 30.5, y2: 24 },
+    { x1: 31.1, y1: 21.9, x2: 34.3, y2: 24 },
+    { x1: 34.9, y1: 21.9, x2: 38.1, y2: 24 },
+    { x1: 38.7, y1: 21.9, x2: 41.9, y2: 24 }
+  ],
+  arrows: [
+    {
+      x1: 42, y1: 7.5, x2: 49, y2: 7.5,
+      head: [[49, 7.5], [47.6, 6.8], [47.6, 8.2]],
+      label: {
+        x: 45.5, y: 6.1, dx: 0, dy: 0,
+        anchor: "middle", text: "очередь + KV-кэш"
+      }
+    },
+    {
+      x1: 68, y1: 7.5, x2: 75, y2: 7.5,
+      head: [[75, 7.5], [73.6, 6.8], [73.6, 8.2]],
+      label: {
+        x: 71.5, y: 6.1, dx: 0, dy: 0,
+        anchor: "middle", text: "число реплик"
+      }
+    },
+    {
+      x1: 84.5, y1: 12, x2: 84.5, y2: 17,
+      head: [[84.5, 17], [83.7, 15.6], [85.3, 15.6]],
+      label: {
+        x: 85, y: 14.5, dx: 8, dy: 0,
+        anchor: "start", text: "реплика → поды"
+      }
+    },
+    {
+      x1: 75, y1: 21.5, x2: 68, y2: 21.5,
+      head: [[68, 21.5], [69.4, 20.8], [69.4, 22.2]],
+      label: {
+        x: 71.5, y: 20.1, dx: 0, dy: 0,
+        anchor: "middle", text: "нужно 8 GPU"
+      }
+    },
+    {
+      x1: 49, y1: 21.5, x2: 43, y2: 21.5,
+      head: [[43, 21.5], [44.4, 20.8], [44.4, 22.2]],
+      label: {
+        x: 46, y: 23.2, dx: 0, dy: 0,
+        anchor: "middle", text: "атомарно"
+      }
+    },
+    {
+      x1: 34.5, y1: 26, x2: 34.5, y2: 31,
+      head: [[34.5, 31], [33.7, 29.6], [35.3, 29.6]],
+      label: {
+        x: 35, y: 28.5, dx: 8, dy: 0,
+        anchor: "start", text: "нет подходящих мест"
+      }
+    },
+    {
+      x1: 43, y1: 35.5, x2: 49, y2: 35.5,
+      head: [[49, 35.5], [47.6, 34.8], [47.6, 36.2]],
+      label: {
+        x: 46, y: 34.1, dx: 0, dy: 0,
+        anchor: "middle", text: "Pending-поды"
+      }
+    },
+    {
+      x1: 68, y1: 35.5, x2: 75, y2: 35.5,
+      head: [[75, 35.5], [73.6, 34.8], [73.6, 36.2]],
+      label: {
+        x: 71.5, y: 34.1, dx: 0, dy: 0,
+        anchor: "middle", text: "нужен узел"
+      }
+    }
+  ],
+  texts: [
+    {
+      x: 34, y: 5.5, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "+40 запросов"
+    },
+    {
+      x: 34, y: 8, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "очередь • KV-кэш"
+    },
+    {
+      x: 34, y: 10, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "время до первого токена"
+    },
+    {
+      x: 58.5, y: 5.8, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "Dynamo Planner"
+    },
+    {
+      x: 58.5, y: 8.4, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "или llm-d WVA"
+    },
+    {
+      x: 58.5, y: 10.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "решает масштаб реплик"
+    },
+    {
+      x: 84.5, y: 6.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "Реплика модели"
+    },
+    {
+      x: 84.5, y: 9.1, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "прикладная мощность"
+    },
+
+    {
+      x: 84.5, y: 20.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "Поды реплики"
+    },
+    {
+      x: 84.5, y: 23.3, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "ждут размещения"
+    },
+    {
+      x: 58.5, y: 20.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "KAI Scheduler"
+    },
+    {
+      x: 58.5, y: 23.3, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "«всё или ничего»"
+    },
+    {
+      x: 34.5, y: 18.1, dx: 0, dy: 0, anchor: "middle",
+      className: "gpu-label", text: "8 GPU вместе"
+    },
+    {
+      x: 34.5, y: 25.1, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "одна топология"
+    },
+
+    {
+      x: 34.5, y: 34.1, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "Свободных GPU нет"
+    },
+    {
+      x: 34.5, y: 37.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "размещение ждёт ресурс"
+    },
+    {
+      x: 58.5, y: 34.1, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "Karpenter"
+    },
+    {
+      x: 58.5, y: 37.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "подбирает NodePool"
+    },
+    {
+      x: 84.5, y: 34.1, dx: 0, dy: 0, anchor: "middle",
+      className: "box-title", text: "GPU-узел"
+    },
+    {
+      x: 84.5, y: 37.2, dx: 0, dy: 0, anchor: "middle",
+      className: "box-subtitle", text: "готов за 45–60 секунд"
+    },
+    {
+      x: 50, y: 44.2, dx: 0, dy: 0, anchor: "middle",
+      className: "footer-label",
+      text: "Поток потребности: запросы → реплика → размещение → узел"
+    }
+  ]
+};
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 10, y: 10 };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes) => {
+    const element = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      element.setAttribute(key, String(value));
+    });
+    return element;
+  };
+
+  const appendRect = item => {
+    svg.appendChild(make("rect", {
+      x: sx(item.x1),
+      y: sy(item.y1),
+      width: sx(item.x2) - sx(item.x1),
+      height: sy(item.y2) - sy(item.y1),
+      class: item.className
+    }));
+  };
+
+  const appendText = item => {
+    const text = make("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      dx: item.dx,
+      dy: item.dy,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle",
+      class: item.className
+    });
+    text.textContent = item.text;
+    svg.appendChild(text);
+  };
+
+  appendRect({
+    x1: diagramData.bounds.x1,
+    y1: diagramData.bounds.y1,
+    x2: diagramData.bounds.x2,
+    y2: diagramData.bounds.y2,
+    className: "backdrop"
+  });
+
+  diagramData.layers.forEach(layer => {
+    appendRect({
+      x1: layer.x1,
+      y1: layer.y1,
+      x2: layer.x2,
+      y2: layer.y2,
+      className: "layer " + layer.className
+    });
+
+    appendText({
+      ...layer.name,
+      anchor: "start",
+      className: "layer-name"
+    });
+    appendText({
+      ...layer.question,
+      anchor: "start",
+      className: "layer-question"
+    });
+    appendText({
+      ...layer.note,
+      anchor: "start",
+      className: "box-subtitle"
+    });
+  });
+
+  diagramData.boxes.forEach(appendRect);
+
+  diagramData.gpuTiles.forEach(tile => {
+    appendRect({ ...tile, className: "gpu" });
+  });
+
+  diagramData.arrows.forEach(arrow => {
+    svg.appendChild(make("line", {
+      x1: sx(arrow.x1),
+      y1: sy(arrow.y1),
+      x2: sx(arrow.x2),
+      y2: sy(arrow.y2),
+      class: "arrow-line"
+    }));
+
+    svg.appendChild(make("polygon", {
+      points: arrow.head
+        .map(point => sx(point[diagramData.bounds.x1]) + "," +
+          sy(point[diagramData.bounds.y1]))
+        .join(" "),
+      class: "arrow-head"
+    }));
+
+    appendText({
+      ...arrow.label,
+      className: "arrow-label"
+    });
+  });
+
+  diagramData.texts.forEach(appendText);
+
+  svg.hidden = false;
+  fallback.hidden = true;
+} catch (error) {
+  const fallback = document.getElementById("fallback");
+  const svg = document.getElementById("diagram");
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна была показать три слоя: Dynamo Planner или llm-d WVA " +
+    "меняет число реплик по очереди и KV-кэшу; KAI Scheduler атомарно " +
+    "размещает 8 GPU; Karpenter добавляет GPU-узел за 45–60 секунд.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кэшируемое сверху, изменчивое снизу</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --surface: #ffffff;
+    --surface-soft: #f1f4f8;
+    --ink: #172033;
+    --muted: #58657a;
+    --line: #c8d0dc;
+    --bad: #c53c4c;
+    --bad-fill: #fff0f2;
+    --bad-soft: #f8d7dc;
+    --good: #16784b;
+    --good-fill: #eaf8f1;
+    --good-soft: #ccebdc;
+    --accent: #455bd6;
+    --accent-fill: #edf0ff;
+    --white: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --surface: #192231;
+      --surface-soft: #202b3c;
+      --ink: #edf2fa;
+      --muted: #aeb9ca;
+      --line: #415068;
+      --bad: #ff8492;
+      --bad-fill: #3b2028;
+      --bad-soft: #552a35;
+      --good: #71d6a5;
+      --good-fill: #17372c;
+      --good-soft: #20513d;
+      --accent: #aab5ff;
+      --accent-fill: #293252;
+      --white: #ffffff;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 12px 14px 10px;
+    background: var(--page);
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 23px;
+    line-height: 1.2;
+    text-align: center;
+    letter-spacing: -0.02em;
+  }
+
+  .lead {
+    margin: 0 0 7px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.3;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .panel {
+    fill: var(--surface);
+    stroke: var(--line);
+  }
+
+  .panel-head-bad {
+    fill: var(--bad-soft);
+  }
+
+  .panel-head-good {
+    fill: var(--good-soft);
+  }
+
+  .dynamic {
+    fill: var(--bad-fill);
+    stroke: var(--bad);
+  }
+
+  .static-muted {
+    fill: var(--surface-soft);
+    stroke: var(--line);
+  }
+
+  .static-good {
+    fill: var(--good-fill);
+    stroke: var(--good);
+  }
+
+  .boundary-label {
+    fill: var(--surface);
+    stroke: var(--good);
+  }
+
+  .rate-bad {
+    fill: var(--bad);
+  }
+
+  .rate-good {
+    fill: var(--good);
+  }
+
+  .move-fill {
+    fill: var(--accent-fill);
+    stroke: var(--accent);
+  }
+
+  .outline {
+    fill: none;
+    stroke: var(--line);
+  }
+
+  .bad-line {
+    fill: none;
+    stroke: var(--bad);
+  }
+
+  .good-line {
+    fill: none;
+    stroke: var(--good);
+  }
+
+  .accent-line {
+    fill: none;
+    stroke: var(--accent);
+  }
+
+  .arrow-head {
+    fill: var(--accent);
+  }
+
+  .title-text {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: 750;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .bad-text {
+    fill: var(--bad);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .good-text {
+    fill: var(--good);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .section-text {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+  }
+
+  .rate {
+    fill: var(--white);
+    font-size: 24px;
+    font-weight: 800;
+  }
+
+  .rate-caption {
+    fill: var(--white);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .fallback {
+    margin: 10px 0 0;
+    padding: 14px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Кэшируемое сверху, изменчивое снизу</h1>
+  <p class="lead">Тот же промпт после перестановки сохраняет длинный общий префикс</p>
+  <svg id="diagram" viewBox="0 0 1000 440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Сравнение неудачного и правильного порядка блоков промпта</title>
+    <desc id="svgDesc">Слева динамические данные стоят в начале и дают семь процентов попаданий. Справа правила и примеры образуют стабильный префикс, динамика находится после границы кэша, а доля попаданий достигает семидесяти четырёх процентов.</desc>
+    <g id="drawing"></g>
+  </svg>
+  <p id="fallback" class="fallback">
+    Схема должна показать два промпта: динамика в начале даёт 7% попаданий,
+    а стабильный префикс с динамикой после границы кэша — 74%.
+  </p>
+</main>
+
+<script>
+const diagramData = [{
+  left: {
+    outer: [24, 20, 468, 382],
+    header: [24, 20, 468, 66],
+    dynamic: [42, 82, 450, 166],
+    cutoffY: 176,
+    static: [42, 194, 450, 310],
+    rate: [42, 326, 450, 366],
+    centerX: 246,
+    textX: 60,
+    dynamicLines: [
+      [60, 106, "Текущее время: {timestamp}"],
+      [60, 130, "ID пользователя: {user_id}"],
+      [60, 154, "Примеры: перемешанный порядок"]
+    ],
+    staticLines: [
+      [60, 221, "Роль ассистента"],
+      [60, 247, "Правила и ограничения"],
+      [60, 273, "Формат ответа"],
+      [60, 299, "Неизменная инструкция"]
+    ]
+  },
+  right: {
+    outer: [532, 20, 976, 382],
+    header: [532, 20, 976, 66],
+    static: [550, 82, 958, 230],
+    boundaryY: 247,
+    boundaryLabel: [681, 235, 827, 259],
+    dynamic: [550, 270, 958, 318],
+    rate: [550, 326, 958, 366],
+    centerX: 754,
+    textX: 568,
+    staticLines: [
+      [568, 108, "Роль ассистента"],
+      [568, 136, "Правила и ограничения"],
+      [568, 164, "Формат ответа"],
+      [568, 192, "Примеры в стабильном порядке"],
+      [568, 218, "Неизменная инструкция"]
+    ],
+    dynamicLines: [
+      [568, 290, "Текущее время · ID пользователя"],
+      [568, 308, "Текущий вопрос"]
+    ]
+  },
+  reorder: {
+    line: [474, 146, 526, 146],
+    head: [[526, 146], [514, 138], [514, 154]],
+    label: [500, 124, "переставить"],
+    box: [467, 108, 533, 164]
+  },
+  footer: {
+    y: 412,
+    badMark: [119, 407, 139, 417],
+    badText: [149, 412, "первое различие обрывает префикс"],
+    goodMark: [573, 407, 593, 417],
+    goodText: [603, 412, "стабильное начало переиспользуется"]
+  },
+  dash: [8, 7],
+  lineWidth: 2
+}];
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const [data] = diagramData;
+  const svg = document.getElementById("diagram");
+  const root = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const NS = "http://www.w3.org/2000/svg";
+
+  function make(name, attributes, content) {
+    const element = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attributes || {})) {
+      element.setAttribute(key, String(value));
+    }
+    if (content !== undefined) {
+      element.textContent = content;
+    }
+    return element;
+  }
+
+  function add(element) {
+    root.appendChild(element);
+    return element;
+  }
+
+  function rectangle(box, className) {
+    const [x1, y1, x2, y2] = box;
+    return add(make("rect", {
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1),
+      class: className,
+      "stroke-width": data.lineWidth
+    }));
+  }
+
+  function line(x1, y1, x2, y2, className, dashed) {
+    const attributes = {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className,
+      "stroke-width": data.lineWidth
+    };
+    if (dashed) {
+      const [dash, gap] = data.dash;
+      attributes["stroke-dasharray"] =
+        String(sx(dash) - sx(origin.x)) + " " +
+        String(sx(gap) - sx(origin.x));
+    }
+    return add(make("line", attributes));
+  }
+
+  function label(x, y, content, className, anchor) {
+    return add(make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content));
+  }
+
+  function polygon(points, className) {
+    return add(make("polygon", {
+      points: points.map(([x, y]) => sx(x) + "," + sy(y)).join(" "),
+      class: className
+    }));
+  }
+
+  function renderLines(lines, className) {
+    for (const [x, y, content] of lines) {
+      label(x, y, content, className, "start");
+    }
+  }
+
+  rectangle(data.left.outer, "panel");
+  rectangle(data.left.header, "panel-head-bad");
+  label(
+    data.left.centerX,
+    data.left.header[1] + (data.left.header[3] - data.left.header[1]) / scale.x,
+    "ДИНАМИКА В НАЧАЛЕ",
+    "title-text",
+    "middle"
+  );
+
+  rectangle(data.left.dynamic, "dynamic");
+  label(data.left.textX, 92, "МЕНЯЕТСЯ ПРИ КАЖДОМ ВЫЗОВЕ", "bad-text", "start");
+  renderLines(data.left.dynamicLines, "label");
+
+  line(
+    data.left.dynamic[0],
+    data.left.cutoffY,
+    data.left.dynamic[2],
+    data.left.cutoffY,
+    "bad-line",
+    true
+  );
+  label(
+    data.left.dynamic[2],
+    data.left.cutoffY,
+    "совпадение закончилось",
+    "bad-text",
+    "end"
+  );
+
+  rectangle(data.left.static, "static-muted");
+  label(data.left.textX, 207, "НИЖЕ УЖЕ НЕ ПОМОГАЕТ", "small", "start");
+  renderLines(data.left.staticLines, "label");
+
+  rectangle(data.left.rate, "rate-bad");
+  label(142, 346, "7%", "rate", "middle");
+  label(282, 346, "попаданий в кэш", "rate-caption", "middle");
+
+  rectangle(data.right.outer, "panel");
+  rectangle(data.right.header, "panel-head-good");
+  label(
+    data.right.centerX,
+    data.right.header[1] + (data.right.header[3] - data.right.header[1]) / scale.x,
+    "СТАБИЛЬНЫЙ ПРЕФИКС",
+    "title-text",
+    "middle"
+  );
+
+  rectangle(data.right.static, "static-good");
+  label(data.right.textX, 94, "КЭШИРУЕМЫЙ БЛОК", "good-text", "start");
+  renderLines(data.right.staticLines, "label");
+
+  line(
+    data.right.static[0],
+    data.right.boundaryY,
+    data.right.static[2],
+    data.right.boundaryY,
+    "good-line",
+    true
+  );
+  rectangle(data.right.boundaryLabel, "boundary-label");
+  label(data.right.centerX, data.right.boundaryY, "ГРАНИЦА КЭША", "good-text", "middle");
+
+  rectangle(data.right.dynamic, "dynamic");
+  label(data.right.textX, 278, "ДИНАМИКА ПОСЛЕ ГРАНИЦЫ", "bad-text", "start");
+  renderLines(data.right.dynamicLines, "label");
+
+  rectangle(data.right.rate, "rate-good");
+  label(650, 346, "74%", "rate", "middle");
+  label(806, 346, "попаданий в кэш", "rate-caption", "middle");
+
+  rectangle(data.reorder.box, "move-fill");
+  const [rx1, ry1, rx2, ry2] = data.reorder.line;
+  line(rx1, ry1, rx2, ry2, "accent-line", false);
+  polygon(data.reorder.head, "arrow-head");
+  label(
+    data.reorder.label[0],
+    data.reorder.label[1],
+    data.reorder.label[2],
+    "small",
+    "middle"
+  );
+
+  const [badX1, badY1, badX2, badY2] = data.footer.badMark;
+  rectangle([badX1, badY1, badX2, badY2], "rate-bad");
+  label(
+    data.footer.badText[0],
+    data.footer.badText[1],
+    data.footer.badText[2],
+    "small",
+    "start"
+  );
+
+  const [goodX1, goodY1, goodX2, goodY2] = data.footer.goodMark;
+  rectangle([goodX1, goodY1, goodX2, goodY2], "rate-good");
+  label(
+    data.footer.goodText[0],
+    data.footer.goodText[1],
+    data.footer.goodText[2],
+    "small",
+    "start"
+  );
+
+  fallback.hidden = true;
+  svg.removeAttribute("aria-busy");
+} catch (error) {
+  const fallback = document.getElementById("fallback");
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна показать: timestamp, ID пользователя и перемешанные примеры в начале дают 7% попаданий; стабильные правила и примеры перед границей кэша, а динамика после неё — 74%.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

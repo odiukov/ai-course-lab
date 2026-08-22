@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Путь запроса через cache-aware-роутер</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: whitesmoke;
+    --panel: white;
+    --ink: midnightblue;
+    --muted: slategray;
+    --line: lightslategray;
+    --flow: royalblue;
+    --cache: mediumseagreen;
+    --event: mediumpurple;
+    --fallback: darkorange;
+    --danger: crimson;
+    --soft-flow: aliceblue;
+    --soft-cache: honeydew;
+    --soft-event: lavender;
+    --soft-fallback: oldlace;
+    --shadow: lightgray;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --panel: #182235;
+      --ink: #eef4ff;
+      --muted: #b4c0d3;
+      --line: #718096;
+      --flow: #78a9ff;
+      --cache: #70d6a5;
+      --event: #c4a7ff;
+      --fallback: #ffb454;
+      --danger: #ff8097;
+      --soft-flow: #172d4f;
+      --soft-cache: #15372d;
+      --soft-event: #30254b;
+      --soft-fallback: #452f18;
+      --shadow: #0b1020;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink); }
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .frame {
+    width: 100%;
+    max-width: 1200px;
+    margin: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px var(--shadow);
+  }
+  h1 {
+    margin: 0;
+    padding: 13px 18px 10px;
+    font-size: 20px;
+    font-weight: 750;
+    letter-spacing: .01em;
+    border-bottom: 1px solid var(--line);
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 472px;
+    background: var(--panel);
+  }
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+    dominant-baseline: middle;
+  }
+  .muted { fill: var(--muted); }
+  .flow-line { stroke: var(--flow); }
+  .event-line { stroke: var(--event); }
+  .cache-line { stroke: var(--cache); }
+  .fallback-line { stroke: var(--fallback); }
+  .node { stroke: var(--line); fill: var(--panel); }
+  .flow-node { stroke: var(--flow); fill: var(--soft-flow); }
+  .cache-node { stroke: var(--cache); fill: var(--soft-cache); }
+  .event-node { stroke: var(--event); fill: var(--soft-event); }
+  .fallback-node { stroke: var(--fallback); fill: var(--soft-fallback); }
+  .selected { stroke: var(--cache); fill: var(--soft-cache); }
+  .fallback-selected { stroke: var(--fallback); fill: var(--soft-fallback); }
+  .fallback-text {
+    padding: 18px;
+    color: var(--danger);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1>Путь запроса через cache-aware-роутер</h1>
+  <svg id="diagram" viewBox="0 0 1200 438" width="1200" height="438"
+       role="img" aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Путь запроса через cache-aware-роутер</title>
+    <desc id="svg-desc">Промпт хэшируется по первым 512 токенам. Роутер ищет prefix_key в индексе prefix hash → replica, выбирает совпавшую реплику, а при промахе — реплику с самой короткой GPU-очередью. Индекс обновляют события block_added и eviction от трёх реплик.</desc>
+    <g id="stage"></g>
+  </svg>
+  <div id="fallback" class="fallback-text" hidden>
+    Схема должна показывать путь промпта через хэш первых 512 токенов и индекс
+    «prefix hash → replica» к совпавшей реплике либо, при промахе, к самой
+    короткой GPU-очереди. Индекс обновляют события block_added и eviction.
+  </div>
+</main>
+<script>
+const DATA = [{
+  z: 0,
+  map: { ox: 0, oy: 0, sx: 1, sy: 1 },
+  canvas: { w: 1200, h: 438 },
+  style: {
+    line: 2, strong: 3, event: 2, dash: 8, gap: 7,
+    font: 15, small: 13, title: 17, tiny: 12,
+    radius: 10, dot: 5, queue: 8
+  },
+  boxes: [
+    { kind: "flow-node", x: 28, y: 170, w: 162, h: 90, r: 12 },
+    { kind: "flow-node", x: 230, y: 170, w: 188, h: 90, r: 12 },
+    { kind: "cache-node", x: 470, y: 120, w: 252, h: 190, r: 12 },
+    { kind: "fallback-node", x: 720, y: 316, w: 190, h: 58, r: 12 },
+    { kind: "node", x: 960, y: 45, w: 212, h: 82, r: 12 },
+    { kind: "selected", x: 960, y: 162, w: 212, h: 82, r: 12 },
+    { kind: "fallback-selected", x: 960, y: 279, w: 212, h: 82, r: 12 }
+  ],
+  diamonds: [
+    {
+      kind: "flow-node",
+      points: [
+        { x: 810, y: 174 }, { x: 878, y: 215 },
+        { x: 810, y: 256 }, { x: 742, y: 215 }
+      ]
+    }
+  ],
+  separators: [
+    { kind: "cache-line", a: { x: 486, y: 174 }, b: { x: 706, y: 174 } },
+    { kind: "cache-line", a: { x: 486, y: 229 }, b: { x: 706, y: 229 } }
+  ],
+  arrows: [
+    {
+      kind: "flow-line", strong: true,
+      points: [{ x: 190, y: 215 }, { x: 230, y: 215 }],
+      head: [{ x: 230, y: 215 }, { x: 216, y: 207 }, { x: 216, y: 223 }]
+    },
+    {
+      kind: "flow-line", strong: true,
+      points: [{ x: 418, y: 215 }, { x: 470, y: 215 }],
+      head: [{ x: 470, y: 215 }, { x: 456, y: 207 }, { x: 456, y: 223 }]
+    },
+    {
+      kind: "flow-line", strong: true,
+      points: [{ x: 722, y: 215 }, { x: 742, y: 215 }],
+      head: [{ x: 742, y: 215 }, { x: 728, y: 207 }, { x: 728, y: 223 }]
+    },
+    {
+      kind: "cache-line", strong: true,
+      points: [
+        { x: 878, y: 215 }, { x: 918, y: 215 },
+        { x: 918, y: 203 }, { x: 960, y: 203 }
+      ],
+      head: [{ x: 960, y: 203 }, { x: 946, y: 195 }, { x: 946, y: 211 }]
+    },
+    {
+      kind: "fallback-line", strong: true,
+      points: [{ x: 810, y: 256 }, { x: 810, y: 316 }],
+      head: [{ x: 810, y: 316 }, { x: 802, y: 302 }, { x: 818, y: 302 }]
+    },
+    {
+      kind: "fallback-line", strong: true,
+      points: [
+        { x: 910, y: 345 }, { x: 934, y: 345 },
+        { x: 934, y: 320 }, { x: 960, y: 320 }
+      ],
+      head: [{ x: 960, y: 320 }, { x: 946, y: 312 }, { x: 946, y: 328 }]
+    }
+  ],
+  events: [
+    {
+      points: [{ x: 1018, y: 127 }, { x: 1018, y: 392 }],
+      dot: { x: 1018, y: 392 }
+    },
+    {
+      points: [{ x: 1080, y: 244 }, { x: 1080, y: 392 }],
+      dot: { x: 1080, y: 392 }
+    },
+    {
+      points: [{ x: 1142, y: 361 }, { x: 1142, y: 392 }],
+      dot: { x: 1142, y: 392 }
+    },
+    {
+      points: [
+        { x: 1142, y: 392 }, { x: 596, y: 392 },
+        { x: 596, y: 310 }
+      ],
+      head: [{ x: 596, y: 310 }, { x: 588, y: 324 }, { x: 604, y: 324 }]
+    }
+  ],
+  queueBars: [
+    { kind: "flow-line", x1: 1070, x2: 1146, y: 105 },
+    { kind: "cache-line", x1: 1070, x2: 1124, y: 222 },
+    { kind: "fallback-line", x1: 1070, x2: 1094, y: 339 }
+  ],
+  labels: [
+    { text: "Промпт", at: { x: 109, y: 198 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "", size: "title", weight: "bold" },
+    { text: "длинный диалог", at: { x: 109, y: 228 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small" },
+
+    { text: "первые 512 токенов", at: { x: 210, y: 197 }, off: { x: 0, y: -20 }, anchor: "middle", cls: "muted", size: "small" },
+    { text: "Стабильный хэш", at: { x: 324, y: 197 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "", size: "title", weight: "bold" },
+    { text: "prefix_key", at: { x: 324, y: 229 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "font", mono: true },
+
+    { text: "Индекс роутера", at: { x: 596, y: 143 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "", size: "title", weight: "bold" },
+    { text: "prefix hash → replica", at: { x: 596, y: 161 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small", mono: true },
+    { text: "prefix_key", at: { x: 492, y: 202 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "font", mono: true },
+    { text: "→", at: { x: 608, y: 202 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "font" },
+    { text: "Реплика B", at: { x: 690, y: 202 }, off: { x: 0, y: 0 }, anchor: "end", cls: "", size: "font", weight: "bold" },
+    { text: "поиск O(1)", at: { x: 596, y: 256 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small" },
+    { text: "без опроса реплик", at: { x: 596, y: 280 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small" },
+
+    { text: "Совпадение?", at: { x: 810, y: 209 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "", size: "font", weight: "bold" },
+    { text: "в индексе", at: { x: 810, y: 231 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small" },
+    { text: "да", at: { x: 894, y: 195 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "small", weight: "bold" },
+    { text: "нет", at: { x: 832, y: 278 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "small", weight: "bold" },
+
+    { text: "Fallback", at: { x: 815, y: 334 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "", size: "font", weight: "bold" },
+    { text: "самая короткая GPU-очередь", at: { x: 815, y: 355 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "tiny" },
+
+    { text: "Реплика A", at: { x: 980, y: 68 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "font", weight: "bold" },
+    { text: "локальная проверка KV-кэша", at: { x: 980, y: 88 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+    { text: "GPU-очередь", at: { x: 980, y: 106 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+
+    { text: "Реплика B", at: { x: 980, y: 185 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "font", weight: "bold" },
+    { text: "совпадение: продолжить с новой части", at: { x: 980, y: 205 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+    { text: "GPU-очередь", at: { x: 980, y: 223 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+
+    { text: "Реплика C", at: { x: 980, y: 302 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "font", weight: "bold" },
+    { text: "fallback: окончательная проверка кэша", at: { x: 980, y: 322 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+    { text: "GPU-очередь", at: { x: 980, y: 340 }, off: { x: 0, y: 0 }, anchor: "start", cls: "muted", size: "tiny" },
+
+    { text: "block_added", at: { x: 1006, y: 143 }, off: { x: 0, y: 0 }, anchor: "end", cls: "", size: "tiny", mono: true },
+    { text: "eviction", at: { x: 1092, y: 262 }, off: { x: 0, y: 0 }, anchor: "start", cls: "", size: "tiny", mono: true },
+    { text: "block_added", at: { x: 1128, y: 375 }, off: { x: 0, y: 0 }, anchor: "end", cls: "", size: "tiny", mono: true },
+    { text: "pub/sub: события поддерживают индекс свежим", at: { x: 760, y: 416 }, off: { x: 0, y: 0 }, anchor: "middle", cls: "muted", size: "small" }
+  ]
+}];
+
+const [C] = DATA;
+const origin = Object.freeze({ x: C.map.ox, y: C.map.oy });
+const scale = Object.freeze({ x: C.map.sx, y: C.map.sy });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const stage = document.getElementById("stage");
+  const ns = svg.namespaceURI;
+  const make = (name, attrs, cls) => {
+    const el = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    if (cls) el.setAttribute("class", cls);
+    stage.appendChild(el);
+    return el;
+  };
+  const points = list => list.map(p => `${sx(p.x)},${sy(p.y)}`).join(" ");
+
+  C.boxes.forEach(b => make("rect", {
+    x: sx(b.x), y: sy(b.y),
+    width: sx(b.x + b.w) - sx(C.z),
+    height: sy(b.y + b.h) - sy(C.z),
+    rx: sx(b.r) - sx(C.z), ry: sy(b.r) - sy(C.z),
+    "stroke-width": C.style.line
+  }, b.kind));
+
+  C.diamonds.forEach(d => make("polygon", {
+    points: points(d.points),
+    "stroke-width": C.style.line
+  }, d.kind));
+
+  C.separators.forEach(s => make("line", {
+    x1: sx(s.a.x), y1: sy(s.a.y),
+    x2: sx(s.b.x), y2: sy(s.b.y),
+    "stroke-width": C.style.line
+  }, s.kind));
+
+  C.events.forEach(e => {
+    make("polyline", {
+      points: points(e.points),
+      fill: "none",
+      "stroke-width": C.style.event,
+      "stroke-dasharray": `${C.style.dash} ${C.style.gap}`,
+      "stroke-linejoin": "round",
+      "stroke-linecap": "round"
+    }, "event-line");
+    if (e.dot) make("circle", {
+      cx: sx(e.dot.x), cy: sy(e.dot.y),
+      r: sx(C.style.dot) - sx(C.z)
+    }, "event-node");
+    if (e.head) make("polygon", { points: points(e.head) }, "event-line");
+  });
+
+  C.arrows.forEach(a => {
+    make("polyline", {
+      points: points(a.points),
+      fill: "none",
+      "stroke-width": a.strong ? C.style.strong : C.style.line,
+      "stroke-linejoin": "round",
+      "stroke-linecap": "round"
+    }, a.kind);
+    make("polygon", { points: points(a.head) }, a.kind);
+  });
+
+  C.queueBars.forEach(q => make("line", {
+    x1: sx(q.x1), y1: sy(q.y),
+    x2: sx(q.x2), y2: sy(q.y),
+    "stroke-width": C.style.queue,
+    "stroke-linecap": "round"
+  }, q.kind));
+
+  C.labels.forEach(l => {
+    const t = make("text", {
+      x: sx(l.at.x + l.off.x),
+      y: sy(l.at.y + l.off.y),
+      "text-anchor": l.anchor,
+      "font-size": C.style[l.size],
+      "font-weight": l.weight || "normal"
+    }, l.cls);
+    if (l.mono) t.setAttribute("font-family", "ui-monospace, SFMono-Regular, Consolas, monospace");
+    t.textContent = l.text;
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Одно чтение весов — несколько проверенных токенов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: ghostwhite;
+    --panel: white;
+    --card: aliceblue;
+    --card-strong: lavender;
+    --text: darkslategray;
+    --muted: slategray;
+    --line: lightslategray;
+    --blue: royalblue;
+    --blue-soft: lightcyan;
+    --green: seagreen;
+    --green-soft: honeydew;
+    --orange: darkorange;
+    --orange-soft: oldlace;
+    --danger: firebrick;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: auto;
+    padding: 14px;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  main {
+    width: 100%;
+    max-width: 1200px;
+    margin: auto;
+  }
+
+  h1 {
+    margin: auto auto 10px;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  .frame {
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 500px;
+  }
+
+  text {
+    fill: var(--text);
+    font-family: inherit;
+  }
+
+  .lane-title {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .lane-note {
+    font-size: 15px;
+    fill: var(--muted);
+  }
+
+  .small {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .label {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .value {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .token {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .legend {
+    font-size: 14px;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .top-card {
+    fill: var(--card);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .weight-top {
+    fill: var(--card-strong);
+    stroke: var(--blue);
+    stroke-width: 2px;
+  }
+
+  .token-top {
+    fill: var(--orange-soft);
+    stroke: var(--orange);
+    stroke-width: 2px;
+  }
+
+  .weight-bottom {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 2.5px;
+  }
+
+  .target {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 2.5px;
+  }
+
+  .candidate {
+    fill: var(--panel);
+    stroke: var(--green);
+    stroke-width: 1.5px;
+  }
+
+  .arrow-top {
+    stroke: var(--orange);
+    stroke-width: 2.5px;
+    fill: var(--orange);
+  }
+
+  .arrow-bottom {
+    stroke: var(--green);
+    stroke-width: 3px;
+    fill: var(--green);
+  }
+
+  .brace {
+    stroke: var(--green);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .accent-blue { fill: var(--blue); }
+  .accent-green { fill: var(--green); }
+  .accent-danger { fill: var(--danger); }
+
+  .fallback {
+    margin: auto;
+    padding: 18px;
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --panel: darkslategray;
+      --card: midnightblue;
+      --card-strong: darkslateblue;
+      --text: whitesmoke;
+      --muted: lightgray;
+      --line: slategray;
+      --blue: lightskyblue;
+      --blue-soft: darkslateblue;
+      --green: lightgreen;
+      --green-soft: darkgreen;
+      --orange: orange;
+      --orange-soft: saddlebrown;
+      --danger: lightsalmon;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Одно чтение весов — несколько проверенных токенов</h1>
+  <div class="frame">
+    <svg id="diagram"
+         viewBox="0 0 1200 500"
+         width="1200"
+         height="500"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Сравнение двух проходов H100</title>
+      <desc id="svg-desc">
+        Сверху пять отдельных чтений примерно 140 гигабайт весов дают по
+        одному токену. Снизу одно такое чтение позволяет проверить пять
+        токенов-кандидатов за один проход target-модели.
+      </desc>
+    </svg>
+    <p id="fallback" class="fallback" hidden>
+      Верхняя дорожка должна показывать пять отдельных чтений примерно
+      140 ГБ весов ради пяти одиночных токенов. Нижняя — одно чтение тех же
+      весов ради проверки пяти токенов-кандидатов.
+    </p>
+  </div>
+</main>
+
+<script>
+const diagramData = [{
+  origin: { x: 24, y: 12 },
+  scale: { x: 1, y: 1 },
+  corner: 10,
+  arrow: { back: 10, half: 6 },
+  divider: { x1: 12, x2: 1140, y: 254 },
+  top: {
+    title: { x: 18, y: 88 },
+    subtitle: { x: 18, y: 111 },
+    note: { x: 220, y: 42 },
+    noteText: "5 проходов H100 · 5 чтений весов",
+    card: { y: 60, w: 165, h: 168 },
+    headerY: 82,
+    weight: { y: 94, dx: 12, w: 141, h: 50 },
+    weightLine1Y: 115,
+    weightLine2Y: 134,
+    arrowStartY: 144,
+    arrowEndY: 172,
+    token: { y: 178, dx: 17, w: 131, h: 38 },
+    tokenY: 203,
+    passes: [
+      { x: 220, name: "H100" },
+      { x: 400, name: "H100" },
+      { x: 580, name: "H100" },
+      { x: 760, name: "H100" },
+      { x: 940, name: "H100" }
+    ]
+  },
+  bottom: {
+    title: { x: 18, y: 332 },
+    subtitle: { x: 18, y: 355 },
+    note: { x: 220, y: 286 },
+    noteText: "1 проход H100 · 1 чтение · 5 проверок",
+    weight: { x: 220, y: 312, w: 190, h: 102 },
+    weightTitleY: 340,
+    weightValueY: 371,
+    weightSmallY: 395,
+    arrow: { x1: 410, x2: 458, y: 363 },
+    arrowLabel: { x: 423, y: 342 },
+    target: { x: 458, y: 300, w: 657, h: 128 },
+    targetTitle: { x: 482, y: 324 },
+    targetNote: { x: 1089, y: 324 },
+    cellY: 340,
+    cellW: 112,
+    cellH: 70,
+    tokenY: 367,
+    checkY: 393,
+    cells: [
+      { x: 478, token: "t₁" },
+      { x: 606, token: "t₂" },
+      { x: 734, token: "t₃" },
+      { x: 862, token: "t₄" },
+      { x: 990, token: "t₅" }
+    ],
+    brace: { x1: 478, x2: 1102, y: 442, tickY: 434 },
+    braceLabel: { x: 790, y: 462 },
+    legend: { x: 18, y: 482 }
+  }
+}];
+
+const [cfg] = diagramData;
+const origin = cfg.origin;
+const scale = cfg.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function add(tag, attrs, text) {
+    const node = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      node.setAttribute(name, value);
+    }
+    if (text !== undefined) node.textContent = text;
+    svg.appendChild(node);
+    return node;
+  }
+
+  function rect(box, className) {
+    return add("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.x + box.w) - sx(box.x),
+      height: sy(box.y + box.h) - sy(box.y),
+      rx: sx(cfg.corner) - sx(0),
+      class: className
+    });
+  }
+
+  function text(x, y, value, className, anchor) {
+    return add("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, value);
+  }
+
+  function line(x1, y1, x2, y2, className) {
+    return add("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    });
+  }
+
+  function arrowV(x, y1, y2, className) {
+    line(x, y1, x, y2 - cfg.arrow.back, className);
+    add("polygon", {
+      points: [
+        sx(x) + "," + sy(y2),
+        sx(x - cfg.arrow.half) + "," + sy(y2 - cfg.arrow.back),
+        sx(x + cfg.arrow.half) + "," + sy(y2 - cfg.arrow.back)
+      ].join(" "),
+      class: className
+    });
+  }
+
+  function arrowH(x1, x2, y, className) {
+    line(x1, y, x2 - cfg.arrow.back, y, className);
+    add("polygon", {
+      points: [
+        sx(x2) + "," + sy(y),
+        sx(x2 - cfg.arrow.back) + "," + sy(y - cfg.arrow.half),
+        sx(x2 - cfg.arrow.back) + "," + sy(y + cfg.arrow.half)
+      ].join(" "),
+      class: className
+    });
+  }
+
+  text(
+    cfg.top.title.x,
+    cfg.top.title.y,
+    "Обычный decode",
+    "lane-title",
+    "start"
+  );
+  text(
+    cfg.top.subtitle.x,
+    cfg.top.subtitle.y,
+    "одно чтение → один токен",
+    "lane-note",
+    "start"
+  );
+  text(
+    cfg.top.note.x,
+    cfg.top.note.y,
+    cfg.top.noteText,
+    "value accent-danger",
+    "start"
+  );
+
+  for (const pass of cfg.top.passes) {
+    rect({
+      x: pass.x,
+      y: cfg.top.card.y,
+      w: cfg.top.card.w,
+      h: cfg.top.card.h
+    }, "top-card");
+
+    text(
+      pass.x + cfg.top.card.w / cfg.scale.x / cfg.scale.x,
+      cfg.top.headerY,
+      pass.name,
+      "small",
+      "middle"
+    );
+
+    rect({
+      x: pass.x + cfg.top.weight.dx,
+      y: cfg.top.weight.y,
+      w: cfg.top.weight.w,
+      h: cfg.top.weight.h
+    }, "weight-top");
+
+    text(
+      pass.x + cfg.top.card.w / cfg.scale.x / cfg.scale.x,
+      cfg.top.weightLine1Y,
+      "≈140 ГБ",
+      "value accent-blue",
+      "middle"
+    );
+    text(
+      pass.x + cfg.top.card.w / cfg.scale.x / cfg.scale.x,
+      cfg.top.weightLine2Y,
+      "весов из HBM",
+      "small",
+      "middle"
+    );
+
+    arrowV(
+      pass.x + cfg.top.card.w / cfg.scale.x / cfg.scale.x,
+      cfg.top.arrowStartY,
+      cfg.top.arrowEndY,
+      "arrow-top"
+    );
+
+    rect({
+      x: pass.x + cfg.top.token.dx,
+      y: cfg.top.token.y,
+      w: cfg.top.token.w,
+      h: cfg.top.token.h
+    }, "token-top");
+
+    text(
+      pass.x + cfg.top.card.w / cfg.scale.x / cfg.scale.x,
+      cfg.top.tokenY,
+      "1 токен",
+      "label",
+      "middle"
+    );
+  }
+
+  line(
+    cfg.divider.x1,
+    cfg.divider.y,
+    cfg.divider.x2,
+    cfg.divider.y,
+    "divider"
+  );
+
+  text(
+    cfg.bottom.title.x,
+    cfg.bottom.title.y,
+    "Speculative decoding",
+    "lane-title",
+    "start"
+  );
+  text(
+    cfg.bottom.subtitle.x,
+    cfg.bottom.subtitle.y,
+    "одно чтение → пять проверок",
+    "lane-note",
+    "start"
+  );
+  text(
+    cfg.bottom.note.x,
+    cfg.bottom.note.y,
+    cfg.bottom.noteText,
+    "value accent-green",
+    "start"
+  );
+
+  rect(cfg.bottom.weight, "weight-bottom");
+  text(
+    cfg.bottom.weight.x + cfg.bottom.weight.w / cfg.scale.x / cfg.scale.x,
+    cfg.bottom.weightTitleY,
+    "HBM → target",
+    "label accent-blue",
+    "middle"
+  );
+  text(
+    cfg.bottom.weight.x + cfg.bottom.weight.w / cfg.scale.x / cfg.scale.x,
+    cfg.bottom.weightValueY,
+    "≈140 ГБ весов",
+    "value",
+    "middle"
+  );
+  text(
+    cfg.bottom.weight.x + cfg.bottom.weight.w / cfg.scale.x / cfg.scale.x,
+    cfg.bottom.weightSmallY,
+    "загружены один раз",
+    "small",
+    "middle"
+  );
+
+  text(
+    cfg.bottom.arrowLabel.x,
+    cfg.bottom.arrowLabel.y,
+    "одно чтение",
+    "small accent-green",
+    "start"
+  );
+  arrowH(
+    cfg.bottom.arrow.x1,
+    cfg.bottom.arrow.x2,
+    cfg.bottom.arrow.y,
+    "arrow-bottom"
+  );
+
+  rect(cfg.bottom.target, "target");
+  text(
+    cfg.bottom.targetTitle.x,
+    cfg.bottom.targetTitle.y,
+    "target-модель",
+    "label accent-green",
+    "start"
+  );
+  text(
+    cfg.bottom.targetNote.x,
+    cfg.bottom.targetNote.y,
+    "один forward pass",
+    "small",
+    "end"
+  );
+
+  for (const cell of cfg.bottom.cells) {
+    rect({
+      x: cell.x,
+      y: cfg.bottom.cellY,
+      w: cfg.bottom.cellW,
+      h: cfg.bottom.cellH
+    }, "candidate");
+
+    text(
+      cell.x + cfg.bottom.cellW / cfg.scale.x / cfg.scale.x,
+      cfg.bottom.tokenY,
+      cell.token,
+      "token",
+      "middle"
+    );
+    text(
+      cell.x + cfg.bottom.cellW / cfg.scale.x / cfg.scale.x,
+      cfg.bottom.checkY,
+      "проверка",
+      "small accent-green",
+      "middle"
+    );
+  }
+
+  line(
+    cfg.bottom.brace.x1,
+    cfg.bottom.brace.y,
+    cfg.bottom.brace.x2,
+    cfg.bottom.brace.y,
+    "brace"
+  );
+  line(
+    cfg.bottom.brace.x1,
+    cfg.bottom.brace.tickY,
+    cfg.bottom.brace.x1,
+    cfg.bottom.brace.y,
+    "brace"
+  );
+  line(
+    cfg.bottom.brace.x2,
+    cfg.bottom.brace.tickY,
+    cfg.bottom.brace.x2,
+    cfg.bottom.brace.y,
+    "brace"
+  );
+  text(
+    cfg.bottom.braceLabel.x,
+    cfg.bottom.braceLabel.y,
+    "5 позиций проверены после одного чтения весов",
+    "label accent-green",
+    "middle"
+  );
+  text(
+    cfg.bottom.legend.x,
+    cfg.bottom.legend.y,
+    "Проверка ≠ автоматическое принятие: при первом расхождении подтверждённая цепочка обрывается.",
+    "legend",
+    "start"
+  );
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

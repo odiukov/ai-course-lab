@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Путь запроса через L1 и L2</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --text: #172033;
+    --muted: #526078;
+    --box: #ffffff;
+    --box-strong: #eef4ff;
+    --panel: #edf2f8;
+    --line: #65738b;
+    --l1: #2563a8;
+    --l1-fill: #e4f0ff;
+    --hit: #16805d;
+    --hit-fill: #e1f6ed;
+    --miss: #b45a22;
+    --miss-fill: #fff0e3;
+    --result: #6c4fc7;
+    --result-fill: #eee9ff;
+    --save: #327276;
+    --save-fill: #e2f3f3;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --text: #eef3fb;
+      --muted: #b8c3d5;
+      --box: #1a2332;
+      --box-strong: #1b2d46;
+      --panel: #151e2c;
+      --line: #94a3b8;
+      --l1: #77b8ff;
+      --l1-fill: #173252;
+      --hit: #65d6a7;
+      --hit-fill: #153d31;
+      --miss: #ffad73;
+      --miss-fill: #472b1d;
+      --result: #b7a2ff;
+      --result-fill: #302755;
+      --save: #73cbd0;
+      --save-fill: #173b3d;
+    }
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .title {
+    color: var(--text);
+    background: var(--bg);
+    font-size: 21px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+    font-family: inherit;
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 16px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .strong {
+    font-weight: bold;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .box {
+    fill: var(--box);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .l1-box {
+    fill: var(--l1-fill);
+    stroke: var(--l1);
+    stroke-width: 3px;
+  }
+
+  .hit-box {
+    fill: var(--hit-fill);
+    stroke: var(--hit);
+    stroke-width: 2px;
+  }
+
+  .miss-box {
+    fill: var(--miss-fill);
+    stroke: var(--miss);
+    stroke-width: 2px;
+  }
+
+  .result-box {
+    fill: var(--result-fill);
+    stroke: var(--result);
+    stroke-width: 3px;
+  }
+
+  .save-box {
+    fill: var(--save-fill);
+    stroke: var(--save);
+    stroke-width: 2px;
+  }
+
+  .primary,
+  .hit,
+  .miss,
+  .result,
+  .save {
+    fill: none;
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .primary { stroke: var(--line); }
+  .hit { stroke: var(--hit); }
+  .miss { stroke: var(--miss); }
+  .result { stroke: var(--result); }
+  .save { stroke: var(--save); }
+
+  .primary-head { fill: var(--line); }
+  .hit-head { fill: var(--hit); }
+  .miss-head { fill: var(--miss); }
+  .result-head { fill: var(--result); }
+  .save-head { fill: var(--save); }
+
+  .hit-label {
+    fill: var(--hit);
+    font-weight: bold;
+  }
+
+  .miss-label {
+    fill: var(--miss);
+    font-weight: bold;
+  }
+
+  .panel-label {
+    fill: var(--muted);
+    font-weight: bold;
+  }
+
+  #fallback {
+    color: var(--text);
+    background: var(--bg);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="title">Путь запроса через L1 и L2</div>
+
+<svg id="diagram"
+     xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1200 430"
+     width="1200"
+     height="430"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">Каскад запроса через семантический кэш L1 и кэш префикса L2</title>
+  <desc id="svgDesc">Попадание в L1 сразу возвращает готовый ответ. Промах ведёт к L2: найденный префикс делает ввод примерно в десять раз дешевле, а полный промах записывает новый префикс.</desc>
+  <g id="drawing"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать: попадание по смыслу в L1 сразу возвращает готовый
+  ответ без вызова модели; промах ведёт к L2, где найденный префикс удешевляет
+  ввод примерно в 10 раз, а полный промах вычисляет и записывает префикс заново.
+</p>
+
+<script>
+const DATA = [{
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  rounding: { x: 14, y: 14 },
+  arrow: { size: 12, wing: 7, tailPoints: 2 },
+
+  panels: [
+    { x: 500, y: 175, w: 675, h: 245, className: "panel" }
+  ],
+
+  rectangles: [
+    { x: 25, y: 175, w: 200, h: 90, className: "box" },
+    { x: 520, y: 70, w: 240, h: 75, className: "hit-box" },
+    { x: 1000, y: 70, w: 170, h: 75, className: "result-box" },
+    { x: 765, y: 195, w: 190, h: 55, className: "hit-box" },
+    { x: 765, y: 340, w: 190, h: 65, className: "miss-box" },
+    { x: 900, y: 265, w: 235, h: 65, className: "box" },
+    { x: 275, y: 350, w: 170, h: 55, className: "save-box" }
+  ],
+
+  polygons: [
+    {
+      className: "l1-box",
+      points: [
+        { x: 360, y: 155 },
+        { x: 455, y: 220 },
+        { x: 360, y: 285 },
+        { x: 265, y: 220 }
+      ]
+    },
+    {
+      className: "box",
+      points: [
+        { x: 635, y: 230 },
+        { x: 720, y: 285 },
+        { x: 635, y: 340 },
+        { x: 550, y: 285 }
+      ]
+    }
+  ],
+
+  arrows: [
+    {
+      kind: "primary",
+      points: [
+        { x: 225, y: 220 },
+        { x: 265, y: 220 }
+      ]
+    },
+    {
+      kind: "hit",
+      points: [
+        { x: 360, y: 155 },
+        { x: 360, y: 107 },
+        { x: 520, y: 107 }
+      ]
+    },
+    {
+      kind: "hit",
+      points: [
+        { x: 760, y: 107 },
+        { x: 1000, y: 107 }
+      ]
+    },
+    {
+      kind: "miss",
+      points: [
+        { x: 455, y: 220 },
+        { x: 490, y: 220 },
+        { x: 490, y: 285 },
+        { x: 550, y: 285 }
+      ]
+    },
+    {
+      kind: "hit",
+      points: [
+        { x: 635, y: 230 },
+        { x: 635, y: 215 },
+        { x: 765, y: 215 }
+      ]
+    },
+    {
+      kind: "miss",
+      points: [
+        { x: 635, y: 340 },
+        { x: 635, y: 372 },
+        { x: 765, y: 372 }
+      ]
+    },
+    {
+      kind: "hit",
+      points: [
+        { x: 860, y: 250 },
+        { x: 860, y: 275 },
+        { x: 900, y: 275 }
+      ]
+    },
+    {
+      kind: "miss",
+      points: [
+        { x: 955, y: 372 },
+        { x: 985, y: 372 },
+        { x: 985, y: 330 }
+      ]
+    },
+    {
+      kind: "result",
+      points: [
+        { x: 1050, y: 265 },
+        { x: 1050, y: 145 }
+      ]
+    },
+    {
+      kind: "save",
+      points: [
+        { x: 1085, y: 330 },
+        { x: 1085, y: 415 },
+        { x: 360, y: 415 },
+        { x: 360, y: 405 }
+      ]
+    }
+  ],
+
+  labels: [
+    {
+      x: 25, y: 28, anchor: "start", className: "small",
+      text: "L1 решает, нужен ли вызов вообще; L2 — сколько работы останется внутри вызова"
+    },
+
+    { x: 125, y: 207, anchor: "middle", className: "strong", text: "Вопрос пользователя" },
+    { x: 125, y: 235, anchor: "middle", className: "small", text: "«Можно вернуть покупку" },
+    { x: 125, y: 254, anchor: "middle", className: "small", text: "без чека?»" },
+
+    { x: 360, y: 207, anchor: "middle", className: "strong", text: "L1" },
+    { x: 360, y: 231, anchor: "middle", className: "small", text: "совпадение" },
+    { x: 360, y: 250, anchor: "middle", className: "small", text: "по смыслу?" },
+
+    { x: 380, y: 94, anchor: "start", className: "hit-label", text: "Попадание по смыслу" },
+    { x: 640, y: 100, anchor: "middle", className: "strong", text: "Готовый ответ из L1" },
+    { x: 640, y: 126, anchor: "middle", className: "small", text: "вызова модели нет" },
+
+    { x: 1085, y: 101, anchor: "middle", className: "strong", text: "Ответ" },
+    { x: 1085, y: 126, anchor: "middle", className: "strong", text: "пользователю" },
+
+    { x: 467, y: 205, anchor: "start", className: "miss-label", text: "Промах L1" },
+    { x: 525, y: 201, anchor: "start", className: "panel-label", text: "L2 · вызов провайдера уже начался" },
+
+    { x: 635, y: 276, anchor: "middle", className: "strong", text: "L2" },
+    { x: 635, y: 300, anchor: "middle", className: "small", text: "совпал префикс?" },
+
+    { x: 735, y: 205, anchor: "end", className: "hit-label", text: "Префикс найден" },
+    { x: 860, y: 217, anchor: "middle", className: "strong", text: "Переиспользовать" },
+    { x: 860, y: 239, anchor: "middle", className: "hit-label", text: "ввод ≈ в 10 раз дешевле" },
+
+    { x: 650, y: 363, anchor: "start", className: "miss-label", text: "Полный промах" },
+    { x: 860, y: 365, anchor: "middle", className: "strong", text: "Вычислить префикс заново" },
+    { x: 860, y: 389, anchor: "middle", className: "small", text: "и записать префикс в L2" },
+
+    { x: 1018, y: 289, anchor: "middle", className: "strong", text: "Модель обрабатывает" },
+    { x: 1018, y: 313, anchor: "middle", className: "small", text: "новый вопрос и создаёт ответ" },
+
+    { x: 360, y: 373, anchor: "middle", className: "strong", text: "Сохранить ответ" },
+    { x: 360, y: 395, anchor: "middle", className: "small", text: "в L1 для похожих вопросов" },
+
+    { x: 1100, y: 397, anchor: "end", className: "small", text: "после генерации" }
+  ]
+}];
+
+const [D] = DATA;
+const origin = Object.freeze(D.origin);
+const scale = Object.freeze(D.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes, parent) => {
+    const node = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, String(value));
+    }
+    parent.appendChild(node);
+    return node;
+  };
+
+  const pointString = points =>
+    points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+  const drawRectangle = rectangle => {
+    make("rect", {
+      x: sx(rectangle.x),
+      y: sy(rectangle.y),
+      width: sx(rectangle.x + rectangle.w) - sx(rectangle.x),
+      height: sy(rectangle.y + rectangle.h) - sy(rectangle.y),
+      rx: sx(D.rounding.x) - sx(origin.x),
+      ry: sy(D.rounding.y) - sy(origin.y),
+      class: rectangle.className
+    }, drawing);
+  };
+
+  const drawArrow = arrow => {
+    make("polyline", {
+      points: pointString(arrow.points),
+      class: arrow.kind
+    }, drawing);
+
+    const [before, tip] = arrow.points.slice(-D.arrow.tailPoints);
+    const dx = tip.x - before.x;
+    const dy = tip.y - before.y;
+    const length = Math.hypot(dx, dy);
+
+    if (!length) {
+      throw new Error("У стрелки совпали начало и конец");
+    }
+
+    const ux = dx / length;
+    const uy = dy / length;
+    const base = {
+      x: tip.x - ux * D.arrow.size,
+      y: tip.y - uy * D.arrow.size
+    };
+    const left = {
+      x: base.x - uy * D.arrow.wing,
+      y: base.y + ux * D.arrow.wing
+    };
+    const right = {
+      x: base.x + uy * D.arrow.wing,
+      y: base.y - ux * D.arrow.wing
+    };
+
+    make("polygon", {
+      points: pointString([tip, left, right]),
+      class: `${arrow.kind}-head`,
+      "aria-hidden": "true"
+    }, drawing);
+  };
+
+  for (const panel of D.panels) {
+    drawRectangle(panel);
+  }
+
+  for (const arrow of D.arrows) {
+    drawArrow(arrow);
+  }
+
+  for (const rectangle of D.rectangles) {
+    drawRectangle(rectangle);
+  }
+
+  for (const polygon of D.polygons) {
+    make("polygon", {
+      points: pointString(polygon.points),
+      class: polygon.className
+    }, drawing);
+  }
+
+  for (const label of D.labels) {
+    const text = make("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      "text-anchor": label.anchor,
+      class: label.className
+    }, drawing);
+    text.textContent = label.text;
+  }
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
