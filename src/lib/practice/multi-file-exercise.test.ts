@@ -5,6 +5,7 @@ import path from "node:path";
 import { readExerciseFiles } from "@/lib/exercise/file";
 import { canonicalFunctions, readExerciseTree, type ExerciseTree } from "@/lib/exercise/tree";
 import type { LessonRef } from "@/lib/source/catalog";
+import { runBench } from "./bench";
 import { runTests } from "./run-tests";
 
 /**
@@ -210,5 +211,106 @@ describe("многофайловое упражнение под настоящ�
       expect(result.passed).toBe(2);
     },
     REAL_PYTEST_TIMEOUT_MS,
+  );
+});
+
+// Входы для scripts/bench.py: без bench.py в каталоге упражнения замер не
+// вызывает функции вовсе (call_args = None) и меряет только AST — а здесь
+// проверяется именно ВЫЗОВ, то есть то, какой модуль исполнился.
+const BENCH_SPEC = `BENCH = {
+    "normalize": ["  Spam Here  "],
+    "matches": ["this text contains spam word", "spam\\nham"],
+}
+`;
+
+// Замер живёт в отдельном процессе python и, в отличие от pytest, ещё и
+// дёргает ruff через uvx. На этой машине полный прогон — около секунды, но
+// дефолтные 5с vitest на чужом железе — риск.
+const REAL_BENCH_TIMEOUT_MS = 60_000;
+
+/**
+ * Тот же настоящий scripts/bench.py, что зовёт маршрут разбора, — на
+ * каталожной форме.
+ *
+ * Здесь ловится не «работает ли замер вообще», а ровно одна вещь: КАКОЙ модуль
+ * исполнился под каждым именем. Файл человека лежит в exercise/, эталон — в
+ * solution/, и оба зовут соседа `from rules import load_rules`. Корень
+ * упражнения на sys.path (как было) не находит соседа вовсе. Оба каталога на
+ * sys.path сразу — хуже: имя `rules` разрешилось бы в первый по порядку, и
+ * «эталон» исполнял бы код учащегося, показывая ×1.00 на любом решении.
+ *
+ * Фикстура разводит эти случаи так, что подмена видна в числах: у человека
+ * main.py уже написан (копия эталонного), а rules.py — ещё заготовка с
+ * NotImplementedError. Значит `matches` замеряется у эталона и НЕ замеряется у
+ * человека — но только если каждый модуль импортировал СВОЕГО соседа. Любая
+ * подмена ломает ровно одно из двух чисел.
+ */
+function materializeMixed(sourceDir: string): ExerciseTree {
+  const tree = readExerciseTree(sourceDir, REF)!;
+  const files = readExerciseFiles(sourceDir, REF)!; // заводит exercise/ из шаблона
+  const main = tree.files.find((item) => item.name === "main.py")!;
+  const mainState = files.files.find((item) => item.name === "main.py")!;
+  fs.copyFileSync(main.solutionPath!, mainState.file);
+  fs.writeFileSync(path.join(tree.dir, "bench.py"), BENCH_SPEC, "utf8");
+  return tree;
+}
+
+describe("многофайловое упражнение под настоящим scripts/bench.py", () => {
+  it(
+    "каждый модуль импортирует своего соседа: эталон замерен, недописанный файл человека — нет",
+    async () => {
+      const sourceDir = makeExerciseSourceDir();
+      const tree = materializeMixed(sourceDir);
+
+      // Отчёт вообще приехал — значит `from rules import load_rules`
+      // разрешился при загрузке обоих модулей. До починки здесь был
+      // ModuleNotFoundError, код возврата 2 и PracticeError вместо отчёта.
+      const report = await runBench({ dir: tree.dir, module: "main.py", python: "python3" });
+      const rows = new Map(report.functions.map((row) => [row.fn, row]));
+
+      expect([...rows.keys()].sort()).toEqual(["matches", "normalize"]);
+
+      // normalize соседа не зовёт — замерен с обеих сторон.
+      expect(typeof rows.get("normalize")!.mine!.us).toBe("number");
+      expect(typeof rows.get("normalize")!.ref.us).toBe("number");
+
+      // matches зовёт load_rules. У эталона сосед написан — число есть.
+      expect(typeof rows.get("matches")!.ref.us).toBe("number");
+      // У человека тот же сосед ещё заготовка — числа нет. Это и доказывает,
+      // что каталоги не смешались: подмена в любую сторону испортила бы ровно
+      // одно из этих двух ожиданий.
+      expect(rows.get("matches")!.written).toBe(false);
+      expect(rows.get("matches")!.mine!.us).toBeNull();
+      expect(rows.get("matches")!.status).toBe("unknown");
+    },
+    REAL_BENCH_TIMEOUT_MS,
+  );
+
+  // Одно-файловая форма — 396 упражнений курса: вызов без --module обязан
+  // остаться тем же, что и был, включая каталог на пути импорта.
+  it(
+    "одно-файловая форма: вызов без --module меряет exercise.py против solution.py как раньше",
+    async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-single-file-bench-"));
+      fs.writeFileSync(
+        path.join(dir, "exercise.py"),
+        "def normalize(text):\n    return text.strip().lower()\n",
+        "utf8",
+      );
+      fs.writeFileSync(
+        path.join(dir, "solution.py"),
+        "def normalize(text):\n    return text.strip().lower()\n",
+        "utf8",
+      );
+      fs.writeFileSync(path.join(dir, "bench.py"), 'BENCH = {"normalize": ["  Hi  "]}\n', "utf8");
+
+      const report = await runBench({ dir, python: "python3" });
+
+      expect(report.functions).toHaveLength(1);
+      expect(report.functions[0].fn).toBe("normalize");
+      expect(typeof report.functions[0].mine!.us).toBe("number");
+      expect(typeof report.functions[0].ref.us).toBe("number");
+    },
+    REAL_BENCH_TIMEOUT_MS,
   );
 });

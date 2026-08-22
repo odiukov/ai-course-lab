@@ -212,6 +212,43 @@ def run_ruff(path):
     return {"available": True, "findings": findings}
 
 
+@contextlib.contextmanager
+def only_importable(directory):
+    """На время загрузки модуля импортируется ровно один каталог — этот.
+
+    Каталожная форма упражнения держит файл человека в exercise/, а эталон —
+    в solution/, и оба зовут соседей по имени: `from rules import load_rules`.
+    Корень упражнения на sys.path (как было раньше) таких соседей не находит
+    вовсе — ModuleNotFoundError, код возврата 2, разбор не состоялся.
+
+    Наивная починка — положить оба каталога сразу — хуже поломки: имя `rules`
+    разрешилось бы в тот каталог, который оказался в пути первым, и «эталон»
+    исполнял бы модуль учащегося. Отчёт сравнивал бы код сам с собой и всегда
+    показывал ×1.00. Поэтому каждый модуль грузится, когда виден только его
+    собственный каталог.
+
+    Возвращается на место не только sys.path, но и набор модулей: импорт
+    соседа кладёт его в sys.modules под именем `rules`, и следующая загрузка
+    взяла бы КЭШИРОВАННЫЙ модуль, не заглядывая в sys.path вовсе — то есть
+    подмена эталона случилась бы и при честном пути. Убираются только модули,
+    прочитанные из этого каталога: стандартная библиотека и пакеты остаются
+    как есть, повторно инициализировать их незачем. Уже загруженному модулю
+    уборка не мешает: имена, ввезённые через `from ... import ...`, связаны в
+    его собственном словаре и живут независимо от кэша.
+    """
+    saved_path = sys.path[:]
+    saved_modules = set(sys.modules)
+    sys.path.insert(0, str(directory))
+    try:
+        yield
+    finally:
+        sys.path[:] = saved_path
+        for name in set(sys.modules) - saved_modules:
+            file = getattr(sys.modules[name], "__file__", None)
+            if file and Path(file).is_relative_to(directory):
+                del sys.modules[name]
+
+
 def load_lesson(lesson_dir, mine_path, ref_path):
     """AST-метрики и импорт exercise.py/solution.py/bench.py.
 
@@ -227,10 +264,16 @@ def load_lesson(lesson_dir, mine_path, ref_path):
     # уровня — сторонний print() на этом уровне не должен попасть на stdout
     # раньше нашего единственного JSON.
     with contextlib.redirect_stdout(sys.stderr):
-        sys.path.insert(0, str(lesson_dir))
-        mine_mod, ref_mod = load(mine_path, "_mine"), load(ref_path, "_ref")
+        # Каталог рядом с самим файлом, а не корень упражнения: у одно-файловой
+        # формы это тот же lesson_dir, что и был, а у каталожной — exercise/ и
+        # solution/, каждый под свою загрузку (см. only_importable).
+        with only_importable(mine_path.parent):
+            mine_mod = load(mine_path, "_mine")
+        with only_importable(ref_path.parent):
+            ref_mod = load(ref_path, "_ref")
         bench_file = lesson_dir / "bench.py"
-        bench_spec = load(bench_file, "_bench").BENCH if bench_file.exists() else {}
+        with only_importable(lesson_dir):
+            bench_spec = load(bench_file, "_bench").BENCH if bench_file.exists() else {}
 
     return mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec
 
