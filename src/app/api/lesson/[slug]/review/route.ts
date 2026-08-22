@@ -1,12 +1,11 @@
 import fs from "node:fs";
-import path from "node:path";
 import { defaultDeps } from "@/lib/agent/factory";
 import { sseStream } from "@/lib/api/sse";
 import { loadConfig } from "@/lib/config";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStep } from "@/lib/content/step-file";
-import { extractFunction, readExerciseFiles } from "@/lib/exercise/file";
-import { readExerciseTree, resolveExerciseFile } from "@/lib/exercise/tree";
+import { extractFunction, readExerciseFiles, type ExerciseFileSet, type ExerciseFileState } from "@/lib/exercise/file";
+import { findTreeFile, readExerciseTree, resolveExerciseFile, type ExerciseTree } from "@/lib/exercise/tree";
 import { formatMetrics, formatRuff, formatTests, reviewCode } from "@/lib/generate/review-code";
 import { runBench } from "@/lib/practice/bench";
 import { addChatMessage, openChatSession } from "@/lib/progress/chat";
@@ -17,6 +16,36 @@ import { findLesson } from "@/lib/source/catalog";
 
 interface Body {
   stepId?: unknown;
+}
+
+interface ReviewTargets {
+  exercise: ExerciseFileState;
+  /** null у одно-файлового упражнения без эталона — "(эталона нет)", не исключение. */
+  solutionPath: string | null;
+}
+
+/**
+ * Файл человека и путь эталона для разбора кода — тем же именем, что видят
+ * тесты/замер/reset (resolveExerciseFile), а не литералом "exercise.py": в
+ * каталожной форме файл человека называется иначе (main.py, hooks.py), и
+ * подстановка имени в set.files должна искать именно его. Путь эталона — не
+ * склейка `<dir>/solution.py` (она верна только для одно-файловой формы), а
+ * solutionPath из дерева: он у каждого файла свой и сам различает обе формы.
+ *
+ * Вынесена отдельно от POST ради теста: поднимать весь маршрут (SSE, агент,
+ * прогрев бенчмарка) в тесте дорого, а эта функция — чистая и решает именно
+ * тот выбор, из-за которого маршрут раньше 404-ился на каталожной форме.
+ */
+export function resolveReviewTargets(
+  tree: ExerciseTree,
+  set: ExerciseFileSet,
+  fn: string,
+  declaredFile: string | undefined,
+): ReviewTargets | null {
+  const fileName = resolveExerciseFile(tree, fn, declaredFile);
+  const exercise = set.files.find((item) => item.name === fileName);
+  if (!exercise) return null;
+  return { exercise, solutionPath: findTreeFile(tree, fileName)?.solutionPath ?? null };
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -47,29 +76,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     );
   }
 
+  const fn = step.exercise_fn;
+
+  const tree = readExerciseTree(config.sourceDir, ref);
   const set = readExerciseFiles(config.sourceDir, ref);
-  const exercise = set?.files.find((item) => item.name === "exercise.py");
-  if (!set || !exercise) {
+  const targets = tree && set ? resolveReviewTargets(tree, set, fn, step.exercise_file) : null;
+  if (!tree || !set || !targets) {
     return Response.json({ error: "У урока нет упражнения" }, { status: 404 });
   }
+  const { exercise, solutionPath } = targets;
 
-  const solutionPath = path.join(set.dir, "solution.py");
-  const solutionCode = fs.existsSync(solutionPath)
-    ? (extractFunction(fs.readFileSync(solutionPath, "utf8"), step.exercise_fn) ??
-      "(в эталоне такой функции нет)")
+  const solutionCode = solutionPath
+    ? (extractFunction(fs.readFileSync(solutionPath, "utf8"), fn) ?? "(в эталоне такой функции нет)")
     : "(эталона нет)";
-  const mineCode = extractFunction(exercise.code, step.exercise_fn) ?? exercise.code;
-  const fn = step.exercise_fn;
+  const mineCode = extractFunction(exercise.code, fn) ?? exercise.code;
 
   // Каталожная форма держит файлы человека и эталона не в корне, а в
   // exercise/ и solution/ — bench.py нужно явно назвать модуль, иначе он
-  // возьмёт устаревший корневой exercise.py/solution.py. Имя того же файла,
-  // что и у тестов/reset/recall — resolveExerciseFile, а не сырой
-  // step.exercise_file: он же решает случай, когда шаг файл не назвал.
-  const tree = readExerciseTree(config.sourceDir, ref);
+  // возьмёт устаревший корневой exercise.py/solution.py. Одно-файловая форма
+  // ведёт себя ровно как раньше: module не передаётся вовсе.
   // Не называем переменную module: next/eslint запрещает — это зарезервированное
   // имя CJS-модуля, и присвоение ему маскирует реальный module в области видимости.
-  const benchModule = tree?.multi ? resolveExerciseFile(tree, fn, step.exercise_file) : undefined;
+  const benchModule = tree.multi ? exercise.name : undefined;
 
   const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
