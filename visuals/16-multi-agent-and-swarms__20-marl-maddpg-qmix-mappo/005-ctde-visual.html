@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Какая информация доступна при обучении и исполнении</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --ink: midnightblue;
+    --muted: slategray;
+    --panel: whitesmoke;
+    --grid: lightsteelblue;
+    --cell: white;
+    --actor: lavender;
+    --critic: honeydew;
+    --agent-one: royalblue;
+    --agent-two: darkorange;
+    --obstacle: slategray;
+    --arrow: seagreen;
+    --warning: mistyrose;
+    --wall: midnightblue;
+  }
+
+  body {
+    margin: auto;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+
+  main {
+    max-width: 1200px;
+    margin: auto;
+  }
+
+  h1 {
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 1200px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 1.5px;
+  }
+
+  .separator,
+  .grid-line {
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .grid-frame {
+    fill: var(--cell);
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+
+  .wall {
+    stroke: var(--wall);
+    stroke-width: 5px;
+  }
+
+  .obstacle {
+    fill: var(--obstacle);
+  }
+
+  .agent-one {
+    fill: var(--agent-one);
+    stroke: white;
+    stroke-width: 2px;
+  }
+
+  .agent-two {
+    fill: var(--agent-two);
+    stroke: white;
+    stroke-width: 2px;
+  }
+
+  .actor {
+    fill: var(--actor);
+    stroke: var(--ink);
+    stroke-width: 1.5px;
+  }
+
+  .critic {
+    fill: var(--critic);
+    stroke: seagreen;
+    stroke-width: 2px;
+  }
+
+  .summary {
+    fill: var(--warning);
+    stroke: var(--grid);
+    stroke-width: 1.5px;
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 2.5px;
+  }
+
+  .arrow-head {
+    fill: var(--arrow);
+  }
+
+  .action {
+    fill: var(--critic);
+    stroke: var(--arrow);
+    stroke-width: 1.5px;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .strong {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .robot-number {
+    fill: white;
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  #status {
+    color: var(--muted);
+    font-size: 16px;
+    text-align: center;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: black;
+      --ink: gainsboro;
+      --muted: silver;
+      --panel: darkslategray;
+      --grid: slategray;
+      --cell: midnightblue;
+      --actor: indigo;
+      --critic: darkgreen;
+      --agent-one: dodgerblue;
+      --agent-two: darkorange;
+      --obstacle: gray;
+      --arrow: lightgreen;
+      --warning: maroon;
+      --wall: gainsboro;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Какая информация доступна при обучении и исполнении</h1>
+  <svg id="diagram" viewBox="0 0 1200 430" width="1200" height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Слева централизованный критик получает наблюдения и действия обоих агентов. Справа каждый актор получает только локальное наблюдение своего агента."></svg>
+  <p id="status">Строится схема разделения информации…</p>
+</main>
+
+<script>
+const [D] = [{
+  zero: 0,
+  one: 1,
+  half: 0.5,
+  corner: 0.8,
+  agentRadius: 1.35,
+  actionRadius: 1.35,
+  numberShift: 0.48,
+  arrowHead: 0.9,
+  arrowWing: 0.5,
+  panels: [
+    { x: 1, y: 3, w: 60, h: 44, title: { x: 4, y: 7 } },
+    { x: 66, y: 3, w: 62, h: 44, title: { x: 69, y: 7 } }
+  ],
+  headerLineY: 9,
+  grid: { n: 4, cell: 5, y: 12, size: 20 },
+  leftGrid: { x: 5, y: 12, w: 20, h: 20 },
+  rightGrid: { x: 68, y: 12, w: 20, h: 20 },
+  leftObstacles: [
+    { c: 2, r: 0 }, { c: 1, r: 2 }, { c: 3, r: 2 }
+  ],
+  rightObstacles: [
+    { c: 1, r: 1 }, { c: 2, r: 2 }
+  ],
+  leftAgents: [
+    { x: 7.5, y: 14.5, label: "1", className: "agent-one" },
+    { x: 22.5, y: 29.5, label: "2", className: "agent-two" }
+  ],
+  rightAgents: [
+    { x: 70.5, y: 14.5, label: "1", className: "agent-one" },
+    { x: 85.5, y: 29.5, label: "2", className: "agent-two" }
+  ],
+  leftActors: [
+    { x: 30, y: 11.5, w: 9.5, h: 6.5, cx: 34.75, cy: 15.25, label: "Актор 1" },
+    { x: 30, y: 24.5, w: 9.5, h: 6.5, cx: 34.75, cy: 28.25, label: "Актор 2" }
+  ],
+  critic: { x: 45, y: 17, w: 12, h: 11, cx: 51, titleY: 21.5, subY: 24.2 },
+  leftObservationArrows: [
+    { a: { x: 8.85, y: 14.5 }, b: { x: 30, y: 14.75 }, label: { x: 19, y: 13.25 }, text: "локальное o₁" },
+    { a: { x: 23.85, y: 29.5 }, b: { x: 30, y: 28 }, label: { x: 26.4, y: 31.2 }, text: "локальное o₂" }
+  ],
+  criticArrows: [
+    { a: { x: 39.5, y: 14.75 }, b: { x: 45, y: 19.5 }, label: { x: 41.7, y: 13.4 }, text: "o₁ + a₁" },
+    { a: { x: 39.5, y: 28 }, b: { x: 45, y: 25.3 }, label: { x: 41.7, y: 30.7 }, text: "o₂ + a₂" }
+  ],
+  rightActors: [
+    { x: 93, y: 11.5, w: 16, h: 7, cx: 101, titleY: 14.6, subY: 17, title: "Актор 1", sub: "видит только o₁" },
+    { x: 93, y: 25.5, w: 16, h: 7, cx: 101, titleY: 28.6, subY: 31, title: "Актор 2", sub: "видит только o₂" }
+  ],
+  runtimeArrows: [
+    { a: { x: 71.85, y: 14.5 }, b: { x: 93, y: 15 }, label: { x: 84, y: 13.2 }, text: "o₁" },
+    { a: { x: 86.85, y: 29.5 }, b: { x: 93, y: 29 }, label: { x: 89.5, y: 31.5 }, text: "o₂" }
+  ],
+  actionArrows: [
+    { a: { x: 109, y: 15 }, b: { x: 113.6, y: 15 }, action: { x: 115, y: 15 }, text: "a₁" },
+    { a: { x: 109, y: 29 }, b: { x: 113.6, y: 29 }, action: { x: 115, y: 29 }, text: "a₂" }
+  ],
+  wall: { x: 78, y1: 12, y2: 32 },
+  labels: {
+    leftGrid: { x: 15, y: 10.6 },
+    roomOne: { x: 73, y: 10.6 },
+    roomTwo: { x: 83, y: 10.6 }
+  },
+  summaries: [
+    { x: 5, y: 35.5, w: 52, h: 8, cx: 31, firstY: 39, secondY: 41.6,
+      first: "Критик получает o₁, a₁, o₂, a₂", second: "полная картина команды" },
+    { x: 68, y: 35.5, w: 54, h: 8, cx: 95, firstY: 39, secondY: 41.6,
+      first: "Каждый актор получает только своё oᵢ", second: "общей карты и общего state нет" }
+  ],
+  fallback: { x: 64, y: 22, secondY: 25 }
+}];
+
+const origin = { x: 20, y: 5 };
+const scale = 8.9;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const svg = document.getElementById("diagram");
+const status = document.getElementById("status");
+
+try {
+  const node = (tag, attrs, content) => {
+    const item = document.createElementNS(svg.namespaceURI, tag);
+    Object.entries(attrs).forEach(([name, value]) => item.setAttribute(name, value));
+    if (content !== undefined) item.textContent = content;
+    svg.appendChild(item);
+    return item;
+  };
+
+  const rectangle = (g, className) => node("rect", {
+    x: sx(g.x),
+    y: sy(g.y),
+    width: sx(g.x + g.w) - sx(g.x),
+    height: sy(g.y + g.h) - sy(g.y),
+    rx: sx(D.corner) - sx(D.zero),
+    ry: sy(D.corner) - sy(D.zero),
+    class: className
+  });
+
+  const segment = (a, b, className) => node("line", {
+    x1: sx(a.x),
+    y1: sy(a.y),
+    x2: sx(b.x),
+    y2: sy(b.y),
+    class: className
+  });
+
+  const label = (p, content, className, anchor) => node("text", {
+    x: sx(p.x),
+    y: sy(p.y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, content);
+
+  const arrow = (a, b) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const distance = Math.hypot(dx, dy);
+    const ux = dx / distance;
+    const uy = dy / distance;
+    const base = {
+      x: b.x - ux * D.arrowHead,
+      y: b.y - uy * D.arrowHead
+    };
+    const left = {
+      x: base.x - uy * D.arrowWing,
+      y: base.y + ux * D.arrowWing
+    };
+    const right = {
+      x: base.x + uy * D.arrowWing,
+      y: base.y - ux * D.arrowWing
+    };
+
+    segment(a, base, "arrow");
+    node("polygon", {
+      points: [
+        sx(b.x) + "," + sy(b.y),
+        sx(left.x) + "," + sy(left.y),
+        sx(right.x) + "," + sy(right.y)
+      ].join(" "),
+      class: "arrow-head"
+    });
+  };
+
+  const grid = (g, obstacles) => {
+    rectangle(g, "grid-frame");
+
+    Array.from({ length: D.grid.n + D.one }).forEach((unused, index) => {
+      const offset = index * D.grid.cell;
+      segment(
+        { x: g.x + offset, y: g.y },
+        { x: g.x + offset, y: g.y + g.h },
+        "grid-line"
+      );
+      segment(
+        { x: g.x, y: g.y + offset },
+        { x: g.x + g.w, y: g.y + offset },
+        "grid-line"
+      );
+    });
+
+    obstacles.forEach(item => rectangle({
+      x: g.x + item.c * D.grid.cell,
+      y: g.y + item.r * D.grid.cell,
+      w: D.grid.cell,
+      h: D.grid.cell
+    }, "obstacle"));
+  };
+
+  const agent = item => {
+    node("circle", {
+      cx: sx(item.x),
+      cy: sy(item.y),
+      r: sx(D.agentRadius) - sx(D.zero),
+      class: item.className
+    });
+    label(
+      { x: item.x, y: item.y + D.numberShift },
+      item.label,
+      "robot-number",
+      "middle"
+    );
+  };
+
+  D.panels.forEach(panel => {
+    rectangle(panel, "panel");
+    segment(
+      { x: panel.x, y: D.headerLineY },
+      { x: panel.x + panel.w, y: D.headerLineY },
+      "separator"
+    );
+  });
+
+  label(D.panels[D.zero].title, "ОБУЧЕНИЕ · централизованный критик", "title", "start");
+  label(D.panels[D.one].title, "ИСПОЛНЕНИЕ · локальные акторы", "title", "start");
+
+  grid(D.leftGrid, D.leftObstacles);
+  grid(D.rightGrid, D.rightObstacles);
+
+  label(D.labels.leftGrid, "решётка 4 × 4", "small", "middle");
+  label(D.labels.roomOne, "помещение 1", "small", "middle");
+  label(D.labels.roomTwo, "помещение 2", "small", "middle");
+
+  segment(
+    { x: D.wall.x, y: D.wall.y1 },
+    { x: D.wall.x, y: D.wall.y2 },
+    "wall"
+  );
+
+  D.leftAgents.forEach(agent);
+  D.rightAgents.forEach(agent);
+
+  D.leftActors.forEach(item => {
+    rectangle(item, "actor");
+    label({ x: item.cx, y: item.cy }, item.label, "strong", "middle");
+  });
+
+  rectangle(D.critic, "critic");
+  label({ x: D.critic.cx, y: D.critic.titleY }, "Критик", "strong", "middle");
+  label({ x: D.critic.cx, y: D.critic.subY }, "видит всё", "small", "middle");
+
+  D.leftObservationArrows.forEach(item => {
+    arrow(item.a, item.b);
+    label(item.label, item.text, "small", "middle");
+  });
+
+  D.criticArrows.forEach(item => {
+    arrow(item.a, item.b);
+    label(item.label, item.text, "strong", "middle");
+  });
+
+  D.rightActors.forEach(item => {
+    rectangle(item, "actor");
+    label({ x: item.cx, y: item.titleY }, item.title, "strong", "middle");
+    label({ x: item.cx, y: item.subY }, item.sub, "small", "middle");
+  });
+
+  D.runtimeArrows.forEach(item => {
+    arrow(item.a, item.b);
+    label(item.label, item.text, "strong", "middle");
+  });
+
+  D.actionArrows.forEach(item => {
+    arrow(item.a, item.b);
+    node("circle", {
+      cx: sx(item.action.x),
+      cy: sy(item.action.y),
+      r: sx(D.actionRadius) - sx(D.zero),
+      class: "action"
+    });
+    label(
+      { x: item.action.x, y: item.action.y + D.numberShift },
+      item.text,
+      "strong",
+      "middle"
+    );
+  });
+
+  D.summaries.forEach(item => {
+    rectangle(item, "summary");
+    label({ x: item.cx, y: item.firstY }, item.first, "strong", "middle");
+    label({ x: item.cx, y: item.secondY }, item.second, "small", "middle");
+  });
+
+  status.hidden = true;
+} catch (error) {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const first = document.createElementNS(svg.namespaceURI, "text");
+  first.setAttribute("x", sx(D.fallback.x));
+  first.setAttribute("y", sy(D.fallback.y));
+  first.setAttribute("class", "title");
+  first.setAttribute("text-anchor", "middle");
+  first.textContent = "При обучении критик видит наблюдения и действия обоих агентов.";
+  svg.appendChild(first);
+
+  const second = document.createElementNS(svg.namespaceURI, "text");
+  second.setAttribute("x", sx(D.fallback.x));
+  second.setAttribute("y", sy(D.fallback.secondY));
+  second.setAttribute("class", "label");
+  second.setAttribute("text-anchor", "middle");
+  second.textContent = "При исполнении каждый актор видит только своё локальное наблюдение.";
+  svg.appendChild(second);
+
+  status.textContent = "Схема показана текстом: полная информация доступна только централизованному критику во время обучения.";
+}
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>

@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Два типа ройного поиска</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --surface: #ffffff;
+    --panel: #f3f5fa;
+    --ink: #172033;
+    --muted: #667085;
+    --line: #c8cfdb;
+    --pso: #4263eb;
+    --pso-soft: #dfe6ff;
+    --aco: #d97706;
+    --aco-soft: #ffedd5;
+    --best: #16865b;
+    --best-soft: #d9f5e8;
+    --quiet: #9aa4b2;
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h2 {
+    color: var(--ink);
+    font-size: 18px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+
+  .panel { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .divider { stroke: var(--line); stroke-width: 2; }
+  .track { stroke: var(--line); stroke-width: 7; stroke-linecap: round; }
+  .tick { stroke: var(--muted); stroke-width: 2; }
+  .pso-line { fill: none; stroke: var(--pso); stroke-width: 2; }
+  .pso-arrow { fill: var(--pso); }
+  .knob-old { fill: var(--surface); stroke: var(--pso); stroke-width: 4; }
+  .knob-best { fill: var(--best); stroke: var(--surface); stroke-width: 4; }
+  .best-ring { fill: var(--best-soft); stroke: var(--best); stroke-width: 2; }
+  .particle { fill: var(--pso); }
+  .badge-pso { fill: var(--pso-soft); stroke: var(--pso); stroke-width: 1; }
+  .request { fill: var(--aco-soft); stroke: var(--aco); stroke-width: 2; }
+  .agent { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+  .agent-chosen { fill: var(--best-soft); stroke: var(--best); stroke-width: 4; }
+  .route-weak { fill: none; stroke: var(--quiet); stroke-width: 2; }
+  .route-mid { fill: none; stroke: var(--aco); stroke-width: 4; }
+  .route-strong { fill: none; stroke: var(--best); stroke-width: 7; }
+  .arrow-weak { fill: var(--quiet); }
+  .arrow-mid { fill: var(--aco); }
+  .arrow-strong { fill: var(--best); }
+  .pheromone-weak { fill: var(--quiet); }
+  .pheromone-mid { fill: var(--aco); }
+  .pheromone-strong { fill: var(--best); }
+  .check { fill: none; stroke: var(--best); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+  .title { fill: var(--ink); font-size: 18px; font-weight: 700; }
+  .subtitle { fill: var(--muted); font-size: 13px; }
+  .label { fill: var(--ink); font-size: 14px; font-weight: 600; }
+  .small { fill: var(--muted); font-size: 12px; }
+  .value { fill: var(--ink); font-size: 13px; }
+  .best-text { fill: var(--best); font-size: 13px; font-weight: 700; }
+  .badge-text { fill: var(--pso); font-size: 12px; font-weight: 700; }
+  .agent-text { fill: var(--ink); font-size: 14px; font-weight: 650; }
+  .chosen-text { fill: var(--best); font-size: 12px; font-weight: 700; }
+  .principle { fill: var(--ink); font-size: 13px; font-weight: 650; }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10131a;
+      --surface: #171b24;
+      --panel: #1d2330;
+      --ink: #edf1f7;
+      --muted: #a7b0bf;
+      --line: #3b4557;
+      --pso: #8ea7ff;
+      --pso-soft: #27345f;
+      --aco: #f2a23a;
+      --aco-soft: #4a321b;
+      --best: #55d39c;
+      --best-soft: #193e33;
+      --quiet: #768196;
+    }
+  }
+</style>
+</head>
+<body>
+<h2 id="diagram-title">Два типа ройного поиска: числа и маршруты</h2>
+<svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="diagram-title diagram-desc">
+  <desc id="diagram-desc">PSO сдвигает числовые ручки temperature и top_k к лучшей оценке, а ACO усиливает феромонный маршрут к выбранному агенту.</desc>
+</svg>
+<p id="fallback" hidden>Схема должна была показать: PSO настраивает числовые параметры temperature и top_k, а ACO выбирает одного агента по усиленным феромонным маршрутам.</p>
+
+<script>
+(() => {
+  const data = [
+    {
+      zero: 0, ox: 24, oy: 16, scaleX: 1, scaleY: 1,
+      arrowLength: 13, arrowHalf: 7, ring: 13, knob: 9,
+      dot: 5, smallDot: 4, corner: 16, smallCorner: 10
+    },
+    {
+      panel: { x: 0, y: 0, w: 552, h: 404, r: 16 },
+      title: { x: 20, y: 32, text: "PSO", anchor: "start", cls: "title" },
+      subtitle: { x: 20, y: 56, text: "Настройка числовых параметров", anchor: "start", cls: "subtitle" },
+      tracks: [
+        { x1: 52, y1: 137, x2: 500, y2: 137 },
+        { x1: 52, y1: 251, x2: 500, y2: 251 }
+      ],
+      ticks: [
+        { x1: 125, y1: 128, x2: 125, y2: 146 },
+        { x1: 276, y1: 128, x2: 276, y2: 146 },
+        { x1: 427, y1: 128, x2: 427, y2: 146 }
+      ],
+      curves: [
+        { x1: 125, y1: 125, c1x: 166, c1y: 86, c2x: 230, c2y: 91, x2: 265, y2: 123, cls: "pso-line", arrow: "pso-arrow" },
+        { x1: 427, y1: 125, c1x: 388, c1y: 86, c2x: 327, c2y: 91, x2: 287, y2: 123, cls: "pso-line", arrow: "pso-arrow" },
+        { x1: 163, y1: 238, c1x: 201, c1y: 205, c2x: 257, c2y: 212, x2: 289, y2: 239, cls: "pso-line", arrow: "pso-arrow" },
+        { x1: 397, y1: 264, c1x: 365, c1y: 297, c2x: 330, c2y: 290, x2: 310, y2: 265, cls: "pso-line", arrow: "pso-arrow" }
+      ],
+      oldKnobs: [
+        { x: 125, y: 137 }, { x: 427, y: 137 },
+        { x: 163, y: 251 }, { x: 397, y: 251 }
+      ],
+      bestKnobs: [
+        { x: 276, y: 137 }, { x: 300, y: 251 }
+      ],
+      particles: [
+        { x: 212, y: 251 }, { x: 244, y: 251 },
+        { x: 345, y: 251 }, { x: 370, y: 251 }
+      ],
+      badge: { x: 180, y: 318, w: 192, h: 32, r: 16 },
+      labels: [
+        { x: 52, y: 101, text: "temperature", anchor: "start", cls: "label" },
+        { x: 125, y: 166, text: "0,4", anchor: "middle", cls: "value" },
+        { x: 276, y: 166, text: "0,6", anchor: "middle", cls: "best-text" },
+        { x: 427, y: 166, text: "0,8", anchor: "middle", cls: "value" },
+        { x: 276, y: 190, text: "лучшая оценка", anchor: "middle", cls: "best-text" },
+        { x: 52, y: 217, text: "top_k", anchor: "start", cls: "label" },
+        { x: 276, y: 289, text: "частицы движутся к лучшему роя", anchor: "middle", cls: "small" },
+        { x: 276, y: 339, text: "10–30 вариантов", anchor: "middle", cls: "badge-text" },
+        { x: 276, y: 382, text: "Непрерывно: промежуточные значения имеют смысл", anchor: "middle", cls: "principle" }
+      ]
+    },
+    {
+      panel: { x: 600, y: 0, w: 552, h: 404, r: 16 },
+      title: { x: 620, y: 32, text: "ACO", anchor: "start", cls: "title" },
+      subtitle: { x: 620, y: 56, text: "Выбор одного маршрута", anchor: "start", cls: "subtitle" },
+      request: { x: 626, y: 178, w: 142, h: 82, r: 16 },
+      agents: [
+        { x: 902, y: 82, w: 218, h: 68, r: 10, cls: "agent" },
+        { x: 902, y: 181, w: 218, h: 76, r: 10, cls: "agent-chosen" },
+        { x: 902, y: 288, w: 218, h: 68, r: 10, cls: "agent" }
+      ],
+      routes: [
+        { x1: 768, y1: 198, c1x: 810, c1y: 160, c2x: 854, c2y: 121, x2: 902, y2: 116, cls: "route-weak", arrow: "arrow-weak" },
+        { x1: 768, y1: 219, c1x: 816, c1y: 219, c2x: 856, c2y: 219, x2: 902, y2: 219, cls: "route-strong", arrow: "arrow-strong" },
+        { x1: 768, y1: 240, c1x: 813, c1y: 270, c2x: 856, c2y: 317, x2: 902, y2: 322, cls: "route-mid", arrow: "arrow-mid" }
+      ],
+      pheromones: [
+        { x: 814, y: 166, r: 4, cls: "pheromone-weak" },
+        { x: 841, y: 219, r: 5, cls: "pheromone-strong" },
+        { x: 869, y: 219, r: 5, cls: "pheromone-strong" },
+        { x: 827, y: 281, r: 4, cls: "pheromone-mid" }
+      ],
+      check: [
+        { x1: 1071, y1: 216, x2: 1080, y2: 226 },
+        { x1: 1080, y1: 226, x2: 1098, y2: 204 }
+      ],
+      legend: [
+        { x1: 686, y1: 344, x2: 736, y2: 344, cls: "route-weak" },
+        { x1: 862, y1: 344, x2: 912, y2: 344, cls: "route-strong" }
+      ],
+      labels: [
+        { x: 697, y: 157, text: "«ошибка оплаты»", anchor: "middle", cls: "small" },
+        { x: 697, y: 211, text: "ЗАПРОС", anchor: "middle", cls: "label" },
+        { x: 697, y: 235, text: "куда направить?", anchor: "middle", cls: "small" },
+        { x: 922, y: 121, text: "Агент возвратов", anchor: "start", cls: "agent-text" },
+        { x: 922, y: 215, text: "Агент оплаты", anchor: "start", cls: "agent-text" },
+        { x: 922, y: 239, text: "выбран", anchor: "start", cls: "chosen-text" },
+        { x: 922, y: 327, text: "Проверяющий", anchor: "start", cls: "agent-text" },
+        { x: 746, y: 349, text: "слабый след", anchor: "start", cls: "small", dx: 8 },
+        { x: 922, y: 349, text: "сильный след", anchor: "start", cls: "best-text", dx: 8 },
+        { x: 876, y: 382, text: "Дискретно: нужен конкретный маршрут", anchor: "middle", cls: "principle" }
+      ]
+    }
+  ];
+
+  const [C, PSO, ACO] = data;
+  const origin = Object.freeze({ x: C.ox, y: C.oy });
+  const scale = Object.freeze({ x: C.scaleX, y: C.scaleY });
+  const sx = x => origin.x + x * scale.x;
+  const sy = y => origin.y + y * scale.y;
+
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  try {
+    const make = (name, attrs, cls, content) => {
+      const element = document.createElementNS(ns, name);
+      Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+      if (cls) element.setAttribute("class", cls);
+      if (content) element.textContent = content;
+      return element;
+    };
+
+    const addRect = (parent, item) => {
+      parent.appendChild(make("rect", {
+        x: sx(item.x), y: sy(item.y),
+        width: sx(item.w) - sx(C.zero),
+        height: sy(item.h) - sy(C.zero),
+        rx: sx(item.r) - sx(C.zero),
+        ry: sy(item.r) - sy(C.zero)
+      }, item.cls));
+    };
+
+    const addLine = (parent, item) => {
+      parent.appendChild(make("line", {
+        x1: sx(item.x1), y1: sy(item.y1),
+        x2: sx(item.x2), y2: sy(item.y2)
+      }, item.cls));
+    };
+
+    const addCircle = (parent, item, cls) => {
+      parent.appendChild(make("circle", {
+        cx: sx(item.x), cy: sy(item.y),
+        r: sx(item.r) - sx(C.zero)
+      }, cls || item.cls));
+    };
+
+    const addText = (parent, item) => {
+      const attrs = {
+        x: sx(item.x), y: sy(item.y),
+        "text-anchor": item.anchor
+      };
+      if (item.dx) attrs.dx = item.dx;
+      if (item.dy) attrs.dy = item.dy;
+      parent.appendChild(make("text", attrs, item.cls, item.text));
+    };
+
+    const addArrowHead = (parent, item) => {
+      const dx = item.x2 - item.c2x;
+      const dy = item.y2 - item.c2y;
+      const length = Math.hypot(dx, dy);
+      const ux = dx / length;
+      const uy = dy / length;
+      const bx = item.x2 - ux * C.arrowLength;
+      const by = item.y2 - uy * C.arrowLength;
+      const points = [
+        [sx(item.x2), sy(item.y2)],
+        [sx(bx - uy * C.arrowHalf), sy(by + ux * C.arrowHalf)],
+        [sx(bx + uy * C.arrowHalf), sy(by - ux * C.arrowHalf)]
+      ].map(point => point.join(",")).join(" ");
+      parent.appendChild(make("polygon", { points }, item.arrow));
+    };
+
+    const addCurve = (parent, item) => {
+      const path = [
+        "M", sx(item.x1), sy(item.y1),
+        "C", sx(item.c1x), sy(item.c1y),
+        sx(item.c2x), sy(item.c2y),
+        sx(item.x2), sy(item.y2)
+      ].join(" ");
+      parent.appendChild(make("path", { d: path }, item.cls));
+      addArrowHead(parent, item);
+    };
+
+    PSO.panel.cls = "panel";
+    ACO.panel.cls = "panel";
+    addRect(svg, PSO.panel);
+    addRect(svg, ACO.panel);
+
+    addText(svg, PSO.title);
+    addText(svg, PSO.subtitle);
+    PSO.tracks.forEach(item => addLine(svg, { ...item, cls: "track" }));
+    PSO.ticks.forEach(item => addLine(svg, { ...item, cls: "tick" }));
+    PSO.curves.forEach(item => addCurve(svg, item));
+    PSO.oldKnobs.forEach(item => addCircle(svg, { ...item, r: C.knob }, "knob-old"));
+    PSO.bestKnobs.forEach(item => {
+      addCircle(svg, { ...item, r: C.ring }, "best-ring");
+      addCircle(svg, { ...item, r: C.knob }, "knob-best");
+    });
+    PSO.particles.forEach(item => addCircle(svg, { ...item, r: C.dot }, "particle"));
+    PSO.badge.cls = "badge-pso";
+    addRect(svg, PSO.badge);
+    PSO.labels.forEach(item => addText(svg, item));
+
+    addText(svg, ACO.title);
+    addText(svg, ACO.subtitle);
+    ACO.request.cls = "request";
+    addRect(svg, ACO.request);
+    ACO.routes.forEach(item => addCurve(svg, item));
+    ACO.pheromones.forEach(item => addCircle(svg, item));
+    ACO.agents.forEach(item => addRect(svg, item));
+    ACO.check.forEach(item => addLine(svg, { ...item, cls: "check" }));
+    ACO.legend.forEach(item => addLine(svg, item));
+    ACO.labels.forEach(item => addText(svg, item));
+  } catch (error) {
+    svg.setAttribute("hidden", "");
+    fallback.removeAttribute("hidden");
+  }
+})();
+</script>
+<script>
+(function () {
+  function contentHeight() {
+    var body = document.body;
+    if (!body) return 0;
+
+    var bottom = body.getBoundingClientRect().bottom;
+    var nodes = body.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i += 1) {
+      var box = nodes[i].getBoundingClientRect();
+      // Схлопнутые и спрятанные узлы пропускаются: у скрытого запасного
+      // текста нулевая коробка, но она всё равно где-то «заканчивается».
+      if (box.width > 0 || box.height > 0) bottom = Math.max(bottom, box.bottom);
+    }
+
+    var style = window.getComputedStyle(body);
+    return bottom + (parseFloat(style.marginBottom) || 0);
+  }
+
+  function report() {
+    parent.postMessage(
+      { type: "lab-visual-height", height: Math.ceil(contentHeight()) },
+      "*"
+    );
+  }
+
+  report();
+  window.addEventListener("load", report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.documentElement);
+})();
+</script></body>
+</html>
