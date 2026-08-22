@@ -66,9 +66,15 @@ interface TestResult {
 // Вердикт всегда помнит текст, который на самом деле прогоняли: иначе после
 // правки кода на экране остаётся зелёная плашка и кнопка разбора, а разбор
 // уходит агенту с прежними числами и новым файлом.
+//
+// Вместе с текстом помнится и ФАЙЛ, в котором его прогоняли: у многофайлового
+// упражнения текст в редакторе меняется ещё и от переключения вкладки, и
+// сравнение прогнанного текста с текстом другого файла всегда даёт
+// «не совпало». Так зелёный прогон main.py гасился кликом по вкладке hooks.py.
 interface Verdict {
   state: "passed" | "failed";
   result: TestResult;
+  testedFile: string | null;
   testedCode: string;
 }
 
@@ -640,9 +646,8 @@ export function ExercisePanel({
         );
         return;
       }
-      const testedCode = activeFileRef.current
-        ? savedCodeRef.current.get(activeFileRef.current) ?? ""
-        : "";
+      const testedFile = activeFileRef.current;
+      const testedCode = testedFile ? savedCodeRef.current.get(testedFile) ?? "" : "";
 
       const result = await fetchJson<{ result: TestResult; state: "passed" | "failed" }>(
         `/api/lesson/${slug}/tests`,
@@ -663,7 +668,7 @@ export function ExercisePanel({
       // правило (`failed === 0 && total > 0`), и полностью пропущенный прогон
       // рисовал зелёную плашку с кнопкой разбора, которую сервер потом
       // отклонял с 409.
-      setVerdict({ state: result.data.state, result: result.data.result, testedCode });
+      setVerdict({ state: result.data.state, result: result.data.result, testedFile, testedCode });
       onProgressChanged();
     } finally {
       if (isCurrent()) setRunning(false);
@@ -794,7 +799,14 @@ export function ExercisePanel({
   const green = verdict?.state === "passed";
   // Вердикт относится к тексту, который прогоняли. Как только редактор от него
   // ушёл, зелёная плашка и разбор больше не про этот код.
-  const staleVerdict = verdict !== null && verdict.testedCode !== code;
+  //
+  // Сравнение имеет смысл только пока открыт ТОТ ЖЕ файл: в редакторе лежит
+  // текст активной вкладки, и на соседней вкладке он законно другой. Без
+  // сверки файла переключение вкладки читалось как правка кода — панель писала
+  // «Код изменился после прогона» и убирала кнопку разбора, хотя человек
+  // ничего не менял.
+  const staleVerdict =
+    verdict !== null && verdict.testedFile === activeFile && verdict.testedCode !== code;
 
   return (
     <section className="space-y-3">
