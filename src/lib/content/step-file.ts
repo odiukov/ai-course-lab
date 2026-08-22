@@ -40,6 +40,12 @@ export const stepMetaSchema = z.object({
   // запускает рисовальщика без задания.
   visual_brief: z.string().min(1).optional(),
   exercise_fn: z.string().optional(),
+  /**
+   * Файл упражнения, в котором живёт `exercise_fn`. Необязателен: у
+   * одно-файлового упражнения он один и подразумевается, а у 382
+   * существующих планов этого поля нет и появляться не должно.
+   */
+  exercise_file: z.string().optional(),
   check: z.array(checkSchema).optional(),
   baseline: z
     .object({

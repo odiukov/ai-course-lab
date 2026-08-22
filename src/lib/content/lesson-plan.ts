@@ -64,9 +64,25 @@ export function validatePlan(
     seen.add(step.id);
   }
 
-  const known = new Set(source.exercise?.functions ?? []);
+  const known = source.exercise?.functions ?? [];
+  // Множество файлов упражнения — по нему отличаем «файла нет вовсе» от
+  // «файл есть, просто в нём нет такой функции».
+  const knownFiles = new Set(known.map((pair) => pair.file));
+  // Имя функции может встречаться в нескольких файлах упражнения (одно и то
+  // же имя — две разные задачи). byName собирает для каждого имени список
+  // файлов, где оно объявлено, чтобы отличить однозначный случай (файл один,
+  // exercise_file можно не указывать) от случая, где угадать нельзя.
+  const byName = new Map<string, string[]>();
+  for (const pair of known) {
+    byName.set(pair.fn, [...(byName.get(pair.fn) ?? []), pair.file]);
+  }
+  // Пара «файл + функция» — вот что на самом деле является задачей.
+  // exercise_fn остаётся строкой (382 плана без exercise_file не должны
+  // ломаться), а различать одноимённые функции в разных файлах приходится
+  // склеенным ключом.
+  const key = (file: string, fn: string) => `${file}::${fn}`;
   const used = new Set<string>();
-  const writtenByName = new Map(written.map((item) => [item.fn, item]));
+  const writtenByName = new Map(written.map((item) => [key(item.file, item.fn), item]));
   let theorySincePrevCode = true;
 
   for (const step of steps) {
@@ -76,34 +92,51 @@ export function validatePlan(
     }
     if (step.type !== "code" && step.type !== "recall") continue;
 
+    let file: string | undefined;
+
     if (!step.exercise_fn) {
       errors.push(`Шаг ${step.id}: у ${step.type}-шага нет exercise_fn`);
     } else {
-      if (!known.has(step.exercise_fn)) {
+      const files = byName.get(step.exercise_fn) ?? [];
+      if (files.length === 0) {
         errors.push(`Шаг ${step.id}: функция ${step.exercise_fn} отсутствует в упражнении`);
-      }
-      if (used.has(step.exercise_fn)) {
-        errors.push(`Шаг ${step.id}: функция ${step.exercise_fn} уже занята другим шагом`);
-      }
-      // recall обещает карточку «вот как ты написал это в прошлый раз», и
-      // прошлый раз ищется по ДРУГИМ упражнениям курса (findPreviousImplementation
-      // исключает текущее). Функция, которую человек ещё не писал, оставляет
-      // карточку пустой — а на уроке, где такую функцию всего одна, recall
-      // вместо code-шага тихо съедает практику: покрытием он считается.
-      // Планировщик приходил сюда именно так: ставил в конце урока отсылку
-      // «ваш compose — это стек слоёв нейросети» шагом recall.
-      if (step.type === "recall" && !writtenByName.has(step.exercise_fn)) {
+      } else if (step.exercise_file && !knownFiles.has(step.exercise_file)) {
+        errors.push(`Шаг ${step.id}: в упражнении нет файла ${step.exercise_file}`);
+      } else if (!step.exercise_file && files.length > 1) {
+        // Одно имя в двух файлах — это две разные задачи, и шаг обязан сказать,
+        // о какой он. Угадать нельзя: и тесты, и сброс, и recall пишут в файл.
         errors.push(
-          `Шаг ${step.id}: recall — про функцию из прошлого урока, а ${step.exercise_fn} человек ещё не писал. ` +
-            `Отсылка к тому, что он написал в этом же уроке, — обычный theory-шаг`,
+          `Шаг ${step.id}: функция ${step.exercise_fn} есть в нескольких файлах упражнения ` +
+            `(${[...files].sort().join(", ")}) — укажи exercise_file`,
         );
+      } else {
+        file = step.exercise_file ?? files[0];
+        if (used.has(key(file, step.exercise_fn))) {
+          errors.push(
+            `Шаг ${step.id}: функция ${step.exercise_fn} в ${file} уже занята другим шагом`,
+          );
+        }
+        // recall обещает карточку «вот как ты написал это в прошлый раз», и
+        // прошлый раз ищется по ДРУГИМ упражнениям курса (findPreviousImplementation
+        // исключает текущее). Функция, которую человек ещё не писал, оставляет
+        // карточку пустой — а на уроке, где такую функцию всего одна, recall
+        // вместо code-шага тихо съедает практику: покрытием он считается.
+        // Планировщик приходил сюда именно так: ставил в конце урока отсылку
+        // «ваш compose — это стек слоёв нейросети» шагом recall.
+        if (step.type === "recall" && !writtenByName.has(key(file, step.exercise_fn))) {
+          errors.push(
+            `Шаг ${step.id}: recall — про функцию из прошлого урока, а ${step.exercise_fn} человек ещё не писал. ` +
+              `Отсылка к тому, что он написал в этом же уроке, — обычный theory-шаг`,
+          );
+        }
+        used.add(key(file, step.exercise_fn));
       }
-      used.add(step.exercise_fn);
     }
 
     if (step.type !== "code") continue;
 
-    const previous = step.exercise_fn ? writtenByName.get(step.exercise_fn) : undefined;
+    const previous =
+      step.exercise_fn && file ? writtenByName.get(key(file, step.exercise_fn)) : undefined;
     if (previous && !step.baseline?.changes) {
       errors.push(
         `Шаг ${step.id}: функция ${step.exercise_fn} уже написана (${previous.lessonSlug ?? previous.exerciseSlug}). ` +
@@ -116,8 +149,14 @@ export function validatePlan(
     theorySincePrevCode = false;
   }
 
-  for (const fn of known) {
-    if (!used.has(fn)) errors.push(`Функция ${fn} не покрыта ни одним code-шагом`);
+  for (const pair of known) {
+    if (!used.has(key(pair.file, pair.fn))) {
+      errors.push(
+        known.some((other) => other.fn === pair.fn && other.file !== pair.file)
+          ? `Функция ${pair.fn} из ${pair.file} не покрыта ни одним code-шагом`
+          : `Функция ${pair.fn} не покрыта ни одним code-шагом`,
+      );
+    }
   }
 
   const visuals = new Set(source.visuals);

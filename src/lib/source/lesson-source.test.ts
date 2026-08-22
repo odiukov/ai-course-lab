@@ -57,7 +57,11 @@ describe("readLessonSource", () => {
   it("находит упражнение и публичные функции", () => {
     const ex = source("01-math-foundations__02-beta").exercise!;
     expect(ex.slug).toBe("p01-l02-beta");
-    expect(ex.functions).toEqual(["transpose", "matmul"]);
+    expect(ex.multi).toBe(false);
+    expect(ex.functions).toEqual([
+      { file: "exercise.py", fn: "transpose" },
+      { file: "exercise.py", fn: "matmul" },
+    ]);
   });
 
   it("видит многострочную сигнатуру и async def, не теряя соседей", () => {
@@ -67,7 +71,12 @@ describe("readLessonSource", () => {
     // `^def name\(` не находил вовсе.
     const ex = source("02-ml-fundamentals__01-gamma").exercise!;
     expect(ex.slug).toBe("p02-l01-gamma");
-    expect(ex.functions).toEqual(["warmup", "gamma_step", "fetch_batch", "cooldown"]);
+    expect(ex.functions).toEqual([
+      { file: "exercise.py", fn: "warmup" },
+      { file: "exercise.py", fn: "gamma_step" },
+      { file: "exercise.py", fn: "fetch_batch" },
+      { file: "exercise.py", fn: "cooldown" },
+    ]);
   });
 
   it("отдаёт null, если упражнения нет", () => {

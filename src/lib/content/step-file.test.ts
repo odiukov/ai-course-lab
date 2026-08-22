@@ -157,6 +157,23 @@ describe("serializeStep", () => {
     expect(round).toEqual(step);
   });
 
+  // exercise_file — адрес пары «файл + функция» у многофайлового упражнения.
+  // Поле необязательное, но раз оно задано, круг обязан его не терять — иначе
+  // план, зависящий от него для различения одноимённых функций, ломается на
+  // первом же чтении с диска.
+  it("не теряет exercise_file при круге", () => {
+    const step: Step = {
+      id: "006-run",
+      type: "code",
+      title: "Пишем run",
+      exercise_fn: "run",
+      exercise_file: "hooks.py",
+      body: "Реализуй функцию.",
+    };
+    const round = parseStep(serializeStep(step));
+    expect(round).toEqual(step);
+  });
+
   it("не пишет пустые поля", () => {
     const out = serializeStep({ id: "001-a", type: "theory", title: "А", body: "Б" });
     expect(out).not.toContain("visual");

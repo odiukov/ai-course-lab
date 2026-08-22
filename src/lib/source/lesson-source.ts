@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { canonicalFunctions, readExerciseTree } from "../exercise/tree";
 import type { LessonRef } from "./catalog";
-import { findExerciseDir, visualPrefixes } from "./naming";
-import { parseTopLevelFunctions } from "./written-functions";
+import { visualPrefixes } from "./naming";
 
 const quizSchema = z.object({
   questions: z.array(
@@ -23,7 +23,9 @@ export type QuizQuestion = z.infer<typeof quizSchema>["questions"][number];
 export interface ExerciseInfo {
   slug: string;
   dir: string;
-  functions: string[];
+  /** Каталожная форма (`exercise.template/`) против одно-файловой. */
+  multi: boolean;
+  functions: { file: string; fn: string }[];
 }
 
 export interface LessonSource {
@@ -67,20 +69,14 @@ function readVisuals(courseRepo: string, ref: LessonRef): string[] {
 }
 
 function readExercise(courseRepo: string, ref: LessonRef): ExerciseInfo | null {
-  const root = path.join(courseRepo, "learning-exercises");
-  const found = findExerciseDir(root, ref);
-  if (!found) return null;
-  const dir = path.join(root, found);
-  const template = path.join(dir, "exercise.template.py");
-  if (!fs.existsSync(template)) return null;
-  // Shares the balanced-paren header parser with the written-functions
-  // registry. The old single-line regex here dropped every function whose
-  // signature spans several lines, so the plan prompt never saw it and the
-  // validator's coverage rule never demanded a step for it.
-  const functions = parseTopLevelFunctions(fs.readFileSync(template, "utf8")).map(
-    (block) => block.fn,
-  );
-  return { slug: found, dir, functions };
+  const tree = readExerciseTree(courseRepo, ref);
+  if (!tree) return null;
+  return {
+    slug: tree.slug,
+    dir: tree.dir,
+    multi: tree.multi,
+    functions: canonicalFunctions(tree),
+  };
 }
 
 export function readLessonSource(courseRepo: string, ref: LessonRef): LessonSource {

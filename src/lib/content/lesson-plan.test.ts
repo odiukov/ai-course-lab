@@ -121,12 +121,96 @@ describe("validatePlan", () => {
   });
 });
 
+describe("адрес практики: файл + функция", () => {
+  // Многофайловое упражнение, где имя run встречается в двух файлах —
+  // main.py и hooks.py. Это и есть тот случай, когда одного имени функции
+  // недостаточно, чтобы понять, о какой задаче речь.
+  const multiSource = {
+    ...SOURCE,
+    exercise: {
+      slug: "p19-l20-loop",
+      dir: "/tmp/p19-l20-loop",
+      multi: true,
+      functions: [
+        { file: "main.py", fn: "run" },
+        { file: "hooks.py", fn: "fire" },
+        { file: "hooks.py", fn: "run" },
+      ],
+    },
+  };
+
+  it("требует exercise_file, когда имя функции есть в двух файлах", () => {
+    const errors = validatePlan(
+      [
+        { id: "001-a", type: "theory", title: "Т" },
+        { id: "002-b", type: "code", title: "К", exercise_fn: "run" },
+      ],
+      multiSource,
+    );
+    expect(errors).toContain(
+      "Шаг 002-b: функция run есть в нескольких файлах упражнения (hooks.py, main.py) — укажи exercise_file",
+    );
+  });
+
+  it("принимает пару файл+функция", () => {
+    const errors = validatePlan(
+      [
+        { id: "001-a", type: "theory", title: "Т" },
+        { id: "002-b", type: "code", title: "К", exercise_fn: "run", exercise_file: "main.py" },
+        { id: "003-c", type: "theory", title: "Т" },
+        { id: "004-d", type: "code", title: "К", exercise_fn: "fire", exercise_file: "hooks.py" },
+        { id: "005-e", type: "theory", title: "Т" },
+        { id: "006-f", type: "code", title: "К", exercise_fn: "run", exercise_file: "hooks.py" },
+      ],
+      multiSource,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("ругается на файл, которого в упражнении нет", () => {
+    const errors = validatePlan(
+      [
+        { id: "001-a", type: "theory", title: "Т" },
+        { id: "002-b", type: "code", title: "К", exercise_fn: "run", exercise_file: "nope.py" },
+      ],
+      multiSource,
+    );
+    expect(errors).toContain("Шаг 002-b: в упражнении нет файла nope.py");
+  });
+
+  it("считает одну и ту же функцию в разных файлах разными задачами", () => {
+    // main.py::run и hooks.py::run — две задачи, и занятость одной не должна
+    // мешать другой.
+    const errors = validatePlan(
+      [
+        { id: "001-a", type: "theory", title: "Т" },
+        { id: "002-b", type: "code", title: "К", exercise_fn: "run", exercise_file: "main.py" },
+        { id: "003-c", type: "theory", title: "Т" },
+        { id: "004-d", type: "code", title: "К", exercise_fn: "run", exercise_file: "hooks.py" },
+        { id: "005-e", type: "theory", title: "Т" },
+        { id: "006-f", type: "code", title: "К", exercise_fn: "fire", exercise_file: "hooks.py" },
+      ],
+      multiSource,
+    );
+    expect(errors).toEqual([]);
+  });
+
+  // Обратная совместимость: одно-файловое упражнение без exercise_file в
+  // шагах ведёт себя ровно как раньше — этим планам взяться неоткуда, но
+  // проверка не должна начать требовать поле, которого в форме нет.
+  it("одно-файловый план без exercise_file остаётся валиден", () => {
+    expect(validatePlan(GOOD, SOURCE)).toEqual([]);
+  });
+});
+
 describe("повторное написание функций", () => {
   const written: WrittenFunction[] = [
     {
       fn: "transpose",
       exerciseSlug: "p01-l02-beta",
       lessonSlug: "01-math-foundations__02-beta",
+      // Одно-файловое упражнение: у него единственный файл, и это его старое имя.
+      file: "exercise.py",
       signature: "transpose(M)",
     },
   ];

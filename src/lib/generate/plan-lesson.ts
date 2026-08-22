@@ -159,7 +159,15 @@ export async function generateLessonPlan(opts: {
     step_budget: String(budget),
     lesson_title: source.ref.title,
     source_text: source.text,
-    functions: (source.exercise?.functions ?? []).map((fn) => `- ${fn}`).join("\n") || "(нет упражнения)",
+    // Одно-файловое упражнение показывает планировщику ровно то, что и
+    // раньше, — «- имя_функции», иначе промпты 382 существующих упражнений
+    // разошлись бы без причины. У многофайлового строка называет и файл: без
+    // адреса планировщик не смог бы заполнить exercise_file для одноимённых
+    // функций из разных файлов.
+    functions:
+      (source.exercise?.functions ?? [])
+        .map((pair) => (source.exercise?.multi ? `- ${pair.file}: ${pair.fn}` : `- ${pair.fn}`))
+        .join("\n") || "(нет упражнения)",
     visuals: source.visuals.map((v) => `- ${v}`).join("\n") || "(нет визуализаций)",
     written_functions:
       written
