@@ -275,7 +275,10 @@ describe("runTests: каталог файлов человека попадае�
     const call = JSON.parse(fs.readFileSync(path.join(dir, "argv.json"), "utf8"));
     expect(call.env.PYTHONPATH.split(path.delimiter)).toContain(nested);
     expect(call.args).toContain(testFile);
-    expect(outcome.passed).toBeGreaterThanOrEqual(0);
+    // Подделка печатает junit с tests="0" — ровно это и обязано приехать в
+    // разобранном итоге. Прежнее `toBeGreaterThanOrEqual(0)` было верно при
+    // любом числе и не проверяло вообще ничего.
+    expect(outcome).toMatchObject({ total: 0, passed: 0, failed: 0, errors: 0 });
   });
 
   it("не затирает PYTHONPATH, уже заданный в окружении, а дописывает его первым по порядку", async () => {

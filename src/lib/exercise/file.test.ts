@@ -318,6 +318,22 @@ describe("writeExerciseFileIfUnchanged", () => {
     ).toThrow(/нет файла evil\.py/);
   });
 
+  // Каталог exercise/ заводит первое ЧТЕНИЕ, но PUT может приехать раньше
+  // любого GET (свежее упражнение, редактор восстановил черновик) — и тогда
+  // запись падала сырым ENOENT вместо того, чтобы создать каталог и записать.
+  it("пишет в каталожную форму, к которой ещё ни разу не обращались за чтением", () => {
+    const sourceDir = makeMulti();
+    const workDir = path.join(sourceDir, "learning-exercises", "p19-l20-loop", "exercise");
+    expect(fs.existsSync(workDir)).toBe(false);
+
+    const result = writeExerciseFileIfUnchanged(
+      sourceDir, p19, "main.py", "def run(goal):\n    return 7\n", 0,
+    );
+
+    expect("conflict" in result).toBe(false);
+    expect(fs.readFileSync(path.join(workDir, "main.py"), "utf8")).toContain("return 7");
+  });
+
   it("отказывает в записи по пути с выходом из каталога", () => {
     const sourceDir = makeMulti();
     readExerciseFiles(sourceDir, p19);

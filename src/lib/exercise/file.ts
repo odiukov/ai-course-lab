@@ -130,6 +130,11 @@ export interface ExerciseConflict {
 // может оставить обрезанное решение — на диске либо прежний файл целиком,
 // либо новый целиком.
 function writeAtomically(file: string, code: string): void {
+  // Каталога может ещё не быть: у каталожной формы файлы человека лежат в
+  // exercise/, и создаёт его readOne при первом чтении. PUT, приехавший раньше
+  // любого GET (свежее упражнение, редактор восстановил черновик), падал здесь
+  // сырым ENOENT вместо записи — при том что писать было куда.
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
   try {
     fs.writeFileSync(tmp, code, "utf8");
