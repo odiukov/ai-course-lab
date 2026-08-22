@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   describeFunctions,
-  readCanonicalFunctions,
+  readCanonicalFunctionNames,
   readExerciseCodeBySlug,
 } from "@/lib/exercise/file";
 import type { LessonRef } from "@/lib/source/catalog";
@@ -121,7 +121,7 @@ describe("runTests: отбор на настоящих именах тестов
 
 // Откуда берётся список «остальных функций» — не деталь реализации, а разница
 // между честным прогоном и ложным зелёным. Список собирается из шаблона
-// упражнения (readCanonicalFunctions), потому что учащийся в свой exercise.py
+// упражнения (readCanonicalFunctionNames), потому что учащийся в свой exercise.py
 // дописывает вспомогательные функции, и они не должны попадать в отрицание -k.
 describe("состав упражнения для фильтра берётся из шаблона, а не из файла учащегося", () => {
   function makeLesson02Source(): string {
@@ -139,7 +139,7 @@ describe("состав упражнения для фильтра берётся
 
   it("вспомогательная `shape` учащегося не отрезает test_identity_shape_and_content", async () => {
     const sourceDir = makeLesson02Source();
-    const canonical = readCanonicalFunctions(sourceDir, LESSON02_REF);
+    const canonical = readCanonicalFunctionNames(sourceDir, LESSON02_REF);
     expect(canonical).toEqual(LESSON02);
 
     const { result, first } = await selection("identity", canonical);

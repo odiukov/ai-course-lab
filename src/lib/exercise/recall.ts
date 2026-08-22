@@ -3,9 +3,9 @@ import { readWrittenFunctions } from "../source/written-functions";
 import {
   extractFunction,
   readExerciseCodeBySlug,
-  readExerciseFile,
+  readExerciseFiles,
   replaceFunction,
-  writeExerciseCode,
+  writeExerciseFile,
   type ExerciseFunction,
 } from "./file";
 
@@ -60,7 +60,9 @@ export function insertPreviousImplementation(
   fn: string,
   previous: PreviousImplementation,
 ): { code: string; functions: ExerciseFunction[]; changed: boolean } | { error: string } {
-  const exercise = readExerciseFile(sourceDir, ref);
+  const exercise = readExerciseFiles(sourceDir, ref)?.files.find(
+    (item) => item.name === "exercise.py",
+  );
   if (!exercise) return { error: "У урока нет упражнения" };
   if (!exercise.functions.some((item) => item.fn === fn)) {
     return { error: `В упражнении этого урока нет функции ${fn} — вставить некуда` };
@@ -71,6 +73,6 @@ export function insertPreviousImplementation(
     return { code, functions: exercise.functions, changed: false };
   }
 
-  const written = writeExerciseCode(sourceDir, ref, code);
+  const written = writeExerciseFile(sourceDir, ref, "exercise.py", code);
   return { code, functions: written.functions, changed: true };
 }

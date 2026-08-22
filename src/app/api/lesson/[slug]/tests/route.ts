@@ -1,6 +1,6 @@
 import { loadConfig } from "@/lib/config";
 import { readStep } from "@/lib/content/step-file";
-import { readCanonicalFunctions, readExerciseFile } from "@/lib/exercise/file";
+import { readCanonicalFunctionNames, readExerciseFiles } from "@/lib/exercise/file";
 import { PracticeError } from "@/lib/practice/errors";
 import { runTests } from "@/lib/practice/run-tests";
 import { openProgressDb } from "@/lib/progress/db";
@@ -42,7 +42,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     return Response.json({ error: "У шага не указана функция упражнения" }, { status: 400 });
   }
 
-  const exercise = readExerciseFile(config.sourceDir, ref);
+  const exercise = readExerciseFiles(config.sourceDir, ref);
   if (!exercise) {
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
@@ -62,7 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       // написал себе сам, попала бы в отрицание и молча отрезала настоящий
       // тест шага (`def shape(M)` рядом с identity убивал
       // test_identity_shape_and_content).
-      functions: readCanonicalFunctions(config.sourceDir, ref),
+      functions: readCanonicalFunctionNames(config.sourceDir, ref),
       python: config.python,
     });
   } catch (error) {

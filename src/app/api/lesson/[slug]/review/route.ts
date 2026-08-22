@@ -5,7 +5,7 @@ import { sseStream } from "@/lib/api/sse";
 import { loadConfig } from "@/lib/config";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStep } from "@/lib/content/step-file";
-import { extractFunction, readExerciseFile } from "@/lib/exercise/file";
+import { extractFunction, readExerciseFiles } from "@/lib/exercise/file";
 import { formatMetrics, formatRuff, formatTests, reviewCode } from "@/lib/generate/review-code";
 import { runBench } from "@/lib/practice/bench";
 import { addChatMessage, openChatSession } from "@/lib/progress/chat";
@@ -46,10 +46,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     );
   }
 
-  const exercise = readExerciseFile(config.sourceDir, ref);
-  if (!exercise) return Response.json({ error: "У урока нет упражнения" }, { status: 404 });
+  const set = readExerciseFiles(config.sourceDir, ref);
+  const exercise = set?.files.find((item) => item.name === "exercise.py");
+  if (!set || !exercise) {
+    return Response.json({ error: "У урока нет упражнения" }, { status: 404 });
+  }
 
-  const solutionPath = path.join(exercise.dir, "solution.py");
+  const solutionPath = path.join(set.dir, "solution.py");
   const solutionCode = fs.existsSync(solutionPath)
     ? (extractFunction(fs.readFileSync(solutionPath, "utf8"), step.exercise_fn) ??
       "(в эталоне такой функции нет)")
@@ -63,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без
     // сигнала закрытая вкладка оставляет python молотить до двух минут.
     const report = await runBench({
-      dir: exercise.dir,
+      dir: set.dir,
       fn,
       python: config.python,
       signal: request.signal,

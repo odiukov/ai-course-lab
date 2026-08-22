@@ -5,9 +5,9 @@ import { parseTopLevelFunctions } from "../source/written-functions";
 import {
   extractFunction,
   findExercise,
-  readExerciseFile,
+  readExerciseFiles,
   replaceFunction,
-  writeExerciseCode,
+  writeExerciseFile,
   type ExerciseFunction,
 } from "./file";
 
@@ -46,16 +46,18 @@ export function resetFunctionToTemplate(
   const block = extractFunction(template, fn);
   if (!block) return { error: `В заготовке упражнения нет функции ${fn}` };
 
-  // readExerciseFile, а не чтение файла: у урока, чей exercise.py ещё не
+  // readExerciseFiles, а не чтение файла: у урока, чей exercise.py ещё не
   // заводили, сброс — такой же законный первый заход, как открытие шага.
-  const exercise = readExerciseFile(sourceDir, ref);
+  const exercise = readExerciseFiles(sourceDir, ref)?.files.find(
+    (item) => item.name === "exercise.py",
+  );
   if (!exercise) return { error: "У урока нет упражнения" };
 
   const code = exercise.functions.some((item) => item.fn === fn)
     ? replaceFunction(exercise.code, fn, block)
     : insertByTemplateOrder(exercise.code, template, fn, block);
 
-  const written = writeExerciseCode(sourceDir, ref, code);
+  const written = writeExerciseFile(sourceDir, ref, "exercise.py", code);
   return { code, functions: written.functions, mtimeMs: written.mtimeMs };
 }
 

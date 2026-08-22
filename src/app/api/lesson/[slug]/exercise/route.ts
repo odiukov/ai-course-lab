@@ -1,8 +1,8 @@
 import { loadConfig } from "@/lib/config";
 import {
-  exerciseMtimeMs,
-  readExerciseFile,
-  writeExerciseCodeIfUnchanged,
+  exerciseFileMtimeMs,
+  readExerciseFiles,
+  writeExerciseFileIfUnchanged,
 } from "@/lib/exercise/file";
 import { findLesson } from "@/lib/source/catalog";
 
@@ -21,14 +21,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   // ?meta=1 — то, чем редактор опрашивает файл на внешние правки: только время
   // изменения, без пересылки всего файла каждые две секунды.
   if (new URL(request.url).searchParams.get("meta") === "1") {
-    const mtimeMs = exerciseMtimeMs(config.sourceDir, ref);
+    const mtimeMs = exerciseFileMtimeMs(config.sourceDir, ref, "exercise.py");
     if (mtimeMs === null) {
       return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
     }
     return Response.json({ mtimeMs });
   }
 
-  const file = readExerciseFile(config.sourceDir, ref);
+  const file = readExerciseFiles(config.sourceDir, ref)?.files.find(
+    (item) => item.name === "exercise.py",
+  );
   if (!file) {
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
@@ -57,7 +59,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ slug
   if (!ref) return Response.json({ error: "Урок не найден" }, { status: 404 });
 
   try {
-    const result = writeExerciseCodeIfUnchanged(config.sourceDir, ref, code, expectedMtimeMs);
+    const result = writeExerciseFileIfUnchanged(
+      config.sourceDir, ref, "exercise.py", code, expectedMtimeMs,
+    );
     // 409 с актуальным содержимым: файл на диске успел измениться (вставка
     // прошлого кода, правка из IDE), и клиент должен перечитать его, а не
     // затереть своим черновиком, получив в ответ «сохранено».

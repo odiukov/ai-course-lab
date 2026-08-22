@@ -19,6 +19,11 @@ function makeSource(): string {
   const write = (exerciseSlug: string, code: string) => {
     const dir = path.join(sourceDir, "learning-exercises", exerciseSlug);
     fs.mkdirSync(dir, { recursive: true });
+    // insertPreviousImplementation теперь читает через readExerciseTree, а он
+    // считает упражнение существующим только при наличии шаблона — как и у
+    // всех настоящих упражнений курса. Содержимое шаблона здесь не важно, он
+    // не участвует в записи.
+    fs.writeFileSync(path.join(dir, "exercise.template.py"), code, "utf8");
     fs.writeFileSync(path.join(dir, "exercise.py"), code, "utf8");
   };
   write("p02-l04-alpha", SOLVED);
