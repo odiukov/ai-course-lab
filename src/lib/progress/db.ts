@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS test_runs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   lesson_slug   TEXT NOT NULL,
   step_id       TEXT NOT NULL,
+  -- Для многофайлового упражнения здесь лежит пара "файл::функция", а не
+  -- просто имя функции: иначе одноимённые функции разных файлов упражнения
+  -- сливались бы в истории прогонов в одну строку.
   exercise_fn   TEXT NOT NULL,
   passed        INTEGER NOT NULL,
   failed        INTEGER NOT NULL,

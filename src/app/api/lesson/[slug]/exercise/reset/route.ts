@@ -4,6 +4,8 @@ import { findLesson } from "@/lib/source/catalog";
 
 interface Body {
   fn?: unknown;
+  /** Файл упражнения, куда встаёт заготовка; не передан — берётся exercise.py. */
+  file?: unknown;
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -11,13 +13,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const body = (await request.json().catch(() => ({}))) as Body;
   const fn = typeof body.fn === "string" ? body.fn.trim() : "";
   if (!fn) return Response.json({ error: "Не передана функция" }, { status: 400 });
+  const file = typeof body.file === "string" && body.file.trim() ? body.file.trim() : undefined;
 
   const config = loadConfig();
   const ref = findLesson(config.sourceDir, slug);
   if (!ref) return Response.json({ error: "Урок не найден" }, { status: 404 });
 
   try {
-    const result = resetFunctionToTemplate(config.sourceDir, ref, fn);
+    const result = resetFunctionToTemplate(config.sourceDir, ref, fn, file);
     if ("error" in result) return Response.json({ error: result.error }, { status: 404 });
     return Response.json(result);
   } catch (error) {

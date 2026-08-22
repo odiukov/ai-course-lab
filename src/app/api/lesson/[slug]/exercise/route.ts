@@ -8,6 +8,8 @@ import { findLesson } from "@/lib/source/catalog";
 
 interface PutBody {
   code?: unknown;
+  /** Имя файла упражнения — обязательно и для одно-файловой формы. */
+  file?: unknown;
   /** mtime файла, каким его видел клиент, — защита от затирания чужой правки. */
   mtimeMs?: unknown;
 }
@@ -18,38 +20,40 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   const ref = findLesson(config.sourceDir, slug);
   if (!ref) return Response.json({ error: "Урок не найден" }, { status: 404 });
 
+  const url = new URL(request.url);
   // ?meta=1 — то, чем редактор опрашивает файл на внешние правки: только время
   // изменения, без пересылки всего файла каждые две секунды.
-  if (new URL(request.url).searchParams.get("meta") === "1") {
-    const mtimeMs = exerciseFileMtimeMs(config.sourceDir, ref, "exercise.py");
+  if (url.searchParams.get("meta") === "1") {
+    // Имя файла обязательно: у многофайлового упражнения «время изменения
+    // упражнения» — это не одно число, и молча взять первый файл значило бы
+    // не замечать правку остальных. ?meta=1 без file подразумевает
+    // exercise.py — так его посылает старый клиент.
+    const name = url.searchParams.get("file") ?? "exercise.py";
+    const mtimeMs = exerciseFileMtimeMs(config.sourceDir, ref, name);
     if (mtimeMs === null) {
-      return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
+      return Response.json({ error: `У этого урока нет файла ${name}` }, { status: 404 });
     }
     return Response.json({ mtimeMs });
   }
 
-  const file = readExerciseFiles(config.sourceDir, ref)?.files.find(
-    (item) => item.name === "exercise.py",
-  );
-  if (!file) {
-    return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
-  }
-  return Response.json(file);
+  const set = readExerciseFiles(config.sourceDir, ref);
+  if (!set) return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
+  return Response.json(set);
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const body = (await request.json().catch(() => ({}))) as PutBody;
   const code = typeof body.code === "string" ? body.code : null;
+  const file = typeof body.file === "string" ? body.file.trim() : "";
   const expectedMtimeMs =
     typeof body.mtimeMs === "number" && Number.isFinite(body.mtimeMs) ? body.mtimeMs : null;
 
-  if (code === null) {
-    return Response.json({ error: "Не передано поле code" }, { status: 400 });
-  }
+  if (code === null) return Response.json({ error: "Не передано поле code" }, { status: 400 });
   if (code.trim().length === 0) {
     return Response.json({ error: "Пустой код — запись отклонена" }, { status: 400 });
   }
+  if (!file) return Response.json({ error: "Не передано поле file" }, { status: 400 });
   if (expectedMtimeMs === null) {
     return Response.json({ error: "Не передано поле mtimeMs" }, { status: 400 });
   }
@@ -60,7 +64,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ slug
 
   try {
     const result = writeExerciseFileIfUnchanged(
-      config.sourceDir, ref, "exercise.py", code, expectedMtimeMs,
+      config.sourceDir, ref, file, code, expectedMtimeMs,
     );
     // 409 с актуальным содержимым: файл на диске успел измениться (вставка
     // прошлого кода, правка из IDE), и клиент должен перечитать его, а не

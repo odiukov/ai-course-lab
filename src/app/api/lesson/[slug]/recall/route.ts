@@ -5,6 +5,8 @@ import { findLesson } from "@/lib/source/catalog";
 
 interface Body {
   fn?: unknown;
+  /** Файл упражнения, в который встаёт прошлый код; не передан — exercise.py. */
+  file?: unknown;
 }
 
 function resolve(slug: string, fn: string) {
@@ -34,6 +36,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const body = (await request.json().catch(() => ({}))) as Body;
   const fn = typeof body.fn === "string" ? body.fn.trim() : "";
   if (!fn) return Response.json({ error: "Не передана функция" }, { status: 400 });
+  const file = typeof body.file === "string" && body.file.trim() ? body.file.trim() : undefined;
 
   const resolved = resolve(slug, fn);
   if ("error" in resolved) {
@@ -45,7 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // используется как есть, а не переписывается заново. Если в упражнении
   // этого урока функции нет вовсе, insertPreviousImplementation отдаёт
   // ошибку — файл не тронут, и отвечать 200 в этом случае нельзя.
-  const result = insertPreviousImplementation(config.sourceDir, ref, fn, previous);
+  const result = insertPreviousImplementation(config.sourceDir, ref, fn, previous, file);
   if ("error" in result) return Response.json({ error: result.error }, { status: 404 });
   return Response.json(result);
 }

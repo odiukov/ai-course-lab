@@ -1,6 +1,8 @@
+import path from "node:path";
 import { loadConfig } from "@/lib/config";
 import { readStep } from "@/lib/content/step-file";
-import { readCanonicalFunctionNames, readExerciseFiles } from "@/lib/exercise/file";
+import { readCanonicalFunctionNames } from "@/lib/exercise/file";
+import { readExerciseTree } from "@/lib/exercise/tree";
 import { PracticeError } from "@/lib/practice/errors";
 import { runTests } from "@/lib/practice/run-tests";
 import { openProgressDb } from "@/lib/progress/db";
@@ -42,20 +44,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     return Response.json({ error: "У шага не указана функция упражнения" }, { status: 400 });
   }
 
-  const exercise = readExerciseFiles(config.sourceDir, ref);
-  if (!exercise) {
+  const tree = readExerciseTree(config.sourceDir, ref);
+  if (!tree) {
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
+
+  const fileName = step.exercise_file ?? "exercise.py";
+  // Фильтр -k про файлы ничего не знает: у имени, встречающегося в нескольких
+  // файлах упражнения, он собрал бы тесты соседнего модуля вместо своих.
+  // Честнее прогнать весь файл тестов и сказать об этом прямо, чем покрасить
+  // шаг за чужую заготовку.
+  const duplicated = tree.duplicateFunctions.includes(step.exercise_fn);
 
   // В try — только прогон: он единственный ломается из-за окружения и только
   // он имеет право ответить 503 «проверь PYTHON». Записи в базу вынесены
   // наружу: упавший SQLite — это не «нет питона», и называть учащемуся не ту
   // причину нельзя.
-  let result;
+  let outcome;
   try {
-    result = await runTests({
-      dir: exercise.dir,
-      fn: step.exercise_fn,
+    outcome = await runTests({
+      dir: tree.dir,
+      fn: duplicated ? undefined : step.exercise_fn,
       // Остальные функции упражнения: из них собирается выражение -k, которое
       // не тянет в прогон тесты ещё не написанных функций. Состав берётся из
       // шаблона, а НЕ из файла учащегося: вспомогательная функция, которую он
@@ -64,6 +73,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       // test_identity_shape_and_content).
       functions: readCanonicalFunctionNames(config.sourceDir, ref),
       python: config.python,
+      // Каталожная форма держит файлы человека в exercise/ рядом с
+      // тестами — без PYTHONPATH на этот каталог pytest импортировал бы либо
+      // ничего, либо чужой solution/.
+      pythonPath: tree.multi ? path.join(tree.dir, "exercise") : undefined,
+      testFile: tree.testPath ?? undefined,
     });
   } catch (error) {
     const kind = error instanceof PracticeError ? error.kind : "output";
@@ -72,9 +86,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     return Response.json({ error: (error as Error).message, kind }, { status: 503 });
   }
 
+  const warning = duplicated
+    ? `Функция ${step.exercise_fn} есть в нескольких файлах упражнения — прогнан весь файл тестов`
+    : outcome.warning;
+  const result = { ...outcome, warning };
+
   const green = isPassingRun(result);
   const db = openProgressDb(config.dataDir);
-  recordTestRun(db, slug, stepId, step.exercise_fn, {
+  // Для многофайлового упражнения в exercise_fn пишется пара «файл::функция»:
+  // без файла две одноимённые функции разных модулей сливались бы в истории
+  // прогонов в одну строку.
+  const exerciseFn = tree.multi ? `${fileName}::${step.exercise_fn}` : step.exercise_fn;
+  recordTestRun(db, slug, stepId, exerciseFn, {
     passed: result.passed,
     failed: result.failed + result.errors,
     firstFailure: result.failures[0]?.decisive ?? null,
