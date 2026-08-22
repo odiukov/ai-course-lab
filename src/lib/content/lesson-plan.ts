@@ -82,7 +82,23 @@ export function validatePlan(
   // склеенным ключом.
   const key = (file: string, fn: string) => `${file}::${fn}`;
   const used = new Set<string>();
-  const writtenByName = new Map(written.map((item) => [key(item.file, item.fn), item]));
+  // А вот «уже написана раньше» ключуется ОДНИМ именем функции, без файла, и
+  // это не небрежность. `written` собран readWrittenFunctions по ВСЕМУ курсу,
+  // поэтому `item.file` — имя файла внутри ЧУЖОГО упражнения (`exercise.py` у
+  // одно-файловых, `main.py` у каталожных), а сравнивать его пришлось бы с
+  // именем файла ТЕКУЩЕГО. У 396 одно-файловых упражнений обе стороны
+  // случайно совпадали на `exercise.py`, и пара работала по совпадению; на
+  // каталожной форме она врёт в обе стороны — законный recall на функцию из
+  // прошлого урока отклоняется как «человек ещё не писал», а code-шаг,
+  // переучивающий её, перестаёт требовать baseline. Правда здесь — имя:
+  // findPreviousImplementation в exercise/recall.ts ищет прошлую реализацию
+  // ровно по нему, и валидатор обещает то же, что покажет карточка.
+  //
+  // Одноимённые записи из разных упражнений схлопываются в последнюю: Map
+  // оставляет последнее значение, readWrittenFunctions идёт по слагам
+  // (pNN-lNN-) по возрастанию, а findPreviousImplementation берёт .at(-1) —
+  // то есть в сообщении об ошибке окажется тот же урок, что и в карточке.
+  const writtenByName = new Map(written.map((item) => [item.fn, item]));
   let theorySincePrevCode = true;
 
   for (const step of steps) {
@@ -138,7 +154,7 @@ export function validatePlan(
         // вместо code-шага тихо съедает практику: покрытием он считается.
         // Планировщик приходил сюда именно так: ставил в конце урока отсылку
         // «ваш compose — это стек слоёв нейросети» шагом recall.
-        if (step.type === "recall" && !writtenByName.has(key(file, step.exercise_fn))) {
+        if (step.type === "recall" && !writtenByName.has(step.exercise_fn)) {
           errors.push(
             `Шаг ${step.id}: recall — про функцию из прошлого урока, а ${step.exercise_fn} человек ещё не писал. ` +
               `Отсылка к тому, что он написал в этом же уроке, — обычный theory-шаг`,
@@ -150,8 +166,11 @@ export function validatePlan(
 
     if (step.type !== "code") continue;
 
-    const previous =
-      step.exercise_fn && file ? writtenByName.get(key(file, step.exercise_fn)) : undefined;
+    // `file` в условии — не часть ключа (ключ здесь один, имя функции), а
+    // признак того, что адрес шага прошёл проверки выше: у шага с неизвестной
+    // или неоднозначной функцией ошибка уже названа, и вторая — «функция уже
+    // написана» — говорила бы о задаче, адреса которой мы не знаем.
+    const previous = step.exercise_fn && file ? writtenByName.get(step.exercise_fn) : undefined;
     if (previous && !step.baseline?.changes) {
       errors.push(
         `Шаг ${step.id}: функция ${step.exercise_fn} уже написана (${previous.lessonSlug ?? previous.exerciseSlug}). ` +

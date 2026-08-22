@@ -292,6 +292,96 @@ describe("повторное написание функций", () => {
   });
 });
 
+// Реестр написанного собран по ВСЕМУ курсу, и имя файла в каждой его записи —
+// из ЧУЖОГО упражнения. У 396 одно-файловых упражнений обе стороны совпадали
+// на exercise.py, поэтому сверка пары «файл + функция» проходила по
+// совпадению; каталожная форма разводит имена, и ключ «файл + функция» врёт в
+// обе стороны сразу. Обе стороны и проверяются ниже.
+describe("реестр написанного против каталожной формы", () => {
+  // Функция normalize написана раньше — в одно-файловом упражнении другого
+  // урока, то есть в его exercise.py. В упражнении ТЕКУЩЕГО урока она стоит в
+  // main.py: имена файлов не совпадают нигде.
+  const multiSource = {
+    ...SOURCE,
+    exercise: {
+      slug: "p19-l83-rule-matcher",
+      dir: "/tmp/p19-l83-rule-matcher",
+      multi: true,
+      functions: [
+        { file: "main.py", fn: "normalize" },
+        { file: "rules.py", fn: "load_rules" },
+      ],
+    },
+  };
+
+  const written: WrittenFunction[] = [
+    {
+      fn: "normalize",
+      exerciseSlug: "p01-l02-beta",
+      lessonSlug: "01-math-foundations__02-beta",
+      file: "exercise.py",
+      signature: "normalize(text)",
+    },
+  ];
+
+  it("пускает recall в main.py про функцию, написанную раньше в exercise.py другого упражнения", () => {
+    const plan = [
+      step({ id: "001-t", type: "theory" }),
+      step({ id: "002-r", type: "recall", exercise_fn: "normalize", exercise_file: "main.py" }),
+      step({ id: "003-t", type: "theory" }),
+      step({ id: "004-c", type: "code", exercise_fn: "load_rules", exercise_file: "rules.py" }),
+    ];
+    // С ключом «файл + функция» здесь приезжало «normalize человек ещё не
+    // писал» — и генерация плана падала на законном recall.
+    expect(validatePlan(plan, multiSource, written)).toEqual([]);
+  });
+
+  it("не пускает code-шаг без baseline на функцию, написанную раньше в файле с другим именем", () => {
+    const plan = [
+      step({ id: "001-t", type: "theory" }),
+      step({ id: "002-c", type: "code", exercise_fn: "normalize", exercise_file: "main.py" }),
+      step({ id: "003-t", type: "theory" }),
+      step({ id: "004-c", type: "code", exercise_fn: "load_rules", exercise_file: "rules.py" }),
+    ];
+    // Вторая сторона той же ошибки: с ключом «файл + функция» правило baseline
+    // молчало, и урок тихо переучивал уже написанную функцию с нуля.
+    expect(validatePlan(plan, multiSource, written).join(" ")).toMatch(
+      /normalize уже написана \(01-math-foundations__02-beta\)/,
+    );
+  });
+
+  it("baseline снимает возражение — как и в одно-файловой форме", () => {
+    const plan = [
+      step({ id: "001-t", type: "theory" }),
+      step({
+        id: "002-c",
+        type: "code",
+        exercise_fn: "normalize",
+        exercise_file: "main.py",
+        baseline: {
+          lesson: "01-math-foundations__02-beta",
+          fn: "normalize",
+          changes: "теперь ещё и убирает пунктуацию",
+        },
+      }),
+      step({ id: "003-t", type: "theory" }),
+      step({ id: "004-c", type: "code", exercise_fn: "load_rules", exercise_file: "rules.py" }),
+    ];
+    expect(validatePlan(plan, multiSource, written)).toEqual([]);
+  });
+
+  it("recall про функцию, которую человек не писал нигде, по-прежнему отклоняется", () => {
+    const plan = [
+      step({ id: "001-t", type: "theory" }),
+      step({ id: "002-c", type: "code", exercise_fn: "normalize", exercise_file: "main.py",
+        baseline: { lesson: "01-math-foundations__02-beta", fn: "normalize", changes: "иначе" } }),
+      step({ id: "003-t", type: "theory" }),
+      step({ id: "004-r", type: "recall", exercise_fn: "load_rules", exercise_file: "rules.py" }),
+    ];
+    expect(validatePlan(plan, multiSource, written).join(" ")).toMatch(/load_rules человек ещё не писал/);
+  });
+});
+
 describe("чтение и запись", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lab-"));
   const plan: LessonPlan = {
