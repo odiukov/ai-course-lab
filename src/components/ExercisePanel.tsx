@@ -6,6 +6,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { errorStatus } from "@/lib/agent/error-message";
 import { fetchJson } from "@/lib/api/fetch-json";
 import { parseSseFrames } from "@/lib/api/sse-client";
+import { pickActiveFile } from "@/lib/editor/active-file";
 import type { BenchReport } from "@/lib/practice/bench";
 import { practiceErrorStatus, type PracticeErrorKind } from "@/lib/practice/errors";
 
@@ -23,12 +24,22 @@ interface ExerciseFunction {
   implemented: boolean;
 }
 
-interface ExerciseData {
+// Один файл упражнения — таким его отдаёт сервер и таким его держит панель.
+interface ExerciseFileState {
+  name: string;
   file: string;
   relPath: string;
   code: string;
   mtimeMs: number;
   functions: ExerciseFunction[];
+}
+
+// `multi` решает, рисовать ли полоску табов вообще: у одно-файлового
+// упражнения (382 существующих) её не должно быть в принципе, а не просто
+// «полоска с одним табом».
+interface ExerciseData {
+  multi: boolean;
+  files: ExerciseFileState[];
 }
 
 interface TestFailure {
@@ -60,8 +71,11 @@ type SaveState = "saved" | "saving" | "failed";
 // Расхождение: файл на диске изменился мимо редактора (правка из IDE, вставка
 // прошлого кода на recall-шаге), и записывать поверх нельзя. Держим ОБА текста
 // — и тот, что на диске, и черновик учащегося на момент расхождения, — потому
-// что решать, чей код остаётся, должен он, а не панель.
+// что решать, чей код остаётся, должен он, а не панель. `file` — какого файла
+// это расхождение: конфликт всегда про АКТИВНЫЙ на момент записи файл, но имя
+// нужно, чтобы не спутать его с файлом, на который могли успеть переключиться.
 interface Conflict {
+  file: string;
   disk: { code: string; mtimeMs: number; functions: ExerciseFunction[] };
   draft: string;
 }
@@ -70,6 +84,7 @@ export function ExercisePanel({
   slug,
   stepId,
   fn,
+  file,
   lspUrl,
   reloadToken = 0,
   onProgressChanged,
@@ -77,6 +92,11 @@ export function ExercisePanel({
   slug: string;
   stepId: string;
   fn: string;
+  /**
+   * Файл упражнения, в котором живёт `fn` (`step.exercise_file`). Не назван —
+   * у функции один-единственный файл, угадывать нечего.
+   */
+  file?: string;
   lspUrl: string | null;
   /**
    * Растёт, когда файл упражнения изменили мимо редактора (кнопка «Взять как
@@ -88,6 +108,11 @@ export function ExercisePanel({
   onProgressChanged: () => void;
 }) {
   const [data, setData] = useState<ExerciseData | null>(null);
+  // Активный файл — своё состояние, а не то, что пересчитывается на каждый
+  // рендер: клик по табу должен пережить любое обновление data после
+  // автосохранения, а смена файла шага — это отдельное решение, принятое один
+  // раз при переходе на шаг, а не на каждую перерисовку.
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [running, setRunning] = useState(false);
@@ -103,16 +128,37 @@ export function ExercisePanel({
   // кнопка иначе оставалась бы взведённой над matmul.
   const [resetArmedFor, setResetArmedFor] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  // Пока прежний активный файл дожимается на диск перед переключением на
+  // другой (клик по табу или смена файла шага), полоска табов блокируется:
+  // иначе второй клик застал бы панель посреди записи первого файла.
+  const [switchingTab, setSwitchingTab] = useState(false);
 
-  // Текст, который точно лежит на диске, и mtime этого файла — то, с чем
-  // сервер сверяет предусловие записи.
-  const savedCodeRef = useRef("");
-  const mtimeRef = useRef(0);
-  // Всегда самый свежий текст редактора: отложенное сохранение может
-  // завершиться уже после того, как ученик успел напечатать ещё, и не должно
-  // подхватить устаревшее замыкание.
+  // Текст, который точно лежит на диске, и mtime — по каждому файлу
+  // упражнения отдельно: черновик соседнего файла не должен теряться или
+  // путаться с чужим mtime при переключении таба.
+  const savedCodeRef = useRef(new Map<string, string>());
+  const mtimeRef = useRef(new Map<string, number>());
+  // Всегда самый свежий текст редактора активного файла: отложенное
+  // сохранение может завершиться уже после того, как ученик успел напечатать
+  // ещё, и не должно подхватить устаревшее замыкание.
   const latestCodeRef = useRef(code);
   latestCodeRef.current = code;
+  // Тот же приём для активного файла: колбэки читают его здесь, а не из
+  // замыкания на момент своего создания — иначе переключение таба во время
+  // отложенной записи не заметили бы.
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
+  // И для файла шага: он нужен внутри load(), которая не зависит от `file` в
+  // своих deps (иначе она пересоздавалась бы на каждый переход между шагами и
+  // перечитывала бы упражнение с сервера заново).
+  const fileRef = useRef(file);
+  fileRef.current = file;
+  // Свежий data — для эффекта смены шага, который обязан читать список файлов
+  // без того, чтобы зависеть от data: иначе он перезапускался бы на каждое
+  // автосохранение (data меняется при каждом успешном PUT), а должен — только
+  // на смену шага.
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   // Таймер дебаунса и запись «в полёте» живут в ref'ах, потому что их нужно
   // достать не только из эффекта: flush() обязан добить их обоих до того, как
@@ -130,6 +176,23 @@ export function ExercisePanel({
   const currentStepRef = useRef({ stepId, fn });
   currentStepRef.current = { stepId, fn };
 
+  // Переключает показанный файл: и активное имя, и черновик под ним берутся
+  // из map'ов по файлам — они уже заполнены к моменту вызова (первой их
+  // заполняет load(), а до неё эта функция не зовётся). Общая точка для
+  // первой загрузки, смены шага и клика по табу — везде одна и та же логика
+  // «показать то, что мы про этот файл знаем».
+  const activateFile = useCallback((name: string) => {
+    activeFileRef.current = name;
+    setActiveFile(name);
+    const text = savedCodeRef.current.get(name) ?? "";
+    latestCodeRef.current = text;
+    setCode(text);
+    setSaveState("saved");
+    saveErrorRef.current = null;
+    setConflict(null);
+    setError(null);
+  }, []);
+
   // Шесть code-шагов урока делят один и тот же файл упражнения, поэтому
   // сам файл (`data`/`code`) переживает переход между шагами и не
   // перезапрашивается — но вердикт, замер и разбор относились к прежней
@@ -146,63 +209,112 @@ export function ExercisePanel({
     setError(null);
     setRunning(false);
     setReviewing(false);
-  }, [stepId, fn]);
+
+    // У многофайлового упражнения смена шага может назвать другой файл — тот
+    // же список файлов, другая пара «файл + функция». Список уже загружен
+    // (или ещё нет — тогда load() сам выберет активный файл, когда он придёт).
+    const current = dataRef.current;
+    if (!current) return;
+    const names = current.files.map((item) => item.name);
+    const resolved = pickActiveFile(names, file, activeFileRef.current);
+    if (resolved === activeFileRef.current) return;
+    // Прежний активный файл мог хранить недожатую правку — тот же порядок,
+    // что и у ручного переключения таба: сначала дожимаем её на диск, потом
+    // показываем новый файл.
+    void flushRef.current().then((ok) => {
+      if (ok) activateFile(resolved);
+    });
+  }, [stepId, fn, file, activateFile]);
 
   const load = useCallback(async () => {
-    const result = await fetchJson<ExerciseData>(`/api/lesson/${slug}/exercise`);
+    const result = await fetchJson<{ multi: boolean; files: ExerciseFileState[] }>(
+      `/api/lesson/${slug}/exercise`,
+    );
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    // Пока ответ летел, ученик мог начать печатать — тогда внешний файл
-    // применять нельзя, иначе набранное исчезнет под ним.
-    if (latestCodeRef.current !== savedCodeRef.current) return;
 
     const json = result.data;
-    setData(json);
-    setCode(json.code);
-    savedCodeRef.current = json.code;
-    latestCodeRef.current = json.code;
-    mtimeRef.current = json.mtimeMs;
-    setSaveState("saved");
-    saveErrorRef.current = null;
-  }, [slug]);
+    const names = json.files.map((item) => item.name);
+    const resolved = pickActiveFile(names, fileRef.current, activeFileRef.current);
+
+    // Пока ответ летел, ученик мог начать печатать в файле, который окажется
+    // активным после этой загрузки, — тогда подменять его сервером нельзя.
+    // На самой первой загрузке активного файла ещё нет, и это условие не
+    // мешает.
+    if (
+      activeFileRef.current &&
+      resolved === activeFileRef.current &&
+      latestCodeRef.current !== savedCodeRef.current.get(activeFileRef.current)
+    ) {
+      return;
+    }
+
+    const nextSaved = new Map<string, string>();
+    const nextMtime = new Map<string, number>();
+    for (const item of json.files) {
+      nextSaved.set(item.name, item.code);
+      nextMtime.set(item.name, item.mtimeMs);
+    }
+    savedCodeRef.current = nextSaved;
+    mtimeRef.current = nextMtime;
+
+    setData({ multi: json.multi, files: json.files });
+    activateFile(resolved);
+  }, [slug, activateFile]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- первая загрузка файла упражнения
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- первая загрузка файлов упражнения
     void load();
   }, [load]);
 
   // Одна попытка записи. Отдаёт, что именно случилось: «ok» — текст на диске,
   // «conflict» — файл на диске изменился и был перечитан (черновик не затёр
-  // чужую правку), «error» — записи не было.
+  // чужую правку), «error» — записи не было. `name` — какой файл упражнения
+  // пишем: активный файл выбирает вызывающий (runSave), а не putOnce сам.
   const putOnce = useCallback(
-    async (text: string): Promise<"ok" | "conflict" | "error"> => {
-      const result = await fetchJson<{ mtimeMs: number; functions: ExerciseFunction[] }>(
+    async (name: string, text: string): Promise<"ok" | "conflict" | "error"> => {
+      const result = await fetchJson<{ name: string; mtimeMs: number; functions: ExerciseFunction[] }>(
         `/api/lesson/${slug}/exercise`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },
-          // mtime, который клиент видел последним: без него отложенный PUT
-          // молча затирает вставку recall или правку из IDE.
-          body: JSON.stringify({ code: text, mtimeMs: mtimeRef.current }),
+          // mtime, который клиент видел последним для ЭТОГО файла: без него
+          // отложенный PUT молча затирает вставку recall или правку из IDE.
+          body: JSON.stringify({
+            file: name,
+            code: text,
+            mtimeMs: mtimeRef.current.get(name) ?? 0,
+          }),
         },
       );
 
       if (result.ok) {
-        savedCodeRef.current = text;
-        mtimeRef.current = result.data.mtimeMs;
-        setData((current) => (current ? { ...current, functions: result.data.functions } : current));
-        setConflict(null);
-        if (latestCodeRef.current === text) {
+        savedCodeRef.current.set(name, text);
+        mtimeRef.current.set(name, result.data.mtimeMs);
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                files: current.files.map((item) =>
+                  item.name === name ? { ...item, functions: result.data.functions } : item,
+                ),
+              }
+            : current,
+        );
+        setConflict((current) => (current?.file === name ? null : current));
+        if (activeFileRef.current === name && latestCodeRef.current === text) {
           setSaveState("saved");
           saveErrorRef.current = null;
         }
         return "ok";
       }
 
-      const current = (result.data as { current?: ExerciseData } | null)?.current;
-      if (result.status === 409 && current) {
+      const onDisk = (
+        result.data as { current?: { code: string; mtimeMs: number; functions: ExerciseFunction[] } } | null
+      )?.current;
+      if (result.status === 409 && onDisk) {
         // Текст учащегося НЕ подменяется содержимым файла. Раньше здесь стоял
         // setCode(current.code): он доезжал до model.setValue, а тот стирает
         // стек отмены — набранное исчезало без следа, и Ctrl+Z его не возвращал.
@@ -212,15 +324,19 @@ export function ExercisePanel({
         //
         // mtimeRef намеренно остаётся прежним: пока учащийся не решил, чей код
         // остаётся, ни одно автосохранение не имеет права записать файл.
-        setConflict({ disk: current, draft: text });
-        setSaveState("failed");
-        saveErrorRef.current = "Файл на диске изменился — реши, чей код оставить.";
+        setConflict({ file: name, disk: onDisk, draft: text });
+        if (activeFileRef.current === name) {
+          setSaveState("failed");
+          saveErrorRef.current = "Файл на диске изменился — реши, чей код оставить.";
+        }
         return "conflict";
       }
 
       saveErrorRef.current = result.error;
-      setSaveState("failed");
-      setError(`Не удалось сохранить файл: ${result.error}`);
+      if (activeFileRef.current === name) {
+        setSaveState("failed");
+        setError(`Не удалось сохранить файл: ${result.error}`);
+      }
       return "error";
     },
     [slug],
@@ -230,11 +346,19 @@ export function ExercisePanel({
   // ещё, и цикл добивает остаток без нового ожидания дебаунса. Одна повторная
   // попытка на сетевую ошибку — раньше первая же неудача была окончательной:
   // savedCodeRef не двигался, и ничего больше не пыталось сохранить.
+  //
+  // Файл берётся из activeFileRef В МОМЕНТ вызова, а не передаётся снаружи:
+  // отложенный автосейв всегда пишет тот файл, что был активен, когда он
+  // планировался, — а переключиться на другой файл можно только через flush(),
+  // который сначала дожимает текущий целиком. Поэтому к моменту, когда
+  // runSave фактически выполняется, activeFileRef ещё не успел смениться.
   const runSave = useCallback(async (): Promise<boolean> => {
-    while (latestCodeRef.current !== savedCodeRef.current) {
+    const name = activeFileRef.current;
+    if (!name) return true;
+    while (latestCodeRef.current !== savedCodeRef.current.get(name)) {
       const text = latestCodeRef.current;
-      let outcome = await putOnce(text);
-      if (outcome === "error") outcome = await putOnce(text);
+      let outcome = await putOnce(name, text);
+      if (outcome === "error") outcome = await putOnce(name, text);
       if (outcome !== "ok") return false;
     }
     return true;
@@ -246,8 +370,9 @@ export function ExercisePanel({
    * когда файл на диске совпадает с редактором (или запись не удалась —
    * тогда false).
    *
-   * Именно это ждут «Прогнать тесты» и «Разбор»: без ожидания pytest читал
-   * файл, которого учащийся уже не видит, и вердикт по нему сохранялся.
+   * Именно это ждут «Прогнать тесты» и «Разбор», а теперь и переключение
+   * таба: без ожидания pytest читал файл, которого учащийся уже не видит, а
+   * переключение таба потеряло бы связь с недожатой правкой.
    */
   const flush = useCallback((): Promise<boolean> => {
     if (timerRef.current !== null) {
@@ -270,11 +395,30 @@ export function ExercisePanel({
   const flushRef = useRef(flush);
   flushRef.current = flush;
 
+  // Клик по табу: прежний активный файл дожимается на диск ПЕРЕД тем, как
+  // показать другой, — иначе отложенный автосейв прежнего файла остался бы
+  // без файла, за которым он был запланирован (activeFileRef уже указывал бы
+  // на новый). Если запись не удалась (сеть, конфликт) — остаёмся на прежнем
+  // файле: плашка про это уже висит над ним, уходить с неё нельзя.
+  const switchTab = useCallback(
+    async (name: string) => {
+      if (name === activeFileRef.current || switchingTab) return;
+      setSwitchingTab(true);
+      try {
+        const ok = await flush();
+        if (ok) activateFile(name);
+      } finally {
+        setSwitchingTab(false);
+      }
+    },
+    [switchingTab, flush, activateFile],
+  );
+
   // Учащийся выбрал свой код: предусловие сдвигается на то, что сейчас на
   // диске, и обычная запись дописывает черновик поверх.
   const overwriteWithDraft = useCallback(() => {
     if (!conflict) return;
-    mtimeRef.current = conflict.disk.mtimeMs;
+    mtimeRef.current.set(conflict.file, conflict.disk.mtimeMs);
     setSaveState("saving");
     void flush();
   }, [conflict, flush]);
@@ -285,21 +429,27 @@ export function ExercisePanel({
   // и скопировать.
   const takeDiskVersion = useCallback(() => {
     if (!conflict) return;
-    savedCodeRef.current = conflict.disk.code;
-    latestCodeRef.current = conflict.disk.code;
-    mtimeRef.current = conflict.disk.mtimeMs;
-    setCode(conflict.disk.code);
+    const { file: name, disk } = conflict;
+    savedCodeRef.current.set(name, disk.code);
+    mtimeRef.current.set(name, disk.mtimeMs);
     setData((existing) =>
       existing
         ? {
             ...existing,
-            code: conflict.disk.code,
-            mtimeMs: conflict.disk.mtimeMs,
-            functions: conflict.disk.functions,
+            files: existing.files.map((item) =>
+              item.name === name
+                ? { ...item, code: disk.code, mtimeMs: disk.mtimeMs, functions: disk.functions }
+                : item,
+            ),
           }
         : existing,
     );
-    setSaveState("saved");
+    if (activeFileRef.current === name) {
+      latestCodeRef.current = disk.code;
+      setCode(disk.code);
+      setSaveState("saved");
+    }
+    setConflict(null);
     saveErrorRef.current = null;
     setError(null);
   }, [conflict]);
@@ -314,6 +464,11 @@ export function ExercisePanel({
    * Черновик здесь именно то, от чего учащийся отказывается, поэтому таймер
    * дебаунса снимается, а запись «в полёте» дожидается до запроса: иначе
    * поздний PUT прилетел бы уже после сброса и вернул стёртое обратно.
+   *
+   * `file` шлётся явно (файл шага, а не текущая вкладка): так же, как тесты и
+   * recall резолвят адрес функции через resolveExerciseFile, чтобы сброс
+   * попал в тот файл, где `fn` на самом деле лежит, даже если открыта вкладка
+   * соседнего файла — просто посмотреть.
    */
   const resetToTemplate = useCallback(async () => {
     setResetting(true);
@@ -326,49 +481,54 @@ export function ExercisePanel({
       await (inFlightRef.current ?? Promise.resolve(true)).catch(() => false);
 
       const result = await fetchJson<{
+        name: string;
         code: string;
         mtimeMs: number;
         functions: ExerciseFunction[];
       }>(`/api/lesson/${slug}/exercise/reset`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fn }),
+        body: JSON.stringify({ fn, file }),
       });
       if (!result.ok) {
         setError(`Не удалось сбросить функцию: ${result.error}`);
         return;
       }
 
-      savedCodeRef.current = result.data.code;
-      latestCodeRef.current = result.data.code;
-      mtimeRef.current = result.data.mtimeMs;
-      setCode(result.data.code);
+      const { name, code: resetCode, mtimeMs, functions } = result.data;
+      savedCodeRef.current.set(name, resetCode);
+      mtimeRef.current.set(name, mtimeMs);
       setData((existing) =>
         existing
           ? {
               ...existing,
-              code: result.data.code,
-              mtimeMs: result.data.mtimeMs,
-              functions: result.data.functions,
+              files: existing.files.map((item) =>
+                item.name === name ? { ...item, code: resetCode, mtimeMs, functions } : item,
+              ),
             }
           : existing,
       );
-      // Расхождение (если оно было) разрешено самим сбросом: на диске теперь
-      // то же, что в редакторе, и выбирать между текстами больше нечего.
-      setConflict(null);
-      setSaveState("saved");
+      if (activeFileRef.current === name) {
+        latestCodeRef.current = resetCode;
+        setCode(resetCode);
+        setSaveState("saved");
+      }
+      // Расхождение (если оно было про этот же файл) разрешено самим сбросом:
+      // на диске теперь то же, что в редакторе, и выбирать между текстами
+      // больше нечего.
+      setConflict((current) => (current?.file === name ? null : current));
       saveErrorRef.current = null;
     } finally {
       setResetting(false);
       setResetArmedFor(null);
     }
-  }, [fn, slug]);
+  }, [fn, file, slug]);
 
   // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
   // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
   // проверит не тот код, который человек видит.
   useEffect(() => {
-    if (!data || code === savedCodeRef.current) return;
+    if (!data || !activeFile || code === savedCodeRef.current.get(activeFile)) return;
     setSaveState("saving");
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
@@ -380,7 +540,7 @@ export function ExercisePanel({
         timerRef.current = null;
       }
     };
-  }, [code, data, flush]);
+  }, [code, data, activeFile, flush]);
 
   // Уход с шага и закрытая вкладка не должны стоить учащемуся последней
   // секунды набора: раньше размонтирование только снимало таймер, и набранное
@@ -405,13 +565,18 @@ export function ExercisePanel({
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      if (latestCodeRef.current === savedCodeRef.current) return;
+      const name = activeFileRef.current;
+      if (!name || latestCodeRef.current === savedCodeRef.current.get(name)) return;
       // Страница уходит: обычный fetch браузер отменит, keepalive — то, что
       // всё-таки доносит последнюю запись до сервера.
       void fetch(`/api/lesson/${slug}/exercise`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: latestCodeRef.current, mtimeMs: mtimeRef.current }),
+        body: JSON.stringify({
+          file: name,
+          code: latestCodeRef.current,
+          mtimeMs: mtimeRef.current.get(name) ?? 0,
+        }),
         keepalive: true,
       }).catch(() => {});
     };
@@ -424,14 +589,23 @@ export function ExercisePanel({
   // раз перед применением: между ?meta=1 и load() проходят два круга к
   // серверу, и набранное за это время не должно быть перезаписано. `code` в
   // зависимостях не нужен — с ним интервал пересоздавался на каждое нажатие.
+  // Опрашивается только активный файл — у остальных пока нет открытого
+  // редактора, за состоянием которого нужно следить.
   useEffect(() => {
     const timer = setInterval(async () => {
-      if (latestCodeRef.current !== savedCodeRef.current) return;
+      const name = activeFileRef.current;
+      if (!name) return;
+      if (latestCodeRef.current !== savedCodeRef.current.get(name)) return;
       const meta = await fetchJson<{ mtimeMs: number | null }>(
-        `/api/lesson/${slug}/exercise?meta=1`,
+        `/api/lesson/${slug}/exercise?meta=1&file=${encodeURIComponent(name)}`,
       );
-      if (!meta.ok || !meta.data.mtimeMs || meta.data.mtimeMs <= mtimeRef.current) return;
-      if (latestCodeRef.current !== savedCodeRef.current) return;
+      if (!meta.ok || !meta.data.mtimeMs || meta.data.mtimeMs <= (mtimeRef.current.get(name) ?? 0)) {
+        return;
+      }
+      // Учащийся мог успеть переключить таб, пока ответ летел — тогда правка
+      // относится уже не к тому файлу, что сейчас на экране.
+      if (activeFileRef.current !== name) return;
+      if (latestCodeRef.current !== savedCodeRef.current.get(name)) return;
       await load();
     }, WATCH_INTERVAL_MS);
     return () => clearInterval(timer);
@@ -457,7 +631,9 @@ export function ExercisePanel({
         );
         return;
       }
-      const testedCode = savedCodeRef.current;
+      const testedCode = activeFileRef.current
+        ? savedCodeRef.current.get(activeFileRef.current) ?? ""
+        : "";
 
       const result = await fetchJson<{ result: TestResult; state: "passed" | "failed" }>(
         `/api/lesson/${slug}/tests`,
@@ -581,11 +757,18 @@ export function ExercisePanel({
     }
   }, [flush, onProgressChanged, slug, stepId, fn]);
 
+  const activeFileState = data?.files.find((item) => item.name === activeFile);
+
   // Мемоизируем по числам и имени, а не по объекту функции: сервер отдаёт
   // свежий (структурно тот же, но новый по ссылке) массив functions после
   // каждого успешного автосохранения. Имя функции здесь — то, по чему
   // CodeEditor понимает, что сменился шаг, а не просто сдвинулись строки.
-  const focusFn = data?.functions.find((item) => item.fn === fn);
+  //
+  // Если активная вкладка — не тот файл, где живёт fn (учащийся открыл
+  // соседний файл просто посмотреть), focusFn не находится, и редактор
+  // показывает файл целиком — это ожидаемо: прятать нечего, своей функции
+  // здесь нет.
+  const focusFn = activeFileState?.functions.find((item) => item.fn === fn);
   const focus = useMemo(
     () =>
       focusFn
@@ -595,7 +778,7 @@ export function ExercisePanel({
     [fn, focusFn?.startLine, focusFn?.endLine],
   );
 
-  if (!data) {
+  if (!data || !activeFile || !activeFileState) {
     return <p className="text-sm text-slate-400">{error ?? "Открываю упражнение…"}</p>;
   }
 
@@ -608,15 +791,37 @@ export function ExercisePanel({
     <section className="space-y-3">
       <div className="flex items-baseline justify-between text-xs text-slate-400">
         <span>
-          <code>{data.relPath}</code> · функция <code>{fn}</code>
+          <code>{activeFileState.relPath}</code> · функция <code>{fn}</code>
         </span>
         <span>
           {saveState === "saved" ? "сохранено" : saveState === "saving" ? "сохраняю…" : "не сохранено"}
         </span>
       </div>
 
+      {/* Полоска табов — только у многофайлового упражнения. У одно-файлового
+          (данные истории) её нет вовсе, а не полоска с единственным табом. */}
+      {data.multi && (
+        <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700">
+          {data.files.map((item) => (
+            <button
+              key={item.name}
+              type="button"
+              onClick={() => void switchTab(item.name)}
+              disabled={switchingTab}
+              className={`rounded-t px-3 py-1.5 text-xs disabled:opacity-50 ${
+                item.name === activeFile
+                  ? "border border-b-0 border-slate-300 bg-white font-medium text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <CodeEditor
-        file={data.file}
+        file={activeFileState.file}
         code={code}
         focus={focus}
         lspUrl={lspUrl}
@@ -624,7 +829,7 @@ export function ExercisePanel({
         onLspError={setError}
       />
 
-      {conflict && (
+      {conflict && conflict.file === activeFile && (
         <div
           role="alert"
           className="space-y-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"

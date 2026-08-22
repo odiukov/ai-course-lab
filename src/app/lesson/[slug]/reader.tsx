@@ -26,6 +26,8 @@ interface StepData {
   visual?: string;
   generatedVisual?: boolean;
   exercise_fn?: string;
+  /** Файл упражнения, в котором живёт exercise_fn — не назван, если он один. */
+  exercise_file?: string;
   check?: CheckQuestion[];
   body: string;
 }
@@ -316,6 +318,7 @@ export function Reader({
               slug={slug}
               stepId={step.id}
               fn={step.exercise_fn}
+              file={step.exercise_file}
               lspUrl={lspUrl}
               onProgressChanged={() => void load()}
             />
@@ -326,6 +329,7 @@ export function Reader({
             <RecallCard
               slug={slug}
               fn={step.exercise_fn}
+              file={step.exercise_file}
               onInserted={() => setReloadEditor((value) => value + 1)}
             />
             <PracticeStatus />
@@ -334,6 +338,7 @@ export function Reader({
               slug={slug}
               stepId={step.id}
               fn={step.exercise_fn}
+              file={step.exercise_file}
               lspUrl={lspUrl}
               onProgressChanged={() => void load()}
             />

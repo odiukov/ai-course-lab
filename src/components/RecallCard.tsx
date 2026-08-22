@@ -13,10 +13,13 @@ interface Previous {
 export function RecallCard({
   slug,
   fn,
+  file,
   onInserted,
 }: {
   slug: string;
   fn: string;
+  /** Файл упражнения, в который встаёт прошлый код (`step.exercise_file`). */
+  file?: string;
   onInserted: () => void;
 }) {
   const [previous, setPrevious] = useState<Previous | null>(null);
@@ -72,10 +75,13 @@ export function RecallCard({
     setNote(null);
     setError(null);
     try {
+      // file шлётся так же, как в тестах и сбросе: без него вставка попала бы
+      // в файл, который резолвится по умолчанию, а не в тот, где фактически
+      // живёт fn у этого шага (важно при одноимённых функциях в разных файлах).
       const result = await fetchJson<{ changed: boolean }>(`/api/lesson/${slug}/recall`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fn }),
+        body: JSON.stringify({ fn, file }),
       });
       if (!isCurrent()) return;
       if (!result.ok) {
@@ -92,7 +98,7 @@ export function RecallCard({
     } finally {
       if (isCurrent()) setInserting(false);
     }
-  }, [fn, onInserted, slug]);
+  }, [fn, file, onInserted, slug]);
 
   if (!previous) {
     return (
