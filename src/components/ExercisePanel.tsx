@@ -6,7 +6,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { errorStatus } from "@/lib/agent/error-message";
 import { fetchJson } from "@/lib/api/fetch-json";
 import { parseSseFrames } from "@/lib/api/sse-client";
-import { pickActiveFile } from "@/lib/editor/active-file";
+import { pickActiveFile, type FileFunctions } from "@/lib/editor/active-file";
 import type { BenchReport } from "@/lib/practice/bench";
 import { practiceErrorStatus, type PracticeErrorKind } from "@/lib/practice/errors";
 
@@ -40,6 +40,12 @@ interface ExerciseFileState {
 interface ExerciseData {
   multi: boolean;
   files: ExerciseFileState[];
+}
+
+// Для pickActiveFile: она решает по владению функцией, а не только по именам
+// файлов, — список функций каждого файла достаточно свести к именам.
+function fileFunctionNames(files: ExerciseFileState[]): FileFunctions[] {
+  return files.map((item) => ({ name: item.name, functions: item.functions.map((fn) => fn.fn) }));
 }
 
 interface TestFailure {
@@ -215,8 +221,7 @@ export function ExercisePanel({
     // (или ещё нет — тогда load() сам выберет активный файл, когда он придёт).
     const current = dataRef.current;
     if (!current) return;
-    const names = current.files.map((item) => item.name);
-    const resolved = pickActiveFile(names, file, activeFileRef.current);
+    const resolved = pickActiveFile(fileFunctionNames(current.files), file, fn, activeFileRef.current);
     if (resolved === activeFileRef.current) return;
     // Прежний активный файл мог хранить недожатую правку — тот же порядок,
     // что и у ручного переключения таба: сначала дожимаем её на диск, потом
@@ -236,8 +241,12 @@ export function ExercisePanel({
     }
 
     const json = result.data;
-    const names = json.files.map((item) => item.name);
-    const resolved = pickActiveFile(names, fileRef.current, activeFileRef.current);
+    const resolved = pickActiveFile(
+      fileFunctionNames(json.files),
+      fileRef.current,
+      currentStepRef.current.fn,
+      activeFileRef.current,
+    );
 
     // Пока ответ летел, ученик мог начать печатать в файле, который окажется
     // активным после этой загрузки, — тогда подменять его сервером нельзя.
