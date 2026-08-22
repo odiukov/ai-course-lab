@@ -215,7 +215,18 @@ export const EXERCISE_SCRIPT = `
   var results = document.querySelector("[data-results]");
   if (!area || !runButton) return;
 
-  var storageKey = "course-exercise:" + data.slug;
+  var activeFile = data.file ||
+    (data.urls.files && data.urls.files.length > 0 ? data.urls.files[0].name : "exercise.py");
+  var activeAsset = data.urls.files
+    ? data.urls.files.filter(function (item) { return item.name === activeFile; })[0]
+    : null;
+  var templateUrl = activeAsset ? activeAsset.template : data.urls.template;
+  var solutionUrl = activeAsset ? activeAsset.solution : data.urls.solution;
+  function storageKeyFor(name) {
+    return "course-exercise:" + data.slug + (data.multi ? ":" + name : "");
+  }
+  var legacyStorageKey = "course-exercise:" + data.slug;
+  var storageKey = storageKeyFor(activeFile);
   var template = "";
   // Полный файл упражнения. В редакторе видна только функция шага, но на
   // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
@@ -231,12 +242,33 @@ export const EXERCISE_SCRIPT = `
    */
   function split(source, fn) {
     var lines = source.split("\\n");
-    var head = new RegExp("^(async\\\\s+)?def\\\\s+" + fn + "\\\\s*\\\\(");
+    var address = fn.split(".");
+    var method = address.length === 2;
+    var owner = method ? address[0] : null;
+    var name = method ? address[1] : fn;
+    var head = new RegExp("^(\\\\s*)(async\\\\s+)?def\\\\s+" + name + "\\\\s*\\\\(");
+    var ownerStart = 0;
+    var ownerEnd = lines.length;
+    if (method) {
+      var classHead = new RegExp("^class\\\\s+" + owner + "(?:\\\\s*\\\\(|\\\\s*:)");
+      ownerStart = -1;
+      for (var c = 0; c < lines.length; c += 1) {
+        if (classHead.test(lines[c])) { ownerStart = c; break; }
+      }
+      if (ownerStart === -1) return null;
+      for (var nextClass = ownerStart + 1; nextClass < lines.length; nextClass += 1) {
+        if (/^(?:async\\s+def\\s|def\\s|class\\s)/.test(lines[nextClass])) {
+          ownerEnd = nextClass;
+          break;
+        }
+      }
+    }
     var start = -1;
-    for (var i = 0; i < lines.length; i += 1) {
+    for (var i = ownerStart; i < ownerEnd; i += 1) {
       if (head.test(lines[i])) { start = i; break; }
     }
     if (start === -1) return null;
+    var methodIndent = (head.exec(lines[start]) || ["", ""])[1].length;
 
     // Конец блока — только НАСТОЯЩЕЕ следующее определение, а не любая строка
     // с левого края.
@@ -249,7 +281,18 @@ export const EXERCISE_SCRIPT = `
     var boundary = /^(async\\s+def\\s|def\\s|class\\s|@|import\\s|from\\s|if\\s+__name__)/;
     var end = lines.length;
     for (var j = start + 1; j < lines.length; j += 1) {
-      if (boundary.test(lines[j])) { end = j; break; }
+      if (method) {
+        if (lines[j].trim() === "") continue;
+        var indent = (/^(\\s*)/.exec(lines[j]) || ["", ""])[1].length;
+        if (indent < methodIndent ||
+            (indent === methodIndent && /^\\s*(?:async\\s+def\\s|def\\s|@)/.test(lines[j]))) {
+          end = j;
+          break;
+        }
+      } else if (boundary.test(lines[j])) {
+        end = j;
+        break;
+      }
     }
     while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
 
@@ -289,11 +332,15 @@ export const EXERCISE_SCRIPT = `
   }
 
   // Заготовка нужна всегда: по ней работает «Сбросить».
-  text(data.urls.template).then(function (source) {
+  text(templateUrl).then(function (source) {
     template = source;
     var saved = null;
     try {
       saved = localStorage.getItem(storageKey);
+      // Первая опубликованная многофайловая версия хранила main.py под
+      // старым ключом без имени файла. Подхватываем его один раз, чтобы
+      // исправление вкладок не стоило человеку уже написанного метода.
+      if (saved === null && data.multi) saved = localStorage.getItem(legacyStorageKey);
     } catch (error) {
       saved = null;
     }
@@ -310,7 +357,6 @@ export const EXERCISE_SCRIPT = `
     setCode(parts ? parts.code : full);
     if (window.CourseEditor) window.CourseEditor.mount(area);
   });
-
   area.addEventListener("input", save);
 
   if (resetButton) {
@@ -325,15 +371,16 @@ export const EXERCISE_SCRIPT = `
     });
   }
 
-  if (solutionButton && solutionBox && data.urls.solution) {
+  if (solutionButton && solutionBox && solutionUrl) {
     solutionButton.addEventListener("click", function () {
       if (!solutionBox.hidden) {
         solutionBox.hidden = true;
         solutionButton.textContent = "Показать решение";
         return;
       }
-      text(data.urls.solution).then(function (source) {
-        solutionBox.textContent = source;
+      text(solutionUrl).then(function (source) {
+        var answer = split(source, data.fn);
+        solutionBox.textContent = answer ? answer.code : source;
         solutionBox.hidden = false;
         solutionButton.textContent = "Скрыть решение";
       });
@@ -360,9 +407,14 @@ export const EXERCISE_SCRIPT = `
         return window.loadPyodide({ indexURL: data.assets.pyodide });
       })
       .then(function (pyodide) {
-        return Promise.all([text(data.assets.harness), text(data.urls.test)]).then(function (files) {
+        return Promise.all([
+          text(data.assets.harness),
+          data.multi ? Promise.resolve(null) : text(data.urls.test),
+        ]).then(function (files) {
           pyodide.FS.mkdirTree("/exercise");
-          pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          if (files[1] !== null) {
+            pyodide.FS.writeFile("/exercise/test_exercise.py", files[1]);
+          }
           pyodide.runPython(files[0]);
           return pyodide;
         });
@@ -434,6 +486,35 @@ export const EXERCISE_SCRIPT = `
     results.appendChild(list);
   }
 
+  function runtimePayload() {
+    if (!data.multi) return Promise.resolve({ files: null, tests: null });
+    var fileAssets = data.urls.files || [];
+    var testAssets = data.urls.tests || [];
+    return Promise.all([
+      Promise.all(fileAssets.map(function (item) {
+        if (item.name === activeFile) return Promise.resolve([item.name, full]);
+        var saved = null;
+        try {
+          saved = localStorage.getItem(storageKeyFor(item.name));
+        } catch (error) {
+          saved = null;
+        }
+        return saved === null
+          ? text(item.template).then(function (source) { return [item.name, source]; })
+          : Promise.resolve([item.name, saved]);
+      })),
+      Promise.all(testAssets.map(function (item) {
+        return text(item.url).then(function (source) { return [item.name, source]; });
+      })),
+    ]).then(function (groups) {
+      var files = {};
+      var tests = {};
+      groups[0].forEach(function (item) { files[item[0]] = item[1]; });
+      groups[1].forEach(function (item) { tests[item[0]] = item[1]; });
+      return { files: files, tests: tests };
+    });
+  }
+
   runButton.addEventListener("click", function () {
     runButton.disabled = true;
     status.className = "run-status";
@@ -442,17 +523,26 @@ export const EXERCISE_SCRIPT = `
     loadPyodideOnce()
       .then(function (pyodide) {
         status.textContent = "Гоняю тесты…";
+        // Синхронизируем полный файл прямо перед прогоном. Обычно это уже
+        // сделал input, но кнопка не должна зависеть от порядка браузерных
+        // событий или от конкретной реализации редактора.
+        save();
         // В Python уезжает файл целиком, а не то, что в редакторе: тесты
         // импортируют из него все имена упражнения разом.
-        pyodide.globals.set(
-          "PAYLOAD",
-          JSON.stringify({
-            code: join(full, data.fn, area.value),
-            fn: data.fn,
-            functions: data.functions,
-          })
-        );
-        return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+        return runtimePayload().then(function (runtime) {
+          pyodide.globals.set(
+            "PAYLOAD",
+            JSON.stringify({
+              code: full,
+              fn: data.fn,
+              functions: data.functions,
+              files: runtime.files,
+              tests: runtime.tests,
+              testNodes: data.testNodes || [],
+            })
+          );
+          return JSON.parse(pyodide.runPython("run_json(PAYLOAD)"));
+        });
       })
       .then(render)
       .catch(function (error) {

@@ -9,6 +9,7 @@ import { ExercisePanel } from "@/components/ExercisePanel";
 import { PracticeStatus } from "@/components/PracticeStatus";
 import { QuestionSet } from "@/components/QuestionSet";
 import { RecallCard } from "@/components/RecallCard";
+import { ScriptRunPanel } from "@/components/ScriptRunPanel";
 import { StepBody } from "@/components/StepBody";
 import { VisualFrame } from "@/components/VisualFrame";
 import { errorStatus } from "@/lib/agent/error-message";
@@ -21,13 +22,14 @@ interface CheckQuestion {
 
 interface StepData {
   id: string;
-  type: "theory" | "visual" | "check" | "code" | "recall" | "quiz";
+  type: "theory" | "visual" | "check" | "code" | "recall" | "run" | "quiz";
   title: string;
   visual?: string;
   generatedVisual?: boolean;
   exercise_fn?: string;
   /** Файл упражнения, в котором живёт exercise_fn — не назван, если он один. */
   exercise_file?: string;
+  run_file?: string;
   check?: CheckQuestion[];
   body: string;
 }
@@ -340,6 +342,17 @@ export function Reader({
               fn={step.exercise_fn}
               file={step.exercise_file}
               lspUrl={lspUrl}
+              onProgressChanged={() => void load()}
+            />
+          </>
+        )}
+        {step.type === "run" && step.run_file && (
+          <>
+            <PracticeStatus slug={slug} />
+            <ScriptRunPanel
+              slug={slug}
+              stepId={step.id}
+              file={step.run_file}
               onProgressChanged={() => void load()}
             />
           </>

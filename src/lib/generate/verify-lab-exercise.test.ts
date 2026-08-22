@@ -40,4 +40,33 @@ describe("verifyDerivedLabExercise", () => {
     const { exercise, spec } = fixture("def test_answer():\n    assert 40 + 2 == 42\n");
     await expect(verifyDerivedLabExercise(exercise, spec)).rejects.toThrow(/осталась зелёной/);
   });
+
+  it("для script-зачёта требует зелёный эталон и красный шаблон", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lab-script-verify-"));
+    const code = path.join(root, "code");
+    const exercise = path.join(root, "exercise");
+    fs.mkdirSync(code, { recursive: true });
+    fs.writeFileSync(
+      path.join(code, "main.py"),
+      [
+        "def converge():",
+        "    return True",
+        "",
+        "if __name__ == '__main__':",
+        "    raise SystemExit(0 if converge() else 1)",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const spec: LabExerciseSpec = {
+      version: 1,
+      run: { file: "main.py" },
+      targets: [
+        { file: "main.py", symbol: "converge", instruction: "Проверь сходимость." },
+      ],
+    };
+    deriveLabExercise(code, exercise, spec);
+
+    await expect(verifyDerivedLabExercise(exercise, spec)).resolves.toBeUndefined();
+  });
 });

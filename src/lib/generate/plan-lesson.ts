@@ -181,6 +181,10 @@ export async function generateLessonPlan(opts: {
     lesson_title: source.ref.title,
     source_text: source.text,
     lab_code: lab ? labCode(source) : "",
+    verification: source.exercise?.run
+      ? `Итоговый запуск: ${source.exercise.run.file}. Добавь после всех code-шагов ровно один шаг ` +
+        `type: "run" с run_file: "${source.exercise.run.file}".`
+      : "Каждый code-шаг проверяется назначенными ему pytest-тестами; run-шаг не нужен.",
     // Одно-файловое упражнение показывает планировщику ровно то, что и
     // раньше, — «- имя_функции», иначе промпты 382 существующих упражнений
     // разошлись бы без причины. У многофайлового строка называет и файл: без

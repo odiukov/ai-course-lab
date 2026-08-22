@@ -229,6 +229,73 @@ describe("практика", () => {
     expect(value).not.toContain("Заголовок упражнения");
     expect(value).not.toContain("def dot");
   });
+  it("показывает только квалифицированный метод, а не весь класс и файл", async () => {
+    const methodStep: StepMeta = {
+      id: "001-method",
+      type: "code",
+      title: "Budget.exceeded",
+      exercise_fn: "Budget.exceeded",
+      exercise_file: "main.py",
+    };
+    const methodModel = buildLessonModel({
+      slug: "lesson-method",
+      title: "Методы",
+      steps: [methodStep],
+      written: { "001-method": { ...methodStep, body: "" } as Step },
+      visualHrefByStepId: {},
+    });
+    const methodPanel = {
+      slug: "p19-l20-loop",
+      multi: true,
+      functions: ["Budget.exceeded"],
+      targets: [{
+        file: "main.py",
+        fn: "Budget.exceeded",
+        tests: ["test_steps.py::TestBudget::test_exceeded"],
+      }],
+      urls: {
+        template: "/base/exercise/p19-l20-loop/template/main.py",
+        test: "/base/exercise/p19-l20-loop/test.py",
+        solution: "/base/exercise/p19-l20-loop/solution/main.py",
+        files: [{
+          name: "main.py",
+          template: "/base/exercise/p19-l20-loop/template/main.py",
+          solution: "/base/exercise/p19-l20-loop/solution/main.py",
+        }],
+        tests: [{ name: "test_steps.py", url: "/base/exercise/p19-l20-loop/tests/test_steps.py" }],
+      },
+    };
+    const source = [
+      "import time",
+      "",
+      "class Budget:",
+      "    def exceeded(self):",
+      "        raise NotImplementedError",
+      "",
+      "    def untouched(self):",
+      "        return 1",
+      "",
+      "class HarnessLoop:",
+      "    pass",
+      "",
+    ].join("\n");
+    const window = new Window({ url: "https://example.test/base/lesson/lesson-method/001-method/" });
+    window.fetch = (async () =>
+      ({ ok: true, text: async () => source })) as unknown as typeof window.fetch;
+    const html = renderStepPage(methodModel, 0, { basePath: "/base", exercise: methodPanel });
+    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    for (const script of [...window.document.body.querySelectorAll("script")]) {
+      if (script.getAttribute("type") === "application/json") continue;
+      window.eval(script.textContent ?? "");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const value = (pick(window, "[data-code]") as HTMLTextAreaElement).value;
+    expect(value).toBe("    def exceeded(self):\n        raise NotImplementedError");
+    expect(value).not.toContain("class Budget");
+    expect(value).not.toContain("untouched");
+  });
+
 
   it("забирает в блок функции обломок без отступа", async () => {
     // Строка, случайно оставшаяся у левого края, ломала файл навсегда: она

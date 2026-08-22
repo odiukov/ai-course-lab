@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { canonicalFunctions, readExerciseTree } from "../exercise/tree";
+import type { ExerciseRunRef } from "../exercise/tree";
 import type { LessonRef } from "./catalog";
 import { visualPrefixes } from "./naming";
 
@@ -26,6 +27,7 @@ export interface ExerciseInfo {
   /** Каталожная форма (`exercise.template/`) против одно-файловой. */
   multi: boolean;
   functions: { file: string; fn: string }[];
+  run?: ExerciseRunRef;
 }
 
 export interface LessonSource {
@@ -76,6 +78,7 @@ function readExercise(courseRepo: string, ref: LessonRef): ExerciseInfo | null {
     dir: tree.dir,
     multi: tree.multi,
     functions: canonicalFunctions(tree),
+    ...(tree.run ? { run: tree.run } : {}),
   };
 }
 

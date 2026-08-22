@@ -281,6 +281,7 @@ function makeTree(multi: boolean, files: { name: string; solutionPath: string | 
     testPath: null,
     testPaths: [],
     targets: null,
+    run: null,
     requirements: [],
     network: false,
     duplicateFunctions: [],

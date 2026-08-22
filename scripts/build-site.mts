@@ -212,7 +212,13 @@ async function main(): Promise<void> {
 
     const bundle = exercises.get(lesson.slug);
     const exercise = bundle
-      ? { slug: bundle.slug, functions: bundle.functions, urls: exerciseUrls(basePath, bundle) }
+      ? {
+          slug: bundle.slug,
+          functions: bundle.functions,
+          multi: bundle.multi,
+          targets: bundle.targets,
+          urls: exerciseUrls(basePath, bundle),
+        }
       : null;
 
     // Страница урока — оглавление; каждый шаг живёт своей страницей, чтобы

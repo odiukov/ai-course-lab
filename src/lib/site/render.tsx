@@ -28,6 +28,8 @@ export interface ExercisePanelData {
   slug: string;
   /** Канонический состав упражнения — по нему отбираются тесты шага. */
   functions: string[];
+  multi?: boolean;
+  targets?: { file: string; fn: string; tests: string[] }[];
   urls: ExerciseUrls;
 }
 
@@ -154,10 +156,16 @@ function renderPractice(block: LessonBlock, options: RenderOptions): string {
     return `<p class="practice">Практика: функция <code>${escapeHtml(fn)}</code>. Упражнение к этому уроку не выложено.</p>`;
   }
 
+  const target = exercise.targets?.find(
+    (item) => item.fn === fn && (!block.practiceFile || item.file === block.practiceFile),
+  );
   const payload = encodeJson({
     slug: exercise.slug,
     fn,
+    file: block.practiceFile,
     functions: exercise.functions,
+    multi: exercise.multi ?? false,
+    testNodes: target?.tests ?? [],
     urls: exercise.urls,
     assets: {
       pyodide: `${options.basePath}/assets/pyodide/`,

@@ -43,6 +43,7 @@ interface ExerciseFileState {
 // «полоска с одним табом».
 interface ExerciseData {
   multi: boolean;
+  verification: "pytest" | "script";
   files: ExerciseFileState[];
 }
 
@@ -237,7 +238,11 @@ export function ExercisePanel({
   }, [stepId, fn, file, activateFile]);
 
   const load = useCallback(async () => {
-    const result = await fetchJson<{ multi: boolean; files: ExerciseFileState[] }>(
+    const result = await fetchJson<{
+      multi: boolean;
+      verification?: "pytest" | "script";
+      files: ExerciseFileState[];
+    }>(
       `/api/lesson/${slug}/exercise`,
     );
     if (!result.ok) {
@@ -274,7 +279,11 @@ export function ExercisePanel({
     savedCodeRef.current = nextSaved;
     mtimeRef.current = nextMtime;
 
-    setData({ multi: json.multi, files: json.files });
+    setData({
+      multi: json.multi,
+      verification: json.verification ?? "pytest",
+      files: json.files,
+    });
     activateFile(resolved);
   }, [slug, activateFile]);
 
@@ -898,13 +907,19 @@ export function ExercisePanel({
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={() => void runTests()}
-          disabled={running}
-          className="rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
-        >
-          {running ? "Гоняю тесты…" : `Прогнать тесты ${fn}`}
-        </button>
+        {data.verification === "pytest" ? (
+          <button
+            onClick={() => void runTests()}
+            disabled={running}
+            className="rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+          >
+            {running ? "Гоняю тесты…" : `Прогнать тесты ${fn}`}
+          </button>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Этот шов проверяется вместе со всей системой в итоговом run-шаге.
+          </p>
+        )}
         {green && !staleVerdict && (
           <button
             onClick={() => void runReview()}

@@ -122,4 +122,30 @@ describe("deriveLabExercise", () => {
       network: true,
     });
   });
+
+  it("собирает лабораторию с запуском скрипта без pytest-файла", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "lab-script-derive-"));
+    const code = path.join(root, "code");
+    const exercise = path.join(root, "exercise");
+    fs.mkdirSync(code, { recursive: true });
+    fs.writeFileSync(
+      path.join(code, "main.py"),
+      "def converge():\n    return True\n\nif __name__ == '__main__':\n    raise SystemExit(0 if converge() else 1)\n",
+      "utf8",
+    );
+
+    deriveLabExercise(code, exercise, {
+      version: 1,
+      run: { file: "main.py", timeoutMs: 90000 },
+      targets: [
+        { file: "main.py", symbol: "converge", instruction: "Проверь сходимость." },
+      ],
+    });
+
+    expect(fs.existsSync(path.join(exercise, "test_exercise.py"))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(exercise, "exercise.json"), "utf8"))).toMatchObject({
+      run: { file: "main.py", args: [], timeoutMs: 90000 },
+      targets: [{ symbol: "converge", tests: [] }],
+    });
+  });
 });

@@ -119,6 +119,34 @@ describe("validatePlan", () => {
     ];
     expect(validatePlan(bad, SOURCE).join(" ")).toMatch(/подряд/);
   });
+
+  it("требует отдельный итоговый run-шаг у script-лаборатории", () => {
+    const scriptSource = {
+      ...SOURCE,
+      exercise: { ...SOURCE.exercise!, run: { file: "exercise.py", args: [], timeoutMs: 180000 } },
+    };
+    expect(validatePlan(GOOD, scriptSource).join(" ")).toMatch(/нет run-шага/);
+
+    const withRun = [
+      ...GOOD,
+      step({ id: "005-run", type: "run", run_file: "exercise.py" }),
+    ];
+    expect(validatePlan(withRun, scriptSource)).toEqual([]);
+  });
+
+  it("не разрешает run-шагу запускать другой файл или стоять до code-шагов", () => {
+    const scriptSource = {
+      ...SOURCE,
+      exercise: { ...SOURCE.exercise!, run: { file: "exercise.py", args: [], timeoutMs: 180000 } },
+    };
+    const bad = [
+      step({ id: "001-run", type: "run", run_file: "other.py" }),
+      ...GOOD,
+    ];
+    const errors = validatePlan(bad, scriptSource).join(" ");
+    expect(errors).toMatch(/exercise\.py, а не other\.py/);
+    expect(errors).toMatch(/после всех code-шагов/);
+  });
 });
 
 describe("адрес практики: файл + функция", () => {

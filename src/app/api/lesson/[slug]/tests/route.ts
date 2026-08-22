@@ -48,6 +48,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (!tree) {
     return Response.json({ error: "У этого урока нет упражнения" }, { status: 404 });
   }
+  if (tree.run) {
+    return Response.json(
+      { error: `Эта лаборатория проверяется целиком запуском ${tree.run.file}` },
+      { status: 400 },
+    );
+  }
 
   const fileName = resolveExerciseFile(tree, step.exercise_fn, step.exercise_file);
   const target = findExerciseTarget(tree, fileName, step.exercise_fn);

@@ -16,7 +16,7 @@ export function practiceErrorStatus(kind: PracticeErrorKind | undefined, message
     case "spawn":
       return "Интерпретатор Python не найден — редактор работает, а тесты и замер нет. Проверь PYTHON в .env.local.";
     case "python":
-      return `Python не смог прогнать тесты: ${message}`;
+      return `Python не смог запустить проверку: ${message}`;
     case "timeout":
       return "Прогон не уложился в таймаут и был прерван — похоже на бесконечный цикл в коде.";
     default:

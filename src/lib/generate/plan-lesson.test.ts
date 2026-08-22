@@ -163,6 +163,33 @@ describe("generateLessonPlan", () => {
     expect(String(run.mock.calls[0][0])).toContain("за 90 минут");
     expect(String(run.mock.calls[0][0])).toContain("Сделай 8–12 шагов");
   });
+
+  it("для script-лаборатории требует отдельный run-шаг после code-шагов", async () => {
+    const contentDir = tmpDir();
+    const source = {
+      ...SOURCE,
+      ref: { ...SOURCE.ref, phaseNumber: 19, lessonNumber: 76 },
+      exercise: {
+        ...SOURCE.exercise!,
+        run: { file: "exercise.py", args: [], timeoutMs: 180000 },
+      },
+    };
+    const plan = JSON.stringify([
+      { id: "001-t", type: "theory", title: "Контракт" },
+      { id: "002-c", type: "code", title: "transpose", exercise_fn: "transpose" },
+      { id: "003-t", type: "theory", title: "Следующий шов" },
+      { id: "004-c", type: "code", title: "matmul", exercise_fn: "matmul" },
+      { id: "005-t", type: "theory", title: "Сборка" },
+      { id: "006-run", type: "run", title: "Сходимость", run_file: "exercise.py" },
+      { id: "007-quiz", type: "quiz", title: "Итог" },
+    ]);
+    const run = vi.fn().mockResolvedValue(plan);
+
+    await generateLessonPlan({ contentDir, source, deps: { run } });
+
+    expect(String(run.mock.calls[0][0])).toContain("Итоговый запуск: exercise.py");
+    expect(String(run.mock.calls[0][0])).toContain('type: "run"');
+  });
 });
 
 describe("stepBudget", () => {

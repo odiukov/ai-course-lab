@@ -24,6 +24,8 @@ export interface ExerciseTree {
   testPaths: string[];
   /** Явные цели новой формы. null сохраняет старое выведение по функциям. */
   targets: ExerciseTargetRef[] | null;
+  /** Отдельный зачёт запуском файла вместо pytest, серия лабораторий 76–81. */
+  run: ExerciseRunRef | null;
   /** Импортируемые Python-модули, без которых лаборатория не запустится. */
   requirements: string[];
   /** Лаборатория проверяет сетевой сценарий и не обещает офлайн-прогон. */
@@ -47,6 +49,12 @@ export interface ExerciseTargetRef {
   tests: string[];
   /** Runtime-бенч допустим только когда цель можно вызвать как функцию модуля. */
   bench: boolean;
+}
+
+export interface ExerciseRunRef {
+  file: string;
+  args: string[];
+  timeoutMs: number;
 }
 
 const SAFE_NAME = /^[A-Za-z0-9_-]+\.py$/;
@@ -116,6 +124,7 @@ export function readExerciseTree(sourceDir: string, ref: LessonRef): ExerciseTre
     testPath,
     testPaths,
     targets: manifest?.targets ?? null,
+    run: manifest?.run ?? null,
     requirements: manifest?.requirements ?? [],
     network: manifest?.network ?? false,
     duplicateFunctions: [],
@@ -138,7 +147,12 @@ function readManifest(
   dir: string,
   files: ExerciseFileRef[],
   testPaths: string[],
-): { targets: ExerciseTargetRef[]; requirements: string[]; network: boolean } | null {
+): {
+  targets: ExerciseTargetRef[];
+  run: ExerciseRunRef | null;
+  requirements: string[];
+  network: boolean;
+} | null {
   const manifestPath = path.join(dir, "exercise.json");
   if (!fs.existsSync(manifestPath)) return null;
 
@@ -151,10 +165,39 @@ function readManifest(
   if (!raw || typeof raw !== "object" || (raw as { version?: unknown }).version !== 1) {
     throw new Error(`В ${manifestPath} нужна версия 1`);
   }
-  const manifest = raw as { targets?: unknown; requirements?: unknown; network?: unknown };
+  const manifest = raw as {
+    targets?: unknown;
+    run?: unknown;
+    requirements?: unknown;
+    network?: unknown;
+  };
   const declared = manifest.targets;
   if (!Array.isArray(declared) || declared.length === 0) {
     throw new Error(`В ${manifestPath} нет targets`);
+  }
+
+  let run: ExerciseRunRef | null = null;
+  if (manifest.run !== undefined) {
+    if (!manifest.run || typeof manifest.run !== "object") {
+      throw new Error(`В ${manifestPath} run должен быть объектом`);
+    }
+    const value = manifest.run as { file?: unknown; args?: unknown; timeoutMs?: unknown };
+    const file = typeof value.file === "string" ? value.file : "";
+    if (!files.some((candidate) => candidate.name === file)) {
+      throw new Error(`В упражнении нет запускаемого файла ${file || "(пусто)"}`);
+    }
+    const args = value.args === undefined ? [] : value.args;
+    if (
+      !Array.isArray(args) ||
+      !args.every((arg): arg is string => typeof arg === "string" && !arg.includes("\0"))
+    ) {
+      throw new Error(`В ${manifestPath} run.args должен быть списком строк`);
+    }
+    const timeoutMs = value.timeoutMs === undefined ? 180_000 : value.timeoutMs;
+    if (!Number.isInteger(timeoutMs) || (timeoutMs as number) < 1_000 || (timeoutMs as number) > 600_000) {
+      throw new Error(`В ${manifestPath} run.timeoutMs должен быть целым числом от 1000 до 600000`);
+    }
+    run = { file, args, timeoutMs: timeoutMs as number };
   }
 
   const knownTests = new Set(testPaths.map((file) => path.basename(file)));
@@ -175,7 +218,12 @@ function readManifest(
     if (!available.some((target) => target.symbol === fn)) {
       throw new Error(`В шаблоне ${file} нет цели ${fn || "(пусто)"}`);
     }
-    if (tests.length === 0 || tests.length !== (value.tests as unknown[]).length) {
+    if (
+      !Array.isArray(value.tests) ||
+      tests.length !== value.tests.length ||
+      (run === null && tests.length === 0) ||
+      (run !== null && tests.length > 0)
+    ) {
       throw new Error(`У цели ${file}::${fn} нет корректных pytest node IDs`);
     }
     for (const test of tests) {
@@ -212,6 +260,7 @@ function readManifest(
   }
   return {
     targets,
+    run,
     requirements: [...new Set(requirements)].sort(),
     network: manifest.network === true,
   };

@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { LessonRef } from "../source/catalog";
 import { canonicalFunctions, readExerciseTree } from "../exercise/tree";
 
@@ -24,10 +25,13 @@ export interface ExerciseBundle {
    * статической сборки это отдельная задача, не задача 10.
    */
   functions: string[];
+  /** Точные тесты новой формы, адресованные парой файл + цель. */
+  targets: { file: string; fn: string; tests: string[] }[];
   /** Каталожная форма (несколько файлов) против одно-файловой. */
   multi: boolean;
   files: ExerciseBundleFile[];
   testPath: string;
+  testPaths: string[];
 }
 
 const LESSON_SLUG = /^(\d{2})-[^_]+__(\d{2})-/;
@@ -59,6 +63,7 @@ export function findLessonExercise(sourceDir: string, lessonSlug: string): Exerc
     slug: tree.slug,
     dir: tree.dir,
     functions: canonicalFunctions(tree).map((pair) => pair.fn),
+    targets: (tree.targets ?? []).map(({ file, fn, tests }) => ({ file, fn, tests })),
     multi: tree.multi,
     files: tree.files.map((file) => ({
       name: file.name,
@@ -66,6 +71,7 @@ export function findLessonExercise(sourceDir: string, lessonSlug: string): Exerc
       solutionPath: file.solutionPath,
     })),
     testPath: tree.testPath,
+    testPaths: tree.testPaths,
   };
 }
 
@@ -73,6 +79,8 @@ export interface ExerciseUrls {
   template: string;
   test: string;
   solution: string | null;
+  files?: { name: string; template: string; solution: string | null }[];
+  tests?: { name: string; url: string }[];
 }
 
 /**
@@ -93,7 +101,24 @@ export function exerciseUrls(basePath: string, bundle: ExerciseBundle): Exercise
       ? `${root}/solution/${primary.name}`
       : `${root}/solution.py`
     : null;
-  return { template, test: `${root}/test.py`, solution };
+  return {
+    template,
+    test: `${root}/test.py`,
+    solution,
+    ...(bundle.multi
+      ? {
+          files: bundle.files.map((file) => ({
+            name: file.name,
+            template: `${root}/template/${file.name}`,
+            solution: file.solutionPath ? `${root}/solution/${file.name}` : null,
+          })),
+          tests: bundle.testPaths.map((file) => ({
+            name: path.basename(file),
+            url: `${root}/tests/${path.basename(file)}`,
+          })),
+        }
+      : {}),
+  };
 }
 
 /**
@@ -123,6 +148,9 @@ export function exerciseFiles(bundle: ExerciseBundle): { from: string; to: strin
     to: `${root}/template/${file.name}`,
   }));
   files.push({ from: bundle.testPath, to: `${root}/test.py` });
+  for (const test of bundle.testPaths) {
+    files.push({ from: test, to: `${root}/tests/${path.basename(test)}` });
+  }
   for (const file of bundle.files) {
     if (file.solutionPath) files.push({ from: file.solutionPath, to: `${root}/solution/${file.name}` });
   }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { lessonPaths } from "./paths";
 
-export const STEP_TYPES = ["theory", "visual", "check", "code", "recall", "quiz"] as const;
+export const STEP_TYPES = ["theory", "visual", "check", "code", "recall", "run", "quiz"] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
 // Экспортируется, потому что этой же схемой проверяется ответ агента при
@@ -46,6 +46,8 @@ export const stepMetaSchema = z.object({
    * существующих планов этого поля нет и появляться не должно.
    */
   exercise_file: z.string().optional(),
+  /** Файл итогового script-зачёта; не является адресом функции code-шага. */
+  run_file: z.string().optional(),
   check: z.array(checkSchema).optional(),
   baseline: z
     .object({

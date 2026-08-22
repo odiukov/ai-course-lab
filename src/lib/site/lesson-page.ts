@@ -8,6 +8,7 @@ export interface LessonBlock {
   visualHref: string | null;
   questions: QuizQuestion[];
   practiceFn: string | null;
+  practiceFile: string | null;
 }
 
 export interface LessonModel {
@@ -53,6 +54,7 @@ export function buildLessonModel(options: BuildLessonModelOptions): LessonModel 
       visualHref: visualHrefByStepId[meta.id] ?? null,
       questions: quizQuestions(step),
       practiceFn: step.exercise_fn ?? null,
+      practiceFile: step.exercise_file ?? null,
     });
   });
 

@@ -63,6 +63,8 @@ export interface ExerciseFileSet {
   exerciseSlug: string;
   dir: string;
   multi: boolean;
+  /** Старые упражнения проверяются pytest, серия 76–81 — итоговым скриптом. */
+  verification?: "pytest" | "script";
   files: ExerciseFileState[];
 }
 
@@ -119,7 +121,13 @@ export function readExerciseFiles(sourceDir: string, ref: LessonRef): ExerciseFi
   }
   if (tree.multi) copyMissingTree(path.join(tree.dir, "exercise.template"), path.join(tree.dir, "exercise"));
   if (files.length === 0) return null;
-  return { exerciseSlug: tree.slug, dir: tree.dir, multi: tree.multi, files };
+  return {
+    exerciseSlug: tree.slug,
+    dir: tree.dir,
+    multi: tree.multi,
+    verification: tree.run ? "script" : "pytest",
+    files,
+  };
 }
 
 function copyMissingTree(from: string, to: string): void {

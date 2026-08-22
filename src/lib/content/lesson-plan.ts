@@ -82,6 +82,23 @@ export function validatePlan(
   // склеенным ключом.
   const key = (file: string, fn: string) => `${file}::${fn}`;
   const used = new Set<string>();
+  const run = source.exercise?.run;
+  const runSteps = steps.filter((step) => step.type === "run");
+  if (run && runSteps.length === 0) {
+    errors.push(`У лаборатории есть script-зачёт ${run.file}, но в плане нет run-шага`);
+  }
+  if (runSteps.length > 1) {
+    errors.push("В плане может быть только один run-шаг");
+  }
+  for (const step of runSteps) {
+    if (!run) {
+      errors.push(`Шаг ${step.id}: у упражнения нет script-зачёта`);
+    } else if (!step.run_file) {
+      errors.push(`Шаг ${step.id}: у run-шага нет run_file`);
+    } else if (step.run_file !== run.file) {
+      errors.push(`Шаг ${step.id}: запускать нужно ${run.file}, а не ${step.run_file}`);
+    }
+  }
   // А вот «уже написана раньше» ключуется ОДНИМ именем функции, без файла, и
   // это не небрежность. `written` собран readWrittenFunctions по ВСЕМУ курсу,
   // поэтому `item.file` — имя файла внутри ЧУЖОГО упражнения (`exercise.py` у
@@ -190,6 +207,17 @@ export function validatePlan(
           ? `Функция ${pair.fn} из ${pair.file} не покрыта ни одним code-шагом`
           : `Функция ${pair.fn} не покрыта ни одним code-шагом`,
       );
+    }
+  }
+
+  if (run && runSteps.length === 1) {
+    const runIndex = steps.indexOf(runSteps[0]);
+    const lastPracticeIndex = steps.reduce(
+      (last, step, index) => (step.type === "code" || step.type === "recall" ? index : last),
+      -1,
+    );
+    if (runIndex < lastPracticeIndex) {
+      errors.push(`Шаг ${runSteps[0].id}: итоговый запуск должен стоять после всех code-шагов`);
     }
   }
 

@@ -165,6 +165,33 @@ describe("readExerciseTree", () => {
     });
   });
 
+  it("читает отдельный запуск скрипта и не требует pytest node IDs", () => {
+    const sourceDir = makeMulti();
+    const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+    fs.rmSync(path.join(dir, "test_exercise.py"));
+    fs.writeFileSync(
+      path.join(dir, "exercise.json"),
+      JSON.stringify({
+        version: 1,
+        run: { file: "main.py", args: ["--world-size", "2"], timeoutMs: 240000 },
+        targets: [
+          { file: "main.py", symbol: "run", tests: [], bench: false },
+          { file: "hooks.py", symbol: "fire", tests: [], bench: false },
+        ],
+      }),
+      "utf8",
+    );
+
+    const tree = readExerciseTree(sourceDir, p19)!;
+    expect(tree.run).toEqual({
+      file: "main.py",
+      args: ["--world-size", "2"],
+      timeoutMs: 240000,
+    });
+    expect(findExerciseTarget(tree, "main.py", "run")?.tests).toEqual([]);
+    expect(tree.testPath).toBeNull();
+  });
+
   it("отклоняет цель манифеста, которой нет в шаблоне", () => {
     const sourceDir = makeMulti();
     addMethodManifest(sourceDir);

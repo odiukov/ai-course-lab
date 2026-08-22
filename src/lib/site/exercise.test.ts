@@ -123,6 +123,7 @@ describe("exerciseFiles", () => {
       "exercise/p19-l20-loop/template/events.py",
       "exercise/p19-l20-loop/template/hooks.py",
       "exercise/p19-l20-loop/test.py",
+      "exercise/p19-l20-loop/tests/test_exercise.py",
       "exercise/p19-l20-loop/solution/main.py",
     ]);
   });

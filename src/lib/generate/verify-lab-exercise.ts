@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { LabExerciseSpec } from "./derive-lab-exercise";
+import { runScript } from "../practice/run-script";
 import { runTests } from "../practice/run-tests";
 
 function green(result: { passed: number; failed: number; errors: number }): boolean {
@@ -20,6 +21,31 @@ export async function verifyDerivedLabExercise(
   const root = path.resolve(exerciseDir);
   const solutionPath = path.join(root, "solution");
   const templatePath = path.join(root, "exercise.template");
+  if (spec.run) {
+    const options = {
+      args: spec.run.args,
+      python,
+      timeoutMs: spec.run.timeoutMs,
+    };
+    const solution = await runScript({
+      ...options,
+      dir: solutionPath,
+      file: path.join(solutionPath, spec.run.file),
+    });
+    if (!solution.passed) {
+      throw new Error(`Эталон лаборатории завершился с кодом ${solution.exitCode}`);
+    }
+    const template = await runScript({
+      ...options,
+      dir: templatePath,
+      file: path.join(templatePath, spec.run.file),
+    });
+    if (template.passed) {
+      throw new Error("Шаблон лаборатории завершился с кодом 0 — вырезанные швы не проверяются запуском");
+    }
+    return;
+  }
+
   const author = await runTests({
     dir: root,
     python,
@@ -34,6 +60,9 @@ export async function verifyDerivedLabExercise(
   }
 
   for (const target of spec.targets) {
+    if (!target.tests || target.tests.length === 0) {
+      throw new Error(`У цели ${target.file}::${target.symbol} не назначены тесты`);
+    }
     const solution = await runTests({
       dir: root,
       python,

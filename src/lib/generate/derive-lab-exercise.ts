@@ -6,7 +6,7 @@ export interface LabTargetSpec {
   file: string;
   symbol: string;
   instruction: string;
-  tests: string[];
+  tests?: string[];
   bench?: boolean;
 }
 
@@ -19,7 +19,12 @@ export interface LabResourceSpec {
 
 export interface LabExerciseSpec {
   version: 1;
-  authorTest: string;
+  authorTest?: string;
+  run?: {
+    file: string;
+    args?: string[];
+    timeoutMs?: number;
+  };
   stepTest?: string;
   resources?: LabResourceSpec[];
   requirements?: string[];
@@ -118,9 +123,34 @@ export function deriveLabExercise(
     throw new Error(`Каталог упражнения уже существует: ${exerciseDir}`);
   }
 
-  const authorTest = path.resolve(sourceRoot, spec.authorTest);
-  if (!inside(sourceRoot, authorTest) || !fs.existsSync(authorTest)) {
+  if ((spec.authorTest ? 1 : 0) + (spec.run ? 1 : 0) !== 1) {
+    throw new Error("Лаборатории нужен ровно один вид зачёта: authorTest или run");
+  }
+  const authorTest = spec.authorTest ? path.resolve(sourceRoot, spec.authorTest) : null;
+  if (authorTest && (!inside(sourceRoot, authorTest) || !fs.existsSync(authorTest))) {
     throw new Error(`Авторский тест вне code/ или отсутствует: ${spec.authorTest}`);
+  }
+  if (spec.run) {
+    if (!/^[A-Za-z0-9_-]+\.py$/.test(spec.run.file)) {
+      throw new Error(`Запускаемый файл должен быть корневым Python-модулем: ${spec.run.file}`);
+    }
+    const runFile = path.resolve(sourceRoot, spec.run.file);
+    if (!inside(sourceRoot, runFile) || !fs.existsSync(runFile)) {
+      throw new Error(`Запускаемый файл вне code/ или отсутствует: ${spec.run.file}`);
+    }
+    if (
+      spec.run.args !== undefined &&
+      (!Array.isArray(spec.run.args) ||
+        !spec.run.args.every((arg) => typeof arg === "string" && !arg.includes("\0")))
+    ) {
+      throw new Error("run.args должен быть списком строк");
+    }
+    if (
+      spec.run.timeoutMs !== undefined &&
+      (!Number.isInteger(spec.run.timeoutMs) || spec.run.timeoutMs < 1_000 || spec.run.timeoutMs > 600_000)
+    ) {
+      throw new Error("run.timeoutMs должен быть целым числом от 1000 до 600000");
+    }
   }
   const stepTest = spec.stepTest ? path.resolve(sourceRoot, spec.stepTest) : null;
   if (stepTest && (!inside(sourceRoot, stepTest) || !fs.existsSync(stepTest))) {
@@ -130,10 +160,13 @@ export function deriveLabExercise(
   fs.mkdirSync(destination, { recursive: false });
   const templateDir = path.join(destination, "exercise.template");
   const solutionDir = path.join(destination, "solution");
-  const excluded = new Set([spec.authorTest, ...(spec.stepTest ? [spec.stepTest] : [])]);
+  const excluded = new Set([
+    ...(spec.authorTest ? [spec.authorTest] : []),
+    ...(spec.stepTest ? [spec.stepTest] : []),
+  ]);
   // В обычной раскладке tests/ содержит только suite и __init__.py. Сам
   // пакет тестов в runtime не нужен; fixture_repo/tests при этом сохраняется.
-  const topLevelTestDir = spec.authorTest.split(/[\\/]/)[0] === "tests" ? "tests" : null;
+  const topLevelTestDir = spec.authorTest?.split(/[\\/]/)[0] === "tests" ? "tests" : null;
   if (topLevelTestDir) excluded.add(topLevelTestDir);
   copyRuntimeTree(sourceRoot, solutionDir, excluded);
   copyRuntimeTree(sourceRoot, templateDir, excluded);
@@ -161,6 +194,12 @@ export function deriveLabExercise(
 
   const targetsByFile = new Map<string, LabTargetSpec[]>();
   for (const target of spec.targets) {
+    if (spec.run && (target.tests?.length ?? 0) > 0) {
+      throw new Error(`У script-цели ${target.file}::${target.symbol} не должно быть pytest node IDs`);
+    }
+    if (!spec.run && (!target.tests || target.tests.length === 0)) {
+      throw new Error(`У pytest-цели ${target.file}::${target.symbol} нет назначенных тестов`);
+    }
     if (target.file.includes("..") || path.isAbsolute(target.file)) {
       throw new Error(`Небезопасный файл цели: ${target.file}`);
     }
@@ -176,7 +215,7 @@ export function deriveLabExercise(
     fs.writeFileSync(template, source, "utf8");
   }
 
-  fs.copyFileSync(authorTest, path.join(destination, "test_exercise.py"));
+  if (authorTest) fs.copyFileSync(authorTest, path.join(destination, "test_exercise.py"));
   if (stepTest) fs.copyFileSync(stepTest, path.join(destination, "test_steps.py"));
   fs.writeFileSync(
     path.join(destination, "exercise.json"),
@@ -185,9 +224,18 @@ export function deriveLabExercise(
       targets: spec.targets.map((target) => ({
         file: target.file,
         symbol: target.symbol,
-        tests: target.tests,
+        tests: target.tests ?? [],
         ...(target.bench === undefined ? {} : { bench: target.bench }),
       })),
+      ...(spec.run
+        ? {
+            run: {
+              file: spec.run.file,
+              args: spec.run.args ?? [],
+              timeoutMs: spec.run.timeoutMs ?? 180_000,
+            },
+          }
+        : {}),
       requirements: [...new Set(spec.requirements ?? [])].sort(),
       network: spec.network ?? false,
     }, null, 2)}\n`,
