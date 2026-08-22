@@ -68,6 +68,31 @@ describe("readWrittenFunctions", () => {
   it("на пустом проекте отдаёт пустой список", () => {
     expect(readWrittenFunctions(makeSource({}))).toEqual([]);
   });
+
+  it("видит функции в каталожной форме упражнения", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-written-multi-"));
+    const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop", "exercise");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "main.py"), "def run(goal):\n    return 1\n", "utf8");
+    fs.writeFileSync(path.join(dir, "hooks.py"), "def fire(topic):\n    return 2\n", "utf8");
+
+    // Алфавитный порядок без спецправила для main.py: "hooks.py" < "main.py"
+    // по коду символов, поэтому fire идёт первым — так и должно быть, это не
+    // список для UI, где main.py открывался бы первым.
+    const written = readWrittenFunctions(sourceDir);
+    expect(written.map((item) => [item.fn, item.file])).toEqual([
+      ["fire", "hooks.py"],
+      ["run", "main.py"],
+    ]);
+  });
+
+  it("одно-файловое упражнение отдаёт file = exercise.py", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-written-single-"));
+    const dir = path.join(sourceDir, "learning-exercises", "p01-l02-beta");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "exercise.py"), "def transpose(M):\n    return M\n", "utf8");
+    expect(readWrittenFunctions(sourceDir)[0].file).toBe("exercise.py");
+  });
 });
 
 describe("readWrittenFunctions — многострочные сигнатуры и краевые случаи", () => {

@@ -13,6 +13,8 @@ export interface PreviousImplementation {
   fn: string;
   exerciseSlug: string;
   lessonSlug: string | null;
+  /** Файл, из которого взят код: нужен, чтобы карточка называла источник целиком. */
+  file: string;
   code: string;
 }
 
@@ -29,7 +31,7 @@ export function findPreviousImplementation(
   const latest = candidates.at(-1);
   if (!latest) return null;
 
-  const source = readExerciseCodeBySlug(sourceDir, latest.exerciseSlug);
+  const source = readExerciseCodeBySlug(sourceDir, latest.exerciseSlug, latest.file);
   if (!source) return null;
   const code = extractFunction(source, fn);
   if (!code) return null;
@@ -38,6 +40,7 @@ export function findPreviousImplementation(
     fn,
     exerciseSlug: latest.exerciseSlug,
     lessonSlug: latest.lessonSlug,
+    file: latest.file,
     code,
   };
 }
@@ -59,20 +62,20 @@ export function insertPreviousImplementation(
   ref: LessonRef,
   fn: string,
   previous: PreviousImplementation,
+  fileName = "exercise.py",
 ): { code: string; functions: ExerciseFunction[]; changed: boolean } | { error: string } {
-  const exercise = readExerciseFiles(sourceDir, ref)?.files.find(
-    (item) => item.name === "exercise.py",
-  );
-  if (!exercise) return { error: "У урока нет упражнения" };
-  if (!exercise.functions.some((item) => item.fn === fn)) {
+  const set = readExerciseFiles(sourceDir, ref);
+  const state = set?.files.find((item) => item.name === fileName);
+  if (!state) return { error: "У урока нет упражнения" };
+  if (!state.functions.some((item) => item.fn === fn)) {
     return { error: `В упражнении этого урока нет функции ${fn} — вставить некуда` };
   }
 
-  const code = replaceFunction(exercise.code, fn, previous.code);
-  if (code === exercise.code) {
-    return { code, functions: exercise.functions, changed: false };
-  }
+  const code = replaceFunction(state.code, fn, previous.code);
+  // «Замена не изменила текст» — не ошибка: так выглядит повторный заход на
+  // тот же recall-шаг, где прошлый код уже стоит на месте.
+  if (code === state.code) return { code, functions: state.functions, changed: false };
 
-  const written = writeExerciseFile(sourceDir, ref, "exercise.py", code);
+  const written = writeExerciseFile(sourceDir, ref, fileName, code);
   return { code, functions: written.functions, changed: true };
 }

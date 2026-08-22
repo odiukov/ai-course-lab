@@ -7,6 +7,8 @@ export interface WrittenFunction {
   fn: string;
   exerciseSlug: string;
   lessonSlug: string | null;
+  /** Файл внутри упражнения: `exercise.py` у старой формы, `main.py` и соседи у новой. */
+  file: string;
   signature: string;
 }
 
@@ -152,6 +154,26 @@ function lessonSlugFor(catalog: PhaseRef[], exerciseSlug: string): string | null
   return null;
 }
 
+/**
+ * Файлы человека в упражнении: `exercise.py` в корне (старая форма) или всё,
+ * что лежит в `exercise/` (каталожная). Читается именно то, что человек
+ * написал, а не шаблон: recall обещает «вот как ты это писал».
+ */
+function learnerFiles(dir: string): { name: string; path: string }[] {
+  const flat = path.join(dir, "exercise.py");
+  if (fs.existsSync(flat)) return [{ name: "exercise.py", path: flat }];
+  const nested = path.join(dir, "exercise");
+  if (!fs.existsSync(nested)) return [];
+  // Алфавитный порядок, без вынесения main.py первым (как в tree.ts для
+  // редактора): этим списком пользуется только поиск по имени функции, а не
+  // UI, и алфавита достаточно.
+  return fs
+    .readdirSync(nested)
+    .filter((name) => name.endsWith(".py"))
+    .sort()
+    .map((name) => ({ name, path: path.join(nested, name) }));
+}
+
 export function readWrittenFunctions(sourceDir: string): WrittenFunction[] {
   const root = path.join(sourceDir, "learning-exercises");
   if (!fs.existsSync(root)) return [];
@@ -159,17 +181,18 @@ export function readWrittenFunctions(sourceDir: string): WrittenFunction[] {
   const catalog = readCatalog(sourceDir);
   const written: WrittenFunction[] = [];
   for (const exerciseSlug of fs.readdirSync(root).sort()) {
-    const file = path.join(root, exerciseSlug, "exercise.py");
-    if (!fs.existsSync(file)) continue;
-    const source = fs.readFileSync(file, "utf8");
-    for (const block of parseTopLevelFunctions(source)) {
-      if (!isFunctionImplemented(block.body)) continue;
-      written.push({
-        fn: block.fn,
-        exerciseSlug,
-        lessonSlug: lessonSlugFor(catalog, exerciseSlug),
-        signature: `${block.fn}(${block.params})`,
-      });
+    for (const file of learnerFiles(path.join(root, exerciseSlug))) {
+      const source = fs.readFileSync(file.path, "utf8");
+      for (const block of parseTopLevelFunctions(source)) {
+        if (!isFunctionImplemented(block.body)) continue;
+        written.push({
+          fn: block.fn,
+          exerciseSlug,
+          lessonSlug: lessonSlugFor(catalog, exerciseSlug),
+          file: file.name,
+          signature: `${block.fn}(${block.params})`,
+        });
+      }
     }
   }
   return written;

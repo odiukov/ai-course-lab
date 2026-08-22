@@ -51,6 +51,40 @@ const deltaRef: LessonRef = {
   title: "Delta",
 };
 
+const p19next: LessonRef = {
+  slug: "19-test__21-next",
+  phaseDir: "19-test",
+  lessonDir: "21-next",
+  phaseNumber: 19,
+  lessonNumber: 21,
+  title: "Next",
+};
+
+const RUN_SOLVED = ["def run(goal):", "    return goal", ""].join("\n");
+const RUN_STUB = ["def run(goal):", "    raise NotImplementedError", ""].join("\n");
+
+/**
+ * Курс с двумя уроками в каталожной форме: прошлый (`p19-l20-loop`) — с
+ * написанной в `exercise/main.py` функцией `run`, текущий (`p19-l21-next`,
+ * ref `p19next`) — с той же функцией на месте заготовки. Проверяет адресацию
+ * recall по файлу внутри каталожной формы, а не только по имени функции.
+ */
+function makeCourseWithPrevious(): string {
+  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-recall-multi-"));
+  const writeMulti = (exerciseSlug: string, code: string) => {
+    const dir = path.join(sourceDir, "learning-exercises", exerciseSlug);
+    fs.mkdirSync(path.join(dir, "exercise.template"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "exercise"), { recursive: true });
+    // Шаблон здесь — как и у настоящих упражнений курса: readExerciseTree
+    // опознаёт упражнение по его наличию, а не по файлу человека.
+    fs.writeFileSync(path.join(dir, "exercise.template", "main.py"), RUN_STUB, "utf8");
+    fs.writeFileSync(path.join(dir, "exercise", "main.py"), code, "utf8");
+  };
+  writeMulti("p19-l20-loop", RUN_SOLVED);
+  writeMulti("p19-l21-next", RUN_STUB);
+  return sourceDir;
+}
+
 describe("findPreviousImplementation", () => {
   it("берёт самую свежую написанную реализацию", () => {
     const found = findPreviousImplementation(makeSource(), "softmax", "p10-l01-gamma")!;
@@ -118,5 +152,14 @@ describe("insertPreviousImplementation", () => {
     if ("error" in again) throw new Error("unreachable");
     expect(again.changed).toBe(false);
     expect(again.code).toContain("sum(xs) or 1");
+  });
+
+  it("вставляет прошлую реализацию в указанный файл", () => {
+    const sourceDir = makeCourseWithPrevious(); // фикстура ниже в этом же файле
+    const previous = findPreviousImplementation(sourceDir, "run", "p19-l21-next")!;
+    expect(previous.file).toBe("main.py");
+
+    const result = insertPreviousImplementation(sourceDir, p19next, "run", previous, "main.py");
+    expect("error" in result).toBe(false);
   });
 });
