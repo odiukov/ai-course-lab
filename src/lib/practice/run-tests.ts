@@ -25,6 +25,8 @@ export interface RunTestsOptions {
   pythonPath?: string;
   /** Путь тестового файла, если он не в cwd прогона. */
   testFile?: string;
+  /** Точные pytest node IDs из exercise.json; для unittest заменяют эвристику -k. */
+  testNodes?: string[];
 }
 
 /**
@@ -75,10 +77,12 @@ function spawnOnce(opts: {
   timeoutMs: number;
   pythonPath?: string;
   testFile?: string;
+  testNodes?: string[];
 }): Promise<RawRun> {
   const junit = opts.junit;
   const args = ["-m", "pytest", "-q", "--no-header", "--junit-xml", junit];
-  if (opts.testFile) args.push(opts.testFile);
+  if (opts.testNodes && opts.testNodes.length > 0) args.push(...opts.testNodes);
+  else if (opts.testFile) args.push(opts.testFile);
   if (opts.filter) args.push("-k", opts.filter);
 
   // PYTHONPATH, а не cwd: тесты курса лежат в каталоге упражнения и
@@ -151,6 +155,7 @@ async function spawnPytest(opts: {
   timeoutMs: number;
   pythonPath?: string;
   testFile?: string;
+  testNodes?: string[];
 }): Promise<RawRun> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lab-junit-"));
   try {
@@ -180,9 +185,13 @@ function toOutcome(run: RawRun, python: string): TestOutcome {
 export async function runTests(options: RunTestsOptions): Promise<TestRunResult> {
   const python = options.python ?? "python3";
   const timeoutMs = options.timeoutMs ?? TESTS_TIMEOUT_MS;
-  const describe = (filter?: string) =>
-    `${python} -m pytest -q --no-header${filter ? ` -k "${filter}"` : ""}`;
-  const filter = options.fn ? buildTestFilter(options.fn, options.functions) : undefined;
+  const describe = (filter?: string, nodes?: string[]) =>
+    `${python} -m pytest -q --no-header${
+      nodes && nodes.length > 0 ? ` ${nodes.join(" ")}` : filter ? ` -k "${filter}"` : ""
+    }`;
+  const filter = !options.testNodes && options.fn
+    ? buildTestFilter(options.fn, options.functions)
+    : undefined;
 
   const first = toOutcome(
     await spawnPytest({
@@ -192,16 +201,17 @@ export async function runTests(options: RunTestsOptions): Promise<TestRunResult>
       timeoutMs,
       pythonPath: options.pythonPath,
       testFile: options.testFile,
+      testNodes: options.testNodes,
     }),
     python,
   );
 
-  if (!filter || first.total > 0) {
+  if (options.testNodes || !filter || first.total > 0) {
     return {
       ...first,
-      filtered: Boolean(filter),
+      filtered: Boolean(filter || options.testNodes?.length),
       warning: null,
-      command: describe(filter),
+      command: describe(filter, options.testNodes),
       stdout: "",
     };
   }

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import type { AgentEvent } from "../agent/events";
 import { renderPrompt } from "../agent/prompts";
@@ -112,6 +114,24 @@ export function countWords(text: string): number {
  * столько и экранов.
  */
 const WORDS_PER_STEP = 80;
+export const LAB_STEP_BUDGET = 10;
+
+function isLab(source: LessonSource): boolean {
+  return source.ref.phaseNumber === 19 && source.ref.lessonNumber >= 20;
+}
+
+function labCode(source: LessonSource): string {
+  if (!source.exercise?.multi) return "(код каркаса недоступен)";
+  const files = [...new Set(source.exercise.functions.map((item) => item.file))];
+  return files
+    .map((name) => {
+      const file = path.join(source.exercise!.dir, "solution", name);
+      return fs.existsSync(file)
+        ? `# --- ${name} ---\n${fs.readFileSync(file, "utf8")}`
+        : `# --- ${name}: эталон отсутствует ---`;
+    })
+    .join("\n\n");
+}
 
 /**
  * Сколько примерно шагов заслуживает этот урок.
@@ -153,12 +173,14 @@ export async function generateLessonPlan(opts: {
 
   const written = opts.written ?? [];
   const functionCount = source.exercise?.functions.length ?? 0;
-  const budget = stepBudget(countWords(source.text), functionCount);
-  const base = renderPrompt("plan-lesson", {
+  const lab = isLab(source);
+  const budget = lab ? LAB_STEP_BUDGET : stepBudget(countWords(source.text), functionCount);
+  const base = renderPrompt(lab ? "plan-lab" : "plan-lesson", {
     other_lessons: formatCourseContext(opts.outlines ?? [], opts.previousPhases ?? []),
     step_budget: String(budget),
     lesson_title: source.ref.title,
     source_text: source.text,
+    lab_code: lab ? labCode(source) : "",
     // Одно-файловое упражнение показывает планировщику ровно то, что и
     // раньше, — «- имя_функции», иначе промпты 382 существующих упражнений
     // разошлись бы без причины. У многофайлового строка называет и файл: без

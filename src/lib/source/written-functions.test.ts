@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readWrittenFunctions, parseTopLevelFunctions, isFunctionImplemented } from "./written-functions";
+import {
+  isFunctionImplemented,
+  parseExerciseTargets,
+  parseTopLevelFunctions,
+  readWrittenFunctions,
+} from "./written-functions";
 
 function makeSource(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "written-"));
@@ -92,6 +97,29 @@ describe("readWrittenFunctions", () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "exercise.py"), "def transpose(M):\n    return M\n", "utf8");
     expect(readWrittenFunctions(sourceDir)[0].file).toBe("exercise.py");
+  });
+
+  it("в каталожной форме с манифестом запоминает написанный метод по qualname", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-written-method-"));
+    const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+    fs.mkdirSync(path.join(dir, "exercise"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "exercise", "main.py"),
+      "class HarnessLoop:\n    def _transition(self, target):\n        self.state = target\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(dir, "exercise.json"),
+      JSON.stringify({
+        version: 1,
+        targets: [{ file: "main.py", symbol: "HarnessLoop._transition", tests: ["test.py"] }],
+      }),
+      "utf8",
+    );
+
+    expect(readWrittenFunctions(sourceDir).map((item) => [item.fn, item.signature])).toEqual([
+      ["HarnessLoop._transition", "_transition(self, target)"],
+    ]);
   });
 });
 
@@ -200,5 +228,71 @@ describe("parseTopLevelFunctions — границы блоков", () => {
   it("isFunctionImplemented экспортирован и отличает заготовку от кода", () => {
     expect(isFunctionImplemented(["    raise NotImplementedError"])).toBe(false);
     expect(isFunctionImplemented(['    """док."""', "    return 1"])).toBe(true);
+  });
+});
+
+describe("parseExerciseTargets — методы классов", () => {
+  it("сохраняет старую функцию и добавляет квалифицированные методы", () => {
+    const source = [
+      "def helper(value):",
+      "    return value",
+      "",
+      "",
+      "class HarnessLoop:",
+      "    @property",
+      "    def events(self):",
+      "        return list(self._events)",
+      "",
+      "    async def resume(",
+      "        self, payload",
+      "    ):",
+      "        return payload",
+      "",
+      "    class Nested:",
+      "        def hidden(self):",
+      "            return 1",
+    ].join("\n");
+
+    expect(
+      parseExerciseTargets(source).map((block) => [
+        block.symbol,
+        block.kind,
+        block.startLine,
+        block.endLine,
+      ]),
+    ).toEqual([
+      ["helper", "function", 1, 2],
+      ["HarnessLoop.events", "method", 7, 8],
+      ["HarnessLoop.resume", "method", 10, 13],
+    ]);
+  });
+
+  it("видит приватные функции и методы, которые старый контракт намеренно скрывает", () => {
+    const source = [
+      "def _planner(goal):",
+      "    return goal",
+      "",
+      "class HarnessLoop:",
+      "    def _transition(self, target):",
+      "        self.state = target",
+    ].join("\n");
+
+    expect(parseTopLevelFunctions(source)).toEqual([]);
+    expect(parseExerciseTargets(source).map((block) => block.symbol)).toEqual([
+      "_planner",
+      "HarnessLoop._transition",
+    ]);
+  });
+
+  it("не принимает вложенную функцию за метод класса", () => {
+    const source = [
+      "class Runner:",
+      "    def run(self):",
+      "        def inside():",
+      "            return 1",
+      "        return inside()",
+    ].join("\n");
+
+    expect(parseExerciseTargets(source).map((block) => block.symbol)).toEqual(["Runner.run"]);
   });
 });

@@ -200,6 +200,45 @@ describe("POST /api/lesson/[slug]/review — файл без эталона", ()
     expect(runBenchMock.mock.calls[0][0]).toMatchObject({ fn: "run", module: "main.py" });
     expect(reviewCodeMock.mock.calls[0][0].request.metrics).toContain("строк: 3 / 2");
   });
+
+  it("квалифицированный метод разбирается по эталону, но не запускает фиктивный runtime-бенч", async () => {
+    const exercise = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+    const code = [
+      "class HarnessLoop:",
+      "    def _transition(self, target):",
+      "        self.state = target",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(exercise, "exercise.template", "main.py"), code, "utf8");
+    fs.writeFileSync(path.join(exercise, "solution", "main.py"), code, "utf8");
+    fs.writeFileSync(
+      path.join(exercise, "exercise.json"),
+      JSON.stringify({
+        version: 1,
+        targets: [
+          {
+            file: "main.py",
+            symbol: "HarnessLoop._transition",
+            tests: ["test_exercise.py"],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    currentStep = {
+      id: "007-transition",
+      exercise_fn: "HarnessLoop._transition",
+      exercise_file: "main.py",
+    };
+
+    await events({ stepId: "007-transition" });
+
+    expect(runBenchMock).not.toHaveBeenCalled();
+    const sent = reviewCodeMock.mock.calls[0][0].request;
+    expect(sent.mineCode).toContain("def _transition");
+    expect(sent.solutionCode).toContain("self.state = target");
+    expect(sent.metrics).toBe("(runtime-замер для метода не предусмотрен)");
+  });
 });
 
 // resolveReviewTargets вынесена из POST ровно из-за этой проверки: поднять
@@ -240,6 +279,10 @@ function makeTree(multi: boolean, files: { name: string; solutionPath: string | 
       solutionPath: item.solutionPath,
     })),
     testPath: null,
+    testPaths: [],
+    targets: null,
+    requirements: [],
+    network: false,
     duplicateFunctions: [],
   };
 }

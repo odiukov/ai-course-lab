@@ -83,6 +83,47 @@ function makeMulti(): string {
   return sourceDir;
 }
 
+function addMethodManifest(sourceDir: string): string {
+  const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+  const source = [
+    "class HarnessLoop:",
+    "    def _transition(self, target):",
+    "        raise NotImplementedError",
+    "",
+    "    def run(self, goal):",
+    "        return goal",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "exercise.template", "main.py"), source, "utf8");
+  fs.mkdirSync(path.join(dir, "exercise.template", "tasks", "one"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "exercise.template", "rules.yml"), "rules: []\n", "utf8");
+  fs.writeFileSync(
+    path.join(dir, "exercise.template", "tasks", "one", "task.json"),
+    '{"id":"one"}\n',
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(dir, "exercise.json"),
+    JSON.stringify({
+      version: 1,
+      targets: [
+        {
+          file: "main.py",
+          symbol: "HarnessLoop._transition",
+          tests: ["test_exercise.py::TestLoop::test_transition"],
+        },
+        {
+          file: "main.py",
+          symbol: "HarnessLoop.run",
+          tests: ["test_exercise.py::TestLoop::test_run"],
+        },
+      ],
+    }),
+    "utf8",
+  );
+  return source;
+}
+
 describe("findExercise", () => {
   it("находит каталог упражнения по номерам фазы и урока", () => {
     const { sourceDir } = makeSource();
@@ -152,6 +193,43 @@ describe("readExerciseFiles", () => {
     expect(set.multi).toBe(false);
     expect(set.files).toHaveLength(1);
     expect(set.files[0].name).toBe("exercise.py");
+  });
+
+  it("отдаёт только цели манифеста и понимает границы методов", () => {
+    const sourceDir = makeMulti();
+    addMethodManifest(sourceDir);
+    const main = readExerciseFiles(sourceDir, p19)!.files[0];
+    expect(main.functions).toEqual([
+      {
+        fn: "HarnessLoop._transition",
+        signature: "_transition(self, target)",
+        startLine: 2,
+        endLine: 3,
+        implemented: false,
+      },
+      {
+        fn: "HarnessLoop.run",
+        signature: "run(self, goal)",
+        startLine: 5,
+        endLine: 6,
+        implemented: true,
+      },
+    ]);
+  });
+
+  it("копирует read-only ресурсы рекурсивно и не перезаписывает их", () => {
+    const sourceDir = makeMulti();
+    addMethodManifest(sourceDir);
+    readExerciseFiles(sourceDir, p19);
+    const work = path.join(sourceDir, "learning-exercises", "p19-l20-loop", "exercise");
+    const rules = path.join(work, "rules.yml");
+    const task = path.join(work, "tasks", "one", "task.json");
+    expect(fs.readFileSync(rules, "utf8")).toBe("rules: []\n");
+    expect(fs.readFileSync(task, "utf8")).toContain('"one"');
+
+    fs.writeFileSync(rules, "правка с диска\n", "utf8");
+    readExerciseFiles(sourceDir, p19);
+    expect(fs.readFileSync(rules, "utf8")).toBe("правка с диска\n");
   });
 });
 
@@ -402,5 +480,26 @@ describe("extractFunction / replaceFunction", () => {
 
   it("на неизвестное имя возвращает исходный код без изменений", () => {
     expect(replaceFunction(TEMPLATE, "nope", "def nope():\n    pass")).toBe(TEMPLATE);
+  });
+
+  it("вырезает и заменяет метод по квалифицированному имени", () => {
+    const source = [
+      "class HarnessLoop:",
+      "    def _transition(self, target):",
+      "        raise NotImplementedError",
+      "",
+      "    def run(self):",
+      "        return self._transition(1)",
+    ].join("\n");
+    expect(extractFunction(source, "HarnessLoop._transition")).toBe(
+      "    def _transition(self, target):\n        raise NotImplementedError",
+    );
+    const replaced = replaceFunction(
+      source,
+      "HarnessLoop._transition",
+      "    def _transition(self, target):\n        self.state = target",
+    );
+    expect(replaced).toContain("        self.state = target");
+    expect(replaced).toContain("    def run(self):");
   });
 });

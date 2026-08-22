@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import os from "node:os";
 import path from "node:path";
-import { probeCommand } from "./health";
+import { probeCommand, probePythonModule } from "./health";
 
 const FAKE = path.join(process.cwd(), "tests/fixtures/practice/fake-python.mjs");
 
@@ -22,5 +22,14 @@ describe("probeCommand", () => {
     delete process.env.FAKE_PYTHON_MODE;
     expect(status.ok).toBe(false);
     expect(status.detail).toMatch(/таймаут/i);
+  });
+});
+
+describe("probePythonModule", () => {
+  it("отличает доступный модуль от отсутствующего", async () => {
+    expect(await probePythonModule("python3", "json")).toEqual({ ok: true, detail: "установлен" });
+    expect(await probePythonModule("python3", "definitely_missing_ai_course_package")).toMatchObject({
+      ok: false,
+    });
   });
 });

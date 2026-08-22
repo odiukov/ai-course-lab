@@ -22,10 +22,19 @@ export interface FunctionBlock {
   endLine: number;
 }
 
+export interface ExerciseTargetBlock extends FunctionBlock {
+  /** Полное имя цели: `transpose` у функции или `HarnessLoop._transition` у метода. */
+  symbol: string;
+  kind: "function" | "method";
+  className: string | null;
+}
+
 // Matches the start of a top-level `def`/`async def` header. The parameter
 // list is not required to close on this line — a header spanning several
 // lines (common with long argument lists) is handled by readHeaderParams.
 const HEADER_START = /^(?:async\s+)?def ([a-z][a-z0-9_]*)\(/;
+const ANY_HEADER_START = /^(\s*)(?:async\s+)?def ([A-Za-z_][A-Za-z0-9_]*)\(/;
+const CLASS_START = /^class\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 
 /**
  * Starting at `lines[startIndex]` (a line matched by HEADER_START), consumes
@@ -120,6 +129,97 @@ export function parseTopLevelFunctions(source: string): FunctionBlock[] {
   return blocks;
 }
 
+function indentation(line: string): number {
+  const prefix = /^\s*/.exec(line)?.[0] ?? "";
+  // Python запрещает неоднозначно смешивать табы и пробелы. Для границ нам
+  // важно только устойчивое сравнение уровней, поэтому таб считается одним
+  // уровнем в восемь пробелов — как в диагностике самого интерпретатора.
+  return [...prefix].reduce((sum, ch) => sum + (ch === "\t" ? 8 : 1), 0);
+}
+
+function readIndentedBlock(
+  lines: string[],
+  startIndex: number,
+  headerEndIndex: number,
+  indent: number,
+): { body: string[]; endLine: number; nextIndex: number } {
+  const body: string[] = [];
+  let endLine = headerEndIndex + 1;
+  let i = headerEndIndex + 1;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().length > 0 && indentation(line) <= indent) break;
+    body.push(line);
+    if (line.trim().length > 0) endLine = i + 1;
+    i++;
+  }
+  return { body, endLine, nextIndex: i };
+}
+
+/**
+ * Редактируемые Python-цели новой формы: функции верхнего уровня и методы
+ * верхнеуровневых классов. Старый parseTopLevelFunctions остаётся без
+ * изменений: 396 прежних упражнений не должны внезапно получить приватные
+ * helpers или методы как обязательные code-шаги.
+ *
+ * Методы различаются квалифицированным именем `Class.method`. Вложенные
+ * классы и локальные функции не считаются целями: лаборатория должна назвать
+ * ровно тот шов, который виден в исходном модуле, а не внутреннюю деталь тела.
+ */
+export function parseExerciseTargets(source: string): ExerciseTargetBlock[] {
+  const lines = source.split("\n");
+  const targets: ExerciseTargetBlock[] = [];
+  let activeClass: { name: string; bodyIndent: number | null } | null = null;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const lineIndent = indentation(line);
+
+    if (trimmed.length > 0 && lineIndent === 0) {
+      const classMatch = CLASS_START.exec(line);
+      activeClass = classMatch ? { name: classMatch[1], bodyIndent: null } : null;
+    } else if (activeClass && trimmed.length > 0 && activeClass.bodyIndent === null) {
+      activeClass.bodyIndent = lineIndent;
+    }
+
+    const match = ANY_HEADER_START.exec(line);
+    if (!match) {
+      i++;
+      continue;
+    }
+
+    const name = match[2];
+    const isTopLevel = lineIndent === 0;
+    const isDirectMethod =
+      activeClass !== null &&
+      activeClass.bodyIndent !== null &&
+      lineIndent === activeClass.bodyIndent;
+    if (!isTopLevel && !isDirectMethod) {
+      i++;
+      continue;
+    }
+
+    const { params, endIndex } = readHeaderParams(lines, i);
+    const block = readIndentedBlock(lines, i, endIndex, lineIndent);
+    const className = isDirectMethod ? activeClass!.name : null;
+    targets.push({
+      fn: name,
+      symbol: className ? `${className}.${name}` : name,
+      kind: className ? "method" : "function",
+      className,
+      params,
+      body: block.body,
+      startLine: i + 1,
+      endLine: block.endLine,
+    });
+    i = block.nextIndex;
+  }
+
+  return targets;
+}
+
 const DOCSTRING_QUOTES = ['"""', "'''"] as const;
 
 function withoutDocstring(lines: string[]): string[] {
@@ -174,6 +274,29 @@ function learnerFiles(dir: string): { name: string; path: string }[] {
     .map((name) => ({ name, path: path.join(nested, name) }));
 }
 
+function declaredTargets(dir: string): Map<string, Set<string>> | null {
+  const manifest = path.join(dir, "exercise.json");
+  if (!fs.existsSync(manifest)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(manifest, "utf8")) as {
+      targets?: { file?: unknown; symbol?: unknown }[];
+    };
+    if (!Array.isArray(raw.targets)) return null;
+    const byFile = new Map<string, Set<string>>();
+    for (const target of raw.targets) {
+      if (typeof target.file !== "string" || typeof target.symbol !== "string") continue;
+      const symbols = byFile.get(target.file) ?? new Set<string>();
+      symbols.add(target.symbol);
+      byFile.set(target.file, symbols);
+    }
+    return byFile;
+  } catch {
+    // Невалидный манифест назовёт readExerciseTree при открытии урока. Recall
+    // сканирует весь курс и не должен исчезнуть целиком из-за чужого черновика.
+    return null;
+  }
+}
+
 export function readWrittenFunctions(sourceDir: string): WrittenFunction[] {
   const root = path.join(sourceDir, "learning-exercises");
   if (!fs.existsSync(root)) return [];
@@ -181,8 +304,24 @@ export function readWrittenFunctions(sourceDir: string): WrittenFunction[] {
   const catalog = readCatalog(sourceDir);
   const written: WrittenFunction[] = [];
   for (const exerciseSlug of fs.readdirSync(root).sort()) {
-    for (const file of learnerFiles(path.join(root, exerciseSlug))) {
+    const exerciseDir = path.join(root, exerciseSlug);
+    const targets = declaredTargets(exerciseDir);
+    for (const file of learnerFiles(exerciseDir)) {
       const source = fs.readFileSync(file.path, "utf8");
+      const declared = targets?.get(file.name);
+      if (declared) {
+        for (const block of parseExerciseTargets(source)) {
+          if (!declared.has(block.symbol) || !isFunctionImplemented(block.body)) continue;
+          written.push({
+            fn: block.symbol,
+            exerciseSlug,
+            lessonSlug: lessonSlugFor(catalog, exerciseSlug),
+            file: file.name,
+            signature: `${block.fn}(${block.params})`,
+          });
+        }
+        continue;
+      }
       for (const block of parseTopLevelFunctions(source)) {
         if (!isFunctionImplemented(block.body)) continue;
         written.push({

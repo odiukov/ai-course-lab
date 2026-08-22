@@ -140,6 +140,29 @@ describe("generateLessonPlan", () => {
     await generateLessonPlan({ contentDir, source: SOURCE, deps: { run }, onEvent: (e) => events.push(e) });
     expect(events).toEqual([{ type: "text", text: "генерирую..." }]);
   });
+
+  it("для практикума фазы 19 использует короткий plan-lab вместо общего промпта", async () => {
+    const contentDir = tmpDir();
+    const source = {
+      ...SOURCE,
+      ref: { ...SOURCE.ref, phaseNumber: 19, lessonNumber: 20 },
+    };
+    const plan = JSON.stringify([
+      { id: "001-t", type: "theory", title: "Контракт" },
+      { id: "002-c", type: "code", title: "transpose", exercise_fn: "transpose" },
+      { id: "003-t", type: "theory", title: "Следующий шов" },
+      { id: "004-c", type: "code", title: "matmul", exercise_fn: "matmul" },
+      { id: "005-t", type: "theory", title: "Сборка" },
+      { id: "006-check", type: "check", title: "Проверка" },
+      { id: "007-quiz", type: "quiz", title: "Итог" },
+    ]);
+    const run = vi.fn().mockResolvedValue(plan);
+
+    await generateLessonPlan({ contentDir, source, deps: { run } });
+
+    expect(String(run.mock.calls[0][0])).toContain("за 90 минут");
+    expect(String(run.mock.calls[0][0])).toContain("Сделай 8–12 шагов");
+  });
 });
 
 describe("stepBudget", () => {

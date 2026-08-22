@@ -313,7 +313,7 @@ export function Reader({
         )}
         {step.type === "code" && step.exercise_fn && (
           <>
-            <PracticeStatus />
+            <PracticeStatus slug={slug} />
             <ExercisePanel
               slug={slug}
               stepId={step.id}
@@ -332,7 +332,7 @@ export function Reader({
               file={step.exercise_file}
               onInserted={() => setReloadEditor((value) => value + 1)}
             />
-            <PracticeStatus />
+            <PracticeStatus slug={slug} />
             <ExercisePanel
               reloadToken={reloadEditor}
               slug={slug}

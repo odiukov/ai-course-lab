@@ -5,7 +5,13 @@ import { loadConfig } from "@/lib/config";
 import { readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStep } from "@/lib/content/step-file";
 import { extractFunction, readExerciseFiles, type ExerciseFileSet, type ExerciseFileState } from "@/lib/exercise/file";
-import { findTreeFile, readExerciseTree, resolveExerciseFile, type ExerciseTree } from "@/lib/exercise/tree";
+import {
+  findExerciseTarget,
+  findTreeFile,
+  readExerciseTree,
+  resolveExerciseFile,
+  type ExerciseTree,
+} from "@/lib/exercise/tree";
 import { formatMetrics, formatRuff, formatTests, reviewCode } from "@/lib/generate/review-code";
 import { runBench } from "@/lib/practice/bench";
 import { addChatMessage, openChatSession } from "@/lib/progress/chat";
@@ -98,6 +104,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   // Не называем переменную module: next/eslint запрещает — это зарезервированное
   // имя CJS-модуля, и присвоение ему маскирует реальный module в области видимости.
   const benchModule = tree.multi ? exercise.name : undefined;
+  const exerciseTarget = findExerciseTarget(tree, exercise.name, fn);
+  const canBench = exerciseTarget?.bench ?? true;
 
   const deps = defaultDeps(config, { signal: request.signal, agent: readAgent(db, config.agent) });
 
@@ -116,7 +124,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     // отчёта, таблицу метрик и формат для промпта — то есть переучить на
     // «эталона может не быть» всё, что построено вокруг сравнения.
     // Поэтому здесь замер просто не запускается, а промпт говорит это прямо.
-    const report = solutionPath
+    const report = solutionPath && canBench
       ? // Сигнал запроса — в замер: он гоняет код учащегося тысячи раз и без
         // сигнала закрытая вкладка оставляет python молотить до двух минут.
         await runBench({
@@ -150,8 +158,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
         // разбирает код без чисел.
         metrics: report
           ? formatMetrics(report.functions.find((item) => item.fn === fn))
-          : "(эталона нет — сравнивать не с чем)",
-        ruff: report ? formatRuff(report.ruff, fn) : "(линтер не запускался: замер не шёл)",
+          : solutionPath
+            ? "(runtime-замер для метода не предусмотрен)"
+            : "(эталона нет — сравнивать не с чем)",
+        ruff: report
+          ? formatRuff(report.ruff, fn)
+          : canBench
+            ? "(линтер не запускался: замер не шёл)"
+            : "(линтер и runtime-замер для метода не запускались)",
       },
       deps,
       onEvent: (event) => {

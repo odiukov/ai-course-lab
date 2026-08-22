@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { LessonRef } from "@/lib/source/catalog";
-import { canonicalFunctions, findTreeFile, readExerciseTree, resolveExerciseFile } from "./tree";
+import {
+  canonicalFunctions,
+  findExerciseTarget,
+  findTreeFile,
+  readExerciseTree,
+  resolveExerciseFile,
+} from "./tree";
 
 const ref: LessonRef = {
   slug: "01-math__02-beta",
@@ -61,6 +67,46 @@ function makeMulti(): string {
   return sourceDir;
 }
 
+function addMethodManifest(sourceDir: string): void {
+  const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+  fs.writeFileSync(
+    path.join(dir, "exercise.template", "main.py"),
+    [
+      "class HarnessLoop:",
+      "    def _transition(self, target):",
+      "        raise NotImplementedError",
+      "",
+      "    def run(self, goal):",
+      "        raise NotImplementedError",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  fs.writeFileSync(path.join(dir, "test_steps.py"), "", "utf8");
+  fs.writeFileSync(
+    path.join(dir, "exercise.json"),
+    JSON.stringify({
+      version: 1,
+      targets: [
+        {
+          file: "main.py",
+          symbol: "HarnessLoop._transition",
+          tests: ["test_steps.py::test_transition"],
+        },
+        {
+          file: "main.py",
+          symbol: "HarnessLoop.run",
+          tests: ["test_exercise.py"],
+          bench: false,
+        },
+      ],
+      requirements: ["torch", "numpy", "torch"],
+      network: true,
+    }),
+    "utf8",
+  );
+}
+
 describe("readExerciseTree", () => {
   it("читает одно-файловую форму как список из одного файла", () => {
     const tree = readExerciseTree(makeSingle(), ref);
@@ -94,6 +140,47 @@ describe("readExerciseTree", () => {
   it("возвращает null, когда упражнения у урока нет", () => {
     const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-tree-none-"));
     expect(readExerciseTree(sourceDir, ref)).toBeNull();
+  });
+
+  it("манифест задаёт квалифицированные цели и точные тесты", () => {
+    const sourceDir = makeMulti();
+    addMethodManifest(sourceDir);
+    const tree = readExerciseTree(sourceDir, p19)!;
+
+    expect(canonicalFunctions(tree)).toEqual([
+      { file: "main.py", fn: "HarnessLoop._transition" },
+      { file: "main.py", fn: "HarnessLoop.run" },
+    ]);
+    expect(tree.testPaths.map((file) => path.basename(file))).toEqual([
+      "test_exercise.py",
+      "test_steps.py",
+    ]);
+    expect(tree.requirements).toEqual(["numpy", "torch"]);
+    expect(tree.network).toBe(true);
+    expect(findExerciseTarget(tree, "main.py", "HarnessLoop._transition")).toEqual({
+      file: "main.py",
+      fn: "HarnessLoop._transition",
+      tests: ["test_steps.py::test_transition"],
+      bench: false,
+    });
+  });
+
+  it("отклоняет цель манифеста, которой нет в шаблоне", () => {
+    const sourceDir = makeMulti();
+    addMethodManifest(sourceDir);
+    const manifest = path.join(
+      sourceDir,
+      "learning-exercises",
+      "p19-l20-loop",
+      "exercise.json",
+    );
+    const parsed = JSON.parse(fs.readFileSync(manifest, "utf8"));
+    parsed.targets[0].symbol = "HarnessLoop.missing";
+    fs.writeFileSync(manifest, JSON.stringify(parsed), "utf8");
+
+    expect(() => readExerciseTree(sourceDir, p19)).toThrow(
+      "В шаблоне main.py нет цели HarnessLoop.missing",
+    );
   });
 });
 
@@ -139,6 +226,13 @@ describe("resolveExerciseFile", () => {
     const tree = readExerciseTree(makeMulti(), p19)!;
     expect(resolveExerciseFile(tree, "fire")).toBe("hooks.py");
     expect(resolveExerciseFile(tree, "emit")).toBe("events.py");
+  });
+
+  it("разрешает файл квалифицированного метода из манифеста", () => {
+    const sourceDir = makeMulti();
+    addMethodManifest(sourceDir);
+    const tree = readExerciseTree(sourceDir, p19)!;
+    expect(resolveExerciseFile(tree, "HarnessLoop._transition")).toBe("main.py");
   });
 
   it("дубль без объявления — первый файл по порядку шаблона, а не ошибка", () => {

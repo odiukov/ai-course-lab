@@ -105,3 +105,26 @@ describe("runBench: передаёт имя модуля скрипту", () => 
     expect(call.args).not.toContain("--module");
   });
 });
+
+describe("runBench: ленивые импорты соседних модулей", () => {
+  it("разрешает import внутри тела функции отдельно для человека и эталона", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-bench-lazy-import-"));
+    for (const side of ["exercise", "solution"]) {
+      fs.mkdirSync(path.join(dir, side), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, side, "main.py"),
+        "def score(value):\n    import helper\n    return value + helper.OFFSET\n",
+        "utf8",
+      );
+    }
+    fs.writeFileSync(path.join(dir, "exercise", "helper.py"), "OFFSET = 1\n", "utf8");
+    fs.writeFileSync(path.join(dir, "solution", "helper.py"), "OFFSET = 2\n", "utf8");
+    fs.writeFileSync(path.join(dir, "bench.py"), "BENCH = {'score': (3,)}\n", "utf8");
+
+    const report = await runBench({ dir, python: "python3", module: "main.py", fn: "score" });
+
+    expect(report.functions[0]).toMatchObject({ fn: "score", written: true });
+    expect(report.functions[0].mine?.us).not.toBeNull();
+    expect(report.functions[0].ref.us).not.toBeNull();
+  }, 20_000);
+});

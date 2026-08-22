@@ -45,3 +45,21 @@ export function pickActiveFile(
   if (current && names.includes(current)) return current;
   return names[0];
 }
+
+/**
+ * Вердикт относится к снимку всего каталога, а не только открытого таба:
+ * тест из main.py вправе импортировать hooks.py, поэтому правка соседа после
+ * зелёного прогона делает результат таким же устаревшим.
+ */
+export function isExerciseVerdictStale(
+  fileNames: string[],
+  activeFile: string,
+  activeCode: string,
+  savedCode: ReadonlyMap<string, string>,
+  testedFiles: Readonly<Record<string, string>>,
+): boolean {
+  return fileNames.some((name) => {
+    const current = name === activeFile ? activeCode : savedCode.get(name) ?? "";
+    return testedFiles[name] !== current;
+  });
+}

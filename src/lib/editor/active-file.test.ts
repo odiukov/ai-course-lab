@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickActiveFile } from "./active-file";
+import { isExerciseVerdictStale, pickActiveFile } from "./active-file";
 
 // Функции файлов не участвуют в этих сценариях — пустые списки достаточно,
 // чтобы проверить приоритет stepFile / выбора человека / первого файла.
@@ -65,5 +65,33 @@ describe("pickActiveFile", () => {
       { name: "hooks.py", functions: ["bar"] },
     ];
     expect(pickActiveFile(files, undefined, undefined, "hooks.py")).toBe("hooks.py");
+  });
+});
+
+describe("isExerciseVerdictStale", () => {
+  const tested = { "main.py": "main-v1", "hooks.py": "hooks-v1" };
+
+  it("не устаревает от простого переключения таба", () => {
+    expect(
+      isExerciseVerdictStale(
+        ["main.py", "hooks.py"],
+        "hooks.py",
+        "hooks-v1",
+        new Map([["main.py", "main-v1"]]),
+        tested,
+      ),
+    ).toBe(false);
+  });
+
+  it("устаревает после правки соседнего файла", () => {
+    expect(
+      isExerciseVerdictStale(
+        ["main.py", "hooks.py"],
+        "main.py",
+        "main-v1",
+        new Map([["hooks.py", "hooks-v2"]]),
+        tested,
+      ),
+    ).toBe(true);
   });
 });

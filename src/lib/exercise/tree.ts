@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { LessonRef } from "../source/catalog";
 import { findExerciseDir } from "../source/naming";
-import { parseTopLevelFunctions } from "../source/written-functions";
+import { parseExerciseTargets, parseTopLevelFunctions } from "../source/written-functions";
 
 export interface ExerciseFileRef {
   /** Имя файла внутри упражнения. У старой формы — всегда `exercise.py`. */
@@ -20,6 +20,14 @@ export interface ExerciseTree {
   multi: boolean;
   files: ExerciseFileRef[];
   testPath: string | null;
+  /** Все корневые pytest-файлы: авторский suite и узкие тесты шагов. */
+  testPaths: string[];
+  /** Явные цели новой формы. null сохраняет старое выведение по функциям. */
+  targets: ExerciseTargetRef[] | null;
+  /** Импортируемые Python-модули, без которых лаборатория не запустится. */
+  requirements: string[];
+  /** Лаборатория проверяет сетевой сценарий и не обещает офлайн-прогон. */
+  network: boolean;
   /**
    * Имена функций, встречающиеся больше чем в одном файле упражнения.
    *
@@ -29,6 +37,16 @@ export interface ExerciseTree {
    * предупреждением, чем покрасить шаг за соседний модуль.
    */
   duplicateFunctions: string[];
+}
+
+export interface ExerciseTargetRef {
+  file: string;
+  /** Bare function или квалифицированный метод `Class.method`. */
+  fn: string;
+  /** Точные pytest node IDs относительно каталога упражнения. */
+  tests: string[];
+  /** Runtime-бенч допустим только когда цель можно вызвать как функцию модуля. */
+  bench: boolean;
 }
 
 const SAFE_NAME = /^[A-Za-z0-9_-]+\.py$/;
@@ -51,8 +69,12 @@ export function readExerciseTree(sourceDir: string, ref: LessonRef): ExerciseTre
   if (!slug) return null;
 
   const dir = path.join(root, slug);
-  const testPathCandidate = path.join(dir, "test_exercise.py");
-  const testPath = fs.existsSync(testPathCandidate) ? testPathCandidate : null;
+  const testPaths = orderTestPaths(
+    fs.readdirSync(dir)
+      .filter((name) => /^test[A-Za-z0-9_-]*\.py$/.test(name))
+      .map((name) => path.join(dir, name)),
+  );
+  const testPath = testPaths.find((file) => path.basename(file) === "test_exercise.py") ?? null;
 
   const templateDir = path.join(dir, "exercise.template");
   const multi = fs.existsSync(templateDir) && fs.statSync(templateDir).isDirectory();
@@ -85,12 +107,125 @@ export function readExerciseTree(sourceDir: string, ref: LessonRef): ExerciseTre
 
   if (files.length === 0) return null;
 
-  return { slug, dir, multi, files, testPath, duplicateFunctions: duplicates(files) };
+  const manifest = readManifest(dir, files, testPaths);
+  const tree: ExerciseTree = {
+    slug,
+    dir,
+    multi,
+    files,
+    testPath,
+    testPaths,
+    targets: manifest?.targets ?? null,
+    requirements: manifest?.requirements ?? [],
+    network: manifest?.network ?? false,
+    duplicateFunctions: [],
+  };
+  tree.duplicateFunctions = duplicates(tree);
+  return tree;
 }
 
-function duplicates(files: ExerciseFileRef[]): string[] {
+function orderTestPaths(files: string[]): string[] {
+  return files.sort((a, b) => {
+    const an = path.basename(a);
+    const bn = path.basename(b);
+    if (an === "test_exercise.py") return -1;
+    if (bn === "test_exercise.py") return 1;
+    return an.localeCompare(bn);
+  });
+}
+
+function readManifest(
+  dir: string,
+  files: ExerciseFileRef[],
+  testPaths: string[],
+): { targets: ExerciseTargetRef[]; requirements: string[]; network: boolean } | null {
+  const manifestPath = path.join(dir, "exercise.json");
+  if (!fs.existsSync(manifestPath)) return null;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Не удалось прочитать ${manifestPath}: ${(error as Error).message}`);
+  }
+  if (!raw || typeof raw !== "object" || (raw as { version?: unknown }).version !== 1) {
+    throw new Error(`В ${manifestPath} нужна версия 1`);
+  }
+  const manifest = raw as { targets?: unknown; requirements?: unknown; network?: unknown };
+  const declared = manifest.targets;
+  if (!Array.isArray(declared) || declared.length === 0) {
+    throw new Error(`В ${manifestPath} нет targets`);
+  }
+
+  const knownTests = new Set(testPaths.map((file) => path.basename(file)));
+  const seen = new Set<string>();
+  const targets = declared.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`Цель ${index + 1} в ${manifestPath} должна быть объектом`);
+    }
+    const value = item as { file?: unknown; symbol?: unknown; tests?: unknown; bench?: unknown };
+    const file = typeof value.file === "string" ? value.file : "";
+    const fn = typeof value.symbol === "string" ? value.symbol : "";
+    const tests = Array.isArray(value.tests)
+      ? value.tests.filter((test): test is string => typeof test === "string" && test.length > 0)
+      : [];
+    const ref = files.find((candidate) => candidate.name === file);
+    if (!ref) throw new Error(`В упражнении нет файла цели ${file || "(пусто)"}`);
+    const available = parseExerciseTargets(fs.readFileSync(ref.templatePath, "utf8"));
+    if (!available.some((target) => target.symbol === fn)) {
+      throw new Error(`В шаблоне ${file} нет цели ${fn || "(пусто)"}`);
+    }
+    if (tests.length === 0 || tests.length !== (value.tests as unknown[]).length) {
+      throw new Error(`У цели ${file}::${fn} нет корректных pytest node IDs`);
+    }
+    for (const test of tests) {
+      const testFile = test.split("::", 1)[0];
+      if (test.includes("..") || test.includes("/") || test.includes("\\") || !knownTests.has(testFile)) {
+        throw new Error(`У цели ${file}::${fn} небезопасный pytest node ID: ${test}`);
+      }
+    }
+    const key = `${file}::${fn}`;
+    if (seen.has(key)) throw new Error(`Цель ${key} объявлена в ${manifestPath} дважды`);
+    seen.add(key);
+    return {
+      file,
+      fn,
+      tests,
+      // Метод требует экземпляра и состояния, которых общий bench.py не знает.
+      bench: typeof value.bench === "boolean" ? value.bench : !fn.includes("."),
+    };
+  });
+  const requirements = Array.isArray(manifest.requirements)
+    ? manifest.requirements.filter(
+        (item): item is string =>
+          typeof item === "string" && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(item),
+      )
+    : [];
+  if (
+    manifest.requirements !== undefined &&
+    (!Array.isArray(manifest.requirements) || requirements.length !== manifest.requirements.length)
+  ) {
+    throw new Error(`В ${manifestPath} requirements должен содержать имена Python-модулей`);
+  }
+  if (manifest.network !== undefined && typeof manifest.network !== "boolean") {
+    throw new Error(`В ${manifestPath} network должен быть boolean`);
+  }
+  return {
+    targets,
+    requirements: [...new Set(requirements)].sort(),
+    network: manifest.network === true,
+  };
+}
+
+function duplicates(tree: Pick<ExerciseTree, "files" | "targets">): string[] {
   const seen = new Map<string, number>();
-  for (const file of files) {
+  if (tree.targets) {
+    for (const target of tree.targets) {
+      seen.set(target.fn, (seen.get(target.fn) ?? 0) + 1);
+    }
+    return [...seen.entries()].filter(([, count]) => count > 1).map(([fn]) => fn).sort();
+  }
+  for (const file of tree.files) {
     if (!fs.existsSync(file.templatePath)) continue;
     const source = fs.readFileSync(file.templatePath, "utf8");
     for (const block of parseTopLevelFunctions(source)) {
@@ -113,6 +248,7 @@ export function findTreeFile(tree: ExerciseTree, name: string): ExerciseFileRef 
 
 /** Канонический состав упражнения — из шаблона, а не из файла человека. */
 export function canonicalFunctions(tree: ExerciseTree): { file: string; fn: string }[] {
+  if (tree.targets) return tree.targets.map(({ file, fn }) => ({ file, fn }));
   const pairs: { file: string; fn: string }[] = [];
   for (const file of tree.files) {
     if (!fs.existsSync(file.templatePath)) continue;
@@ -121,6 +257,14 @@ export function canonicalFunctions(tree: ExerciseTree): { file: string; fn: stri
     }
   }
   return pairs;
+}
+
+export function findExerciseTarget(
+  tree: ExerciseTree,
+  file: string,
+  fn: string,
+): ExerciseTargetRef | null {
+  return tree.targets?.find((target) => target.file === file && target.fn === fn) ?? null;
 }
 
 /**

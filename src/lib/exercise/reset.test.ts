@@ -362,4 +362,48 @@ describe("resetFunctionToTemplate с многофайловым упражнен
       error: "В заготовке main.py нет функции fire",
     });
   });
+
+  it("сбрасывает метод по квалифицированному имени, не трогая соседний метод", () => {
+    const sourceDir = makeMulti();
+    const dir = path.join(sourceDir, "learning-exercises", "p19-l20-loop");
+    const template = [
+      "class HarnessLoop:",
+      "    def _transition(self, target):",
+      "        raise NotImplementedError",
+      "",
+      "    def run(self):",
+      "        return self._transition(1)",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "exercise.template", "main.py"), template, "utf8");
+    fs.writeFileSync(
+      path.join(dir, "exercise.json"),
+      JSON.stringify({
+        version: 1,
+        targets: [
+          {
+            file: "main.py",
+            symbol: "HarnessLoop._transition",
+            tests: ["test_exercise.py"],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(dir, "test_exercise.py"), "", "utf8");
+    readExerciseFiles(sourceDir, p19);
+    const work = path.join(dir, "exercise", "main.py");
+    fs.writeFileSync(
+      work,
+      template.replace("raise NotImplementedError", "self.state = target"),
+      "utf8",
+    );
+
+    const result = ok(
+      resetFunctionToTemplate(sourceDir, p19, "HarnessLoop._transition", "main.py"),
+    );
+
+    expect(result.code).toContain("        raise NotImplementedError");
+    expect(result.code).toContain("    def run(self):\n        return self._transition(1)");
+  });
 });

@@ -11,6 +11,8 @@ export interface PracticeHealth {
   pytest: ToolStatus;
   ruff: ToolStatus;
   lsp: ToolStatus;
+  packages: Record<string, ToolStatus>;
+  networkRequired: boolean;
 }
 
 export const PROBE_TIMEOUT_MS = 5000;
@@ -54,12 +56,32 @@ export function probeCommand(
   });
 }
 
-export async function checkPractice(config: Config): Promise<PracticeHealth> {
+export async function probePythonModule(python: string, name: string): Promise<ToolStatus> {
+  const status = await probeCommand(python, [
+    "-c",
+    "import importlib.util,sys; raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)",
+    name,
+  ]);
+  return status.ok
+    ? { ok: true, detail: "установлен" }
+    : { ok: false, detail: `модуль ${name} не найден в ${python}` };
+}
+
+export async function checkPractice(
+  config: Config,
+  requirements: string[] = [],
+  networkRequired = false,
+): Promise<PracticeHealth> {
   const [python, pytest, ruff] = await Promise.all([
     probeCommand(config.python, ["--version"]),
     probeCommand(config.python, ["-m", "pytest", "--version"]),
     probeCommand("uvx", ["ruff", "--version"]),
   ]);
+  const packageEntries = await Promise.all(
+    [...new Set(requirements)].sort().map(async (name) => {
+      return [name, await probePythonModule(config.python, name)] as const;
+    }),
+  );
 
   // Мост проверяется по HTTP с сервера, а не из браузера: так не нужен CORS, и
   // ответ приезжает одним запросом вместе с остальными инструментами.
@@ -75,5 +97,5 @@ export async function checkPractice(config: Config): Promise<PracticeHealth> {
     lsp = { ok: false, detail: (error as Error).message };
   }
 
-  return { python, pytest, ruff, lsp };
+  return { python, pytest, ruff, lsp, packages: Object.fromEntries(packageEntries), networkRequired };
 }

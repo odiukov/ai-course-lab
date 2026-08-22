@@ -6,7 +6,11 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { errorStatus } from "@/lib/agent/error-message";
 import { fetchJson } from "@/lib/api/fetch-json";
 import { parseSseFrames } from "@/lib/api/sse-client";
-import { pickActiveFile, type FileFunctions } from "@/lib/editor/active-file";
+import {
+  isExerciseVerdictStale,
+  pickActiveFile,
+  type FileFunctions,
+} from "@/lib/editor/active-file";
 import type { BenchReport } from "@/lib/practice/bench";
 import { practiceErrorStatus, type PracticeErrorKind } from "@/lib/practice/errors";
 
@@ -63,19 +67,14 @@ interface TestResult {
   failures: TestFailure[];
 }
 
-// Вердикт всегда помнит текст, который на самом деле прогоняли: иначе после
-// правки кода на экране остаётся зелёная плашка и кнопка разбора, а разбор
-// уходит агенту с прежними числами и новым файлом.
-//
-// Вместе с текстом помнится и ФАЙЛ, в котором его прогоняли: у многофайлового
-// упражнения текст в редакторе меняется ещё и от переключения вкладки, и
-// сравнение прогнанного текста с текстом другого файла всегда даёт
-// «не совпало». Так зелёный прогон main.py гасился кликом по вкладке hooks.py.
+// Вердикт помнит снимок ВСЕХ файлов, которые видел pytest. У многофайлового
+// упражнения тест текущего метода может импортировать соседний модуль, и
+// зелёный результат перестаёт быть правдой после правки любого из них, а не
+// только активной вкладки.
 interface Verdict {
   state: "passed" | "failed";
   result: TestResult;
-  testedFile: string | null;
-  testedCode: string;
+  testedFiles: Record<string, string>;
 }
 
 type SaveState = "saved" | "saving" | "failed";
@@ -646,8 +645,7 @@ export function ExercisePanel({
         );
         return;
       }
-      const testedFile = activeFileRef.current;
-      const testedCode = testedFile ? savedCodeRef.current.get(testedFile) ?? "" : "";
+      const testedFiles = Object.fromEntries(savedCodeRef.current.entries());
 
       const result = await fetchJson<{ result: TestResult; state: "passed" | "failed" }>(
         `/api/lesson/${slug}/tests`,
@@ -668,7 +666,7 @@ export function ExercisePanel({
       // правило (`failed === 0 && total > 0`), и полностью пропущенный прогон
       // рисовал зелёную плашку с кнопкой разбора, которую сервер потом
       // отклонял с 409.
-      setVerdict({ state: result.data.state, result: result.data.result, testedFile, testedCode });
+      setVerdict({ state: result.data.state, result: result.data.result, testedFiles });
       onProgressChanged();
     } finally {
       if (isCurrent()) setRunning(false);
@@ -797,22 +795,25 @@ export function ExercisePanel({
   }
 
   const green = verdict?.state === "passed";
-  // Вердикт относится к тексту, который прогоняли. Как только редактор от него
-  // ушёл, зелёная плашка и разбор больше не про этот код.
-  //
-  // Сравнение имеет смысл только пока открыт ТОТ ЖЕ файл: в редакторе лежит
-  // текст активной вкладки, и на соседней вкладке он законно другой. Без
-  // сверки файла переключение вкладки читалось как правка кода — панель писала
-  // «Код изменился после прогона» и убирала кнопку разбора, хотя человек
-  // ничего не менял.
+  const targetKind = fn.includes(".") ? "метод" : "функция";
+  // Активный файл сравнивается с живым текстом редактора, остальные — с
+  // последней сохранённой версией. Поэтому простой переход по табам ничего не
+  // гасит, а сохранённая правка соседа честно делает прежний verdict устаревшим.
   const staleVerdict =
-    verdict !== null && verdict.testedFile === activeFile && verdict.testedCode !== code;
+    verdict !== null &&
+    isExerciseVerdictStale(
+      data.files.map((item) => item.name),
+      activeFile,
+      code,
+      savedCodeRef.current,
+      verdict.testedFiles,
+    );
 
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between text-xs text-slate-400">
         <span>
-          <code>{activeFileState.relPath}</code> · функция <code>{fn}</code>
+          <code>{activeFileState.relPath}</code> · {targetKind} <code>{fn}</code>
         </span>
         <span>
           {saveState === "saved" ? "сохранено" : saveState === "saving" ? "сохраняю…" : "не сохранено"}
@@ -910,7 +911,7 @@ export function ExercisePanel({
             disabled={reviewing}
             className="rounded border border-emerald-600 px-4 py-2 text-sm text-emerald-700 disabled:opacity-40 dark:text-emerald-400"
           >
-            {reviewing ? "Разбираю…" : "Замер и разбор кода"}
+            {reviewing ? "Разбираю…" : fn.includes(".") ? "Разбор кода" : "Замер и разбор кода"}
           </button>
         )}
         {/* Сброс стирает написанное, поэтому одного нажатия мало: первое
@@ -936,7 +937,7 @@ export function ExercisePanel({
             onClick={() => setResetArmedFor(fn)}
             className="rounded border border-slate-300 px-4 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300"
           >
-            Сбросить функцию
+            Сбросить {targetKind}
           </button>
         )}
       </div>

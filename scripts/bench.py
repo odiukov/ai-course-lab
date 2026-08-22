@@ -278,7 +278,7 @@ def load_lesson(lesson_dir, mine_path, ref_path):
     return mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec
 
 
-def build_report(lesson_dir, mine_path, only_fn, mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec):
+def build_report(lesson_dir, mine_path, ref_path, only_fn, mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec):
     """Собирает JSON из уже импортированных модулей.
 
     Импорт (load_lesson выше) уже прошёл успешно к этому моменту, а bench()
@@ -295,8 +295,15 @@ def build_report(lesson_dir, mine_path, only_fn, mine_metrics, ref_metrics, mine
             if only_fn and name != only_fn:
                 continue
             call_args = bench_spec.get(name)
-            t_mine = bench(getattr(mine_mod, name, None), call_args)
-            t_ref = bench(getattr(ref_mod, name, None), call_args)
+            # Импорт может жить не на уровне модуля, а внутри самой функции.
+            # К моменту замера load_lesson уже вернул sys.path на место, и без
+            # этих отдельных контекстов `import helper` превращал честный
+            # результат в written:false. Каталоги по-прежнему не видны вместе:
+            # эталон не может случайно подхватить helper учащегося.
+            with only_importable(mine_path.parent):
+                t_mine = bench(getattr(mine_mod, name, None), call_args)
+            with only_importable(ref_path.parent):
+                t_ref = bench(getattr(ref_mod, name, None), call_args)
             ratio = round(t_mine / t_ref, 3) if (t_mine and t_ref) else None
             my_stats = mine_metrics.get(name)
             functions.append({
@@ -351,7 +358,8 @@ def main():
         sys.exit(2)
 
     report = build_report(
-        lesson_dir, mine_path, args.fn, mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec,
+        lesson_dir, mine_path, ref_path, args.fn,
+        mine_metrics, ref_metrics, mine_mod, ref_mod, bench_spec,
     )
     print(json.dumps(report, ensure_ascii=False))
 

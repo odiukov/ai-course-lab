@@ -3,6 +3,7 @@ import path from "node:path";
 
 export type PromptName =
   | "plan-lesson"
+  | "plan-lab"
   | "write-step"
   | "explain"
   | "review-code"

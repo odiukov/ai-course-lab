@@ -172,4 +172,58 @@ describe("insertPreviousImplementation", () => {
     expect(fs.readFileSync(nextFile, "utf8")).toContain("return goal");
     expect(fs.readFileSync(nextFile, "utf8")).toBe(result.code);
   });
+
+  it("находит и вставляет прошлый метод по квалифицированному имени", () => {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "lab-recall-method-"));
+    const write = (slug: string, implemented: boolean) => {
+      const dir = path.join(sourceDir, "learning-exercises", slug);
+      fs.mkdirSync(path.join(dir, "exercise.template"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "exercise"), { recursive: true });
+      const template = [
+        "class HarnessLoop:",
+        "    def _transition(self, target):",
+        "        raise NotImplementedError",
+        "",
+      ].join("\n");
+      const code = implemented
+        ? template.replace("raise NotImplementedError", "self.state = target")
+        : template;
+      fs.writeFileSync(path.join(dir, "exercise.template", "main.py"), template, "utf8");
+      fs.writeFileSync(path.join(dir, "exercise", "main.py"), code, "utf8");
+      fs.writeFileSync(path.join(dir, "test_exercise.py"), "", "utf8");
+      fs.writeFileSync(
+        path.join(dir, "exercise.json"),
+        JSON.stringify({
+          version: 1,
+          targets: [
+            {
+              file: "main.py",
+              symbol: "HarnessLoop._transition",
+              tests: ["test_exercise.py"],
+            },
+          ],
+        }),
+        "utf8",
+      );
+    };
+    write("p19-l20-loop", true);
+    write("p19-l21-next", false);
+
+    const previous = findPreviousImplementation(
+      sourceDir,
+      "HarnessLoop._transition",
+      "p19-l21-next",
+    )!;
+    const result = insertPreviousImplementation(
+      sourceDir,
+      p19next,
+      "HarnessLoop._transition",
+      previous,
+      "main.py",
+    );
+
+    expect("error" in result).toBe(false);
+    if ("error" in result) throw new Error("unreachable");
+    expect(result.code).toContain("self.state = target");
+  });
 });

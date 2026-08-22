@@ -3,7 +3,11 @@ import path from "node:path";
 import { repoRelative } from "../content/paths";
 import type { LessonRef } from "../source/catalog";
 import { findExerciseDir } from "../source/naming";
-import { isFunctionImplemented, parseTopLevelFunctions } from "../source/written-functions";
+import {
+  isFunctionImplemented,
+  parseExerciseTargets,
+  parseTopLevelFunctions,
+} from "../source/written-functions";
 import { canonicalFunctions, findTreeFile, readExerciseTree, type ExerciseTree } from "./tree";
 
 export interface ExerciseFunction {
@@ -24,7 +28,18 @@ export function findExercise(
   return { slug: found, dir: path.join(root, found) };
 }
 
-export function describeFunctions(code: string): ExerciseFunction[] {
+export function describeFunctions(code: string, targets?: string[]): ExerciseFunction[] {
+  if (targets) {
+    return parseExerciseTargets(code)
+      .filter((block) => targets.includes(block.symbol))
+      .map((block) => ({
+        fn: block.symbol,
+        signature: `${block.fn}(${block.params})`,
+        startLine: block.startLine,
+        endLine: block.endLine,
+        implemented: isFunctionImplemented(block.body),
+      }));
+  }
   return parseTopLevelFunctions(code).map((block) => ({
     fn: block.fn,
     signature: `${block.fn}(${block.params})`,
@@ -86,7 +101,10 @@ function readOne(sourceDir: string, tree: ExerciseTree, name: string): ExerciseF
     // Без округления: mtimeMs — предусловие записи, и округление до
     // миллисекунды делало бы две записи в один тик неразличимыми.
     mtimeMs: fs.statSync(file).mtimeMs,
-    functions: describeFunctions(code),
+    functions: describeFunctions(
+      code,
+      tree.targets?.filter((target) => target.file === name).map((target) => target.fn),
+    ),
     createdFromTemplate,
   };
 }
@@ -99,8 +117,22 @@ export function readExerciseFiles(sourceDir: string, ref: LessonRef): ExerciseFi
     const state = readOne(sourceDir, tree, item.name);
     if (state) files.push(state);
   }
+  if (tree.multi) copyMissingTree(path.join(tree.dir, "exercise.template"), path.join(tree.dir, "exercise"));
   if (files.length === 0) return null;
   return { exerciseSlug: tree.slug, dir: tree.dir, multi: tree.multi, files };
+}
+
+function copyMissingTree(from: string, to: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      copyMissingTree(source, target);
+    } else if (entry.isFile() && !fs.existsSync(target)) {
+      fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
+    }
+  }
 }
 
 export function exerciseFileMtimeMs(
@@ -159,8 +191,16 @@ export function writeExerciseFile(
     throw new Error("Код упражнения пуст — запись отклонена");
   }
   const file = workFilePath(sourceDir, tree, name);
+  if (tree.multi) copyMissingTree(path.join(tree.dir, "exercise.template"), path.join(tree.dir, "exercise"));
   writeAtomically(file, code);
-  return { name, mtimeMs: fs.statSync(file).mtimeMs, functions: describeFunctions(code) };
+  return {
+    name,
+    mtimeMs: fs.statSync(file).mtimeMs,
+    functions: describeFunctions(
+      code,
+      tree.targets?.filter((target) => target.file === name).map((target) => target.fn),
+    ),
+  };
 }
 
 /**
@@ -187,7 +227,15 @@ export function writeExerciseFileIfUnchanged(
     if (actual !== expectedMtimeMs) {
       const current = fs.readFileSync(file, "utf8");
       return {
-        conflict: { name, code: current, mtimeMs: actual, functions: describeFunctions(current) },
+        conflict: {
+          name,
+          code: current,
+          mtimeMs: actual,
+          functions: describeFunctions(
+            current,
+            tree.targets?.filter((target) => target.file === name).map((target) => target.fn),
+          ),
+        },
       };
     }
   }
@@ -246,7 +294,9 @@ export function readExerciseCodeBySlug(
 }
 
 export function extractFunction(code: string, fn: string): string | null {
-  const block = parseTopLevelFunctions(code).find((item) => item.fn === fn);
+  const block = fn.includes(".")
+    ? parseExerciseTargets(code).find((item) => item.symbol === fn)
+    : parseTopLevelFunctions(code).find((item) => item.fn === fn);
   if (!block) return null;
   return code
     .split("\n")
@@ -255,7 +305,9 @@ export function extractFunction(code: string, fn: string): string | null {
 }
 
 export function replaceFunction(code: string, fn: string, replacement: string): string {
-  const block = parseTopLevelFunctions(code).find((item) => item.fn === fn);
+  const block = fn.includes(".")
+    ? parseExerciseTargets(code).find((item) => item.symbol === fn)
+    : parseTopLevelFunctions(code).find((item) => item.fn === fn);
   if (!block) return code;
   const lines = code.split("\n");
   return [

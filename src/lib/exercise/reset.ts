@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { LessonRef } from "../source/catalog";
-import { parseTopLevelFunctions } from "../source/written-functions";
+import { parseExerciseTargets, parseTopLevelFunctions } from "../source/written-functions";
 import { findExerciseDir } from "../source/naming";
 import {
   extractFunction,
@@ -100,8 +100,15 @@ export function resetFunctionToTemplate(
  * одно, конец файла.
  */
 function insertByTemplateOrder(code: string, template: string, fn: string, block: string): string {
-  const order = parseTopLevelFunctions(template).map((item) => item.fn);
-  const present = new Map(parseTopLevelFunctions(code).map((item) => [item.fn, item.startLine]));
+  const methods = fn.includes(".");
+  const order = methods
+    ? parseExerciseTargets(template).map((item) => item.symbol)
+    : parseTopLevelFunctions(template).map((item) => item.fn);
+  const present = new Map(
+    methods
+      ? parseExerciseTargets(code).map((item) => [item.symbol, item.startLine] as const)
+      : parseTopLevelFunctions(code).map((item) => [item.fn, item.startLine] as const),
+  );
 
   const after = order.slice(order.indexOf(fn) + 1);
   const anchor = after.map((name) => present.get(name)).find((line) => line !== undefined);
