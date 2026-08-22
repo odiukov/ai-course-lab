@@ -394,7 +394,7 @@ window.addEventListener("message", function (event) {
     };
   }
 
-  /** Контекст метода: весь класс с полями и уже готовыми соседними методами. */
+  /** Контекст метода: поля и готовые соседи без дублирования самого задания. */
   function enclosingClass(source, fn) {
     var address = fn.split(".");
     if (address.length !== 2) return null;
@@ -409,13 +409,45 @@ window.addEventListener("message", function (event) {
 
     var end = lines.length;
     for (var j = start + 1; j < lines.length; j += 1) {
-      if (/^(?:async\s+def\s|def\s|class\s)/.test(lines[j])) {
+      // Декоратор следующего класса принадлежит уже ему. Если оставить его в
+      // предыдущем контексте, у Budget внизу появляется одинокий @dataclass.
+      if (/^(?:@|async\s+def\s|def\s|class\s)/.test(lines[j])) {
         end = j;
         break;
       }
     }
-    while (end > start + 1 && lines[end - 1].trim() === "") end -= 1;
-    return lines.slice(start, end).join("\n");
+
+    var methodHead = new RegExp("^(\\s*)(?:async\\s+)?def\\s+" + address[1] + "\\s*\\(");
+    var methodStart = -1;
+    for (var k = start + 1; k < end; k += 1) {
+      if (methodHead.test(lines[k])) { methodStart = k; break; }
+    }
+    if (methodStart === -1) return null;
+
+    var methodIndent = (methodHead.exec(lines[methodStart]) || ["", ""])[1];
+    var methodEnd = end;
+    for (var m = methodStart + 1; m < end; m += 1) {
+      if (lines[m].trim() === "") continue;
+      var indent = (/^(\s*)/.exec(lines[m]) || ["", ""])[1];
+      if (indent.length < methodIndent.length ||
+          (indent.length === methodIndent.length && /^\s*(?:@|async\s+def\s|def\s)/.test(lines[m]))) {
+        methodEnd = m;
+        break;
+      }
+    }
+
+    // Декораторы целевого метода тоже относятся к редактируемому фрагменту.
+    while (methodStart > start + 1 &&
+           lines[methodStart - 1].slice(0, methodIndent.length) === methodIndent &&
+           lines[methodStart - 1].trim().startsWith("@")) {
+      methodStart -= 1;
+    }
+
+    var context = lines.slice(start, methodStart)
+      .concat([methodIndent + "# Метод " + address[1] + " редактируется ниже."])
+      .concat(lines.slice(methodEnd, end));
+    while (context.length > 1 && context[context.length - 1].trim() === "") context.pop();
+    return context.join("\n");
   }
 
   function join(source, fn, code) {
