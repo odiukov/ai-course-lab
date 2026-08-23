@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Защищаем контракт шардированного checkpoint-а при смене world size, пропаже файла и частичной записи — Checkpoint Sharded Resume</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/">← Checkpoint Sharded Resume</a>
+<span class="counter" data-counter>11 / 11</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем атомарный шардированный checkpoint: четыре ранга сохраняются отдельно и побайтово восстанавливаются</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем контракт публикации и возобновления</span></a></li>
+<li><a class="toc-link" data-step="003-manifest-json" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/003-manifest-json/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Сериализуем полный манифест: все поля и записи шардов попадают в стабильный JSON, включая пустой список shards</span></a></li>
+<li><a class="toc-link" data-step="004-schema-boundary" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/004-schema-boundary/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">JSON — долговечная граница: после чтения числа нормализуются, а словари шардов снова становятся ShardEntry</span></a></li>
+<li><a class="toc-link" data-step="005-manifest-parse" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/005-manifest-parse/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Восстанавливаем типизированный манифест: сохраняем схему и порядок шардов, а строковые числа приводим к нужным типам</span></a></li>
+<li><a class="toc-link" data-step="006-publish-order" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/006-publish-order/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Фиксируем порядок публикации: fsync временных шардов, их rename и только затем финальный manifest.json</span></a></li>
+<li><a class="toc-link" data-step="007-save-shards" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/007-save-shards/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Сохраняем по файлу на ранг: SHA-256 считается по записанному payload, смещения непрерывны, а нулевая длина param_shard допустима</span></a></li>
+<li><a class="toc-link" data-step="008-resume-gates" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/008-resume-gates/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Загрузка сначала отвергает несовместимый манифест, пропавший шард и повреждённый payload — и лишь затем десериализует состояние</span></a></li>
+<li><a class="toc-link" data-step="009-load-shards" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/009-load-shards/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Возобновляем по владельцам рангов: проверяем версию, размер мира, число и уникальность рангов, безопасные пути и SHA-256 каждого файла</span></a></li>
+<li><a class="toc-link" data-step="010-run" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/010-run/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Запускаем круговой тест, проверки отказов и ротацию checkpoint-ов</span></a></li>
+<li><a class="toc-link is-current" data-step="011-quiz" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/011-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Защищаем контракт шардированного checkpoint-а при смене world size, пропаже файла и частичной записи</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Защищаем контракт шардированного checkpoint-а при смене world size, пропаже файла и частичной записи</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты открываешь каталог после аварии: <code>manifest.json</code> есть, но один шард недописан, пропал или принадлежит другому <code>world size</code>. Дальше по курсу тебе понадобится не «попробовать загрузить», а доказать целостность набора: порядок публикации закреплён в <a href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/006-publish-order/">шаге 6</a>, а проверки до десериализации — в <a href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/008-resume-gates/">шагах 8</a>–<a href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/009-load-shards/">9</a>. Частая ошибка — считать видимый манифест достаточным или незаметно подгонять число рангов.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь лабораторию с четырьмя пронумерованными пробами. Итоговый протокол кладут на стол только после герметизации всех контейнеров. Если проба исчезла, пломба повреждена или протокол рассчитан на четыре контейнера вместо двух, лаборант не начинает анализ: набор сначала признают непригодным целиком.</p>
+</blockquote></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"Во время сохранения процесс упал после rename всех шардов, но до публикации manifest.json. Можно ли возобновиться из этого каталога?","options":["Да, если все файлы шардов уже видны","Да, если угадать их порядок по именам","Нет, без финального манифеста checkpoint не считается опубликованным"],"correct":2,"explanation":"Именно манифест объявляет набор завершённым. Отдельные шарды до его публикации ещё не образуют checkpoint."},{"question":"Checkpoint записан для четырёх рангов, а загрузка запущена с world size 2. Что должно произойти?","options":["Каждый новый ранг автоматически загрузит по два файла","Загрузка должна остановиться до десериализации","Нужно проигнорировать ранги 2 и 3","Достаточно пересчитать смещения"],"correct":1,"explanation":"Контракт этого checkpoint-а требует того же world size. Перераспределение состояния было бы отдельной операцией, которой здесь нет."},{"question":"Какой каталог допустимо успешно загрузить?","options":["Один шард отсутствует, но его длина в манифесте равна нулю","Все шарды на месте, но SHA-256 одного файла не совпадает","Все заявленные файлы присутствуют, их ранги уникальны, пути безопасны и хеши совпадают","Число записей шардов меньше world size, зато общий размер совпадает"],"correct":2,"explanation":"Нулевая длина payload допустима, но сам заявленный файл обязан существовать. Успех возможен лишь после проверки всего контракта."},{"question":"После чтения manifest.json числовые поля пришли строками, а записи шардов стали обычными словарями. Что делать?","options":["Оставить значения как есть: JSON уже гарантирует нужные типы","Нормализовать числа и восстановить типизированные ShardEntry, сохранив порядок","Отсортировать словари по размеру и назначить ранги заново","Удалить поля схемы, чтобы избежать несовместимости"],"correct":1,"explanation":"JSON служит долговечной границей, но после неё нужно явно восстановить типы и структуру манифеста."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">Во время сохранения процесс упал после rename всех шардов, но до публикации manifest.json. Можно ли возобновиться из этого каталога?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Да, если все файлы шардов уже видны</button></li><li><button type="button" data-option="1">Да, если угадать их порядок по именам</button></li><li><button type="button" data-option="2">Нет, без финального манифеста checkpoint не считается опубликованным</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">Checkpoint записан для четырёх рангов, а загрузка запущена с world size 2. Что должно произойти?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Каждый новый ранг автоматически загрузит по два файла</button></li><li><button type="button" data-option="1">Загрузка должна остановиться до десериализации</button></li><li><button type="button" data-option="2">Нужно проигнорировать ранги 2 и 3</button></li><li><button type="button" data-option="3">Достаточно пересчитать смещения</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="2">
+<p class="quiz-prompt">Какой каталог допустимо успешно загрузить?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Один шард отсутствует, но его длина в манифесте равна нулю</button></li><li><button type="button" data-option="1">Все шарды на месте, но SHA-256 одного файла не совпадает</button></li><li><button type="button" data-option="2">Все заявленные файлы присутствуют, их ранги уникальны, пути безопасны и хеши совпадают</button></li><li><button type="button" data-option="3">Число записей шардов меньше world size, зато общий размер совпадает</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="3">
+<p class="quiz-prompt">После чтения manifest.json числовые поля пришли строками, а записи шардов стали обычными словарями. Что делать?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Оставить значения как есть: JSON уже гарантирует нужные типы</button></li><li><button type="button" data-option="1">Нормализовать числа и восстановить типизированные ShardEntry, сохранив порядок</button></li><li><button type="button" data-option="2">Отсортировать словари по размеру и назначить ранги заново</button></li><li><button type="button" data-option="3">Удалить поля схемы, чтобы избежать несовместимости</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/010-run/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-done" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__80-checkpoint-sharded-resume/">Закончить урок</a>
+<a class="nav-button" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__81-end-to-end-distributed-train/">Следующий урок: End To End Distributed Train →</a>
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__80-checkpoint-sharded-resume","stepId":"011-quiz","number":11,"plannedCount":11}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

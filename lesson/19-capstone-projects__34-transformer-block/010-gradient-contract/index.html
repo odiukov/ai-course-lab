@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Измеряем различие архитектур в backward, а не по совпадающим формам forward — Transformer Block</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/">← Transformer Block</a>
+<span class="counter" data-counter>10 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем блок, который сохраняет форму и выдерживает глубину</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем причинность и residual-путь</span></a></li>
+<li><a class="toc-link" data-step="003-layernorm" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/003-layernorm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Нормализуем каждый токен: scale и shift обучаются, форма сохраняется, константный вход остаётся конечным</span></a></li>
+<li><a class="toc-link" data-step="004-attn-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/004-attn-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Разводим головы и закрываем доступ к будущему до softmax</span></a></li>
+<li><a class="toc-link" data-step="005-attention" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/005-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Замыкаем fused QKV attention: выход остаётся B×T×D, будущее не влияет на прошлое, T сверх context_length отклоняется</span></a></li>
+<li><a class="toc-link" data-step="006-ln-placement" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/006-ln-placement/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Сравниваем позиции LayerNorm вокруг двух residual-сложений</span></a></li>
+<li><a class="toc-link" data-step="007-block" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/007-block/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Переключаем pre-LN и post-LN: оба пути сохраняют форму, а при нулевых ветках pre-LN становится тождественным</span></a></li>
+<li><a class="toc-link" data-step="008-stack-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/008-stack-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Повторяем один контракт по глубине и оставляем финальную нормализацию единственной точкой выхода</span></a></li>
+<li><a class="toc-link" data-step="009-stack" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/009-stack/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Проводим embeddings через блоки по порядку: форма B×T×D неизменна, а depth=0 оставляет embedding и final LayerNorm</span></a></li>
+<li><a class="toc-link is-current" data-step="010-gradient-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/010-gradient-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Измеряем различие архитектур в backward, а не по совпадающим формам forward</span></a></li>
+<li><a class="toc-link" data-step="011-gradient" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/011-gradient/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Снимаем норму градиента embeddings после одного backward: старые градиенты обнуляются, результат скалярный, отсутствие grad даёт 0.0</span></a></li>
+<li><a class="toc-link" data-step="012-quiz" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/012-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Сверяем causal-маску, residual-пути и градиентный эксперимент</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Измеряем различие архитектур в backward, а не по совпадающим формам forward</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты дописал переключатель из <a href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/007-block/">шага 7</a>, прогнал стек из <a href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/009-stack/">шага 9</a> и смотришь на вывод. <code>pre-LN</code>: <code>torch.Size([2, 8, 64])</code>. <code>post-LN</code>: <code>torch.Size([2, 8, 64])</code>. Числа внутри разные, но оба тензора живые, конечные, нужной формы. И тут неприятный вопрос: а чем я, собственно, доказал, что это две разные архитектуры? Форма совпала, глубина держится, тесты зелёные — по forward они близнецы.</p>
+<p>Так и есть: forward специально устроен так, чтобы контракт был один. Разница между вариантами — не в том, что выходит, а в том, что возвращается назад.</p>
+<p>Вспомни: обучение — это путь сигнала в обратную сторону. Считается одно число (loss), и от него назад по всем слоям идёт градиент — «насколько каждый вес виноват». Он проходит те же сложения и нормализации, только в обратном порядке. Вот здесь варианты расходятся. В pre-LN residual-путь от выхода до embeddings ничем не перегорожен: LayerNorm стоит сбоку, внутри ветки. В post-LN каждое residual-сложение упирается в нормализацию, и градиент проходит через неё — на каждом из 12 слоёв.</p>
+<p>Значит, мерить надо не форму выхода, а то, что доехало до самого низа: норму градиента на embeddings — одно скалярное число, «сколько сигнала дошло». Поставь глубину 2 — числа будут рядом. Поставь 12 — разойдутся.</p>
+<p>Одинаковый выход не значит одинаковая модель: различие живёт в обратном проходе, и увидеть его можно только backward.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Две цепочки карабинов висят рядом, обе длиной в двенадцать звеньев, обе выглядят одинаково. Дёрни верхнее звено — и смотри не на верх, а на самое нижнее: в первой цепочке рывок дошёл целиком, во второй каждое звено проглотило часть усилия, и до низа доехала дрожь. Разглядывая цепочку сверху, ты этого не увидишь. Надо дёрнуть и приложить палец к нижнему концу.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/009-stack/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/011-gradient/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__34-transformer-block","stepId":"010-gradient-contract","number":10,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

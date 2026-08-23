@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Считаем вероятность только на целевых токенах — Eval Pipeline</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/">← Eval Pipeline</a>
+<span class="counter" data-counter>6 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/001-result-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем единый eval-пайплайн</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем границы метрик</span></a></li>
+<li><a class="toc-link" data-step="003-token-f1" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/003-token-f1/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Считаем token F1 по мешку токенов</span></a></li>
+<li><a class="toc-link" data-step="004-judge-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/004-judge-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Превращаем сходство в детерминированный вердикт</span></a></li>
+<li><a class="toc-link" data-step="005-mock-judge" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/005-mock-judge/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Выдаём балл судьи от 1 до 5</span></a></li>
+<li><a class="toc-link is-current" data-step="006-ppl-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/006-ppl-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Считаем вероятность только на целевых токенах</span></a></li>
+<li><a class="toc-link" data-step="007-perplexity" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/007-perplexity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Измеряем perplexity без вклада паддинга</span></a></li>
+<li><a class="toc-link" data-step="008-em-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/008-em-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Отделяем генерацию от строгого совпадения</span></a></li>
+<li><a class="toc-link" data-step="009-exact-match" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/009-exact-match/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Агрегируем нормализованный exact-match</span></a></li>
+<li><a class="toc-link" data-step="010-aggregation-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/010-aggregation-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Приводим разные шкалы к общему агрегату</span></a></li>
+<li><a class="toc-link" data-step="011-aggregate" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/011-aggregate/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Собираем взвешенный FinalReport</span></a></li>
+<li><a class="toc-link" data-step="012-final-quiz" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/012-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Диагностируем eval-пайплайн целиком</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Считаем вероятность только на целевых токенах</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Ты запускаешь оценку на двух одинаковых текстах, но во втором больше пустых позиций для выравнивания батча. Модель видит те же слова — а итоговая вероятность вдруг меняется. Значит, в расчёт попало то, что модель вообще не должна была угадывать.</p>
+<p>Считать нужно только <strong>целевые токены</strong>: реальные следующие токены, для которых существует предсказание. Здесь важен сдвиг на одну позицию. Выход модели на позиции 0 относится не к токену 0, а к токену 1; выход на позиции 1 — к токену 2, и так далее. Поэтому нельзя просто сопоставить каждый выход с токеном на той же позиции. Число получится, но описывать качество предсказания следующего токена оно не будет.</p>
+<p>После сдвига остаётся проверить маску: если целевая позиция содержит паддинг — технический заполнитель одинаковой длины, — её вероятность не участвует ни в сумме потерь, ни в количестве токенов. Первый токен фрагмента тоже не имеет предсказания внутри этого фрагмента, а последнему выходу уже не соответствует следующий целевой токен.</p>
+<p>Так в знаменателе остаётся ровно число честных попыток модели. Длина контейнера больше не притворяется объёмом задания.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь тренировку с карточками: тебе показывают слово «на», и ты угадываешь следующую карточку — «столе». После настоящих слов в колоду положили десять пустых карточек, чтобы стопки были одинаковой высоты. Оценивать догадки по пустым карточкам бессмысленно. И сравнивать ответ нужно со следующей карточкой, а не с той, которую тебе уже показали.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/005-mock-judge/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/007-perplexity/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__41-eval-pipeline","stepId":"006-ppl-contract","number":6,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

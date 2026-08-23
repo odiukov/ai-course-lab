@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Почему читаем window_size + 1 — Hdf5 Tokenized Corpus</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/">← Hdf5 Tokenized Corpus</a>
+<span class="counter" data-counter>10 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Что соберём за 90 минут</span></a></li>
+<li><a class="toc-link" data-step="002-write-contract" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/002-write-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем контракт записи и хвоста</span></a></li>
+<li><a class="toc-link" data-step="003-tokenizer-encode" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/003-tokenizer-encode/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Кодируем текст в байтовые id</span></a></li>
+<li><a class="toc-link" data-step="004-buffer-discipline" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/004-buffer-discipline/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Буфер, расширение, хвост</span></a></li>
+<li><a class="toc-link" data-step="005-flush-buffer" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/005-flush-buffer/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Сбрасываем буфер шагом чанка</span></a></li>
+<li><a class="toc-link" data-step="006-shard-index" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/006-shard-index/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">shards.json как источник истины</span></a></li>
+<li><a class="toc-link" data-step="007-write-corpus" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/007-write-corpus/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Считаем глобальные смещения и публикуем индекс</span></a></li>
+<li><a class="toc-link" data-step="008-mmap-read" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/008-mmap-read/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Один API чтения поверх многих файлов</span></a></li>
+<li><a class="toc-link" data-step="009-get-slice" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/009-get-slice/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Собираем срез через границу шардов</span></a></li>
+<li><a class="toc-link is-current" data-step="010-window-shift" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/010-window-shift/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Почему читаем window_size + 1</span></a></li>
+<li><a class="toc-link" data-step="011-dataloader-iter" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/011-dataloader-iter/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Выдаём батчи случайных окон</span></a></li>
+<li><a class="toc-link" data-step="012-quiz" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/012-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Проверяем весь контракт корпуса</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Почему читаем window_size + 1</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Возьми <code>window_size = 512</code> и попроси у ридера из <a href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/008-mmap-read/">шага 8</a> ровно 512 токенов со случайной позиции. Теперь разложи их на пары «что видно → что назвать»: на позиции 0 модель видит первый токен и должна предсказать второй, на позиции 1 — второй, предсказать третий, и так дальше. Дойди до конца среза. На позиции 511 входной токен есть, а правильного ответа нет: следующий токен остался за краем прочитанного куска.</p>
+<p>Пар вышло 511, а позиций в окне — 512. Последняя позиция обучается впустую.</p>
+<p>Отсюда и лишний токен. Читаешь 513 штук и режешь их на две части, сдвинутые друг относительно друга на один шаг: <code>input = tokens[:-1]</code> — первые 512, <code>target = tokens[1:]</code> — со второго по 513-й. Длина у обеих ровно 512, и напротив каждого входного токена стоит именно тот, который идёт за ним в потоке. На «кот сидит на окне и» вход — «кот сидит на окне», ответ — «сидит на окне и».</p>
+<p>Платишь за это один токен на окно. Копий в памяти нет: это два среза одного и того же прочитанного массива.</p>
+<p>И да, этот <code>+1</code> иногда уезжает за границу шарда — но брать срез через стык ты уже умеешь (<a href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/009-get-slice/">шаг 9</a>), для ридера тут ничего нового.</p>
+<p>512 входов — это 513 прочитанных токенов, и самый последний из них никогда не попадёт на вход: он существует только как ответ для предпоследнего.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Перепиши список из пяти дел на два листа: на первом начни с первого дела, на втором — со второго. Положи листы рядом. Напротив каждой строки левого листа стоит следующее дело — но таких строк вышло четыре, а не пять: последнему делу пары не нашлось. Хочешь пять пар — выписывай шесть дел. Шестая строка нужна не сама по себе, а чтобы у последней пары был правый край.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/009-get-slice/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__43-hdf5-tokenized-corpus/011-dataloader-iter/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__43-hdf5-tokenized-corpus","stepId":"010-window-shift","number":10,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

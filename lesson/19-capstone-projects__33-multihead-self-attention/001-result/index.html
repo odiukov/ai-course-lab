@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Собираем causal multi-head attention: от входа (B, T, D) до логитов и весов голов — Multihead Self Attention</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/">← Multihead Self Attention</a>
+<span class="counter" data-counter>1 / 10</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link is-current" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем causal multi-head attention: от входа (B, T, D) до логитов и весов голов</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем формы голов и причинность</span></a></li>
+<li><a class="toc-link" data-step="003-split-heads" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/003-split-heads/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Разрезаем признаки на головы без смешивания: (B, T, D) → (B, H, T, d_head), включая H=1</span></a></li>
+<li><a class="toc-link" data-step="004-merge-contract" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/004-merge-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Обратная перестановка обязана сохранить порядок токенов и признаков каждой головы</span></a></li>
+<li><a class="toc-link" data-step="005-merge-heads" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/005-merge-heads/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Склеиваем головы в (B, T, D), сохраняя их порядок и обрабатывая non-contiguous transpose</span></a></li>
+<li><a class="toc-link" data-step="006-score-mask" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/006-score-mask/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Считаем QKᵀ / √d_head и маскируем будущее до нормировки по оси ключей</span></a></li>
+<li><a class="toc-link" data-step="007-attention-forward" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/007-attention-forward/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Замыкаем QKV → causal weights → context → projection: форма сохраняется, строки весов дают 1, а при T=1 единственный вес равен 1</span></a></li>
+<li><a class="toc-link" data-step="008-lm-seam" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/008-lm-seam/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Подключаем attention между суммой токенных и позиционных эмбеддингов и LM-головой</span></a></li>
+<li><a class="toc-link" data-step="009-tiny-lm-forward" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/009-tiny-lm-forward/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Получаем логиты (B, T, V) в обоих режимах и возвращаем веса (B, H, T, T) только по флагу, включая batch=1</span></a></li>
+<li><a class="toc-link" data-step="010-quiz" href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/010-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Проверяем весь шов: формы, масштабирование, causal-маску и путь до логитов</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Собираем causal multi-head attention: от входа (B, T, D) до логитов и весов голов</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Представь вход <code>x</code> формы <code>(B, T, D)</code>: в батче <code>B</code> последовательностей, в каждой <code>T</code> токенов, каждый описан <code>D</code> числами. Если сразу сравнивать такие представления между собой, непонятно, какие числа должны отвечать за поиск, совпадение и перенос информации. Поэтому одна проекция получает для каждого токена сразу три версии — <code>Q</code>, <code>K</code> и <code>V</code>. Её результат имеет форму <code>(B, T, 3D)</code>, а после разделения каждая версия снова занимает <code>(B, T, D)</code>.</p>
+<p>Дальше признаки распределяются между <code>H</code> головами. У каждой остаётся <code>d_head = D / H</code> признаков, поэтому <code>Q</code>, <code>K</code> и <code>V</code> рассматриваются в форме <code>(B, H, T, d_head)</code>. Это не <code>H</code> отдельных запусков: измерение голов входит в одну батчевую операцию.</p>
+<p>Теперь каждый query сравнивается со всеми keys своей головы. Получается таблица <code>(B, H, T, T)</code>: для каждого токена есть оценка связи с каждым токеном последовательности. Эти ещё не нормализованные оценки называют <strong>логитами</strong> — как черновые баллы перед переводом в доли. Их делят на <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msqrt><msub><mi>d</mi><mrow><mi>h</mi><mi>e</mi><mi>a</mi><mi>d</mi></mrow></msub></msqrt></mrow><annotation encoding="application/x-tex">\sqrt{d_{head}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.04em;vertical-align:-0.1828em"></span><span class="mord sqrt"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.8572em"><span class="svg-align" style="top:-3em"><span class="pstrut" style="height:3em"></span><span class="mord" style="padding-left:0.833em"><span class="mord"><span class="mord mathnormal">d</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">h</span><span class="mord mathnormal mtight">e</span><span class="mord mathnormal mtight">a</span><span class="mord mathnormal mtight">d</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span><span style="top:-2.8172em"><span class="pstrut" style="height:3em"></span><span class="hide-tail" style="min-width:0.853em;height:1.08em"><svg xmlns="http://www.w3.org/2000/svg" width="400em" height="1.08em" viewBox="0 0 400000 1080" preserveAspectRatio="xMinYMin slice"><path d="M95,702
+c-2.7,0,-7.17,-2.7,-13.5,-8c-5.8,-5.3,-9.5,-10,-9.5,-14
+c0,-2,0.3,-3.3,1,-4c1.3,-2.7,23.83,-20.7,67.5,-54
+c44.2,-33.3,65.8,-50.3,66.5,-51c1.3,-1.3,3,-2,5,-2c4.7,0,8.7,3.3,12,10
+s173,378,173,378c0.7,0,35.3,-71,104,-213c68.7,-142,137.5,-285,206.5,-429
+c69,-144,104.5,-217.7,106.5,-221
+l0 -0
+c5.3,-9.3,12,-14,20,-14
+H400000v40H845.2724
+s-225.272,467,-225.272,467s-235,486,-235,486c-2.7,4.7,-9,7,-19,7
+c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
+M834 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1828em"><span></span></span></span></span></span></span></span></span>, чтобы при росте размера головы значения не становились слишком резкими.</p>
+<p>Но decoder не должен подсматривать вправо. Поэтому логиты будущих позиций заменяются на очень большое отрицательное число. После <code>softmax</code> по последнему измерению они превращаются в веса: в каждой строке значения неотрицательны и дают сумму <code>1</code>. Взвешивая ими <code>V</code>, каждая голова собирает для токена только доступный ему контекст.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь несколько редакторов, читающих одну фразу с разными задачами. Каждый ставит черновые баллы словам, но заклеивает всё правее текущего слова. Затем он превращает оставшиеся баллы в доли общего внимания. Поэтому редакторы смотрят на разные признаки, но никто не читает продолжение раньше времени.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<span class="nav-button is-disabled">Назад</span>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__33-multihead-self-attention/002-contract-check/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__33-multihead-self-attention","stepId":"001-result","number":1,"plannedCount":10}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

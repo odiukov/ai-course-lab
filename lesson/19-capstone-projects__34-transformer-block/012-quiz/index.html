@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сверяем causal-маску, residual-пути и градиентный эксперимент — Transformer Block</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/">← Transformer Block</a>
+<span class="counter" data-counter>12 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем блок, который сохраняет форму и выдерживает глубину</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем причинность и residual-путь</span></a></li>
+<li><a class="toc-link" data-step="003-layernorm" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/003-layernorm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Нормализуем каждый токен: scale и shift обучаются, форма сохраняется, константный вход остаётся конечным</span></a></li>
+<li><a class="toc-link" data-step="004-attn-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/004-attn-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Разводим головы и закрываем доступ к будущему до softmax</span></a></li>
+<li><a class="toc-link" data-step="005-attention" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/005-attention/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Замыкаем fused QKV attention: выход остаётся B×T×D, будущее не влияет на прошлое, T сверх context_length отклоняется</span></a></li>
+<li><a class="toc-link" data-step="006-ln-placement" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/006-ln-placement/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Сравниваем позиции LayerNorm вокруг двух residual-сложений</span></a></li>
+<li><a class="toc-link" data-step="007-block" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/007-block/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Переключаем pre-LN и post-LN: оба пути сохраняют форму, а при нулевых ветках pre-LN становится тождественным</span></a></li>
+<li><a class="toc-link" data-step="008-stack-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/008-stack-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Повторяем один контракт по глубине и оставляем финальную нормализацию единственной точкой выхода</span></a></li>
+<li><a class="toc-link" data-step="009-stack" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/009-stack/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Проводим embeddings через блоки по порядку: форма B×T×D неизменна, а depth=0 оставляет embedding и final LayerNorm</span></a></li>
+<li><a class="toc-link" data-step="010-gradient-contract" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/010-gradient-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Измеряем различие архитектур в backward, а не по совпадающим формам forward</span></a></li>
+<li><a class="toc-link" data-step="011-gradient" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/011-gradient/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Снимаем норму градиента embeddings после одного backward: старые градиенты обнуляются, результат скалярный, отсутствие grad даёт 0.0</span></a></li>
+<li><a class="toc-link is-current" data-step="012-quiz" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/012-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Сверяем causal-маску, residual-пути и градиентный эксперимент</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Сверяем causal-маску, residual-пути и градиентный эксперимент</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Дальше в курсе этот блок станет единицей повторения: всё, что ты соберёшь потом — полная GPT, генерация, обучение — опирается на то, что вход и выход блока имеют одну форму B×T×D и что стек можно нарастить, не меняя ни строчки внутри.</p>
+<p>Спотыкаются обычно на двух вещах. Первая: совпадающие формы forward принимают за доказательство, что архитектуры одинаковые — а различие живёт в backward, в градиентах (<a href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/010-gradient-contract/">шаг 10</a>). Вторая: маска. Её место — до softmax, иначе будущее успевает попасть в знаменатель нормировки и просочиться в веса прошлого.</p>
+<p>Проверь себя на вопросах выше — они по всему уроку, не только по последнему экрану.</p></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"Ты прогоняешь тензор 2 на 16 на 384 при 6 головах через pre-LN и post-LN блоки, инициализировав веса одинаково и выключив dropout. Что увидишь?","options":["Формы выходов разойдутся: post-LN добавляет лишнее измерение","Формы совпадут, но сами числа на выходе будут разными","И формы, и числа совпадут: сложение residual коммутативно","post-LN упадёт с ошибкой на длине 16"],"correct":1,"explanation":"Оба варианта держат один контракт формы, поэтому 2 на 16 на 384 остаётся 2 на 16 на 384. Но нормализация стоит в разных местах относительно сложения, значит числа расходятся, и allclose это ловит."},{"question":"Кто-то решил не заполнять верхний треугольник минус бесконечностью, а просто занулить веса внимания уже после softmax. Что сломается?","options":["Ничего: нули в верхнем треугольнике — это ровно то, что нужно","Форма весов перестанет быть B на T на T","Softmax уже поделил на сумму, куда вошли будущие токены, так что их влияние осталось в оставшихся весах","Градиенты станут нулевыми по всей матрице"],"correct":2,"explanation":"Softmax нормирует строку целиком. Если будущее участвовало в знаменателе, оно уже подмешалось в вес каждого прошлого токена, и позднее зануление этого не отменит. Маска обязана стоять до softmax."},{"question":"Ты собрал стек из блоков и поставил depth равным нулю. Что вернёт модель?","options":["Ошибку: стек без блоков не собирается","Нулевой тензор нужной формы","Embedding, прошедший через финальную нормализацию","Embedding без каких-либо изменений"],"correct":2,"explanation":"Блоков нет — значит между embedding и выходом остаётся только финальный LayerNorm, единственная точка выхода. Форма B на T на D при этом не меняется."},{"question":"В блоке на 768 измерений bias у линейных слоёв даёт 6912 параметров, на 12 блоках — 82 944 против 124 миллионов. Почему их всё равно выбрасывают?","options":["Без bias модель обучается принципиально точнее","Выигрыш в памяти решающий: почти четверть модели","Пользы почти нет, а лишний тензор усложняет ядра и шардирование","С bias нельзя посчитать норму градиента embeddings"],"correct":2,"explanation":"Меньше одной десятой процента параметров — экономия символическая. Дело в инженерии: bias почти ничего не добавляет к качеству, зато каждый дополнительный тензор усложняет вычислительные ядра и разрезание модели по устройствам."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">Ты прогоняешь тензор 2 на 16 на 384 при 6 головах через pre-LN и post-LN блоки, инициализировав веса одинаково и выключив dropout. Что увидишь?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Формы выходов разойдутся: post-LN добавляет лишнее измерение</button></li><li><button type="button" data-option="1">Формы совпадут, но сами числа на выходе будут разными</button></li><li><button type="button" data-option="2">И формы, и числа совпадут: сложение residual коммутативно</button></li><li><button type="button" data-option="3">post-LN упадёт с ошибкой на длине 16</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">Кто-то решил не заполнять верхний треугольник минус бесконечностью, а просто занулить веса внимания уже после softmax. Что сломается?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Ничего: нули в верхнем треугольнике — это ровно то, что нужно</button></li><li><button type="button" data-option="1">Форма весов перестанет быть B на T на T</button></li><li><button type="button" data-option="2">Softmax уже поделил на сумму, куда вошли будущие токены, так что их влияние осталось в оставшихся весах</button></li><li><button type="button" data-option="3">Градиенты станут нулевыми по всей матрице</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="2">
+<p class="quiz-prompt">Ты собрал стек из блоков и поставил depth равным нулю. Что вернёт модель?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Ошибку: стек без блоков не собирается</button></li><li><button type="button" data-option="1">Нулевой тензор нужной формы</button></li><li><button type="button" data-option="2">Embedding, прошедший через финальную нормализацию</button></li><li><button type="button" data-option="3">Embedding без каких-либо изменений</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="3">
+<p class="quiz-prompt">В блоке на 768 измерений bias у линейных слоёв даёт 6912 параметров, на 12 блоках — 82 944 против 124 миллионов. Почему их всё равно выбрасывают?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Без bias модель обучается принципиально точнее</button></li><li><button type="button" data-option="1">Выигрыш в памяти решающий: почти четверть модели</button></li><li><button type="button" data-option="2">Пользы почти нет, а лишний тензор усложняет ядра и шардирование</button></li><li><button type="button" data-option="3">С bias нельзя посчитать норму градиента embeddings</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/011-gradient/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-done" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__34-transformer-block/">Закончить урок</a>
+<a class="nav-button" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__35-gpt-model-assembly/">Следующий урок: Gpt Model Assembly →</a>
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__34-transformer-block","stepId":"012-quiz","number":12,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

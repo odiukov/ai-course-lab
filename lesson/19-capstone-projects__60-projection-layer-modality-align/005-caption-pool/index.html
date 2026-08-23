@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сводим подпись переменной длины в одну замороженную цель — Projection Layer Modality Align</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/">← Projection Layer Modality Align</a>
+<span class="counter" data-counter>5 / 11</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем обучаемый мост между замороженными модальностями</span></a></li>
+<li><a class="toc-link" data-step="002-pair-contract" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/002-pair-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Фиксируем контракт синтетической пары изображения и подписи</span></a></li>
+<li><a class="toc-link" data-step="003-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/003-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Проверяем границы данных и обучения</span></a></li>
+<li><a class="toc-link" data-step="004-make-pair" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/004-make-pair/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Синтезируем пару: seed воспроизводит оба объекта, подпись имеет max_len, а id 0 остаётся padding</span></a></li>
+<li><a class="toc-link is-current" data-step="005-caption-pool" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/005-caption-pool/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Сводим подпись переменной длины в одну замороженную цель</span></a></li>
+<li><a class="toc-link" data-step="006-text-forward" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/006-text-forward/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Усредняем только непустые токены: выход сохраняет B×D, padding не влияет, all-padding даёт конечный нулевой вектор</span></a></li>
+<li><a class="toc-link" data-step="007-mlp-contract" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/007-mlp-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Проводим признаки через два линейных отображения и один нелинейный изгиб</span></a></li>
+<li><a class="toc-link" data-step="008-projector-forward" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/008-projector-forward/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Проецируем последнюю ось: GELU стоит между fc1 и fc2, ведущие размерности сохраняются, batch=1 не схлопывается</span></a></li>
+<li><a class="toc-link" data-step="009-cosine-contract" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/009-cosine-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Сравниваем направления в общем пространстве независимо от длины векторов</span></a></li>
+<li><a class="toc-link" data-step="010-alignment-loss" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/010-alignment-loss/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Считаем среднее 1−cos: результат скалярный, совпадающие векторы дают 0, противоположные 2, разные формы отклоняются</span></a></li>
+<li><a class="toc-link" data-step="011-quiz" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/011-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Проверяем полный шов данных, проекции, заморозки и выравнивания</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Сводим подпись переменной длины в одну замороженную цель</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Возьми две подписи из синтетической пары на <a href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/004-make-pair/">шаге 4</a>: в одной пять содержательных токенов, в другой — девять. После текстового энкодера первая превращается в пять векторов, вторая — в девять. Но для каждой картинки нужна одна текстовая цель одинакового размера. Иначе примеры нельзя напрямую сопоставить: число слов будет менять форму данных.</p>
+<p>Поэтому последовательность токенов сворачивают в один вектор подписи — делают <strong>пулинг</strong>, то есть собирают несколько представлений в одно. Здесь естественный вариант — усреднить векторы содержательных токенов. Длина исчезает, а смысл, распределённый между словами, остаётся в их общем представлении. На выходе каждая подпись, короткая или длинная, занимает одну строку размерности <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>D</mi></mrow><annotation encoding="application/x-tex">D</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0278em">D</span></span></span></span>, где <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>D</mi></mrow><annotation encoding="application/x-tex">D</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0278em">D</span></span></span></span> — размер вектора текстового энкодера.</p>
+<p>Почему цель «замороженная»? Текстовый энкодер уже обучен и, как договорились на <a href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/001-result/">шаге 1</a>, его параметры не меняются. Само усреднение тоже ничего не обучает. Значит, для одной и той же подписи получается стабильная точка, к которой можно подтягивать представление изображения.</p>
+<p>Есть тонкость: подписи дополнены нулями до <code>max_len</code>, но эти пустые позиции не несут смысла. Если включить их в среднее, короткие фразы окажутся искусственно ближе к нулю. Поэтому при свёртке длина должна исчезнуть, а padding — не оставить следа.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь дегустацию: одну смесь составили из пяти настоящих образцов, другую — из девяти. Пустые стаканы выставили лишь затем, чтобы на обоих подносах было одинаковое число мест. Итоговый вкус получают, смешивая только наполненные стаканы. Тогда размер подноса не влияет на результат, а каждая смесь превращается в одну фиксированную пробу.</p>
+</blockquote></div>
+
+
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/004-make-pair/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/006-text-forward/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__60-projection-layer-modality-align","stepId":"005-caption-pool","number":5,"plannedCount":11}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

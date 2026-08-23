@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверяем полный шов: формы голов, pre-LN residual, глубину стопки и путь градиента от CLS к патчам — Vit Transformer</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/">← Vit Transformer</a>
+<span class="counter" data-counter>11 / 11</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем ViT-энкодер: от 197 патч-токенов до контекстной последовательности и CLS-вектора</span></a></li>
+<li><a class="toc-link" data-step="002-attention-contract" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/002-attention-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Фиксируем контракт внимания: 12 голов по 64 измерения, полная матрица без causal mask и неизменная форма</span></a></li>
+<li><a class="toc-link" data-step="003-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/003-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Проверяем формы и направление softmax</span></a></li>
+<li><a class="toc-link" data-step="004-mhsa" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/004-mhsa/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Контекстуализируем токены полным self-attention; сохраняем (B, N, D), нормируем каждую строку весов до 1 и отклоняем вход не ранга 3</span></a></li>
+<li><a class="toc-link" data-step="005-pre-ln" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/005-pre-ln/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Проводим residual-магистраль через два pre-LN подслоя: внимание, затем FFN с расширением 4×</span></a></li>
+<li><a class="toc-link" data-step="006-block" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/006-block/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Замыкаем pre-LN блок; оба residual-пути сохраняют форму и размер батча, а занулённый подслой превращается в тождественный путь</span></a></li>
+<li><a class="toc-link" data-step="007-stack" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/007-stack/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Складываем одинаковые блоки последовательно и применяем единственный финальный LayerNorm</span></a></li>
+<li><a class="toc-link" data-step="008-vit" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/008-vit/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Прогоняем токены через всю глубину ViT; форма остаётся неизменной, store_attn доходит до блоков, а глубина 0 оставляет только финальную нормализацию</span></a></li>
+<li><a class="toc-link" data-step="009-cls" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/009-cls/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Соединяем патч-фронтенд со стопкой и берём первый финальный токен как резюме всей картинки</span></a></li>
+<li><a class="toc-link" data-step="010-encoder" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/010-encoder/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Возвращаем контекстные tokens и CLS-пулинг; соблюдаем формы (B, 197, 768) и (B, 768), поддерживаем batch=1 и сохраняем градиент до проекции патчей</span></a></li>
+<li><a class="toc-link is-current" data-step="011-quiz" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/011-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Проверяем полный шов: формы голов, pre-LN residual, глубину стопки и путь градиента от CLS к патчам</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Проверяем полный шов: формы голов, pre-LN residual, глубину стопки и путь градиента от CLS к патчам</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Дальше тебе пригодится умение проверять модель не по одной удачной форме, а по всему шву сразу: разбиению признаков между головами, направлению softmax, residual-магистрали из <a href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/005-pre-ln/">шага 5</a>, последовательной глубине из <a href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/008-vit/">шага 8</a> и обратному пути градиента из <a href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/010-encoder/">шага 10</a>. Чаще всего спотыкаются именно на последнем: прямой проход выглядит убедительно, хотя часть модели уже нельзя обучить.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь поезд из 197 вагонов, проходящий несколько станций контроля. На каждой станции состав должен сохранить длину, инспекторы — правильно разделиться на 12 бригад, а главный вагон — собрать сведения со всего поезда. Но проверка закончена лишь тогда, когда его итоговый сигнал способен вернуться до первого багажного вагона: иначе сведения приехали, а источник ничему не научился.</p>
+</blockquote></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"На вход внимания приходит тензор формы B, N, 768. Какая форма голов согласуется с контрактом урока?","options":["B, 12, N, 64","B, 64, N, 12","B, N, 12, 768","B, 12, N, 768"],"correct":0,"explanation":"Каждый из 768 признаков распределяется между 12 головами: на одну голову приходится 64 признака. Размеры батча и последовательности при этом сохраняются."},{"question":"После softmax получены веса внимания формы B, 12, N, N. Что должно быть верно?","options":["Для каждого запроса веса по всем ключам суммируются в единицу","Для каждого ключа веса по всем запросам суммируются в единицу","Сумма всех элементов тензора всегда равна единице","Каждая из 12 голов получает одинаковые веса"],"correct":0,"explanation":"Каждый запрос распределяет свою единицу внимания между всеми ключами. Поэтому нормализация идёт по последней оси матрицы."},{"question":"Оба обучаемых подслоя pre-LN блока принудительно возвращают нули. Что произойдёт с входом блока?","options":["Он пройдёт без изменений","Он превратится в нулевой тензор","Он пройдёт только через финальный LayerNorm","Его размерность уменьшится в четыре раза"],"correct":0,"explanation":"Residual-пути прибавляют нулевые результаты подслоёв к исходным значениям. Поэтому весь блок становится тождественным преобразованием."},{"question":"Форма выхода и значения внимания выглядят правильно, но градиент от CLS не доходит до проекции патчей. Что это показывает?","options":["Вычислительный путь от итогового CLS к пикселям где-то разорван","Нужно увеличить число голов","Softmax выполнен по неверной оси","Стопка содержит слишком много блоков"],"correct":0,"explanation":"Правильный прямой проход ещё не гарантирует обучение. Проекция патчей обновляется только при непрерывном вычислительном пути от итогового CLS назад к изображению."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">На вход внимания приходит тензор формы B, N, 768. Какая форма голов согласуется с контрактом урока?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">B, 12, N, 64</button></li><li><button type="button" data-option="1">B, 64, N, 12</button></li><li><button type="button" data-option="2">B, N, 12, 768</button></li><li><button type="button" data-option="3">B, 12, N, 768</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">После softmax получены веса внимания формы B, 12, N, N. Что должно быть верно?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Для каждого запроса веса по всем ключам суммируются в единицу</button></li><li><button type="button" data-option="1">Для каждого ключа веса по всем запросам суммируются в единицу</button></li><li><button type="button" data-option="2">Сумма всех элементов тензора всегда равна единице</button></li><li><button type="button" data-option="3">Каждая из 12 голов получает одинаковые веса</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="2">
+<p class="quiz-prompt">Оба обучаемых подслоя pre-LN блока принудительно возвращают нули. Что произойдёт с входом блока?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Он пройдёт без изменений</button></li><li><button type="button" data-option="1">Он превратится в нулевой тензор</button></li><li><button type="button" data-option="2">Он пройдёт только через финальный LayerNorm</button></li><li><button type="button" data-option="3">Его размерность уменьшится в четыре раза</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="3">
+<p class="quiz-prompt">Форма выхода и значения внимания выглядят правильно, но градиент от CLS не доходит до проекции патчей. Что это показывает?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Вычислительный путь от итогового CLS к пикселям где-то разорван</button></li><li><button type="button" data-option="1">Нужно увеличить число голов</button></li><li><button type="button" data-option="2">Softmax выполнен по неверной оси</button></li><li><button type="button" data-option="3">Стопка содержит слишком много блоков</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/010-encoder/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-done" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__59-vit-transformer/">Закончить урок</a>
+<a class="nav-button" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__60-projection-layer-modality-align/">Следующий урок: Projection Layer Modality Align →</a>
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__59-vit-transformer","stepId":"011-quiz","number":11,"plannedCount":11}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

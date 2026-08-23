@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверяем карту имён, transpose-on-load, атомарность и weight tying — Loading Pretrained Weights</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/">← Loading Pretrained Weights</a>
+<span class="counter" data-counter>10 / 10</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем проверяемый шов загрузки GPT-2-весов</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем контракт до первого присваивания</span></a></li>
+<li><a class="toc-link" data-step="003-name-map" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/003-name-map/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Разворачиваем полную карту имён: каждый блок получает 12 соответствий, а при нуле блоков остаются только глобальные параметры</span></a></li>
+<li><a class="toc-link" data-step="004-layout-rule" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/004-layout-rule/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Отделяем переименование параметра от преобразования его раскладки</span></a></li>
+<li><a class="toc-link" data-step="005-transpose" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/005-transpose/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Распознаём conv1d-веса по точному суффиксу: проекции транспонируются, смещения и похожие имена — нет</span></a></li>
+<li><a class="toc-link" data-step="006-atomic-load" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/006-atomic-load/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Сначала валидируем весь файл, затем одним проходом меняем модель</span></a></li>
+<li><a class="toc-link" data-step="007-loader" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/007-loader/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Загружаем веса атомарно: сопоставляем, транспонируем и проверяем формы; при mismatch не изменяем ни одного параметра</span></a></li>
+<li><a class="toc-link" data-step="008-sanity-sample" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/008-sanity-sample/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Используем генерацию как сквозную проверку изменившегося распределения</span></a></li>
+<li><a class="toc-link" data-step="009-generate" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/009-generate/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Генерируем жадное продолжение под скользящим окном: добавляем ровно n токенов, а при n=0 сохраняем промпт</span></a></li>
+<li><a class="toc-link is-current" data-step="010-quiz" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/010-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Проверяем карту имён, transpose-on-load, атомарность и weight tying</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Проверяем карту имён, transpose-on-load, атомарность и weight tying</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Дальше тебе понадобится привычка проверять не отдельное присваивание, а весь шов целиком: покрытие карты из <a href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/003-name-map/">шага 3</a>, точный transpose-on-load из <a href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/005-transpose/">шага 5</a>, атомарность из <a href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/007-loader/">шага 7</a>, общий вес эмбеддингов и головы, а затем наблюдаемое поведение генерации из <a href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/008-sanity-sample/">шагов 8</a>–<a href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/009-generate/">9</a>. Чаще всего ошибка прячется там, где каждый фрагмент выглядит разумно по отдельности, но их контракты не сходятся вместе.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь сборку механических часов из иностранного набора: ты сверяешь номера всех деталей, некоторые шестерёнки разворачиваешь, проверяешь посадку всего комплекта и только потом устанавливаешь его. Стрелки часов и счётчик минут сидят на общей оси: если сделать две независимые оси, механизм внешне соберётся, но показывать время согласованно не сможет.</p>
+</blockquote></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"Ты создаёшь карту имён для модели с нулём трансформерных блоков. Что должно в ней остаться?","options":["Только глобальные параметры: эмбеддинги и финальная нормализация","Соответствия для одного блока с индексом 0","Пустой словарь, потому что слоёв нет","Все соответствия, кроме токенных эмбеддингов"],"correct":0,"explanation":"Цикл не добавит параметры блоков, но глобальные параметры модели не зависят от их количества."},{"question":"Один загружаемый тензор после нужного транспонирования всё равно не совпал по форме. Как должен поступить атомарный загрузчик?","options":["Загрузить все совпавшие тензоры, а этот пропустить","Обрезать тензор до нужной формы","Записать mismatch в отчёт и не изменить ни одного параметра","Отменить только транспонирование этого тензора"],"correct":2,"explanation":"Атомарность требует сначала проверить весь набор. Любое несовпадение формы отменяет весь проход присваиваний."},{"question":"После загрузки ты изменяешь один элемент tok_embed.weight. Что должно произойти с соответствующим элементом lm_head.weight при правильном weight tying?","options":["Он изменится сам, потому что оба имени указывают на общую память","Он останется прежним до следующей загрузки","Он изменится только после транспонирования","Он обнулится, потому что LM-головы нет в файле"],"correct":0,"explanation":"Weight tying связывает два параметра одним объектом памяти, поэтому отдельная копия для LM-головы не нужна."},{"question":"Промпт длиннее контекстного окна, а генератор должен добавить три токена. Какое поведение верно?","options":["Обрезать сохранённый промпт и вернуть только окно с тремя новыми токенами","На каждом шаге подавать доступный хвост, но вернуть весь промпт и ровно три новых токена","Остановиться без генерации из-за слишком длинного промпта","Добавить столько токенов, сколько помещается в окно"],"correct":1,"explanation":"Окно ограничивает вход модели на текущем шаге, а не итоговую последовательность; число новых токенов задаётся отдельно."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">Ты создаёшь карту имён для модели с нулём трансформерных блоков. Что должно в ней остаться?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Только глобальные параметры: эмбеддинги и финальная нормализация</button></li><li><button type="button" data-option="1">Соответствия для одного блока с индексом 0</button></li><li><button type="button" data-option="2">Пустой словарь, потому что слоёв нет</button></li><li><button type="button" data-option="3">Все соответствия, кроме токенных эмбеддингов</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">Один загружаемый тензор после нужного транспонирования всё равно не совпал по форме. Как должен поступить атомарный загрузчик?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Загрузить все совпавшие тензоры, а этот пропустить</button></li><li><button type="button" data-option="1">Обрезать тензор до нужной формы</button></li><li><button type="button" data-option="2">Записать mismatch в отчёт и не изменить ни одного параметра</button></li><li><button type="button" data-option="3">Отменить только транспонирование этого тензора</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="2">
+<p class="quiz-prompt">После загрузки ты изменяешь один элемент tok_embed.weight. Что должно произойти с соответствующим элементом lm_head.weight при правильном weight tying?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Он изменится сам, потому что оба имени указывают на общую память</button></li><li><button type="button" data-option="1">Он останется прежним до следующей загрузки</button></li><li><button type="button" data-option="2">Он изменится только после транспонирования</button></li><li><button type="button" data-option="3">Он обнулится, потому что LM-головы нет в файле</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="3">
+<p class="quiz-prompt">Промпт длиннее контекстного окна, а генератор должен добавить три токена. Какое поведение верно?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Обрезать сохранённый промпт и вернуть только окно с тремя новыми токенами</button></li><li><button type="button" data-option="1">На каждом шаге подавать доступный хвост, но вернуть весь промпт и ровно три новых токена</button></li><li><button type="button" data-option="2">Остановиться без генерации из-за слишком длинного промпта</button></li><li><button type="button" data-option="3">Добавить столько токенов, сколько помещается в окно</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/009-generate/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-done" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__37-loading-pretrained-weights/">Закончить урок</a>
+<a class="nav-button" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__38-classifier-finetuning/">Следующий урок: Classifier Finetuning →</a>
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__37-loading-pretrained-weights","stepId":"010-quiz","number":10,"plannedCount":10}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

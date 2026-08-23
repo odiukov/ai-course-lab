@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Диагностируем eval-пайплайн целиком — Eval Pipeline</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/">← Eval Pipeline</a>
+<span class="counter" data-counter>12 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/001-result-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем единый eval-пайплайн</span></a></li>
+<li><a class="toc-link" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Проверяем границы метрик</span></a></li>
+<li><a class="toc-link" data-step="003-token-f1" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/003-token-f1/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Считаем token F1 по мешку токенов</span></a></li>
+<li><a class="toc-link" data-step="004-judge-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/004-judge-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Превращаем сходство в детерминированный вердикт</span></a></li>
+<li><a class="toc-link" data-step="005-mock-judge" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/005-mock-judge/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Выдаём балл судьи от 1 до 5</span></a></li>
+<li><a class="toc-link" data-step="006-ppl-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/006-ppl-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Считаем вероятность только на целевых токенах</span></a></li>
+<li><a class="toc-link" data-step="007-perplexity" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/007-perplexity/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Измеряем perplexity без вклада паддинга</span></a></li>
+<li><a class="toc-link" data-step="008-em-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/008-em-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Отделяем генерацию от строгого совпадения</span></a></li>
+<li><a class="toc-link" data-step="009-exact-match" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/009-exact-match/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Агрегируем нормализованный exact-match</span></a></li>
+<li><a class="toc-link" data-step="010-aggregation-contract" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/010-aggregation-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Приводим разные шкалы к общему агрегату</span></a></li>
+<li><a class="toc-link" data-step="011-aggregate" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/011-aggregate/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Собираем взвешенный FinalReport</span></a></li>
+<li><a class="toc-link is-current" data-step="012-final-quiz" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/012-final-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Диагностируем eval-пайплайн целиком</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Диагностируем eval-пайплайн целиком</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Дальше тебе придётся не просто получать оценку модели, а объяснять её изменение. Здесь особенно легко споткнуться: принять общий балл за диагноз, смешать несовместимые шкалы или позволить паддингу и лишним токенам исказить расчёт. Опирайся на контракты из <a href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/006-ppl-contract/">шагов 6</a>–<a href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/011-aggregate/">11</a>: сначала проверяй корректность отдельных измерений, затем их нормализацию и веса, а после падения агрегата спускайся к конкретным примерам. Тогда число сообщает о проблеме, а отчёт помогает найти её источник.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь диспетчера большого здания. Общая лампа сообщает: где-то тревога. Табло этажей уточняет, что проблема на третьем, а датчик конкретной комнаты показывает дым возле кофемашины. Если оставить только лампу, ты узнаешь о сбое, но отправишь ремонтника искать его вслепую.</p>
+</blockquote></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"Модель добавила к правильному ответу вежливое пояснение. Нормализованный exact-match стал равен нулю, а token F1 остался высоким. Как это прочитать?","options":["Модель сохранила содержание, но нарушила требуемую форму ответа","Обе метрики показывают, что ответ полностью неверен","Token F1 обязательно посчитан с ошибкой","Perplexity модели стала выше"],"correct":0,"explanation":"Exact-match требует полного совпадения после нормализации, а token F1 допускает частичное совпадение состава токенов. Вместе они отделяют проблему формы от потери содержания."},{"question":"В батче короткие ответы дополнены паддингом до общей длины. Какие позиции должны влиять на perplexity?","options":["Все позиции батча, включая паддинг","Только первый токен каждого ответа","Только целевые позиции, не скрытые маской","Только позиции, где модель ошиблась"],"correct":2,"explanation":"Паддинг нужен лишь для выравнивания формы батча и не является частью ответа. Если включить его в расчёт, perplexity будет зависеть от искусственного заполнения."},{"question":"Ты сравниваешь вероятности только нескольких допустимых ответов. Как получить распределение именно между ними?","options":["Округлить их исходные вероятности до целых чисел","Выбрать самый длинный допустимый ответ","Добавить вероятности всех остальных токенов к первому варианту","Взять оценки допустимых токенов и нормализовать только внутри этого набора"],"correct":3,"explanation":"Так сумма вероятностей целевых вариантов станет равна единице, а посторонние токены не будут участвовать в сравнении."},{"question":"Итоговый балл снизился с 0,60 до 0,57. Что лучше сделать первым для диагностики?","options":["Сразу отменить новую версию модели","Посмотреть отдельные нормализованные метрики, затем примеры в просевшей части","Увеличить вес метрики с самым высоким значением","Оставить только итоговый балл и повторить прогон"],"correct":1,"explanation":"Агрегат показывает наличие изменения, но не его причину. Отдельные метрики локализуют тип регрессии, а разбивка по примерам показывает конкретные входы."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">Модель добавила к правильному ответу вежливое пояснение. Нормализованный exact-match стал равен нулю, а token F1 остался высоким. Как это прочитать?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Модель сохранила содержание, но нарушила требуемую форму ответа</button></li><li><button type="button" data-option="1">Обе метрики показывают, что ответ полностью неверен</button></li><li><button type="button" data-option="2">Token F1 обязательно посчитан с ошибкой</button></li><li><button type="button" data-option="3">Perplexity модели стала выше</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">В батче короткие ответы дополнены паддингом до общей длины. Какие позиции должны влиять на perplexity?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Все позиции батча, включая паддинг</button></li><li><button type="button" data-option="1">Только первый токен каждого ответа</button></li><li><button type="button" data-option="2">Только целевые позиции, не скрытые маской</button></li><li><button type="button" data-option="3">Только позиции, где модель ошиблась</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="2">
+<p class="quiz-prompt">Ты сравниваешь вероятности только нескольких допустимых ответов. Как получить распределение именно между ними?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Округлить их исходные вероятности до целых чисел</button></li><li><button type="button" data-option="1">Выбрать самый длинный допустимый ответ</button></li><li><button type="button" data-option="2">Добавить вероятности всех остальных токенов к первому варианту</button></li><li><button type="button" data-option="3">Взять оценки допустимых токенов и нормализовать только внутри этого набора</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="3">
+<p class="quiz-prompt">Итоговый балл снизился с 0,60 до 0,57. Что лучше сделать первым для диагностики?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Сразу отменить новую версию модели</button></li><li><button type="button" data-option="1">Посмотреть отдельные нормализованные метрики, затем примеры в просевшей части</button></li><li><button type="button" data-option="2">Увеличить вес метрики с самым высоким значением</button></li><li><button type="button" data-option="3">Оставить только итоговый балл и повторить прогон</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/011-aggregate/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-done" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__41-eval-pipeline/">Закончить урок</a>
+<a class="nav-button" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__42-large-corpus-downloader/">Следующий урок: Large Corpus Downloader →</a>
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__41-eval-pipeline","stepId":"012-final-quiz","number":12,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Фиксируем границы расписания — Cosine Lr Warmup</title>
+<link rel="icon" type="image/svg+xml" href="/ai-course-lab/assets/favicon.svg">
+<link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
+<link rel="stylesheet" href="/ai-course-lab/assets/site.css">
+</head>
+<body>
+<header class="step-header">
+<a class="back" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/">← Cosine Lr Warmup</a>
+<span class="counter" data-counter>2 / 12</span>
+</header>
+<div class="progress"><div class="progress-fill" data-progress-fill></div></div>
+<div class="lesson-layout">
+<div class="toc-drawer">
+<input type="checkbox" id="toc-toggle" class="toc-toggle">
+<label class="toc-summary" for="toc-toggle">Шаги урока</label>
+<nav class="toc" aria-label="Шаги урока"><ol>
+<li><a class="toc-link" data-step="001-result" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/001-result/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">1</span><span class="toc-title">Собираем наблюдаемый шов обучения</span></a></li>
+<li><a class="toc-link is-current" data-step="002-contract-check" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/002-contract-check/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">2</span><span class="toc-title">Фиксируем границы расписания</span></a></li>
+<li><a class="toc-link" data-step="003-schedule" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/003-schedule/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">3</span><span class="toc-title">Считаем learning rate напрямую из шага</span></a></li>
+<li><a class="toc-link" data-step="004-norm-contract" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/004-norm-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">4</span><span class="toc-title">Сводим все градиенты к одному сигналу</span></a></li>
+<li><a class="toc-link" data-step="005-grad-norm" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/005-grad-norm/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">5</span><span class="toc-title">Измеряем общую L2-норму градиента</span></a></li>
+<li><a class="toc-link" data-step="006-step-order" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/006-step-order/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">6</span><span class="toc-title">Закрепляем порядок одного обновления</span></a></li>
+<li><a class="toc-link" data-step="007-train-step" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/007-train-step/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">7</span><span class="toc-title">Проводим одно обновление через AdamW</span></a></li>
+<li><a class="toc-link" data-step="008-plot-contract" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/008-plot-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">8</span><span class="toc-title">Делаем форму кривой видимой в терминале</span></a></li>
+<li><a class="toc-link" data-step="009-ascii-plot" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/009-ascii-plot/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">9</span><span class="toc-title">Рисуем детерминированный ASCII-график</span></a></li>
+<li><a class="toc-link" data-step="010-csv-contract" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/010-csv-contract/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">10</span><span class="toc-title">Фиксируем расписание как долгоживущий артефакт</span></a></li>
+<li><a class="toc-link" data-step="011-schedule-csv" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/011-schedule-csv/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">11</span><span class="toc-title">Выгружаем полную кривую в CSV</span></a></li>
+<li><a class="toc-link" data-step="012-quiz" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/012-quiz/"><span class="toc-mark" aria-hidden="true"></span><span class="toc-number">12</span><span class="toc-title">Проверяем весь контракт</span></a></li>
+</ol></nav>
+</div>
+<main class="lesson">
+<article class="step">
+<h1 class="step-title">Фиксируем границы расписания</h1>
+<button type="button" class="return-button" data-return hidden></button>
+<div class="lesson-step-body prose prose-slate max-w-none dark:prose-invert"><p>Представь, что ты отмечаешь две крайние точки разогрева. При положительном <code>warmup_steps</code> первая стоит на шаге 0 и даёт нулевой learning rate, а последняя — на самом <code>warmup_steps</code> и даёт <code>lr_max</code>. Обе границы входят в участок разогрева.</p>
+<p>Особое внимание — значению <code>warmup_steps = 0</code>. Здесь участок не сжимается в формулу с делением на ноль: он исчезает. Поэтому уже на нулевом шаге расписание выдаёт <code>lr_max</code> и переходит к затуханию. Именно эта граница чаще всего ломается при реализации.</p>
+<blockquote>
+<p>🎒 <strong>На пальцах.</strong> Представь эскалатор с зоной плавного разгона между двумя метками. Обычно у первой метки скорость нулевая, у второй — полная. Но если метки совпали, разгонной зоны просто нет: ты сразу оказываешься на движущемся с полной скоростью эскалаторе. Делить длину исчезнувшей зоны ни на что не приходится.</p>
+</blockquote></div>
+
+<div class="quiz" data-quiz>
+<script type="application/json" data-quiz-answers>[{"question":"При warmup_steps = 2000 какие значения должны стоять на границах разогрева?","options":["На шаге 0 — lr_max, на шаге 2000 — 0","На шаге 0 — 0, на шаге 2000 — lr_max","На обеих границах — lr_max"],"correct":1,"explanation":"Разогрев начинается с нулевого learning rate и включительно доходит до lr_max на шаге warmup_steps."},{"question":"Что должно произойти на нулевом шаге при warmup_steps = 0?","options":["Расписание должно вернуть 0","Нужно пропустить нулевой шаг","Расписание должно вернуть lr_max и перейти к затуханию"],"correct":2,"explanation":"Нулевой разогрев означает отсутствие разогрева: расписание стартует с lr_max и не пытается делить на ноль."}]</script>
+<ol class="quiz-questions">
+<li class="quiz-question" data-question="0">
+<p class="quiz-prompt">При warmup_steps = 2000 какие значения должны стоять на границах разогрева?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">На шаге 0 — lr_max, на шаге 2000 — 0</button></li><li><button type="button" data-option="1">На шаге 0 — 0, на шаге 2000 — lr_max</button></li><li><button type="button" data-option="2">На обеих границах — lr_max</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+<li class="quiz-question" data-question="1">
+<p class="quiz-prompt">Что должно произойти на нулевом шаге при warmup_steps = 0?</p>
+<ul class="quiz-options"><li><button type="button" data-option="0">Расписание должно вернуть 0</button></li><li><button type="button" data-option="1">Нужно пропустить нулевой шаг</button></li><li><button type="button" data-option="2">Расписание должно вернуть lr_max и перейти к затуханию</button></li></ul>
+<p class="quiz-explanation" data-explanation hidden></p>
+</li>
+</ol>
+</div>
+
+</article>
+<nav class="step-nav">
+<a class="nav-button" href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/001-result/">Назад</a>
+<span class="step-nav-forward">
+<a class="nav-button is-primary" data-mark-read href="/ai-course-lab/lesson/19-capstone-projects__44-cosine-lr-warmup/003-schedule/">Дальше</a>
+
+</span>
+</nav>
+</main>
+</div>
+<script type="application/json" data-lesson>{"slug":"19-capstone-projects__44-cosine-lr-warmup","stepId":"002-contract-check","number":2,"plannedCount":12}</script>
+<script>
+(function () {
+
+var PREFIX = "course-progress:";
+
+function readProgress(slug) {
+  try {
+    var raw = localStorage.getItem(PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markRead(slug, stepId) {
+  var ids = readProgress(slug);
+  if (ids.indexOf(stepId) !== -1) return ids;
+  ids.push(stepId);
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(ids));
+  } catch (error) {
+    // Запись запрещена — прогресс просто не переживёт перезагрузку.
+  }
+  return ids;
+}
+
+function lessonData(selector) {
+  var node = document.querySelector(selector);
+  return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+
+var data = lessonData("[data-lesson]");
+if (!data) return;
+
+function paint(ids) {
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+
+  var counter = document.querySelector("[data-counter]");
+  if (counter) {
+    counter.textContent = data.number + " / " + data.plannedCount + " · прочитано " + ids.length;
+  }
+
+  var fill = document.querySelector("[data-progress-fill]");
+  if (fill) {
+    var share = data.plannedCount > 0 ? Math.round((ids.length / data.plannedCount) * 100) : 0;
+    fill.style.width = share + "%";
+  }
+
+  var links = document.querySelectorAll("[data-step]");
+  for (var j = 0; j < links.length; j += 1) {
+    links[j].classList.toggle("is-read", !!read[links[j].getAttribute("data-step")]);
+  }
+}
+
+paint(readProgress(data.slug));
+
+// Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
+// ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
+//
+// Раньше отметку ставил только клик по «Дальше», и у читателя, который ходил
+// по оглавлению, счётчик навсегда оставался на нуле. pagehide ловит уход
+// целиком, а клик по «Дальше» оставлен ради мгновенной отметки: счётчик и
+// полоска должны шевельнуться под пальцем, а не после перехода.
+var forward = document.querySelectorAll("[data-mark-read]");
+for (var k = 0; k < forward.length; k += 1) {
+  forward[k].addEventListener("click", function () {
+    paint(markRead(data.slug, data.stepId));
+  });
+}
+
+window.addEventListener("pagehide", function () {
+  markRead(data.slug, data.stepId);
+});
+
+// Возврат к шагу, из текста которого сюда пришли.
+//
+// Откуда пришли, знает только referrer: адрес страницы про это молчит.
+// Кнопка появляется, лишь если это был ДРУГОЙ шаг этого же урока и не сосед
+// по чтению — с соседа сюда ведёт обычное «Дальше»/«Назад», и предлагать
+// вернуться незачем. Уводит history.back(), чтобы попасть ровно в тот абзац,
+// а не в начало шага.
+(function () {
+  var button = document.querySelector("[data-return]");
+  if (!button || !document.referrer) return;
+
+  var from;
+  try {
+    from = new URL(document.referrer);
+  } catch (error) {
+    return;
+  }
+  if (from.host !== window.location.host) return;
+
+  var here = window.location.pathname.replace(/\/+$/, "").split("/");
+  var there = from.pathname.replace(/\/+$/, "").split("/");
+  var currentId = here.pop();
+  var fromId = there.pop();
+  if (!fromId || fromId === currentId) return;
+  // Тот же урок: путь до последнего сегмента должен совпасть.
+  if (here.join("/") !== there.join("/")) return;
+
+  var link = document.querySelector('[data-step="' + fromId + '"]');
+  if (!link) return;
+
+  var index = -1;
+  var links = document.querySelectorAll("[data-step]");
+  var currentIndex = -1;
+  for (var i = 0; i < links.length; i += 1) {
+    if (links[i] === link) index = i;
+    if (links[i].getAttribute("data-step") === currentId) currentIndex = i;
+  }
+  if (index === -1 || Math.abs(index - currentIndex) === 1) return;
+
+  var number = link.querySelector(".toc-number");
+  button.textContent = "← Вернуться к шагу " + (number ? number.textContent : "");
+  button.hidden = false;
+  button.addEventListener("click", function () {
+    window.history.back();
+  });
+})();
+})();
+</script>
+<script>
+document.querySelectorAll("[data-quiz]").forEach(function (root) {
+  var source = root.querySelector("[data-quiz-answers]");
+  if (!source) return;
+  var answers = JSON.parse(source.textContent || "[]");
+
+  root.querySelectorAll("[data-question]").forEach(function (question) {
+    var answer = answers[Number(question.getAttribute("data-question"))];
+    if (!answer) return;
+    var explanation = question.querySelector("[data-explanation]");
+
+    question.querySelectorAll("[data-option]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var chosen = Number(button.getAttribute("data-option"));
+        question.querySelectorAll("[data-option]").forEach(function (other) {
+          other.classList.remove("is-chosen", "is-wrong");
+          if (Number(other.getAttribute("data-option")) === answer.correct) {
+            other.classList.add("is-correct");
+          }
+        });
+        button.classList.add(chosen === answer.correct ? "is-chosen" : "is-wrong");
+        if (explanation && answer.explanation) {
+          explanation.textContent = answer.explanation;
+          explanation.hidden = false;
+        }
+      });
+    });
+  });
+});
+</script>
+<script>
+window.addEventListener("message", function (event) {
+  var data = event.data;
+  if (!data || data.type !== "lab-visual-height") return;
+  var value = Number(data.height);
+  if (!isFinite(value)) return;
+
+  var frames = document.querySelectorAll("iframe[data-visual]");
+  for (var i = 0; i < frames.length; i += 1) {
+    if (frames[i].contentWindow !== event.source) continue;
+    frames[i].style.height = Math.min(Math.max(Math.ceil(value), 160), 5200) + "px";
+    return;
+  }
+});
+</script>
+</body>
+</html>
