@@ -558,4 +558,35 @@ describe("состояние шага", () => {
     wrong.click();
     expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("passed");
   });
+
+  it("не считает шаг сданным, если верный ответ пережил переклик неверным на другом вопросе", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [
+            { question: "Раз?", options: ["Да", "Нет"], correct: 0 },
+            { question: "Два?", options: ["Да", "Нет"], correct: 1 },
+          ],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const questions = [...window.document.querySelectorAll("[data-question]")];
+    // Q1: сначала верно, затем переклик неверным вариантом.
+    (questions[0].querySelectorAll("[data-option]")[0] as unknown as HTMLElement).click();
+    (questions[0].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+    // Q2: верно — но Q1 сейчас показывает неверный вариант, шаг не сдан.
+    (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).not.toBe("passed");
+  });
 });

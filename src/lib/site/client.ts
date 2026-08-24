@@ -849,6 +849,10 @@ document.querySelectorAll("[data-quiz]").forEach(function (root) {
             markState(lesson.slug, lesson.stepId, "passed");
           }
         } else {
+          // Вопрос мог уже засчитаться верным раньше — переклик неверным
+          // вариантом должен снять эту засечку, иначе следующий верный ответ
+          // на другой вопрос ошибочно и необратимо сдаст весь шаг.
+          delete correct[index];
           markState(lesson.slug, lesson.stepId, "failed");
         }
       });
