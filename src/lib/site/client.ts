@@ -831,17 +831,25 @@ export const CATALOG_SCRIPT = `
 (function () {
 ${STORE}
 
-var rows = document.querySelectorAll("[data-lesson-slug]");
-for (var i = 0; i < rows.length; i += 1) {
-  var slug = rows[i].getAttribute("data-lesson-slug");
-  var count = readProgress(slug).length;
-  if (count === 0) continue;
+function paint() {
+  var rows = document.querySelectorAll("[data-lesson-slug]");
+  for (var i = 0; i < rows.length; i += 1) {
+    var slug = rows[i].getAttribute("data-lesson-slug");
+    var count = readProgress(slug).length;
+    if (count === 0) continue;
 
-  var target = rows[i].querySelector("[data-read]");
-  if (!target) continue;
-  target.textContent = "прочитано " + count;
-  target.hidden = false;
+    var target = rows[i].querySelector("[data-read]");
+    if (!target) continue;
+    target.textContent = "прочитано " + count;
+    target.hidden = false;
+  }
 }
+
+paint();
+
+// Каталог — первая страница, на которую возвращаются: прогресс с другого
+// устройства должен проступить на ней сам, без перезагрузки.
+window.addEventListener("course-sync-progress", paint);
 })();
 `;
 

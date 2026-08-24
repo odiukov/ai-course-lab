@@ -548,27 +548,46 @@ describe("оглавление урока", () => {
 });
 
 describe("каталог", () => {
-  it("показывает прочитанное у тех уроков, где что-то прочитано", () => {
-    const window = open(
-      renderIndexPage(
-        [
-          {
-            number: 1,
-            title: "Фаза",
-            lessons: [
-              { slug: "lesson-a", title: "Урок", number: 1, writtenCount: 3, plannedCount: 3 },
-              { slug: "lesson-b", title: "Другой", number: 2, writtenCount: 3, plannedCount: 3 },
-            ],
-          },
-        ],
-        { basePath: "/base" },
-      ),
-      ["001-a", "002-b"],
-    );
+  const phases = [
+    {
+      number: 1,
+      title: "Фаза",
+      lessons: [
+        { slug: "lesson-a", title: "Урок", number: 1, writtenCount: 3, plannedCount: 3 },
+        { slug: "lesson-b", title: "Другой", number: 2, writtenCount: 3, plannedCount: 3 },
+      ],
+    },
+  ];
 
-    const read = [...window.document.querySelectorAll("[data-read]")] as unknown as HTMLElement[];
+  /** Строки «прочитано N» в порядке уроков каталога. */
+  function counts(window: Window): HTMLElement[] {
+    return [...window.document.querySelectorAll("[data-read]")] as unknown as HTMLElement[];
+  }
+
+  it("показывает прочитанное у тех уроков, где что-то прочитано", () => {
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), ["001-a", "002-b"]);
+
+    const read = counts(window);
     expect(read[0].textContent).toBe("прочитано 2");
     expect(read[1].hidden).toBe(true);
+  });
+
+  it("перерисовывает каталог по приехавшему из облака прогрессу", () => {
+    // Каталог — первая страница, на которую возвращаются: прогресс со второго
+    // устройства должен проступить на ней без перезагрузки.
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), ["001-a"]);
+    window.localStorage.setItem(key, JSON.stringify(["001-a", "002-b", "003-c"]));
+    window.localStorage.setItem(
+      `${PROGRESS_KEY_PREFIX}lesson-b`,
+      JSON.stringify(["001-a"]),
+    );
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    const read = counts(window);
+    expect(read[0].textContent).toBe("прочитано 3");
+    expect(read[1].textContent).toBe("прочитано 1");
+    expect(read[1].hidden).toBe(false);
   });
 });
 
