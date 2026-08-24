@@ -508,6 +508,40 @@ describe("практика", () => {
     expect(area.value).toBe(before);
     expect(pick(window, "[data-sync-notice]").hidden).toBe(true);
   });
+
+  it("не открывает файл, в котором функции шага нет, и не теряет правки после него", async () => {
+    // Такой файл попал бы в редактор целиком, save() не нашёл бы в нём места
+    // для правки — и каждое нажатие клавиши уходило бы в никуда.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { content: template.replace("def magnitude(v):", "def magnitudee(v):") });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+
+    area.value = "def magnitude(v):\n    return 7";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    expect(window.localStorage.getItem(`course-exercise:${panel.slug}`)).toContain("return 7");
+  });
+
+  it("оставляет тронутому редактору действенную подсказку, а не плашку про копию", async () => {
+    // Про отложенную копию человеку сообщать нечего: на экране его код, и
+    // единственное, что ему сейчас нужно, — знать, что в аккаунте лежит другой.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitude(v):\n    return 1";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+    sendFile(window, { backup: true });
+
+    expect(area.value).toBe("def magnitude(v):\n    return 1");
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+  });
 });
 
 describe("оглавление урока", () => {

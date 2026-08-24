@@ -130,29 +130,13 @@ async function syncNow(user: string): Promise<{ steps: number; files: number; ba
   const local = readLocalProgress(snapshot(), new Date().toISOString());
   const plan = planMigration(local, cloud);
 
-  if (plan.steps.length > 0) {
-    await client.from("step_progress").upsert(
-      plan.steps.map((row) => ({
-        user_id: user,
-        lesson_slug: row.lessonSlug,
-        step_id: row.stepId,
-        state: row.state,
-        updated_at: row.updatedAt,
-      })),
-    );
-  }
-  if (plan.files.length > 0) {
-    await client.from("exercise_files").upsert(
-      plan.files.map((row) => ({
-        user_id: user,
-        slug: row.slug,
-        file_name: row.fileName,
-        content: row.content,
-        updated_at: row.updatedAt ?? new Date().toISOString(),
-      })),
-    );
-  }
-
+  // Запись обратно идёт до отправки, а не после.
+  //
+  // План посчитан по снимку, снятому строкой выше, и ждать двух обращений к
+  // сети с ним на руках нельзя: клик по «Дальше» или зелёный прогон, попавшие
+  // в это окно, пишут localStorage сами — и запись целого
+  // «course-progress:<урок>» из устаревшего снимка стёрла бы их. Отправка от
+  // локальной записи не зависит вовсе.
   write(plan.writes);
   // Страница уже отрисована по тому, что лежало в localStorage до слияния.
   // Событиями ей сообщается, что данные под ней поменялись: сама она об этом
@@ -176,6 +160,30 @@ async function syncNow(user: string): Promise<{ steps: number; files: number; ba
       }),
     );
   }
+
+  if (plan.steps.length > 0) {
+    await client.from("step_progress").upsert(
+      plan.steps.map((row) => ({
+        user_id: user,
+        lesson_slug: row.lessonSlug,
+        step_id: row.stepId,
+        state: row.state,
+        updated_at: row.updatedAt,
+      })),
+    );
+  }
+  if (plan.files.length > 0) {
+    await client.from("exercise_files").upsert(
+      plan.files.map((row) => ({
+        user_id: user,
+        slug: row.slug,
+        file_name: row.fileName,
+        content: row.content,
+        updated_at: row.updatedAt ?? new Date().toISOString(),
+      })),
+    );
+  }
+
   return { steps: plan.steps.length, files: plan.files.length, backups: plan.backups };
 }
 
