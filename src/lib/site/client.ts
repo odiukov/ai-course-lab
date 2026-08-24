@@ -1,7 +1,8 @@
 import { HEIGHT_MESSAGE } from "../api/visual-height";
+import { PROGRESS_KEY_PREFIX } from "./storage-keys";
 
-/** Префикс ключа localStorage: на каждый урок свой список прочитанных шагов. */
-export const PROGRESS_KEY_PREFIX = "course-progress:";
+// Реэкспорт ради тестов страниц, которые собирают ключ сами.
+export { PROGRESS_KEY_PREFIX };
 
 /**
  * Общая для всех страниц работа с прогрессом.
