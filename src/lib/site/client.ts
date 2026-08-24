@@ -1,5 +1,5 @@
 import { HEIGHT_MESSAGE } from "../api/visual-height";
-import { PROGRESS_KEY_PREFIX } from "./storage-keys";
+import { PROGRESS_KEY_PREFIX, STEP_STATE_KEY_PREFIX, UPDATED_AT_SUFFIX } from "./storage-keys";
 
 // Реэкспорт ради тестов страниц, которые собирают ключ сами.
 export { PROGRESS_KEY_PREFIX };
@@ -42,6 +42,38 @@ function markRead(slug, stepId) {
 function lessonData(selector) {
   var node = document.querySelector(selector);
   return node ? JSON.parse(node.textContent || "{}") : null;
+}
+
+var STATE_PREFIX = ${JSON.stringify(STEP_STATE_KEY_PREFIX)};
+
+function readStates(slug) {
+  try {
+    var raw = localStorage.getItem(STATE_PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * Состояние практики шага.
+ *
+ * passed не сбрасывается ничем: красный прогон после зелёного означает, что
+ * человек полез что-то менять в уже сданном шаге, а не что шаг разучился.
+ */
+function markState(slug, stepId, state) {
+  var rank = { read: 1, failed: 1, passed: 2 };
+  var states = readStates(slug);
+  if ((rank[states[stepId]] || 0) > (rank[state] || 0)) return states;
+  states[stepId] = state;
+  try {
+    localStorage.setItem(STATE_PREFIX + slug, JSON.stringify(states));
+  } catch (error) {
+    // Приватное окно: состояние не переживёт перезагрузку.
+  }
+  if (window.CourseSync) window.CourseSync.putStep(slug, stepId, state);
+  return states;
 }
 `;
 
@@ -203,6 +235,10 @@ if (resume) {
  */
 export const EXERCISE_SCRIPT = `
 (function () {
+${STORE}
+
+var lesson = lessonData("[data-lesson]");
+
   var node = document.querySelector("[data-exercise]");
   if (!node) return;
   var data = JSON.parse(node.textContent || "{}");
@@ -453,9 +489,11 @@ export const EXERCISE_SCRIPT = `
     }
     try {
       localStorage.setItem(storageKey, full);
+      localStorage.setItem(storageKey + ${JSON.stringify(UPDATED_AT_SUFFIX)}, new Date().toISOString());
     } catch (error) {
       // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
     }
+    if (window.CourseSync) window.CourseSync.putFile(data.slug, activeFile, full);
   }
 
   function setCode(text) {
@@ -660,6 +698,13 @@ export const EXERCISE_SCRIPT = `
       passed + " из " + total + " зелёные" +
       (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
     status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    if (lesson && total > 0) {
+      var verdict = passed === total ? "passed" : "failed";
+      markState(lesson.slug, lesson.stepId, verdict);
+      if (window.CourseSync) {
+        window.CourseSync.putRun(lesson.slug, lesson.stepId, passed, total - passed);
+      }
+    }
     results.appendChild(list);
   }
 
@@ -760,16 +805,26 @@ for (var i = 0; i < rows.length; i += 1) {
  * Проверка ответов в браузере.
  *
  * Верный вариант лежит рядом в JSON: сервера у статики нет, прятать ответ не
- * от кого и незачем. Ничего не сохраняется — в прогресс идут только шаги.
+ * от кого и незачем. Шаг считается сданным, когда верно отвечены все вопросы
+ * блока — состояние идёт в то же хранилище, что и прогон тестов упражнения.
  */
 export const QUIZ_SCRIPT = `
+(function () {
+${STORE}
+
+var lesson = lessonData("[data-lesson]");
+
 document.querySelectorAll("[data-quiz]").forEach(function (root) {
   var source = root.querySelector("[data-quiz-answers]");
   if (!source) return;
   var answers = JSON.parse(source.textContent || "[]");
+  // Шаг сдан, когда верно отвечены все вопросы блока, а не первый попавшийся.
+  var correct = {};
+  var total = root.querySelectorAll("[data-question]").length;
 
   root.querySelectorAll("[data-question]").forEach(function (question) {
-    var answer = answers[Number(question.getAttribute("data-question"))];
+    var index = Number(question.getAttribute("data-question"));
+    var answer = answers[index];
     if (!answer) return;
     var explanation = question.querySelector("[data-explanation]");
 
@@ -787,10 +842,20 @@ document.querySelectorAll("[data-quiz]").forEach(function (root) {
           explanation.textContent = answer.explanation;
           explanation.hidden = false;
         }
+        if (!lesson) return;
+        if (chosen === answer.correct) {
+          correct[index] = true;
+          if (Object.keys(correct).length === total) {
+            markState(lesson.slug, lesson.stepId, "passed");
+          }
+        } else {
+          markState(lesson.slug, lesson.stepId, "failed");
+        }
       });
     });
   });
 });
+})();
 `;
 
 /**

@@ -479,3 +479,83 @@ describe("каталог", () => {
     expect(read[1].hidden).toBe(true);
   });
 });
+
+describe("состояние шага", () => {
+  const stateKey = "course-step-state:lesson-a";
+
+  it("отмечает шаг сданным, когда все вопросы отвечены верно", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [
+            { question: "Раз?", options: ["Да", "Нет"], correct: 0 },
+            { question: "Два?", options: ["Да", "Нет"], correct: 1 },
+          ],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const questions = [...window.document.querySelectorAll("[data-question]")];
+    (questions[0].querySelectorAll("[data-option]")[0] as unknown as HTMLElement).click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBeUndefined();
+
+    (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("passed");
+  });
+
+  it("отмечает шаг проваленным на неверном ответе", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [{ question: "Раз?", options: ["Да", "Нет"], correct: 0 }],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
+    wrong.click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("failed");
+  });
+
+  it("не сбрасывает сданный шаг последующим неверным ответом", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [{ question: "Раз?", options: ["Да", "Нет"], correct: 0 }],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+    window.localStorage.setItem(stateKey, JSON.stringify({ "002-b": "passed" }));
+
+    const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
+    wrong.click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("passed");
+  });
+});

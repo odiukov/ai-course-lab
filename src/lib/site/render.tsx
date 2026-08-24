@@ -197,6 +197,7 @@ ${solution}
 <pre class="console-output" data-console></pre>
 </section>
 <pre class="solution" data-solution hidden></pre>
+<p class="practice-notice" data-sync-notice hidden></p>
 <script type="application/json" data-exercise>${payload}</script>
 </section>`;
 }
