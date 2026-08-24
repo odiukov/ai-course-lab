@@ -39,7 +39,7 @@ describe("склейка файла упражнения", () => {
           urls: { template: "/t.py", test: "/x.py", solution: null },
         },
       });
-      window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+      window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
       for (const script of [...window.document.body.querySelectorAll("script")]) {
         if (script.getAttribute("type") === "application/json") continue;
         window.eval(script.textContent ?? "");

@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 import type { Step, StepMeta } from "../content/step-file";
 import { PROGRESS_KEY_PREFIX } from "./client";
 import { buildLessonModel } from "./lesson-page";
-import { renderIndexPage, renderLessonIndexPage, renderStepPage } from "./render";
+import {
+  renderAuthPage,
+  renderIndexPage,
+  renderLessonIndexPage,
+  renderStepPage,
+} from "./render";
 
 const plan: StepMeta[] = [
   { id: "001-a", type: "theory", title: "Первый" },
@@ -45,7 +50,7 @@ function open(html: string, progress: string[] = []): Window {
 
   if (progress.length > 0) window.localStorage.setItem(key, JSON.stringify(progress));
 
-  document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+  document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
   for (const script of [...document.body.querySelectorAll("script")]) {
     if (script.getAttribute("type") === "application/json") continue;
     window.eval(script.textContent ?? "");
@@ -62,7 +67,7 @@ function openFrom(html: string, current: string, from: string): Window {
     configurable: true,
   });
 
-  window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+  window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
   for (const script of [...window.document.body.querySelectorAll("script")]) {
     if (script.getAttribute("type") === "application/json") continue;
     window.eval(script.textContent ?? "");
@@ -159,6 +164,20 @@ describe("страница шага", () => {
 
     expect(stored(window)).toEqual(["003-c"]);
   });
+
+  it("перерисовывает прогресс, приехавший из облака после отрисовки", () => {
+    // Слияние с облаком асинхронно и заканчивается уже после того, как
+    // страница нарисована: без события счётчик до перезагрузки врёт.
+    const window = open(renderStepPage(model, 1, { basePath: "/base" }));
+    window.localStorage.setItem(key, JSON.stringify(["001-a", "003-c"]));
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    expect(window.document.querySelector("[data-counter]")?.textContent).toBe(
+      "2 / 3 · прочитано 2",
+    );
+    expect(window.document.querySelector('[data-step="003-c"]')?.className).toContain("is-read");
+  });
 });
 
 describe("практика", () => {
@@ -208,7 +227,7 @@ describe("практика", () => {
       ({ ok: true, text: async () => template })) as unknown as typeof window.fetch;
 
     const html = renderStepPage(exerciseModel, 0, { basePath: "/base", exercise: panel });
-    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
     for (const script of [...window.document.body.querySelectorAll("script")]) {
       if (script.getAttribute("type") === "application/json") continue;
       window.eval(script.textContent ?? "");
@@ -289,7 +308,7 @@ describe("практика", () => {
     window.fetch = (async () =>
       ({ ok: true, text: async () => source })) as unknown as typeof window.fetch;
     const html = renderStepPage(methodModel, 0, { basePath: "/base", exercise: methodPanel });
-    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
     for (const script of [...window.document.body.querySelectorAll("script")]) {
       if (script.getAttribute("type") === "application/json") continue;
       window.eval(script.textContent ?? "");
@@ -431,6 +450,98 @@ describe("практика", () => {
     expect(saved).not.toContain("def mag_nitude");
     expect(window.localStorage.getItem(`course-exercise:${panel.slug}:recovery`)).toBe(broken);
   });
+
+  /** Событие о файле, приехавшем из аккаунта после отрисовки страницы. */
+  function sendFile(window: Window, detail: Record<string, unknown>): void {
+    window.dispatchEvent(
+      new window.CustomEvent("course-sync-file", {
+        detail: { slug: panel.slug, fileName: "exercise.py", backup: false, ...detail },
+      }),
+    );
+  }
+
+  it("показывает код, приехавший из аккаунта, в нетронутом редакторе", async () => {
+    const window = await openPractice();
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+
+    expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toBe(
+      "def magnitude(v):\n    return 5",
+    );
+    expect(pick(window, "[data-sync-notice]").hidden).toBe(false);
+  });
+
+  it("не подменяет код под пальцами: тронутый редактор получает плашку", async () => {
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitude(v):\n    return 1";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+
+    expect(area.value).toBe("def magnitude(v):\n    return 1");
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+  });
+
+  it("сообщает об отложенной копии, а не подменяет текст", async () => {
+    // У события про копию содержимого нет вовсе: облачный текст приехал
+    // отдельным событием, а это — только объяснение, куда делся локальный.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { backup: true });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("local-копия");
+  });
+
+  it("не реагирует на файл чужого упражнения", async () => {
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { slug: "p01-l02-other", content: "def magnitude(v):\n    return 5" });
+    sendFile(window, { fileName: "main.py", content: "def magnitude(v):\n    return 5" });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").hidden).toBe(true);
+  });
+
+  it("не открывает файл, в котором функции шага нет, и не теряет правки после него", async () => {
+    // Такой файл попал бы в редактор целиком, save() не нашёл бы в нём места
+    // для правки — и каждое нажатие клавиши уходило бы в никуда.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { content: template.replace("def magnitude(v):", "def magnitudee(v):") });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+
+    area.value = "def magnitude(v):\n    return 7";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    expect(window.localStorage.getItem(`course-exercise:${panel.slug}`)).toContain("return 7");
+  });
+
+  it("оставляет тронутому редактору действенную подсказку, а не плашку про копию", async () => {
+    // Про отложенную копию человеку сообщать нечего: на экране его код, и
+    // единственное, что ему сейчас нужно, — знать, что в аккаунте лежит другой.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitude(v):\n    return 1";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+    sendFile(window, { backup: true });
+
+    expect(area.value).toBe("def magnitude(v):\n    return 1");
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+  });
 });
 
 describe("оглавление урока", () => {
@@ -453,29 +564,311 @@ describe("оглавление урока", () => {
     expect(resume.getAttribute("href")).toBe("/base/lesson/lesson-a/001-a/");
     expect(resume.textContent).toBe("Начать урок");
   });
+
+  it("перерисовывает оглавление по приехавшему из облака прогрессу", () => {
+    const window = open(renderLessonIndexPage(model, { basePath: "/base" }));
+    window.localStorage.setItem(key, JSON.stringify(["001-a"]));
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    expect(window.document.querySelector("[data-read-count]")?.textContent).toBe(
+      "прочитано 1 из 3",
+    );
+    expect(window.document.querySelector('[data-step="001-a"]')?.className).toContain("is-read");
+    expect(pick(window, "[data-resume]").getAttribute("href")).toBe(
+      "/base/lesson/lesson-a/002-b/",
+    );
+  });
 });
 
 describe("каталог", () => {
-  it("показывает прочитанное у тех уроков, где что-то прочитано", () => {
-    const window = open(
-      renderIndexPage(
-        [
-          {
-            number: 1,
-            title: "Фаза",
-            lessons: [
-              { slug: "lesson-a", title: "Урок", number: 1, writtenCount: 3, plannedCount: 3 },
-              { slug: "lesson-b", title: "Другой", number: 2, writtenCount: 3, plannedCount: 3 },
-            ],
-          },
-        ],
-        { basePath: "/base" },
-      ),
-      ["001-a", "002-b"],
-    );
+  const phases = [
+    {
+      number: 1,
+      title: "Фаза",
+      lessons: [
+        { slug: "lesson-a", title: "Урок", number: 1, writtenCount: 3, plannedCount: 3 },
+        { slug: "lesson-b", title: "Другой", number: 2, writtenCount: 3, plannedCount: 3 },
+      ],
+    },
+  ];
 
-    const read = [...window.document.querySelectorAll("[data-read]")] as unknown as HTMLElement[];
+  /** Строки «прочитано N» в порядке уроков каталога. */
+  function counts(window: Window): HTMLElement[] {
+    return [...window.document.querySelectorAll("[data-read]")] as unknown as HTMLElement[];
+  }
+
+  it("показывает прочитанное у тех уроков, где что-то прочитано", () => {
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), ["001-a", "002-b"]);
+
+    const read = counts(window);
     expect(read[0].textContent).toBe("прочитано 2");
     expect(read[1].hidden).toBe(true);
+  });
+
+  it("перерисовывает каталог по приехавшему из облака прогрессу", () => {
+    // Каталог — первая страница, на которую возвращаются: прогресс со второго
+    // устройства должен проступить на ней без перезагрузки.
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), ["001-a"]);
+    window.localStorage.setItem(key, JSON.stringify(["001-a", "002-b", "003-c"]));
+    window.localStorage.setItem(
+      `${PROGRESS_KEY_PREFIX}lesson-b`,
+      JSON.stringify(["001-a"]),
+    );
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    const read = counts(window);
+    expect(read[0].textContent).toBe("прочитано 3");
+    expect(read[1].textContent).toBe("прочитано 1");
+    expect(read[1].hidden).toBe(false);
+  });
+});
+
+describe("состояние шага", () => {
+  const stateKey = "course-step-state:lesson-a";
+
+  it("отмечает шаг сданным, когда все вопросы отвечены верно", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [
+            { question: "Раз?", options: ["Да", "Нет"], correct: 0 },
+            { question: "Два?", options: ["Да", "Нет"], correct: 1 },
+          ],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const questions = [...window.document.querySelectorAll("[data-question]")];
+    (questions[0].querySelectorAll("[data-option]")[0] as unknown as HTMLElement).click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBeUndefined();
+
+    (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+    const entry = JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"];
+    expect(entry.state).toBe("passed");
+    // Время изменения пишется рядом с состоянием: без него слияние с облаком
+    // подставляло бы время открытия страницы и выигрывало бы каждую ничью.
+    expect(Number.isNaN(Date.parse(entry.updatedAt))).toBe(false);
+  });
+
+  it("отмечает шаг проваленным на неверном ответе", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [{ question: "Раз?", options: ["Да", "Нет"], correct: 0 }],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
+    wrong.click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"].state).toBe("failed");
+  });
+
+  it("не сбрасывает сданный шаг последующим неверным ответом", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [{ question: "Раз?", options: ["Да", "Нет"], correct: 0 }],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+    // Голая строка вместо записи — форма ключа первых дней: она могла остаться
+    // в браузере разработчика, и понижать сданный шаг из-за неё нельзя.
+    window.localStorage.setItem(stateKey, JSON.stringify({ "002-b": "passed" }));
+
+    const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
+    wrong.click();
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("passed");
+  });
+
+  it("не считает шаг сданным, если верный ответ пережил переклик неверным на другом вопросе", () => {
+    const withQuiz = buildLessonModel({
+      slug: "lesson-a",
+      title: "Урок",
+      steps: plan,
+      written: {
+        ...written,
+        "002-b": {
+          ...written["002-b"],
+          check: [
+            { question: "Раз?", options: ["Да", "Нет"], correct: 0 },
+            { question: "Два?", options: ["Да", "Нет"], correct: 1 },
+          ],
+        } as Step,
+      },
+      visualHrefByStepId: {},
+    });
+
+    const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
+    const window = open(html);
+
+    const questions = [...window.document.querySelectorAll("[data-question]")];
+    // Q1: сначала верно, затем переклик неверным вариантом.
+    (questions[0].querySelectorAll("[data-option]")[0] as unknown as HTMLElement).click();
+    (questions[0].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+    // Q2: верно — но Q1 сейчас показывает неверный вариант, шаг не сдан.
+    (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
+
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).not.toBe("passed");
+  });
+});
+
+/**
+ * Страница возврата после входа.
+ *
+ * Адрес возврата — единственное место на сайте, где путь перехода приходит
+ * снаружи: его подставляет тот, кто прислал ссылку. Поэтому проверяется в
+ * первую очередь то, что уйти по ней можно только внутрь самого сайта.
+ */
+describe("AUTH_PAGE_SCRIPT", () => {
+  /**
+   * Открывает `/auth/?next=...` и отдаёт то, что скрипт сделал по итогу входа.
+   *
+   * `ahead` — бандл входа успел закончить работу до того, как скрипт страницы
+   * подписался: итог лежит в window.CourseSyncReady, а событие уже пролетело.
+   */
+  function openAuth(
+    next: string | null,
+    detail: Record<string, unknown>,
+    basePath = "/base",
+    ahead = false,
+  ) {
+    const search = next === null ? "" : `?next=${encodeURIComponent(next)}`;
+    const window = new Window({ url: `https://example.test${basePath}/auth/${search}` });
+    const html = renderAuthPage({ basePath });
+
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.setAttribute("data-base", basePath);
+
+    // Переход выполняется отложенно; ждать секунду в тесте незачем, поэтому
+    // таймер срабатывает сразу, а сам переход только записывается.
+    const replaced: string[] = [];
+    Object.defineProperty(window, "setTimeout", {
+      value: (fn: () => void) => {
+        fn();
+        return 0;
+      },
+      configurable: true,
+    });
+    Object.defineProperty(window.location, "replace", {
+      value: (url: string) => replaced.push(url),
+      configurable: true,
+    });
+
+    if (ahead) (window as unknown as { CourseSyncReady?: unknown }).CourseSyncReady = detail;
+
+    for (const script of [...window.document.body.querySelectorAll("script")]) {
+      if (script.getAttribute("type") === "application/json") continue;
+      window.eval(script.textContent ?? "");
+    }
+    if (!ahead) window.dispatchEvent(new window.CustomEvent("course-sync-ready", { detail }));
+
+    return {
+      replaced,
+      status: window.document.querySelector("[data-auth-status]")?.textContent ?? "",
+    };
+  }
+
+  const signedIn = { user: "u-1", migrated: false };
+
+  it("забирает итог, когда бандл входа закончил раньше подписки на событие", () => {
+    // Бандл грузится блокирующим тегом и в принципе может закончить работу до
+    // того, как этот скрипт вообще выполнится. Раньше страница в таком случае
+    // навсегда осталась бы на «Проверяю вход…».
+    const page = openAuth("/base/lesson/lesson-a/002-b/", signedIn, "/base", true);
+    expect(page.status).toBe("Вход выполнен.");
+    expect(page.replaced).toEqual(["/base/lesson/lesson-a/002-b/"]);
+  });
+
+  it("returns to the page the reader came from", () => {
+    expect(openAuth("/base/lesson/lesson-a/002-b/", signedIn).replaced).toEqual([
+      "/base/lesson/lesson-a/002-b/",
+    ]);
+  });
+
+  it("falls back to the course root without a next", () => {
+    expect(openAuth(null, signedIn).replaced).toEqual(["/base/"]);
+  });
+
+  // Чужой адрес целиком, адрес без схемы, обратная косая, которую браузер
+  // выпрямит в такой же адрес без схемы, и путь вне базового.
+  it.each([["https://evil.test/"], ["//evil.test/"], ["/\\evil.test/"], ["/other/page/"]])(
+    "refuses to redirect off the site: %s",
+    (next) => {
+      expect(openAuth(next, signedIn).replaced).toEqual(["/base/"]);
+    },
+  );
+
+  // На своём домене базового пути нет, и проверка «внутри базового» ничего не
+  // ловит — остаётся одна сверка адреса с адресом самой страницы. Здесь всё,
+  // что выглядит путём, но разбирается в чужой сайт: обратная косая, которую
+  // разбор выпрямляет, и табуляция с переводами строк, которые он выбрасывает
+  // до разбора, оставляя те же две косые подряд.
+  it.each([
+    ["//evil.test/"],
+    ["/\\evil.test/"],
+    ["/\\/evil.test/"],
+    ["/\t/evil.test/"],
+    ["/\n/evil.test/"],
+    ["/\r/evil.test/"],
+  ])("refuses to redirect off a site published without a base path: %j", (next) => {
+    expect(openAuth(next, signedIn, "").replaced).toEqual(["/"]);
+  });
+
+  it("reports the outcome of the first merge", () => {
+    const page = openAuth("/base/", {
+      user: "u-1",
+      migrated: true,
+      steps: 12,
+      files: 3,
+      backups: 1,
+    });
+
+    expect(page.status).toContain("шагов 12");
+    expect(page.status).toContain("файлов 3");
+    expect(page.status).toContain("отложено копий кода 1");
+  });
+
+  it("does not pretend the merge succeeded when it failed", () => {
+    const page = openAuth("/base/", { user: "u-1", migrated: false, error: "Failed to fetch" });
+
+    expect(page.status).toContain("влить не удалось");
+    expect(page.replaced).toEqual(["/base/"]);
+  });
+
+  it("stays put and explains when there is no session", () => {
+    const page = openAuth("/base/", { user: null });
+
+    expect(page.status).toContain("Войти не удалось");
+    expect(page.replaced).toEqual([]);
   });
 });

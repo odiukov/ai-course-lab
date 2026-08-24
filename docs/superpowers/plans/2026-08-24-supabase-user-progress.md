@@ -119,7 +119,22 @@ create policy "own rows" on run_results
 3. Supabase → Authentication → Providers → GitHub: включить, вставить пару.
 4. Supabase → Authentication → URL Configuration:
    - Site URL: `https://odiukov.github.io/ai-course-lab/`
-   - Redirect URLs: добавить `https://odiukov.github.io/ai-course-lab/auth/` и `http://localhost:4173/auth/` (адрес для локальной проверки собранного `out/`).
+   - Redirect URLs: добавить четыре записи —
+     `https://odiukov.github.io/ai-course-lab/auth/`,
+     `https://odiukov.github.io/ai-course-lab/auth/**`,
+     `http://localhost:4173/auth/`,
+     `http://localhost:4173/auth/**`
+     (второй адрес каждой пары — для локальной проверки собранного `out/`).
+5. Отдельным пунктом — проверить, что записи со звёздочками действительно на месте:
+   - [ ] `https://odiukov.github.io/ai-course-lab/auth/**` в списке Redirect URLs
+   - [ ] `http://localhost:4173/auth/**` в списке Redirect URLs
+
+   `signIn()` в `src/site-auth/auth.ts` строит адрес возврата всегда со строкой
+   запроса: `…/auth/?next=<путь>`. GoTrue сверяет Redirect URL целиком и по
+   правилам glob, а запись без звёздочек совпадения с адресом, несущим `?next=`,
+   не гарантирует — вход в таком случае вернётся на Site URL, и человек потеряет
+   то место курса, откуда уходил входить. Записи без звёздочек тоже остаются:
+   они нужны для точного адреса `/auth/` без параметров.
 
 Почта не настраивается вовсе: встроенный отправитель Supabase шлёт порядка двух-трёх писем в час, и для открытой регистрации это неработоспособно. OAuth писем не шлёт.
 

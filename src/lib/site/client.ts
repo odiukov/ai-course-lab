@@ -1,7 +1,8 @@
 import { HEIGHT_MESSAGE } from "../api/visual-height";
+import { PROGRESS_KEY_PREFIX, STEP_STATE_KEY_PREFIX, UPDATED_AT_SUFFIX } from "./storage-keys";
 
-/** Префикс ключа localStorage: на каждый урок свой список прочитанных шагов. */
-export const PROGRESS_KEY_PREFIX = "course-progress:";
+// Реэкспорт ради тестов страниц, которые собирают ключ сами.
+export { PROGRESS_KEY_PREFIX };
 
 /**
  * Общая для всех страниц работа с прогрессом.
@@ -42,6 +43,54 @@ function lessonData(selector) {
   var node = document.querySelector(selector);
   return node ? JSON.parse(node.textContent || "{}") : null;
 }
+
+var STATE_PREFIX = ${JSON.stringify(STEP_STATE_KEY_PREFIX)};
+
+function readStates(slug) {
+  try {
+    var raw = localStorage.getItem(STATE_PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * Состояние из записи хранилища.
+ *
+ * Запись — объект с состоянием и временем. Голая строка состояния осталась от
+ * первых дней ключа: опубликована она не была, но в браузере разработчика
+ * лежать может.
+ */
+function stateOf(entry) {
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : entry.state || "";
+}
+
+/**
+ * Состояние практики шага.
+ *
+ * passed не сбрасывается ничем: красный прогон после зелёного означает, что
+ * человек полез что-то менять в уже сданном шаге, а не что шаг разучился.
+ *
+ * Рядом с состоянием пишется время изменения. Без него слияние с облаком не
+ * знает, чей failed свежее, и вынуждено подставлять время открытия страницы —
+ * то есть отдавать любую ничью тому устройству, на котором её разбирают.
+ */
+function markState(slug, stepId, state) {
+  var rank = { read: 1, failed: 1, passed: 2 };
+  var states = readStates(slug);
+  if ((rank[stateOf(states[stepId])] || 0) > (rank[state] || 0)) return states;
+  states[stepId] = { state: state, updatedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(STATE_PREFIX + slug, JSON.stringify(states));
+  } catch (error) {
+    // Приватное окно: состояние не переживёт перезагрузку.
+  }
+  if (window.CourseSync) window.CourseSync.putStep(slug, stepId, state);
+  return states;
+}
 `;
 
 /**
@@ -81,6 +130,11 @@ function paint(ids) {
 }
 
 paint(readProgress(data.slug));
+
+// Прогресс мог приехать из облака уже после отрисовки: слияние асинхронно.
+window.addEventListener("course-sync-progress", function () {
+  paint(readProgress(data.slug));
+});
 
 // Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
 // ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
@@ -163,30 +217,37 @@ ${STORE}
 var data = lessonData("[data-lesson]");
 if (!data) return;
 
-var ids = readProgress(data.slug);
-var read = {};
-for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+function paint() {
+  var ids = readProgress(data.slug);
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
 
-var links = document.querySelectorAll("[data-step]");
-var next = null;
-for (var j = 0; j < links.length; j += 1) {
-  var id = links[j].getAttribute("data-step");
-  if (read[id]) links[j].classList.add("is-read");
-  else if (!next) next = links[j];
-}
+  var links = document.querySelectorAll("[data-step]");
+  var next = null;
+  for (var j = 0; j < links.length; j += 1) {
+    var id = links[j].getAttribute("data-step");
+    if (read[id]) links[j].classList.add("is-read");
+    else if (!next) next = links[j];
+  }
 
-var counter = document.querySelector("[data-read-count]");
-if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
+  var counter = document.querySelector("[data-read-count]");
+  if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
 
-var resume = document.querySelector("[data-resume]");
-if (resume) {
-  var target = next || links[0];
-  if (target) {
-    resume.setAttribute("href", target.getAttribute("href"));
-    resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
-    resume.hidden = false;
+  var resume = document.querySelector("[data-resume]");
+  if (resume) {
+    var target = next || links[0];
+    if (target) {
+      resume.setAttribute("href", target.getAttribute("href"));
+      resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
+      resume.hidden = false;
+    }
   }
 }
+
+paint();
+
+// Прогресс мог приехать из облака уже после отрисовки: слияние асинхронно.
+window.addEventListener("course-sync-progress", paint);
 })();
 `;
 
@@ -202,6 +263,10 @@ if (resume) {
  */
 export const EXERCISE_SCRIPT = `
 (function () {
+${STORE}
+
+var lesson = lessonData("[data-lesson]");
+
   var node = document.querySelector("[data-exercise]");
   if (!node) return;
   var data = JSON.parse(node.textContent || "{}");
@@ -452,9 +517,11 @@ export const EXERCISE_SCRIPT = `
     }
     try {
       localStorage.setItem(storageKey, full);
+      localStorage.setItem(storageKey + ${JSON.stringify(UPDATED_AT_SUFFIX)}, new Date().toISOString());
     } catch (error) {
       // Приватное окно: код не переживёт перезагрузку, писать всё равно можно.
     }
+    if (window.CourseSync) window.CourseSync.putFile(data.slug, activeFile, full);
   }
 
   function setCode(text) {
@@ -659,6 +726,13 @@ export const EXERCISE_SCRIPT = `
       passed + " из " + total + " зелёные" +
       (report.filtered ? "" : " (тесты этого шага не нашлись — прогнали всё упражнение)");
     status.className = passed === total && total > 0 ? "run-status is-passed" : "run-status";
+    if (lesson && total > 0) {
+      var verdict = passed === total ? "passed" : "failed";
+      markState(lesson.slug, lesson.stepId, verdict);
+      if (window.CourseSync) {
+        window.CourseSync.putRun(lesson.slug, lesson.stepId, passed, total - passed);
+      }
+    }
     results.appendChild(list);
   }
 
@@ -733,6 +807,51 @@ export const EXERCISE_SCRIPT = `
         runButton.disabled = false;
       });
   });
+
+  // Код приехал с другого устройства. Молча подменять текст под пальцами
+  // нельзя, поэтому подменяется только нетронутый редактор; тронутый получает
+  // плашку и остаётся как есть.
+  var dirty = false;
+  area.addEventListener("input", function () { dirty = true; });
+
+  var notice = document.querySelector("[data-sync-notice]");
+  // Имя параметра не text: так зовут загрузчик файлов выше по скрипту.
+  function say(message) {
+    if (!notice) return;
+    notice.textContent = message;
+    notice.hidden = false;
+  }
+
+  window.addEventListener("course-sync-file", function (event) {
+    var detail = event.detail || {};
+    if (detail.slug !== data.slug || detail.fileName !== activeFile) return;
+    // Тронутый редактор разбирается первым: на экране в любом случае остаётся
+    // написанное человеком, и сказать ему надо про это, а не про победивший
+    // код из аккаунта. Иначе плашка про отложенную копию приходит следом и
+    // затирает единственную подсказку, которая тут что-то значит.
+    if (dirty) {
+      say("Код из аккаунта новее того, что открыт здесь. Обнови страницу, чтобы забрать его.");
+      return;
+    }
+    if (detail.backup) {
+      say("На этом устройстве был другой код. Победил код из аккаунта, а local-копия сохранена в хранилище браузера.");
+      return;
+    }
+    // Функции шага в приехавшем файле может не быть вовсе — например, на
+    // другом устройстве её переименовали. Показывать такой файл в редакторе
+    // одной функции нельзя: save() не нашёл бы, куда вернуть написанное, и
+    // молча выбрасывал бы каждую правку. Чинит такой файл загрузка страницы,
+    // у которой для этого есть restoreMissingFunction.
+    var parts = split(detail.content, data.fn);
+    if (!parts) {
+      say("Из аккаунта приехал код, в котором функции этого шага нет. Обнови страницу, чтобы открыть его.");
+      return;
+    }
+    full = detail.content;
+    activeParts = parts;
+    setCode(parts.code);
+    say("Код подтянут из аккаунта.");
+  });
 })();
 `;
 
@@ -741,17 +860,25 @@ export const CATALOG_SCRIPT = `
 (function () {
 ${STORE}
 
-var rows = document.querySelectorAll("[data-lesson-slug]");
-for (var i = 0; i < rows.length; i += 1) {
-  var slug = rows[i].getAttribute("data-lesson-slug");
-  var count = readProgress(slug).length;
-  if (count === 0) continue;
+function paint() {
+  var rows = document.querySelectorAll("[data-lesson-slug]");
+  for (var i = 0; i < rows.length; i += 1) {
+    var slug = rows[i].getAttribute("data-lesson-slug");
+    var count = readProgress(slug).length;
+    if (count === 0) continue;
 
-  var target = rows[i].querySelector("[data-read]");
-  if (!target) continue;
-  target.textContent = "прочитано " + count;
-  target.hidden = false;
+    var target = rows[i].querySelector("[data-read]");
+    if (!target) continue;
+    target.textContent = "прочитано " + count;
+    target.hidden = false;
+  }
 }
+
+paint();
+
+// Каталог — первая страница, на которую возвращаются: прогресс с другого
+// устройства должен проступить на ней сам, без перезагрузки.
+window.addEventListener("course-sync-progress", paint);
 })();
 `;
 
@@ -759,16 +886,26 @@ for (var i = 0; i < rows.length; i += 1) {
  * Проверка ответов в браузере.
  *
  * Верный вариант лежит рядом в JSON: сервера у статики нет, прятать ответ не
- * от кого и незачем. Ничего не сохраняется — в прогресс идут только шаги.
+ * от кого и незачем. Шаг считается сданным, когда верно отвечены все вопросы
+ * блока — состояние идёт в то же хранилище, что и прогон тестов упражнения.
  */
 export const QUIZ_SCRIPT = `
+(function () {
+${STORE}
+
+var lesson = lessonData("[data-lesson]");
+
 document.querySelectorAll("[data-quiz]").forEach(function (root) {
   var source = root.querySelector("[data-quiz-answers]");
   if (!source) return;
   var answers = JSON.parse(source.textContent || "[]");
+  // Шаг сдан, когда верно отвечены все вопросы блока, а не первый попавшийся.
+  var correct = {};
+  var total = root.querySelectorAll("[data-question]").length;
 
   root.querySelectorAll("[data-question]").forEach(function (question) {
-    var answer = answers[Number(question.getAttribute("data-question"))];
+    var index = Number(question.getAttribute("data-question"));
+    var answer = answers[index];
     if (!answer) return;
     var explanation = question.querySelector("[data-explanation]");
 
@@ -786,10 +923,24 @@ document.querySelectorAll("[data-quiz]").forEach(function (root) {
           explanation.textContent = answer.explanation;
           explanation.hidden = false;
         }
+        if (!lesson) return;
+        if (chosen === answer.correct) {
+          correct[index] = true;
+          if (Object.keys(correct).length === total) {
+            markState(lesson.slug, lesson.stepId, "passed");
+          }
+        } else {
+          // Вопрос мог уже засчитаться верным раньше — переклик неверным
+          // вариантом должен снять эту засечку, иначе следующий верный ответ
+          // на другой вопрос ошибочно и необратимо сдаст весь шаг.
+          delete correct[index];
+          markState(lesson.slug, lesson.stepId, "failed");
+        }
       });
     });
   });
 });
+})();
 `;
 
 /**
@@ -813,4 +964,71 @@ window.addEventListener("message", function (event) {
     return;
   }
 });
+`;
+
+/**
+ * Страница `/auth/`: показать итог входа и увести обратно.
+ *
+ * Адрес возврата приходит строкой запроса, поэтому проверяется на то, что это
+ * путь внутри самого сайта: без проверки страница входа превращается в
+ * открытый редирект на чужой сайт.
+ */
+export const AUTH_PAGE_SCRIPT = `
+(function () {
+  var status = document.querySelector("[data-auth-status]");
+  var base = document.body.getAttribute("data-base") || "";
+
+  function safeNext() {
+    var raw = new URLSearchParams(window.location.search).get("next");
+    if (!raw) return base + "/";
+    // Решение принимается по разобранному адресу, а не по исходной строке.
+    // Разбор выбрасывает табуляцию и переводы строк и выпрямляет обратные
+    // косые, поэтому проверять строку посимвольно бесполезно: "/\\t//чужой"
+    // выглядит путём, а браузер уводит по нему на чужой сайт. Сверка идёт с
+    // тем же адресом, по которому потом и произойдёт переход.
+    var url;
+    try {
+      url = new URL(raw, window.location.origin);
+    } catch (error) {
+      return base + "/";
+    }
+    if (url.origin !== window.location.origin) return base + "/";
+    if (base && url.pathname.indexOf(base + "/") !== 0) return base + "/";
+    return url.pathname + url.search + url.hash;
+  }
+
+  function show(detail) {
+    if (!detail.user) {
+      if (status) status.textContent = "Войти не удалось: " + (detail.error || "неизвестная причина");
+      return;
+    }
+    // Сорвавшееся слияние не молчит: флаг при отказе не ставится, и следующий
+    // заход попробует снова — но узнать об этом человек должен здесь.
+    if (status) {
+      status.textContent = detail.error
+        ? "Вход выполнен, но прогресс с этого устройства влить не удалось: " + detail.error +
+          ". Попробуется снова при следующем заходе."
+        : detail.migrated
+          ? "Прогресс с этого устройства влит в аккаунт: шагов " + detail.steps +
+            ", файлов " + detail.files +
+            (detail.backups > 0 ? ", отложено копий кода " + detail.backups : "")
+          : "Вход выполнен.";
+    }
+    window.setTimeout(function () {
+      window.location.replace(safeNext());
+    }, detail.error || detail.backups > 0 ? 4000 : 1200);
+  }
+
+  // Бандл входа грузится блокирующим тегом и может закончить работу раньше,
+  // чем этот скрипт вообще выполнится. Событие в таком случае уже пролетело,
+  // и страница осталась бы на «Проверяю вход…» навсегда. Итог лежит ещё и в
+  // window.CourseSyncReady, поэтому сначала смотрим туда.
+  if (window.CourseSyncReady) {
+    show(window.CourseSyncReady);
+  } else {
+    window.addEventListener("course-sync-ready", function (event) {
+      show(event.detail || {});
+    });
+  }
+})();
 `;
