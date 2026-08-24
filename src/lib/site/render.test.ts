@@ -160,6 +160,8 @@ describe("renderStepPage", () => {
     expect(html).toContain("data-context-panel");
     expect(html).toContain("data-context");
     expect(html).toContain("data-run");
+    expect(html).toContain("data-console-panel");
+    expect(html).toContain("data-console");
     expect(html).toContain('"fn":"magnitude"');
     expect(html).toContain('"functions":["magnitude","dot"]');
     expect(html).toContain("/base/assets/pyodide/");

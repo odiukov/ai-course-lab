@@ -7,15 +7,26 @@ import {
   readCanonicalFunctionNames,
   readExerciseCodeBySlug,
 } from "@/lib/exercise/file";
+import { canonicalFunctions, readExerciseTree } from "@/lib/exercise/tree";
 import type { LessonRef } from "@/lib/source/catalog";
 import { PracticeError } from "./errors";
-import { buildTestFilter, runTests } from "./run-tests";
+import { buildTestFilter, runTests, selectDirectTestNames } from "./run-tests";
 
 const FAKE = path.join(process.cwd(), "tests/fixtures/practice/fake-python.mjs");
 
 // Функции настоящего упражнения урока 02 в том порядке, в котором их отдаёт
 // describeFunctions, — и порядок шагов, в котором учащийся их пишет.
 const LESSON02 = ["transpose", "matmul", "identity", "trace", "is_symmetric", "hadamard"];
+const LESSON01 = [
+  "magnitude",
+  "dot",
+  "cosine_similarity",
+  "angle_between",
+  "project",
+  "matvec",
+  "is_invertible_2x2",
+  "most_similar_pair",
+];
 
 const LESSON02_REF: LessonRef = {
   slug: "01-math__02-matrices",
@@ -35,8 +46,9 @@ function makeDir(): string {
 // Гоняет подделку интерпретатора на настоящих именах тестов урока 02 и
 // отдаёт имена, которые выражение -k отобрало на ПЕРВОМ прогоне (второй, если
 // он был, — это уже откат на весь файл).
-async function selection(fn: string, functions: string[] = LESSON02) {
-  process.env.FAKE_PYTHON_MODE = "lesson02";
+async function selection(fn: string, functions: string[] = LESSON02, testNames?: string[]) {
+  process.env.FAKE_PYTHON_MODE = testNames ? "selection" : "lesson02";
+  if (testNames) process.env.FAKE_PYTHON_TEST_NAMES = JSON.stringify(testNames);
   const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "lab-select-")), "selected.txt");
   process.env.FAKE_PYTHON_SELECTED = log;
   const result = await runTests({ dir: makeDir(), fn, functions, python: FAKE });
@@ -53,6 +65,7 @@ async function selection(fn: string, functions: string[] = LESSON02) {
 afterEach(() => {
   delete process.env.FAKE_PYTHON_MODE;
   delete process.env.FAKE_PYTHON_SELECTED;
+  delete process.env.FAKE_PYTHON_TEST_NAMES;
 });
 
 describe("buildTestFilter", () => {
@@ -73,6 +86,138 @@ describe("buildTestFilter", () => {
   });
 });
 
+describe("selectDirectTestNames", () => {
+  it("находит тесты по реальному вызову, даже когда имя теста сокращено", () => {
+    const source = `def test_loss_is_zero():
+    assert flow_matching_loss(lambda x: x, [], [], []) == 0
+
+def test_other():
+    assert interpolate(0, 1, 0.5) == 0.5
+`;
+
+    expect(
+      selectDirectTestNames(source, "flow_matching_loss", ["interpolate", "flow_matching_loss"]),
+    ).toEqual(["test_loss_is_zero"]);
+  });
+
+  it("не выбирает интеграционный тест, которому нужна другая функция упражнения", () => {
+    const source = `def test_identity_is_symmetric():
+    assert is_symmetric(identity(4))
+
+def test_symmetric_true():
+    assert is_symmetric([[1]])
+`;
+
+    expect(selectDirectTestNames(source, "is_symmetric", ["identity", "is_symmetric"])).toEqual([
+      "test_symmetric_true",
+    ]);
+  });
+
+  it("проходит через локальный helper с предметным именем", () => {
+    const source = `def message():
+    return make_message("m-1", {})
+
+def test_message_has_an_id():
+    assert message()["id"] == "m-1"
+`;
+
+    expect(selectDirectTestNames(source, "make_message", ["make_message", "make_task"])).toEqual([
+      "test_message_has_an_id",
+    ]);
+  });
+
+  it("берёт интеграционные тесты, если изолированных для функции нет", () => {
+    const source = `def test_composition():
+    assert outer(inner(1)) == 2
+`;
+
+    expect(selectDirectTestNames(source, "outer", ["inner", "outer"])).toEqual([
+      "test_composition",
+    ]);
+  });
+});
+
+describe("контракт code-шагов всего курса", () => {
+  const root = process.cwd();
+  const sourceDir = path.join(root, "source");
+  const lessonRoot = path.join(root, "content/lessons");
+  const lessonDirs = fs.readdirSync(lessonRoot).filter((name) => /^\d+-.*__\d+-/.test(name));
+
+  it("каждый exercise_fn существует в шаблоне упражнения", () => {
+    const missing: string[] = [];
+    for (const lessonDir of lessonDirs) {
+      const match = /^(\d+)-.*__(\d+)-/.exec(lessonDir)!;
+      const plan = JSON.parse(
+        fs.readFileSync(path.join(lessonRoot, lessonDir, "lesson.json"), "utf8"),
+      ) as { steps?: { exercise_fn?: string }[] };
+      const fns = [...new Set((plan.steps ?? []).map((step) => step.exercise_fn).filter(Boolean))] as string[];
+      if (fns.length === 0) continue;
+
+      const ref = {
+        slug: lessonDir,
+        phaseNumber: Number(match[1]),
+        lessonNumber: Number(match[2]),
+      } as LessonRef;
+      const tree = readExerciseTree(sourceDir, ref);
+      const available = new Set(tree ? canonicalFunctions(tree).map((item) => item.fn) : []);
+      for (const fn of fns) {
+        if (!available.has(fn)) missing.push(`${lessonDir}: ${fn}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("для каждого exercise_fn раннер может выбрать собственные тесты", () => {
+    const missing: string[] = [];
+    for (const lessonDir of lessonDirs) {
+      const match = /^(\d+)-.*__(\d+)-/.exec(lessonDir)!;
+      const plan = JSON.parse(
+        fs.readFileSync(path.join(lessonRoot, lessonDir, "lesson.json"), "utf8"),
+      ) as { steps?: { exercise_fn?: string }[] };
+      const fns = [...new Set((plan.steps ?? []).map((step) => step.exercise_fn).filter(Boolean))] as string[];
+      if (fns.length === 0) continue;
+
+      const ref = {
+        slug: lessonDir,
+        phaseNumber: Number(match[1]),
+        lessonNumber: Number(match[2]),
+      } as LessonRef;
+      const tree = readExerciseTree(sourceDir, ref);
+      // Серия 76–81 проверяет все швы одним итоговым `python main.py`:
+      // требовать здесь отдельный pytest означало бы вернуть именно ложный
+      // пошаговый зачёт, ради отказа от которого у дерева есть run-контракт.
+      if (tree?.run) continue;
+      if (tree?.targets) {
+        for (const fn of fns) {
+          if (!tree.targets.some((target) => target.fn === fn && target.tests.length > 0)) {
+            missing.push(`${lessonDir}: ${fn}`);
+          }
+        }
+        continue;
+      }
+      if (!tree?.testPath) {
+        missing.push(`${lessonDir}: нет test_exercise.py`);
+        continue;
+      }
+      const functions = canonicalFunctions(tree).map((item) => item.fn);
+      const tests = fs.readFileSync(tree.testPath, "utf8");
+      const testNames = [...tests.matchAll(/^def\s+(test_[A-Za-z0-9_]+)\s*\(/gm)].map(
+        (item) => item[1],
+      );
+
+      for (const fn of fns) {
+        const direct = selectDirectTestNames(tests, fn, functions);
+        const others = functions.filter((name) => name !== fn && !fn.includes(name));
+        const named = testNames.filter(
+          (name) => name.includes(fn) && !others.some((other) => name.includes(other)),
+        );
+        if (direct.length === 0 && named.length === 0) missing.push(`${lessonDir}: ${fn}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  }, 15_000);
+});
+
 describe("runTests: отбор на настоящих именах тестов урока 02", () => {
   it("hadamard не тянет за собой тест, который зовёт ещё не написанный matmul", async () => {
     const { result, first } = await selection("hadamard");
@@ -90,14 +235,11 @@ describe("runTests: отбор на настоящих именах тестов
     expect(result).toMatchObject({ total: 2, filtered: true, warning: null });
   });
 
-  it("is_symmetric: ни одного своего теста — весь файл и предупреждение, а не ложное «1 из 1»", async () => {
-    // test_symmetric_true/false не содержат `is_symmetric`, а единственное
-    // совпадение — test_identity_is_symmetric — отрезано отрицанием identity.
-    const { result, runs } = await selection("is_symmetric");
-    expect(runs[0]).toEqual([]);
-    expect(result.filtered).toBe(false);
-    expect(result.warning).toContain("is_symmetric");
-    expect(result.total).toBe(17);
+  it("is_symmetric запускает только два собственных теста", async () => {
+    const { result, first, runs } = await selection("is_symmetric");
+    expect(first).toEqual(["test_is_symmetric_true", "test_is_symmetric_false"]);
+    expect(runs).toHaveLength(1);
+    expect(result).toMatchObject({ total: 2, passed: 2, filtered: true, warning: null });
   });
 
   it("transpose отбирает все три своих теста", async () => {
@@ -116,6 +258,39 @@ describe("runTests: отбор на настоящих именах тестов
       "test_matmul_shapes_2x3_by_3x2",
       "test_matmul_is_not_commutative",
     ]);
+  });
+});
+
+describe("runTests: каждый code-шаг урока 01 имеет собственные тесты", () => {
+  const source = fs.readFileSync(
+    path.join(
+      process.cwd(),
+      "source/learning-exercises/p01-l01-linear-algebra-intuition/test_exercise.py",
+    ),
+    "utf8",
+  );
+  const testNames = [...source.matchAll(/^def (test_[a-zA-Z0-9_]+)\(/gm)].map((match) => match[1]);
+  const expectedCounts: Record<string, number> = {
+    magnitude: 4,
+    dot: 4,
+    cosine_similarity: 4,
+    angle_between: 4,
+    project: 4,
+    matvec: 5,
+    is_invertible_2x2: 4,
+    most_similar_pair: 3,
+  };
+
+  it.each(LESSON01)("%s не откатывается к прогону всего упражнения", async (fn) => {
+    const { result, first, runs } = await selection(fn, LESSON01, testNames);
+
+    expect(first).toHaveLength(expectedCounts[fn]);
+    expect(runs).toHaveLength(1);
+    expect(result).toMatchObject({
+      total: expectedCounts[fn],
+      filtered: true,
+      warning: null,
+    });
   });
 });
 

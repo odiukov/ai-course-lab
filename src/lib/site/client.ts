@@ -215,6 +215,8 @@ export const EXERCISE_SCRIPT = `
   var results = document.querySelector("[data-results]");
   var contextPanel = document.querySelector("[data-context-panel]");
   var contextBox = document.querySelector("[data-context]");
+  var consolePanel = document.querySelector("[data-console-panel]");
+  var consoleOutput = document.querySelector("[data-console]");
   if (!area || !runButton) return;
 
   var activeFile = data.file ||
@@ -229,11 +231,19 @@ export const EXERCISE_SCRIPT = `
   }
   var legacyStorageKey = "course-exercise:" + data.slug;
   var storageKey = storageKeyFor(activeFile);
+  var recoveryKey = storageKey + ":recovery";
   var template = "";
   // Полный файл упражнения. В редакторе видна только функция шага, но на
   // диск в браузере уезжает файл целиком: тесты импортируют из него все имена
   // сразу, и файл с одной функцией не загрузился бы вовсе.
   var full = "";
+  // Границы видимой функции в полном файле фиксируются при загрузке страницы.
+  // Искать функцию заново после каждого символа нельзя: учащийся может на
+  // секунду переименовать is_symmetric в issymmetric, и тогда следующий
+  // input уже не найдёт каноническое имя. Редактор покажет исправленный текст,
+  // а hidden full останется со старой опечаткой — тесты проверят не то, что
+  // видно на экране.
+  var activeParts = null;
 
   /**
    * Делит файл на «до функции», саму функцию и «после».
@@ -375,8 +385,71 @@ export const EXERCISE_SCRIPT = `
     return [parts.before, code, parts.after].join("\\n");
   }
 
+  /**
+   * Возвращает пропавшее каноническое имя, не стирая остальные функции.
+   *
+   * Частая опечатка — удалить или добавить подчёркивание в имени. Если такой
+   * кандидат ровно один, сохраняем всё его тело и чиним только заголовок.
+   * Для неизвестного переименования безопаснее добавить заготовку в конец:
+   * прежний файл останется целиком, а не заменится всем шаблоном.
+   */
+  function restoreMissingFunction(source, templateSource, fn) {
+    var normalized = fn.replace(/_/g, "").toLowerCase();
+    var candidates = [];
+    var head = /^(?:async\\s+)?def\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(/gm;
+    var match = null;
+    while ((match = head.exec(source)) !== null) {
+      var name = match[1];
+      if (name !== fn && name.replace(/_/g, "").toLowerCase() === normalized) {
+        candidates.push(name);
+      }
+    }
+
+    if (candidates.length === 1) {
+      var alias = candidates[0];
+      var aliasParts = split(source, alias);
+      if (aliasParts) {
+        var aliasHead = new RegExp("^(async\\\\s+)?def\\\\s+" + alias + "\\\\s*\\\\(");
+        var repaired = aliasParts.code.replace(aliasHead, function (_, asyncPrefix) {
+          return (asyncPrefix || "") + "def " + fn + "(";
+        });
+        return join(source, alias, repaired);
+      }
+    }
+
+    var fresh = split(templateSource, fn);
+    if (!fresh) return source;
+    if (fn.indexOf(".") !== -1) {
+      var className = fn.split(".")[0];
+      var lines = source.split("\\n");
+      var classHead = new RegExp("^class\\\\s+" + className + "(?:\\\\s*\\\\(|\\\\s*:)");
+      var classStart = -1;
+      var classEnd = lines.length;
+      for (var i = 0; i < lines.length; i += 1) {
+        if (classHead.test(lines[i])) { classStart = i; break; }
+      }
+      if (classStart !== -1) {
+        for (var j = classStart + 1; j < lines.length; j += 1) {
+          if (/^(?:async\\s+def\\s|def\\s|class\\s)/.test(lines[j])) {
+            classEnd = j;
+            break;
+          }
+        }
+        lines.splice(classEnd, 0, "", fresh.code);
+        return lines.join("\\n");
+      }
+      return source;
+    }
+    return source.replace(/\\s+$/, "") + "\\n\\n" + fresh.code + "\\n";
+  }
+
   function save() {
-    full = join(full, data.fn, area.value);
+    if (activeParts) {
+      activeParts.code = area.value;
+      full = [activeParts.before, activeParts.code, activeParts.after].join("\\n");
+    } else {
+      full = join(full, data.fn, area.value);
+    }
     try {
       localStorage.setItem(storageKey, full);
     } catch (error) {
@@ -419,15 +492,38 @@ export const EXERCISE_SCRIPT = `
       contextPanel.hidden = false;
     }
     // Сохранённого файла не хватает: функции шага в нём нет вовсе. Такой файл
-    // ничем не поможет — берём заготовку, иначе редактор открылся бы пустым
-    // или чужим кодом.
+    // раньше целиком заменялся заготовкой, и написанные на прошлых шагах
+    // функции исчезали. Сначала сохраняем исходник отдельно, затем чиним
+    // только текущую функцию, не трогая остальные участки файла.
+    if (!parts) {
+      if (saved !== null) {
+        try {
+          localStorage.setItem(recoveryKey, saved);
+        } catch (error) {
+          // Даже без backup продолжаем в памяти: приватный режим не должен
+          // снова превращать локальную опечатку в сброс всего упражнения.
+        }
+      }
+      full = restoreMissingFunction(full, source, data.fn);
+      parts = split(full, data.fn);
+      if (parts) {
+        try {
+          localStorage.setItem(storageKey, full);
+        } catch (error) {
+          // В приватном режиме отремонтированный текст проживёт хотя бы вкладку.
+        }
+      }
+    }
+    // Повреждён даже шаблон — только тогда остаётся последний аварийный путь.
     if (!parts) {
       full = source;
       parts = split(full, data.fn);
     }
+    activeParts = parts;
     setCode(parts ? parts.code : full);
     if (window.CourseEditor) window.CourseEditor.mount(area);
   });
+
   area.addEventListener("input", save);
 
   if (resetButton) {
@@ -503,6 +599,10 @@ export const EXERCISE_SCRIPT = `
 
   function render(report) {
     results.innerHTML = "";
+    if (consolePanel && consoleOutput) {
+      consoleOutput.textContent = report.output || "(вывода нет)";
+      consolePanel.hidden = false;
+    }
     if (report.loadError) {
       // Статус обязан смениться: без этого на экране остаётся «Гоняю тесты…»,
       // и прогон выглядит зависшим, хотя он давно закончился ошибкой.
@@ -528,9 +628,14 @@ export const EXERCISE_SCRIPT = `
         }
         full = template;
         var fresh = split(full, data.fn);
+        activeParts = fresh;
         setCode(fresh ? fresh.code : full);
         save();
         results.innerHTML = "";
+        if (consolePanel && consoleOutput) {
+          consoleOutput.textContent = "";
+          consolePanel.hidden = true;
+        }
         status.textContent = "Упражнение сброшено к заготовке.";
       });
       results.appendChild(rescue);
@@ -588,6 +693,10 @@ export const EXERCISE_SCRIPT = `
 
   runButton.addEventListener("click", function () {
     runButton.disabled = true;
+    if (consolePanel && consoleOutput) {
+      consoleOutput.textContent = "";
+      consolePanel.hidden = true;
+    }
     status.className = "run-status";
     status.textContent = "Готовлю Python…";
 

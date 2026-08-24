@@ -9,6 +9,8 @@
 библиотеки Pyodide хватает на все упражнения: numpy и прочего в них нет.
 """
 
+import contextlib
+import io
 import inspect
 import json
 import math
@@ -124,6 +126,7 @@ def _parametrize(argnames, argvalues, **kwargs):
                     raise AssertionError("случай {!r}: {}".format(case, error))
 
         wrapper.__name__ = function.__name__
+        wrapper.__wrapped__ = function
         return wrapper
 
     return decorate
@@ -199,7 +202,29 @@ def install_pytest_stub():
     sys.modules["pytest"] = module
 
 
-def select_tests(names, fn, functions):
+def referenced_names(function, module):
+    """Глобальные имена теста, включая вызванные им локальные helpers."""
+
+    found = set()
+    seen = set()
+
+    def visit(current):
+        while callable(current) and id(current) not in seen:
+            seen.add(id(current))
+            code = getattr(current, "__code__", None)
+            if code is not None:
+                found.update(code.co_names)
+                for name in code.co_names:
+                    helper = getattr(module, name, None)
+                    if callable(helper) and getattr(helper, "__module__", None) == module.__name__:
+                        visit(helper)
+            current = getattr(current, "__wrapped__", None)
+
+    visit(function)
+    return found
+
+
+def select_tests(names, fn, functions, module=None):
     """Тесты шага: те, что про его функцию, и только они.
 
     Правило то же, что у фильтра `pytest -k` в локальном приложении: имя
@@ -211,14 +236,26 @@ def select_tests(names, fn, functions):
     """
 
     others = [name for name in dict.fromkeys(functions) if name != fn and name not in fn]
+    if module is not None:
+        direct = []
+        isolated = []
+        for name in names:
+            references = referenced_names(getattr(module, name), module)
+            if fn in references:
+                direct.append(name)
+                if not any(other in references for other in others):
+                    isolated.append(name)
+        if isolated or direct:
+            return isolated or direct
+
     chosen = [
         name for name in names if fn in name and not any(other in name for other in others)
     ]
     return chosen
 
 
-def run(code, fn, functions, workdir="/exercise"):
-    """Пишет код учащегося на диск и гоняет по нему тесты упражнения.
+def _run_report(code, fn, functions, workdir):
+    """Пишет код учащегося на диск и возвращает отчёт о тестах.
 
     Каталог — аргумент, чтобы прогонщик можно было проверить обычным Python,
     а не только внутри браузера.
@@ -237,19 +274,17 @@ def run(code, fn, functions, workdir="/exercise"):
     try:
         module = __import__("test_exercise")
     except Exception as error:  # noqa: BLE001 — учащемуся важна причина, любая
-        return json.dumps(
-            {
-                "loadError": "".join(
-                    traceback.format_exception_only(type(error), error)
-                ).strip(),
-                "results": [],
-                "filtered": False,
-            }
-        )
+        return {
+            "loadError": "".join(
+                traceback.format_exception_only(type(error), error)
+            ).strip(),
+            "results": [],
+            "filtered": False,
+        }
 
     names = [name for name in dir(module) if name.startswith("test_")]
     names.sort()
-    chosen = select_tests(names, fn, functions) if fn else names
+    chosen = select_tests(names, fn, functions, module) if fn else names
     # Пустой отбор — не повод молчать: гоняем весь файл и говорим об этом.
     # Зелёный вердикт по случайно совпавшему тесту хуже честного «прогнали всё».
     filtered = len(chosen) > 0
@@ -275,7 +310,8 @@ def run(code, fn, functions, workdir="/exercise"):
             message = "".join(traceback.format_exception_only(type(error), error)).strip()
             results.append({"name": name, "passed": False, "message": message})
 
-    return json.dumps({"loadError": None, "results": results, "filtered": filtered})
+    return {"loadError": None, "results": results, "filtered": filtered}
+
 
 class RecordingResult(unittest.TestResult):
     """Переводит unittest.TestCase в тот же короткий отчёт, что pytest-функции."""
@@ -387,6 +423,20 @@ def _run_report_files(files, tests, test_nodes, workdir):
     return {"loadError": None, "results": results, "filtered": True}
 
 
+def run(code, fn, functions, workdir="/exercise"):
+    """Гоняет тесты и возвращает JSON вместе с консольным выводом Python.
+
+    stdout и stderr направлены в один поток: `print`, предупреждения и ручная
+    отладка должны приехать в браузер в том же порядке, в котором появились.
+    Перехват охватывает и импорт файла, и сами тесты — вывод до падения не
+    теряется даже при синтаксической ошибке или красном тесте.
+    """
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        report = _run_report(code, fn, functions, workdir)
+    report["output"] = output.getvalue()
+    return json.dumps(report)
 
 
 def run_json(payload):
@@ -398,11 +448,14 @@ def run_json(payload):
 
     request = json.loads(payload)
     if request.get("files") is not None:
-        report = _run_report_files(
-            request["files"],
-            request.get("tests") or {},
-            request.get("testNodes") or [],
-            "/exercise",
-        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            report = _run_report_files(
+                request["files"],
+                request.get("tests") or {},
+                request.get("testNodes") or [],
+                "/exercise",
+            )
+        report["output"] = output.getvalue()
         return json.dumps(report)
     return run(request["code"], request.get("fn"), request.get("functions") or [])

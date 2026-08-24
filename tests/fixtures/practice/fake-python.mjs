@@ -28,13 +28,19 @@ const LESSON02 = [
   "test_identity_of_one",
   "test_trace_basic",
   "test_trace_of_identity_is_size",
-  "test_symmetric_true",
-  "test_symmetric_false",
+  "test_is_symmetric_true",
+  "test_is_symmetric_false",
   "test_identity_is_symmetric",
   "test_hadamard_scales_elementwise",
   "test_hadamard_differs_from_matmul",
   "test_hadamard_with_zero_mask_zeroes_everything",
 ];
+
+// Другие настоящие упражнения тесты могут передать через окружение. Так
+// регрессии в соглашении test_<exercise_fn>_<случай> проверяются без запуска
+// внешнего Python и без копии длинного списка имён в TypeScript-тесте.
+const suppliedNames = process.env.FAKE_PYTHON_TEST_NAMES;
+const selectable = suppliedNames ? JSON.parse(suppliedNames) : LESSON02;
 
 // Семантика pytest -k: слово — это поиск подстроки в идентификаторе теста,
 // плюс and / or / not и скобки. Рекурсивный спуск на десять строк вместо
@@ -93,8 +99,8 @@ if (mode === "hang") {
   setTimeout(() => process.exit(0), 60_000);
 } else {
   const cases =
-    mode === "lesson02"
-      ? LESSON02.filter((name) => (expression ? matches(expression, name) : true)).map(ok)
+    mode === "lesson02" || mode === "selection"
+      ? selectable.filter((name) => (expression ? matches(expression, name) : true)).map(ok)
       : mode === "red"
         ? [ok("test_transpose_rectangular"), bad("test_transpose_twice_returns_original")]
         : mode === "empty-filter" && filtered

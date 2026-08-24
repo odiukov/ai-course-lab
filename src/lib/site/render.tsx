@@ -192,6 +192,10 @@ ${solution}
 </div>
 <p class="run-status" data-run-status></p>
 <div data-results></div>
+<section class="console-panel" data-console-panel hidden>
+<h3 class="console-title">Консоль</h3>
+<pre class="console-output" data-console></pre>
+</section>
 <pre class="solution" data-solution hidden></pre>
 <script type="application/json" data-exercise>${payload}</script>
 </section>`;

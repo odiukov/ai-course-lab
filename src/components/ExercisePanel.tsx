@@ -98,6 +98,8 @@ export function ExercisePanel({
   fn,
   file,
   lspUrl,
+  apiBase,
+  allowReview = true,
   reloadToken = 0,
   onProgressChanged,
 }: {
@@ -110,6 +112,9 @@ export function ExercisePanel({
    */
   file?: string;
   lspUrl: string | null;
+  /** API конкретного упражнения. По умолчанию — обычный урок. */
+  apiBase?: string;
+  allowReview?: boolean;
   /**
    * Растёт, когда файл упражнения изменили мимо редактора (кнопка «Взять как
    * есть» на recall-шаге). Панель на это досохраняет набранное и перечитывает
@@ -119,6 +124,7 @@ export function ExercisePanel({
   reloadToken?: number;
   onProgressChanged: () => void;
 }) {
+  const endpoint = apiBase ?? `/api/lesson/${slug}`;
   const [data, setData] = useState<ExerciseData | null>(null);
   // Активный файл — своё состояние, а не то, что пересчитывается на каждый
   // рендер: клик по табу должен пережить любое обновление data после
@@ -243,7 +249,7 @@ export function ExercisePanel({
       verification?: "pytest" | "script";
       files: ExerciseFileState[];
     }>(
-      `/api/lesson/${slug}/exercise`,
+      `${endpoint}/exercise`,
     );
     if (!result.ok) {
       setError(result.error);
@@ -285,7 +291,7 @@ export function ExercisePanel({
       files: json.files,
     });
     activateFile(resolved);
-  }, [slug, activateFile]);
+  }, [endpoint, activateFile]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- первая загрузка файлов упражнения
@@ -299,7 +305,7 @@ export function ExercisePanel({
   const putOnce = useCallback(
     async (name: string, text: string): Promise<"ok" | "conflict" | "error"> => {
       const result = await fetchJson<{ name: string; mtimeMs: number; functions: ExerciseFunction[] }>(
-        `/api/lesson/${slug}/exercise`,
+        `${endpoint}/exercise`,
         {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -362,7 +368,7 @@ export function ExercisePanel({
       }
       return "error";
     },
-    [slug],
+    [endpoint],
   );
 
   // Догоняющая запись: пока предыдущий PUT ждал ответа, ученик мог напечатать
@@ -508,7 +514,7 @@ export function ExercisePanel({
         code: string;
         mtimeMs: number;
         functions: ExerciseFunction[];
-      }>(`/api/lesson/${slug}/exercise/reset`, {
+      }>(`${endpoint}/exercise/reset`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ fn, file }),
@@ -545,7 +551,7 @@ export function ExercisePanel({
       setResetting(false);
       setResetArmedFor(null);
     }
-  }, [fn, file, slug]);
+  }, [fn, file, endpoint]);
 
   // Автосохранение с задержкой в секунду: файл на диске — единственная правда,
   // и держать несохранённый черновик в браузере нельзя, иначе прогон тестов
@@ -592,7 +598,7 @@ export function ExercisePanel({
       if (!name || latestCodeRef.current === savedCodeRef.current.get(name)) return;
       // Страница уходит: обычный fetch браузер отменит, keepalive — то, что
       // всё-таки доносит последнюю запись до сервера.
-      void fetch(`/api/lesson/${slug}/exercise`, {
+      void fetch(`${endpoint}/exercise`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -605,7 +611,7 @@ export function ExercisePanel({
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
-  }, [slug]);
+  }, [endpoint]);
 
   // Правка из IDE подтягивается сама. Свежесть читается из ref'а прямо в тике
   // (а не из значения, замкнутого при создании интервала), и проверяется ещё
@@ -620,7 +626,7 @@ export function ExercisePanel({
       if (!name) return;
       if (latestCodeRef.current !== savedCodeRef.current.get(name)) return;
       const meta = await fetchJson<{ mtimeMs: number | null }>(
-        `/api/lesson/${slug}/exercise?meta=1&file=${encodeURIComponent(name)}`,
+        `${endpoint}/exercise?meta=1&file=${encodeURIComponent(name)}`,
       );
       if (!meta.ok || !meta.data.mtimeMs || meta.data.mtimeMs <= (mtimeRef.current.get(name) ?? 0)) {
         return;
@@ -632,7 +638,7 @@ export function ExercisePanel({
       await load();
     }, WATCH_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [load, slug]);
+  }, [load, endpoint]);
 
   const runTests = useCallback(async () => {
     const startedFor = { stepId, fn };
@@ -657,7 +663,7 @@ export function ExercisePanel({
       const testedFiles = Object.fromEntries(savedCodeRef.current.entries());
 
       const result = await fetchJson<{ result: TestResult; state: "passed" | "failed" }>(
-        `/api/lesson/${slug}/tests`,
+        `${endpoint}/tests`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -680,7 +686,7 @@ export function ExercisePanel({
     } finally {
       if (isCurrent()) setRunning(false);
     }
-  }, [flush, onProgressChanged, slug, stepId, fn]);
+  }, [flush, onProgressChanged, endpoint, stepId, fn]);
 
   const runReview = useCallback(async () => {
     const startedFor = { stepId, fn };
@@ -705,7 +711,7 @@ export function ExercisePanel({
 
       let response: Response;
       try {
-        response = await fetch(`/api/lesson/${slug}/review`, {
+        response = await fetch(`${endpoint}/review`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ stepId }),
@@ -776,7 +782,7 @@ export function ExercisePanel({
       void reader?.cancel().catch(() => {});
       if (isCurrent()) setReviewing(false);
     }
-  }, [flush, onProgressChanged, slug, stepId, fn]);
+  }, [flush, onProgressChanged, endpoint, stepId, fn]);
 
   const activeFileState = data?.files.find((item) => item.name === activeFile);
 
@@ -920,7 +926,7 @@ export function ExercisePanel({
             Этот шов проверяется вместе со всей системой в итоговом run-шаге.
           </p>
         )}
-        {green && !staleVerdict && (
+        {allowReview && green && !staleVerdict && (
           <button
             onClick={() => void runReview()}
             disabled={reviewing}

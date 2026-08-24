@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseTopLevelFunctions } from "../source/written-functions";
 import { PracticeError } from "./errors";
 import { parseJunitXml, type TestOutcome } from "./junit";
 
@@ -37,9 +38,9 @@ export interface RunTestsOptions {
  * `test_matmul_by_identity_changes_nothing`, `test_trace_of_identity_is_size`,
  * `test_identity_is_symmetric` — тесты, которые зовут функции, не написанные
  * к этому шагу, и красят шаг в красный за чужую заготовку. Обратный случай не
- * лучше: `-k is_symmetric` выбирает ОДИН `test_identity_is_symmetric`, а
- * `test_symmetric_true/false` не гоняет вовсе — и шаг получает «1 из 1
- * зелёные» на непроверенном коде.
+ * лучше: если собственные тесты `is_symmetric` ошибочно назвать
+ * `test_symmetric_*`, то `-k is_symmetric` выберет только интеграционный
+ * `test_identity_is_symmetric` и даст зелёный вердикт на непроверенном коде.
  *
  * Поэтому выражение — это «имя функции И НЕ любое из остальных имён этого же
  * упражнения». Имена, которые сами являются подстрокой `fn`
@@ -52,6 +53,49 @@ export function buildTestFilter(fn: string, functions: string[] = []): string {
   const others = [...new Set(functions)].filter((name) => name !== fn && !fn.includes(name));
   if (others.length === 0) return fn;
   return `${fn} and not (${others.join(" or ")})`;
+}
+
+/**
+ * Тесты, которые прямо вызывают функцию шага.
+ *
+ * Имена старых тестов не всегда повторяют полное имя функции:
+ * `flow_matching_loss` проверяют `test_loss_*`. Смотрим на тело теста, а не
+ * только на заголовок. Сначала предпочитаем изолированные тесты; если их нет,
+ * оставляем интеграционные, которые действительно доходят до нужной функции,
+ * вместо прогона всего упражнения.
+ */
+export function selectDirectTestNames(
+  source: string,
+  fn: string,
+  functions: string[] = [],
+): string[] {
+  const canonical = [...new Set(functions.length > 0 ? functions : [fn])];
+  const others = canonical.filter((name) => name !== fn && !fn.includes(name));
+  const blocks = parseTopLevelFunctions(source);
+  const byName = new Map(blocks.map((block) => [block.fn, block]));
+  const calls = (body: string, name: string) =>
+    new RegExp(`(^|[^A-Za-z0-9_])${name}\\s*\\(`, "m").test(body);
+  const reaches = (blockName: string, target: string, seen = new Set<string>()): boolean => {
+    if (seen.has(blockName)) return false;
+    seen.add(blockName);
+    const block = byName.get(blockName);
+    if (!block) return false;
+    const body = block.body
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    if (calls(body, target)) return true;
+    return [...byName.keys()].some(
+      (helper) => calls(body, helper) && reaches(helper, target, new Set(seen)),
+    );
+  };
+
+  const direct = blocks.filter(
+    (block) => block.fn.startsWith("test_") && reaches(block.fn, fn),
+  );
+  const isolated = direct.filter(
+    (block) => !others.some((name) => reaches(block.fn, name)),
+  );
+  return (isolated.length > 0 ? isolated : direct).map((block) => block.fn);
 }
 
 export interface TestRunResult extends TestOutcome {
@@ -189,8 +233,15 @@ export async function runTests(options: RunTestsOptions): Promise<TestRunResult>
     `${python} -m pytest -q --no-header${
       nodes && nodes.length > 0 ? ` ${nodes.join(" ")}` : filter ? ` -k "${filter}"` : ""
     }`;
+  const testFile = options.testFile ?? path.join(options.dir, "test_exercise.py");
+  const direct =
+    !options.testNodes && options.fn && fs.existsSync(testFile)
+      ? selectDirectTestNames(fs.readFileSync(testFile, "utf8"), options.fn, options.functions)
+      : [];
   const filter = !options.testNodes && options.fn
-    ? buildTestFilter(options.fn, options.functions)
+    ? direct.length > 0
+      ? direct.join(" or ")
+      : buildTestFilter(options.fn, options.functions)
     : undefined;
 
   const first = toOutcome(

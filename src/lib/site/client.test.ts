@@ -229,6 +229,7 @@ describe("практика", () => {
     expect(value).not.toContain("Заголовок упражнения");
     expect(value).not.toContain("def dot");
   });
+
   it("показывает только квалифицированный метод, а не весь класс и файл", async () => {
     const methodStep: StepMeta = {
       id: "001-method",
@@ -309,7 +310,6 @@ describe("практика", () => {
     expect(pick(window, "[data-context]").textContent).not.toContain("@dataclass");
   });
 
-
   it("забирает в блок функции обломок без отступа", async () => {
     // Строка, случайно оставшаяся у левого края, ломала файл навсегда: она
     // считалась началом следующей функции, оставалась снаружи блока и
@@ -352,6 +352,84 @@ describe("практика", () => {
     expect(saved).toContain("def dot(a, b):");
     expect(saved).toContain("import math");
     expect(saved).not.toContain("def magnitude(v):\n    raise NotImplementedError");
+  });
+
+  it("показывает print из Python в консоли после прогона", async () => {
+    const window = await openPractice();
+
+    Object.defineProperty(window.document.head, "appendChild", {
+      configurable: true,
+      value(node: Node) {
+        const script = node as unknown as HTMLScriptElement;
+        if (typeof script.onload === "function") {
+          queueMicrotask(() => script.onload?.(new window.Event("load") as unknown as Event));
+        }
+        return node;
+      },
+    });
+
+    Object.assign(window, {
+      loadPyodide: async () => ({
+        FS: { mkdirTree() {}, writeFile() {} },
+        globals: { set() {} },
+        runPython(source: string) {
+          if (source !== "run_json(PAYLOAD)") return undefined;
+          return JSON.stringify({
+            loadError: null,
+            results: [{ name: "test_magnitude", passed: true, message: "" }],
+            filtered: true,
+            output: "magnitude([3, 4]) = 5\n",
+          });
+        },
+      }),
+    });
+
+    pick(window, "[data-run]").click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect({
+      hidden: pick(window, "[data-console-panel]").hidden,
+      status: pick(window, "[data-run-status]").textContent,
+    }).toEqual({ hidden: false, status: "1 из 1 зелёные" });
+    expect(pick(window, "[data-console]").textContent).toBe("magnitude([3, 4]) = 5\n");
+  });
+
+  it("не теряет исправление после временного переименования функции", async () => {
+    // Первый input раньше удалял из hidden full каноническое имя. Второй уже
+    // не мог найти место для замены: редактор показывал исправление, а Python
+    // продолжал получать вариант с опечаткой.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitudee(v):\n    return 1";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    area.value = "def magnitude(v):\n    return 2";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    const saved = window.localStorage.getItem(`course-exercise:${panel.slug}`)!;
+    expect(saved).toContain("def magnitude(v):\n    return 2");
+    expect(saved).not.toContain("def magnitudee");
+    expect(saved).toContain("def dot(a, b):");
+  });
+
+  it("восстанавливает имя из сохранённого файла, не стирая прошлые функции", async () => {
+    const broken = template
+      .replace(
+        "def magnitude(v):\n    raise NotImplementedError",
+        "def mag_nitude(v):\n    return 41",
+      )
+      .replace("def dot(a, b):\n    raise NotImplementedError", "def dot(a, b):\n    return 99");
+
+    const window = await openPractice(broken);
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const saved = window.localStorage.getItem(`course-exercise:${panel.slug}`)!;
+
+    expect(area.value).toBe("def magnitude(v):\n    return 41");
+    expect(saved).toContain("def magnitude(v):\n    return 41");
+    expect(saved).toContain("def dot(a, b):\n    return 99");
+    expect(saved).not.toContain("def mag_nitude");
+    expect(window.localStorage.getItem(`course-exercise:${panel.slug}:recovery`)).toBe(broken);
   });
 });
 
