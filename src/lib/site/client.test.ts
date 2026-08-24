@@ -662,14 +662,20 @@ describe("AUTH_PAGE_SCRIPT", () => {
   );
 
   // На своём домене базового пути нет, и проверка «внутри базового» ничего не
-  // ловит: остаются только две первые. Косая и обратная косая одинаково
-  // означают «другой сайт» — браузер выпрямляет вторую в первую.
-  it.each([["//evil.test/"], ["/\\evil.test/"], ["/\\/evil.test/"]])(
-    "refuses to redirect off a site published without a base path: %s",
-    (next) => {
-      expect(openAuth(next, signedIn, "").replaced).toEqual(["/"]);
-    },
-  );
+  // ловит — остаётся одна сверка адреса с адресом самой страницы. Здесь всё,
+  // что выглядит путём, но разбирается в чужой сайт: обратная косая, которую
+  // разбор выпрямляет, и табуляция с переводами строк, которые он выбрасывает
+  // до разбора, оставляя те же две косые подряд.
+  it.each([
+    ["//evil.test/"],
+    ["/\\evil.test/"],
+    ["/\\/evil.test/"],
+    ["/\t/evil.test/"],
+    ["/\n/evil.test/"],
+    ["/\r/evil.test/"],
+  ])("refuses to redirect off a site published without a base path: %j", (next) => {
+    expect(openAuth(next, signedIn, "").replaced).toEqual(["/"]);
+  });
 
   it("reports the outcome of the first merge", () => {
     const page = openAuth("/base/", {

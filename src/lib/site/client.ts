@@ -900,12 +900,20 @@ export const AUTH_PAGE_SCRIPT = `
   function safeNext() {
     var raw = new URLSearchParams(window.location.search).get("next");
     if (!raw) return base + "/";
-    // Обратная косая — та же дыра, что и //: браузер приводит её к прямой, и
-    // "/\\чужой.сайт" уезжает на чужой сайт. В пути самого сайта её не бывает.
-    if (raw.indexOf("\\\\") !== -1) return base + "/";
-    if (raw.charAt(0) !== "/" || raw.charAt(1) === "/") return base + "/";
-    if (base && raw.indexOf(base + "/") !== 0) return base + "/";
-    return raw;
+    // Решение принимается по разобранному адресу, а не по исходной строке.
+    // Разбор выбрасывает табуляцию и переводы строк и выпрямляет обратные
+    // косые, поэтому проверять строку посимвольно бесполезно: "/\\t//чужой"
+    // выглядит путём, а браузер уводит по нему на чужой сайт. Сверка идёт с
+    // тем же адресом, по которому потом и произойдёт переход.
+    var url;
+    try {
+      url = new URL(raw, window.location.origin);
+    } catch (error) {
+      return base + "/";
+    }
+    if (url.origin !== window.location.origin) return base + "/";
+    if (base && url.pathname.indexOf(base + "/") !== 0) return base + "/";
+    return url.pathname + url.search + url.hash;
   }
 
   window.addEventListener("course-sync-ready", function (event) {
