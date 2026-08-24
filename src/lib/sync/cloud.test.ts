@@ -55,6 +55,26 @@ describe("snapshot", () => {
     };
     expect(snapshot(throwing, ["course-progress:"])).toEqual({});
   });
+
+  it("отдаёт пустой снимок, не частичный, когда бросает после первого ключа", () => {
+    // Если хранилище начало давать ключи, а потом упало, частичный снимок
+    // хуже, чем пустой: слияние переберёт утраченные ключи как прочитанные,
+    // и степи с шагов, которых нет ни в облаке, ни в этом неполном снимке,
+    // исчезнут из массива, нарушив правило: «раз прочитано, никогда не
+    // прочитано назад». Поэтому если бросает — вообще не брать, пусть
+    // хранилище вернёт пусто.
+    let callCount = 0;
+    const partialThrowing: StorageLike = {
+      length: 2,
+      key: (index) => (index === 0 ? "course-progress:lesson-a" : "course-progress:lesson-b"),
+      getItem: () => {
+        callCount += 1;
+        if (callCount > 1) throw new Error("storage corrupted");
+        return "[]";
+      },
+    };
+    expect(snapshot(partialThrowing, ["course-progress:"])).toEqual({});
+  });
 });
 
 describe("pullCloud", () => {
