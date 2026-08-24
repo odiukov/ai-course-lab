@@ -255,3 +255,31 @@ describe("renderIndexPage", () => {
     expect(html).toContain("8 из 56 шагов");
   });
 });
+
+/**
+ * Общая обвязка страницы.
+ *
+ * Базовый путь в атрибуте `body` читают две стороны: бандл входа берёт из него
+ * адрес возврата OAuth, а скрипт страницы `/auth/` — границу, за которую
+ * переход не выпускается. Обе молча сломаются, если атрибут пропадёт.
+ */
+describe("обвязка страницы", () => {
+  it("кладёт базовый путь в атрибут body", () => {
+    expect(renderStepPage(model(allWritten), 1, { basePath: "/base" })).toContain(
+      '<body data-base="/base">',
+    );
+    expect(renderIndexPage([], { basePath: "/base" })).toContain('<body data-base="/base">');
+    expect(renderIndexPage([], { basePath: "" })).toContain('<body data-base="">');
+  });
+
+  it("подключает бандл входа только тогда, когда он собран", () => {
+    // Без переменных сборки файла assets/auth.js нет вовсе, и страница,
+    // сославшаяся на него, ловила бы 404 на каждом открытии.
+    const withAuth = renderStepPage(model(allWritten), 1, { basePath: "/base", withAuth: true });
+    expect(withAuth).toContain('<script src="/base/assets/auth.js"></script>');
+
+    expect(renderStepPage(model(allWritten), 1, { basePath: "/base" })).not.toContain(
+      "assets/auth.js",
+    );
+  });
+});
