@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
 <link rel="stylesheet" href="/ai-course-lab/assets/site.css">
 </head>
-<body>
+<body data-base="/ai-course-lab">
 <header class="lesson-header">
 <a class="back" href="/ai-course-lab/">← к списку уроков</a>
 <h1>Star Family Reasoning</h1>
@@ -60,6 +60,7 @@
 </ol>
 </main>
 <script type="application/json" data-lesson>{"slug":"15-autonomous-systems__02-star-family-reasoning","plannedCount":37}</script>
+<script src="/ai-course-lab/assets/auth.js"></script>
 <script>
 (function () {
 
@@ -92,34 +93,89 @@ function lessonData(selector) {
   return node ? JSON.parse(node.textContent || "{}") : null;
 }
 
+var STATE_PREFIX = "course-step-state:";
+
+function readStates(slug) {
+  try {
+    var raw = localStorage.getItem(STATE_PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * Состояние из записи хранилища.
+ *
+ * Запись — объект с состоянием и временем. Голая строка состояния осталась от
+ * первых дней ключа: опубликована она не была, но в браузере разработчика
+ * лежать может.
+ */
+function stateOf(entry) {
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : entry.state || "";
+}
+
+/**
+ * Состояние практики шага.
+ *
+ * passed не сбрасывается ничем: красный прогон после зелёного означает, что
+ * человек полез что-то менять в уже сданном шаге, а не что шаг разучился.
+ *
+ * Рядом с состоянием пишется время изменения. Без него слияние с облаком не
+ * знает, чей failed свежее, и вынуждено подставлять время открытия страницы —
+ * то есть отдавать любую ничью тому устройству, на котором её разбирают.
+ */
+function markState(slug, stepId, state) {
+  var rank = { read: 1, failed: 1, passed: 2 };
+  var states = readStates(slug);
+  if ((rank[stateOf(states[stepId])] || 0) > (rank[state] || 0)) return states;
+  states[stepId] = { state: state, updatedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(STATE_PREFIX + slug, JSON.stringify(states));
+  } catch (error) {
+    // Приватное окно: состояние не переживёт перезагрузку.
+  }
+  if (window.CourseSync) window.CourseSync.putStep(slug, stepId, state);
+  return states;
+}
+
 
 var data = lessonData("[data-lesson]");
 if (!data) return;
 
-var ids = readProgress(data.slug);
-var read = {};
-for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+function paint() {
+  var ids = readProgress(data.slug);
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
 
-var links = document.querySelectorAll("[data-step]");
-var next = null;
-for (var j = 0; j < links.length; j += 1) {
-  var id = links[j].getAttribute("data-step");
-  if (read[id]) links[j].classList.add("is-read");
-  else if (!next) next = links[j];
-}
+  var links = document.querySelectorAll("[data-step]");
+  var next = null;
+  for (var j = 0; j < links.length; j += 1) {
+    var id = links[j].getAttribute("data-step");
+    if (read[id]) links[j].classList.add("is-read");
+    else if (!next) next = links[j];
+  }
 
-var counter = document.querySelector("[data-read-count]");
-if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
+  var counter = document.querySelector("[data-read-count]");
+  if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
 
-var resume = document.querySelector("[data-resume]");
-if (resume) {
-  var target = next || links[0];
-  if (target) {
-    resume.setAttribute("href", target.getAttribute("href"));
-    resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
-    resume.hidden = false;
+  var resume = document.querySelector("[data-resume]");
+  if (resume) {
+    var target = next || links[0];
+    if (target) {
+      resume.setAttribute("href", target.getAttribute("href"));
+      resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
+      resume.hidden = false;
+    }
   }
 }
+
+paint();
+
+// Прогресс мог приехать из облака уже после отрисовки: слияние асинхронно.
+window.addEventListener("course-sync-progress", paint);
 })();
 </script>
 </body>

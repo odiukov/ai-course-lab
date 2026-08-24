@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/ai-course-lab/assets/katex/katex.min.css">
 <link rel="stylesheet" href="/ai-course-lab/assets/site.css">
 </head>
-<body>
+<body data-base="/ai-course-lab">
 <header class="index-header"><h1>AI Lab</h1></header>
 <section class="phase">
 <h2>Фаза 1. Math Foundations</h2>
@@ -3897,6 +3897,7 @@
 </li>
 </ul>
 </section>
+<script src="/ai-course-lab/assets/auth.js"></script>
 <script>
 (function () {
 
@@ -3929,18 +3930,74 @@ function lessonData(selector) {
   return node ? JSON.parse(node.textContent || "{}") : null;
 }
 
+var STATE_PREFIX = "course-step-state:";
 
-var rows = document.querySelectorAll("[data-lesson-slug]");
-for (var i = 0; i < rows.length; i += 1) {
-  var slug = rows[i].getAttribute("data-lesson-slug");
-  var count = readProgress(slug).length;
-  if (count === 0) continue;
-
-  var target = rows[i].querySelector("[data-read]");
-  if (!target) continue;
-  target.textContent = "прочитано " + count;
-  target.hidden = false;
+function readStates(slug) {
+  try {
+    var raw = localStorage.getItem(STATE_PREFIX + slug);
+    var parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
 }
+
+/**
+ * Состояние из записи хранилища.
+ *
+ * Запись — объект с состоянием и временем. Голая строка состояния осталась от
+ * первых дней ключа: опубликована она не была, но в браузере разработчика
+ * лежать может.
+ */
+function stateOf(entry) {
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : entry.state || "";
+}
+
+/**
+ * Состояние практики шага.
+ *
+ * passed не сбрасывается ничем: красный прогон после зелёного означает, что
+ * человек полез что-то менять в уже сданном шаге, а не что шаг разучился.
+ *
+ * Рядом с состоянием пишется время изменения. Без него слияние с облаком не
+ * знает, чей failed свежее, и вынуждено подставлять время открытия страницы —
+ * то есть отдавать любую ничью тому устройству, на котором её разбирают.
+ */
+function markState(slug, stepId, state) {
+  var rank = { read: 1, failed: 1, passed: 2 };
+  var states = readStates(slug);
+  if ((rank[stateOf(states[stepId])] || 0) > (rank[state] || 0)) return states;
+  states[stepId] = { state: state, updatedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(STATE_PREFIX + slug, JSON.stringify(states));
+  } catch (error) {
+    // Приватное окно: состояние не переживёт перезагрузку.
+  }
+  if (window.CourseSync) window.CourseSync.putStep(slug, stepId, state);
+  return states;
+}
+
+
+function paint() {
+  var rows = document.querySelectorAll("[data-lesson-slug]");
+  for (var i = 0; i < rows.length; i += 1) {
+    var slug = rows[i].getAttribute("data-lesson-slug");
+    var count = readProgress(slug).length;
+    if (count === 0) continue;
+
+    var target = rows[i].querySelector("[data-read]");
+    if (!target) continue;
+    target.textContent = "прочитано " + count;
+    target.hidden = false;
+  }
+}
+
+paint();
+
+// Каталог — первая страница, на которую возвращаются: прогресс с другого
+// устройства должен проступить на ней сам, без перезагрузки.
+window.addEventListener("course-sync-progress", paint);
 })();
 </script>
 </body>
