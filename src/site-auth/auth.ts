@@ -10,14 +10,12 @@
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import {
   EXERCISE_KEY_PREFIX,
-  LOCAL_BACKUP_SUFFIX,
   PROGRESS_KEY_PREFIX,
   STEP_STATE_KEY_PREFIX,
   SYNCED_KEY_PREFIX,
-  UPDATED_AT_SUFFIX,
 } from "../lib/site/storage-keys";
-import type { FileRow, StepRow } from "../lib/sync/merge";
-import { planMigration, readLocalProgress, type StorageSnapshot } from "../lib/sync/migrate";
+import { fileSyncEvents, pullCloud, snapshot } from "../lib/sync/cloud";
+import { planMigration, readLocalProgress } from "../lib/sync/migrate";
 
 declare const __SUPABASE_URL__: string;
 declare const __SUPABASE_ANON_KEY__: string;
@@ -29,6 +27,16 @@ declare global {
       putFile(slug: string, fileName: string, content: string): void;
       putRun(lessonSlug: string, stepId: string, passed: number, failed: number): void;
     };
+    /**
+     * Итог входа и слияния — он же содержимое события `course-sync-ready`.
+     *
+     * Бандл грузится блокирующим тегом, то есть заканчивает работу раньше, чем
+     * инлайновый скрипт страницы успевает подписаться на событие. Сейчас
+     * дожидаться сессии всё равно приходится через промис, и подписка успевает,
+     * но держать страницу входа на этой случайности нельзя: выиграй гонку
+     * бандл — и `/auth/` навсегда осталась бы на «Проверяю вход…».
+     */
+    CourseSyncReady?: Record<string, unknown>;
   }
 }
 
@@ -57,23 +65,13 @@ client.auth.onAuthStateChange((_event, next) => {
   paintButton();
 });
 
-/** Снимок localStorage обычным объектом: разбор живёт в чистом модуле. */
-function snapshot(): StorageSnapshot {
-  const result: StorageSnapshot = {};
-  for (let i = 0; i < localStorage.length; i += 1) {
-    const key = localStorage.key(i);
-    if (!key) continue;
-    if (
-      !key.startsWith(PROGRESS_KEY_PREFIX) &&
-      !key.startsWith(STEP_STATE_KEY_PREFIX) &&
-      !key.startsWith(EXERCISE_KEY_PREFIX)
-    ) {
-      continue;
-    }
-    const value = localStorage.getItem(key);
-    if (value !== null) result[key] = value;
-  }
-  return result;
+/** Ключи, которые участвуют в слиянии; всё прочее в снимок не попадает. */
+const SYNCED_PREFIXES = [PROGRESS_KEY_PREFIX, STEP_STATE_KEY_PREFIX, EXERCISE_KEY_PREFIX];
+
+/** Итог входа уходит и событием, и в глобальную переменную. */
+function announce(detail: Record<string, unknown>): void {
+  window.CourseSyncReady = detail;
+  window.dispatchEvent(new CustomEvent("course-sync-ready", { detail }));
 }
 
 function write(writes: Record<string, string>): void {
@@ -84,32 +82,6 @@ function write(writes: Record<string, string>): void {
       // Приватное окно: слияние доживёт до конца вкладки и не дальше.
     }
   }
-}
-
-async function pullCloud(): Promise<{ steps: StepRow[]; files: FileRow[] }> {
-  const [steps, files] = await Promise.all([
-    client.from("step_progress").select("lesson_slug, step_id, state, updated_at"),
-    client.from("exercise_files").select("slug, file_name, content, updated_at"),
-  ]);
-  // Отказ чтения нельзя принимать за пустое облако. Иначе слияние решит, что в
-  // аккаунте пусто, а вызывающий выставит флаг «этот браузер уже влит» — и
-  // прогресс, набранный здесь, не уедет в аккаунт уже никогда.
-  if (steps.error) throw new Error(steps.error.message);
-  if (files.error) throw new Error(files.error.message);
-  return {
-    steps: (steps.data ?? []).map((row) => ({
-      lessonSlug: row.lesson_slug as string,
-      stepId: row.step_id as string,
-      state: row.state as StepRow["state"],
-      updatedAt: row.updated_at as string,
-    })),
-    files: (files.data ?? []).map((row) => ({
-      slug: row.slug as string,
-      fileName: row.file_name as string,
-      content: row.content as string,
-      updatedAt: row.updated_at as string,
-    })),
-  };
 }
 
 /**
@@ -126,8 +98,8 @@ async function pullCloud(): Promise<{ steps: StepRow[]; files: FileRow[] }> {
  * слиянию, а не к самому слиянию.
  */
 async function syncNow(user: string): Promise<{ steps: number; files: number; backups: number }> {
-  const cloud = await pullCloud();
-  const local = readLocalProgress(snapshot(), new Date().toISOString());
+  const cloud = await pullCloud(client);
+  const local = readLocalProgress(snapshot(localStorage, SYNCED_PREFIXES));
   const plan = planMigration(local, cloud);
 
   // Запись обратно идёт до отправки, а не после.
@@ -142,27 +114,19 @@ async function syncNow(user: string): Promise<{ steps: number; files: number; ba
   // Событиями ей сообщается, что данные под ней поменялись: сама она об этом
   // узнать не может.
   window.dispatchEvent(new CustomEvent("course-sync-progress"));
-  for (const [key, value] of Object.entries(plan.writes)) {
-    if (!key.startsWith(EXERCISE_KEY_PREFIX)) continue;
-    if (key.endsWith(UPDATED_AT_SUFFIX)) continue;
-    const backup = key.endsWith(LOCAL_BACKUP_SUFFIX);
-    const clean = backup ? key.slice(0, -LOCAL_BACKUP_SUFFIX.length) : key;
-    const rest = clean.slice(EXERCISE_KEY_PREFIX.length);
-    const separator = rest.indexOf(":");
-    window.dispatchEvent(
-      new CustomEvent("course-sync-file", {
-        detail: {
-          slug: separator === -1 ? rest : rest.slice(0, separator),
-          fileName: separator === -1 ? "exercise.py" : rest.slice(separator + 1),
-          backup,
-          content: backup ? undefined : value,
-        },
-      }),
-    );
+  for (const detail of fileSyncEvents(plan.writes)) {
+    window.dispatchEvent(new CustomEvent("course-sync-file", { detail }));
   }
 
+  // Отказ отправки не молчит.
+  //
+  // Клиент Supabase не отклоняет промис, а возвращает { error }: без этой
+  // проверки страница входа рассказывала бы человеку, что прогресс уехал в
+  // аккаунт, когда его отбила политика доступа или потолок на размер файла, и
+  // ставила бы флаг «этот браузер уже влит». Бросок здесь ничего не стоит:
+  // локальная запись и события ушли выше и от отправки не зависят.
   if (plan.steps.length > 0) {
-    await client.from("step_progress").upsert(
+    const { error } = await client.from("step_progress").upsert(
       plan.steps.map((row) => ({
         user_id: user,
         lesson_slug: row.lessonSlug,
@@ -171,9 +135,13 @@ async function syncNow(user: string): Promise<{ steps: number; files: number; ba
         updated_at: row.updatedAt,
       })),
     );
+    if (error) {
+      console.error("не удалось отправить прогресс шагов", error);
+      throw new Error(error.message);
+    }
   }
   if (plan.files.length > 0) {
-    await client.from("exercise_files").upsert(
+    const { error } = await client.from("exercise_files").upsert(
       plan.files.map((row) => ({
         user_id: user,
         slug: row.slug,
@@ -182,6 +150,10 @@ async function syncNow(user: string): Promise<{ steps: number; files: number; ba
         updated_at: row.updatedAt ?? new Date().toISOString(),
       })),
     );
+    if (error) {
+      console.error("не удалось отправить файлы упражнений", error);
+      throw new Error(error.message);
+    }
   }
 
   return { steps: plan.steps.length, files: plan.files.length, backups: plan.backups };
@@ -300,7 +272,7 @@ window.CourseSync = {
 void ready.then(async () => {
   paintButton();
   if (!session) {
-    window.dispatchEvent(new CustomEvent("course-sync-ready", { detail: { user: null } }));
+    announce({ user: null });
     return;
   }
   const user = session.user.id;
@@ -319,5 +291,5 @@ void ready.then(async () => {
   } catch (error) {
     detail = { user, migrated: false, error: String(error) };
   }
-  window.dispatchEvent(new CustomEvent("course-sync-ready", { detail }));
+  announce(detail);
 });
