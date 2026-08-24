@@ -21,6 +21,7 @@ import { readStepsById } from "../src/lib/content/step-file.js";
 import { groupLessons, type CatalogLesson } from "../src/lib/site/catalog.js";
 import { buildLessonModel } from "../src/lib/site/lesson-page.js";
 import {
+  renderAuthPage,
   renderIndexPage,
   renderLessonIndexPage,
   renderStepPage,
@@ -87,6 +88,36 @@ async function buildEditor(): Promise<void> {
     target: "es2019",
     logLevel: "warning",
   });
+}
+
+/**
+ * Вход и синхронизация одним файлом.
+ *
+ * Без переменных окружения бандл не собирается вовсе: сайт тогда получается
+ * ровно такой, каким был до появления аккаунтов, и чужая сборка репозитория
+ * не спотыкается об отсутствие проекта Supabase.
+ */
+async function buildAuth(): Promise<boolean> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    console.log("SUPABASE_URL/SUPABASE_ANON_KEY не заданы — сайт собирается без входа");
+    return false;
+  }
+  await build({
+    entryPoints: [path.join(root, "src", "site-auth", "auth.ts")],
+    outfile: path.join(outDir, "assets", "auth.js"),
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2020",
+    define: {
+      __SUPABASE_URL__: JSON.stringify(url),
+      __SUPABASE_ANON_KEY__: JSON.stringify(key),
+    },
+    logLevel: "warning",
+  });
+  return true;
 }
 
 function copyKatexAssets(): void {
@@ -203,6 +234,10 @@ async function main(): Promise<void> {
   // отвечает на вопрос «что читать дальше» в конце урока.
   const ordered = phases.flatMap((phase) => phase.lessons);
 
+  // Бандл входа собирается до страниц: от того, собрался ли он, зависит, есть
+  // ли на страницах ссылка на него.
+  const withAuth = await buildAuth();
+
   ordered.forEach((lesson, position) => {
     const model = models.get(lesson.slug);
     if (!model) return;
@@ -225,17 +260,18 @@ async function main(): Promise<void> {
     // урок читался порциями, а не одним полотном.
     write(
       path.join("lesson", lesson.slug, "index.html"),
-      renderLessonIndexPage(model, { basePath, nextLesson }),
+      renderLessonIndexPage(model, { basePath, nextLesson, withAuth }),
     );
     model.blocks.forEach((block, index) => {
       write(
         path.join("lesson", lesson.slug, block.step.id, "index.html"),
-        renderStepPage(model, index, { basePath, nextLesson, exercise }),
+        renderStepPage(model, index, { basePath, nextLesson, exercise, withAuth }),
       );
     });
   });
 
-  write("index.html", renderIndexPage(phases, { basePath }));
+  write("index.html", renderIndexPage(phases, { basePath, withAuth }));
+  if (withAuth) write(path.join("auth", "index.html"), renderAuthPage({ basePath }));
   write("assets/site.css", buildSiteCss());
   write("assets/harness.py", fs.readFileSync(path.join(root, "src", "site-python", "harness.py"), "utf8"));
   write(

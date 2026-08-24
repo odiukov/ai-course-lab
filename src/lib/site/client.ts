@@ -884,3 +884,51 @@ window.addEventListener("message", function (event) {
   }
 });
 `;
+
+/**
+ * Страница `/auth/`: показать итог входа и увести обратно.
+ *
+ * Адрес возврата приходит строкой запроса, поэтому проверяется на то, что это
+ * путь внутри самого сайта: без проверки страница входа превращается в
+ * открытый редирект на чужой сайт.
+ */
+export const AUTH_PAGE_SCRIPT = `
+(function () {
+  var status = document.querySelector("[data-auth-status]");
+  var base = document.body.getAttribute("data-base") || "";
+
+  function safeNext() {
+    var raw = new URLSearchParams(window.location.search).get("next");
+    if (!raw) return base + "/";
+    // Обратная косая — та же дыра, что и //: браузер приводит её к прямой, и
+    // "/\\чужой.сайт" уезжает на чужой сайт. В пути самого сайта её не бывает.
+    if (raw.indexOf("\\\\") !== -1) return base + "/";
+    if (raw.charAt(0) !== "/" || raw.charAt(1) === "/") return base + "/";
+    if (base && raw.indexOf(base + "/") !== 0) return base + "/";
+    return raw;
+  }
+
+  window.addEventListener("course-sync-ready", function (event) {
+    var detail = event.detail || {};
+    if (!detail.user) {
+      if (status) status.textContent = "Войти не удалось: " + (detail.error || "неизвестная причина");
+      return;
+    }
+    // Сорвавшееся слияние не молчит: флаг при отказе не ставится, и следующий
+    // заход попробует снова — но узнать об этом человек должен здесь.
+    if (status) {
+      status.textContent = detail.error
+        ? "Вход выполнен, но прогресс с этого устройства влить не удалось: " + detail.error +
+          ". Попробуется снова при следующем заходе."
+        : detail.migrated
+          ? "Прогресс с этого устройства влит в аккаунт: шагов " + detail.steps +
+            ", файлов " + detail.files +
+            (detail.backups > 0 ? ", отложено копий кода " + detail.backups : "")
+          : "Вход выполнен.";
+    }
+    window.setTimeout(function () {
+      window.location.replace(safeNext());
+    }, detail.error || detail.backups > 0 ? 4000 : 1200);
+  });
+})();
+`;

@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 import type { Step, StepMeta } from "../content/step-file";
 import { PROGRESS_KEY_PREFIX } from "./client";
 import { buildLessonModel } from "./lesson-page";
-import { renderIndexPage, renderLessonIndexPage, renderStepPage } from "./render";
+import {
+  renderAuthPage,
+  renderIndexPage,
+  renderLessonIndexPage,
+  renderStepPage,
+} from "./render";
 
 const plan: StepMeta[] = [
   { id: "001-a", type: "theory", title: "Первый" },
@@ -45,7 +50,7 @@ function open(html: string, progress: string[] = []): Window {
 
   if (progress.length > 0) window.localStorage.setItem(key, JSON.stringify(progress));
 
-  document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+  document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
   for (const script of [...document.body.querySelectorAll("script")]) {
     if (script.getAttribute("type") === "application/json") continue;
     window.eval(script.textContent ?? "");
@@ -62,7 +67,7 @@ function openFrom(html: string, current: string, from: string): Window {
     configurable: true,
   });
 
-  window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+  window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
   for (const script of [...window.document.body.querySelectorAll("script")]) {
     if (script.getAttribute("type") === "application/json") continue;
     window.eval(script.textContent ?? "");
@@ -208,7 +213,7 @@ describe("практика", () => {
       ({ ok: true, text: async () => template })) as unknown as typeof window.fetch;
 
     const html = renderStepPage(exerciseModel, 0, { basePath: "/base", exercise: panel });
-    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
     for (const script of [...window.document.body.querySelectorAll("script")]) {
       if (script.getAttribute("type") === "application/json") continue;
       window.eval(script.textContent ?? "");
@@ -289,7 +294,7 @@ describe("практика", () => {
     window.fetch = (async () =>
       ({ ok: true, text: async () => source })) as unknown as typeof window.fetch;
     const html = renderStepPage(methodModel, 0, { basePath: "/base", exercise: methodPanel });
-    window.document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
     for (const script of [...window.document.body.querySelectorAll("script")]) {
       if (script.getAttribute("type") === "application/json") continue;
       window.eval(script.textContent ?? "");
@@ -588,5 +593,109 @@ describe("состояние шага", () => {
     (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
 
     expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).not.toBe("passed");
+  });
+});
+
+/**
+ * Страница возврата после входа.
+ *
+ * Адрес возврата — единственное место на сайте, где путь перехода приходит
+ * снаружи: его подставляет тот, кто прислал ссылку. Поэтому проверяется в
+ * первую очередь то, что уйти по ней можно только внутрь самого сайта.
+ */
+describe("AUTH_PAGE_SCRIPT", () => {
+  /** Открывает `/auth/?next=...` и отдаёт то, что скрипт сделал по событию. */
+  function openAuth(next: string | null, detail: Record<string, unknown>, basePath = "/base") {
+    const search = next === null ? "" : `?next=${encodeURIComponent(next)}`;
+    const window = new Window({ url: `https://example.test${basePath}/auth/${search}` });
+    const html = renderAuthPage({ basePath });
+
+    window.document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
+    window.document.body.setAttribute("data-base", basePath);
+
+    // Переход выполняется отложенно; ждать секунду в тесте незачем, поэтому
+    // таймер срабатывает сразу, а сам переход только записывается.
+    const replaced: string[] = [];
+    Object.defineProperty(window, "setTimeout", {
+      value: (fn: () => void) => {
+        fn();
+        return 0;
+      },
+      configurable: true,
+    });
+    Object.defineProperty(window.location, "replace", {
+      value: (url: string) => replaced.push(url),
+      configurable: true,
+    });
+
+    for (const script of [...window.document.body.querySelectorAll("script")]) {
+      if (script.getAttribute("type") === "application/json") continue;
+      window.eval(script.textContent ?? "");
+    }
+    window.dispatchEvent(new window.CustomEvent("course-sync-ready", { detail }));
+
+    return {
+      replaced,
+      status: window.document.querySelector("[data-auth-status]")?.textContent ?? "",
+    };
+  }
+
+  const signedIn = { user: "u-1", migrated: false };
+
+  it("returns to the page the reader came from", () => {
+    expect(openAuth("/base/lesson/lesson-a/002-b/", signedIn).replaced).toEqual([
+      "/base/lesson/lesson-a/002-b/",
+    ]);
+  });
+
+  it("falls back to the course root without a next", () => {
+    expect(openAuth(null, signedIn).replaced).toEqual(["/base/"]);
+  });
+
+  // Чужой адрес целиком, адрес без схемы, обратная косая, которую браузер
+  // выпрямит в такой же адрес без схемы, и путь вне базового.
+  it.each([["https://evil.test/"], ["//evil.test/"], ["/\\evil.test/"], ["/other/page/"]])(
+    "refuses to redirect off the site: %s",
+    (next) => {
+      expect(openAuth(next, signedIn).replaced).toEqual(["/base/"]);
+    },
+  );
+
+  // На своём домене базового пути нет, и проверка «внутри базового» ничего не
+  // ловит: остаются только две первые. Косая и обратная косая одинаково
+  // означают «другой сайт» — браузер выпрямляет вторую в первую.
+  it.each([["//evil.test/"], ["/\\evil.test/"], ["/\\/evil.test/"]])(
+    "refuses to redirect off a site published without a base path: %s",
+    (next) => {
+      expect(openAuth(next, signedIn, "").replaced).toEqual(["/"]);
+    },
+  );
+
+  it("reports the outcome of the first merge", () => {
+    const page = openAuth("/base/", {
+      user: "u-1",
+      migrated: true,
+      steps: 12,
+      files: 3,
+      backups: 1,
+    });
+
+    expect(page.status).toContain("шагов 12");
+    expect(page.status).toContain("файлов 3");
+    expect(page.status).toContain("отложено копий кода 1");
+  });
+
+  it("does not pretend the merge succeeded when it failed", () => {
+    const page = openAuth("/base/", { user: "u-1", migrated: false, error: "Failed to fetch" });
+
+    expect(page.status).toContain("влить не удалось");
+    expect(page.replaced).toEqual(["/base/"]);
+  });
+
+  it("stays put and explains when there is no session", () => {
+    const page = openAuth("/base/", { user: null });
+
+    expect(page.status).toContain("Войти не удалось");
+    expect(page.replaced).toEqual([]);
   });
 });

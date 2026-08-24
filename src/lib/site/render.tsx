@@ -4,6 +4,7 @@ import { StepBody } from "../../components/StepBody";
 import { lessonUrl, stepPageHref, stepPageUrl } from "./anchors";
 import type { CatalogPhase } from "./catalog";
 import {
+  AUTH_PAGE_SCRIPT,
   CATALOG_SCRIPT,
   EXERCISE_SCRIPT,
   FRAME_SCRIPT,
@@ -39,6 +40,8 @@ export interface RenderOptions {
   nextLesson?: NextLesson | null;
   /** Упражнение урока, если оно есть. */
   exercise?: ExercisePanelData | null;
+  /** Собран ли бандл входа: без переменных сборки страница о нём не знает. */
+  withAuth?: boolean;
 }
 
 function escapeHtml(text: string): string {
@@ -77,12 +80,22 @@ function htmlDocument(options: {
 <link rel="stylesheet" href="${options.basePath}/assets/katex/katex.min.css">
 <link rel="stylesheet" href="${options.basePath}/assets/site.css">
 </head>
-<body>
+<body data-base="${options.basePath}">
 ${options.body}
 ${scripts}
 </body>
 </html>
 `;
+}
+
+/**
+ * Бандл входа в списке модулей страницы — или пусто.
+ *
+ * Он стоит первым: `window.CourseSync` должен существовать к моменту, когда
+ * инлайновый скрипт страницы впервые до него дотянется.
+ */
+function authModules(options: RenderOptions): string[] {
+  return options.withAuth ? [`${options.basePath}/assets/auth.js`] : [];
 }
 
 function renderQuiz(block: LessonBlock): string {
@@ -304,7 +317,10 @@ ${onward}
     // Скрипт практики подключается только там, где есть что запускать: на
     // шаге с теорией ему нечего делать.
     scripts: [PROGRESS_SCRIPT, QUIZ_SCRIPT, FRAME_SCRIPT, ...(hasEditor ? [EXERCISE_SCRIPT] : [])],
-    modules: hasEditor ? [`${options.basePath}/assets/editor.js`] : [],
+    modules: [
+      ...authModules(options),
+      ...(hasEditor ? [`${options.basePath}/assets/editor.js`] : []),
+    ],
   });
 }
 
@@ -349,6 +365,7 @@ ${items}
     basePath: options.basePath,
     body: page,
     scripts: [LESSON_INDEX_SCRIPT],
+    modules: authModules(options),
   });
 }
 
@@ -387,5 +404,26 @@ ${lessons}
     basePath: options.basePath,
     body: `<header class="index-header"><h1>${SITE_TITLE}</h1></header>\n${sections}`,
     scripts: [CATALOG_SCRIPT],
+    modules: authModules(options),
+  });
+}
+
+/**
+ * Страница возврата после входа через GitHub.
+ *
+ * Единственное место, где виден ход первого слияния. Разбор токена из адреса
+ * делает клиент Supabase, сюда он приходит уже с сессией.
+ */
+export function renderAuthPage(options: { basePath: string }): string {
+  return htmlDocument({
+    title: `Вход — ${SITE_TITLE}`,
+    basePath: options.basePath,
+    body: `<header class="index-header"><h1>Вход</h1></header>
+<main class="lesson">
+<p class="run-status" data-auth-status>Проверяю вход…</p>
+<a class="nav-button" data-auth-back href="${options.basePath}/">К курсу</a>
+</main>`,
+    modules: [`${options.basePath}/assets/auth.js`],
+    scripts: [AUTH_PAGE_SCRIPT],
   });
 }
