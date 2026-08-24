@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Почему углы ромба создают нулевые веса</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ed;
+      --surface: #fffdf8;
+      --ink: #25282d;
+      --muted: #687079;
+      --axis: #76808a;
+      --loss: #c9a66b;
+      --loss-touch: #d56732;
+      --l1-fill: #dceee6;
+      --l1-edge: #28735a;
+      --l2-fill: #e4e8f6;
+      --l2-edge: #4b60a8;
+      --point: #c33d35;
+      --guide: #9b413b;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #171a1f;
+        --surface: #20242b;
+        --ink: #f2eee5;
+        --muted: #aeb7c0;
+        --axis: #8e99a5;
+        --loss: #b7945b;
+        --loss-touch: #ff9b65;
+        --l1-fill: #163d33;
+        --l1-edge: #70d0aa;
+        --l2-fill: #252f59;
+        --l2-edge: #9eb0ff;
+        --point: #ff8178;
+        --guide: #ef8e87;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--surface);
+      border: 1px solid var(--axis);
+    }
+
+    svg[hidden],
+    [hidden] {
+      display: none;
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-head {
+      fill: var(--axis);
+      stroke: none;
+    }
+
+    .loss-outer {
+      fill: none;
+      stroke: var(--loss);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .loss-touch {
+      fill: none;
+      stroke: var(--loss-touch);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .l1-shape {
+      fill: var(--l1-fill);
+      stroke: var(--l1-edge);
+      stroke-width: 3px;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .l2-shape {
+      fill: var(--l2-fill);
+      stroke: var(--l2-edge);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .touch-point {
+      fill: var(--point);
+      stroke: var(--surface);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .leader {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 1.5px;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .panel-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-style: italic;
+    }
+
+    .callout {
+      fill: var(--ink);
+      stroke: var(--surface);
+      stroke-width: 4px;
+      paint-order: stroke fill;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .callout-value {
+      fill: var(--point);
+      stroke: var(--surface);
+      stroke-width: 4px;
+      paint-order: stroke fill;
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .legend {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .summary {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    #fallback {
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--axis);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Почему углы ромба создают нулевые веса</h1>
+
+    <svg id="diagram"
+         viewBox="0 0 900 460"
+         width="900"
+         height="460"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Сравнение геометрии ограничений L1 и L2</title>
+      <desc id="svg-description">
+        Слева эллипс функции потерь касается угла ромба L1 на оси,
+        где один вес равен нулю. Справа эллипс касается гладкой границы
+        круга L2 между осями, где оба веса ненулевые.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать, как эллипс функции потерь касается угла
+      ромба L1 на оси и гладкой границы круга L2 между осями.
+    </p>
+  </main>
+
+  <script>
+    const data = {
+      canvas: { width: 900, height: 460 },
+      zero: 0,
+      one: 1,
+      turn: 6.283185307179586,
+      samples: 72,
+      touchScale: 1,
+      contourScales: [1.5, 1.25, 1],
+      panels: [
+        {
+          kind: "l1",
+          center: { x: -3, y: 0 },
+          title: { text: "L1: ромб с углами", x: -3, y: 3.42 },
+          axis: {
+            left: -5.25,
+            right: -0.75,
+            bottom: -1.55,
+            top: 2.8
+          },
+          radius: 1.1,
+          loss: {
+            center: { x: -3, y: 1.95 },
+            rx: 1.28,
+            ry: 0.85,
+            angle: 0
+          },
+          touch: { x: -3, y: 1.1 },
+          leader: {
+            from: { x: -3, y: 1.1 },
+            to: { x: -4.08, y: 1.1 }
+          },
+          labels: [
+            {
+              text: "угол ромба",
+              x: -4.25,
+              y: 1.25,
+              dx: 0,
+              dy: 0,
+              anchor: "end",
+              className: "callout"
+            },
+            {
+              text: "w₁ = 0",
+              x: -4.25,
+              y: 0.95,
+              dx: 0,
+              dy: 0,
+              anchor: "end",
+              className: "callout-value"
+            }
+          ]
+        },
+        {
+          kind: "l2",
+          center: { x: 3, y: 0 },
+          title: { text: "L2: гладкий круг", x: 3, y: 3.42 },
+          axis: {
+            left: 0.75,
+            right: 5.25,
+            bottom: -1.55,
+            top: 2.8
+          },
+          radius: 1.1,
+          loss: {
+            center: { x: 4.286934, y: 1.286934 },
+            rx: 0.72,
+            ry: 0.46,
+            angle: 0.7853981633974483
+          },
+          touch: { x: 3.777817, y: 0.777817 },
+          leader: {
+            from: { x: 3.777817, y: 0.777817 },
+            to: { x: 4.05, y: 0.777817 }
+          },
+          labels: [
+            {
+              text: "гладкое касание",
+              x: 4.2,
+              y: 0.92,
+              dx: 0,
+              dy: 0,
+              anchor: "start",
+              className: "callout"
+            },
+            {
+              text: "оба веса ≠ 0",
+              x: 4.2,
+              y: 0.62,
+              dx: 0,
+              dy: 0,
+              anchor: "start",
+              className: "callout-value"
+            }
+          ]
+        }
+      ],
+      arrow: {
+        length: 0.14,
+        halfWidth: 0.08
+      },
+      pointRadius: 0.075,
+      axisLabels: {
+        horizontalDx: -8,
+        horizontalDy: 18,
+        verticalDx: 10,
+        verticalDy: 5
+      },
+      legend: [
+        {
+          type: "loss",
+          from: { x: -5.1, y: -2.35 },
+          to: { x: -4.5, y: -2.35 },
+          label: {
+            text: "эллипсы — одинаковая ошибка",
+            x: -4.35,
+            y: -2.35,
+            dx: 0,
+            dy: 4,
+            anchor: "start"
+          }
+        },
+        {
+          type: "boundary",
+          from: { x: 0.85, y: -2.35 },
+          to: { x: 1.45, y: -2.35 },
+          label: {
+            text: "граница допустимых весов",
+            x: 1.6,
+            y: -2.35,
+            dx: 0,
+            dy: 4,
+            anchor: "start"
+          }
+        }
+      ],
+      summary: {
+        text: "угол ведёт на ось → один вес равен нулю; гладкая граница → оба веса ненулевые",
+        x: 0,
+        y: -2.88,
+        dx: 0,
+        dy: 0,
+        anchor: "middle"
+      }
+    };
+
+    const origin = { x: 450, y: 250 };
+    const scale = 64;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y - y * scale;
+
+    try {
+      const NS = "http://www.w3.org/2000/svg";
+      const plot = document.getElementById("plot");
+      const diagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      const make = (tag, attributes, content) => {
+        const node = document.createElementNS(NS, tag);
+        Object.entries(attributes || {}).forEach(([name, value]) => {
+          node.setAttribute(name, String(value));
+        });
+        if (content !== undefined) node.textContent = content;
+        return node;
+      };
+
+      const append = node => {
+        plot.appendChild(node);
+        return node;
+      };
+
+      const pathFromPoints = (points, closed) => {
+        const commands = points.map((point, index) => {
+          const command = index === data.zero ? "M" : "L";
+          return `${command} ${sx(point.x)} ${sy(point.y)}`;
+        });
+        if (closed) commands.push("Z");
+        return commands.join(" ");
+      };
+
+      const ellipsePoints = (ellipse, level) => {
+        const points = [];
+        const cosine = Math.cos(ellipse.angle);
+        const sine = Math.sin(ellipse.angle);
+
+        for (
+          let index = data.zero;
+          index <= data.samples;
+          index += data.one
+        ) {
+          const theta = data.turn * index / data.samples;
+          const localX = ellipse.rx * level * Math.cos(theta);
+          const localY = ellipse.ry * level * Math.sin(theta);
+
+          points.push({
+            x: ellipse.center.x + localX * cosine - localY * sine,
+            y: ellipse.center.y + localX * sine + localY * cosine
+          });
+        }
+        return points;
+      };
+
+      const circlePoints = (center, radius) => {
+        const points = [];
+
+        for (
+          let index = data.zero;
+          index <= data.samples;
+          index += data.one
+        ) {
+          const theta = data.turn * index / data.samples;
+          points.push({
+            x: center.x + radius * Math.cos(theta),
+            y: center.y + radius * Math.sin(theta)
+          });
+        }
+        return points;
+      };
+
+      const drawText = item => append(make("text", {
+        x: sx(item.x) + item.dx,
+        y: sy(item.y) + item.dy,
+        "text-anchor": item.anchor,
+        class: item.className
+      }, item.text));
+
+      const drawAxis = panel => {
+        const axis = panel.axis;
+        const center = panel.center;
+        const arrow = data.arrow;
+
+        append(make("line", {
+          x1: sx(axis.left),
+          y1: sy(center.y),
+          x2: sx(axis.right),
+          y2: sy(center.y),
+          class: "axis"
+        }));
+
+        append(make("polygon", {
+          points: [
+            `${sx(axis.right)},${sy(center.y)}`,
+            `${sx(axis.right - arrow.length)},${sy(center.y + arrow.halfWidth)}`,
+            `${sx(axis.right - arrow.length)},${sy(center.y - arrow.halfWidth)}`
+          ].join(" "),
+          class: "axis-head"
+        }));
+
+        append(make("line", {
+          x1: sx(center.x),
+          y1: sy(axis.bottom),
+          x2: sx(center.x),
+          y2: sy(axis.top),
+          class: "axis"
+        }));
+
+        append(make("polygon", {
+          points: [
+            `${sx(center.x)},${sy(axis.top)}`,
+            `${sx(center.x - arrow.halfWidth)},${sy(axis.top - arrow.length)}`,
+            `${sx(center.x + arrow.halfWidth)},${sy(axis.top - arrow.length)}`
+          ].join(" "),
+          class: "axis-head"
+        }));
+
+        append(make("text", {
+          x: sx(axis.right) + data.axisLabels.horizontalDx,
+          y: sy(center.y) + data.axisLabels.horizontalDy,
+          "text-anchor": "end",
+          class: "axis-label"
+        }, "w₁"));
+
+        append(make("text", {
+          x: sx(center.x) + data.axisLabels.verticalDx,
+          y: sy(axis.top) + data.axisLabels.verticalDy,
+          "text-anchor": "start",
+          class: "axis-label"
+        }, "w₂"));
+      };
+
+      data.panels.forEach(panel => {
+        drawAxis(panel);
+
+        data.contourScales.forEach(level => {
+          append(make("path", {
+            d: pathFromPoints(ellipsePoints(panel.loss, level), true),
+            class: level === data.touchScale
+              ? "loss-touch"
+              : "loss-outer"
+          }));
+        });
+
+        if (panel.kind === "l1") {
+          const center = panel.center;
+          const radius = panel.radius;
+          const diamond = [
+            { x: center.x, y: center.y + radius },
+            { x: center.x + radius, y: center.y },
+            { x: center.x, y: center.y - radius },
+            { x: center.x - radius, y: center.y }
+          ];
+
+          append(make("path", {
+            d: pathFromPoints(diamond, true),
+            class: "l1-shape"
+          }));
+        } else {
+          append(make("path", {
+            d: pathFromPoints(
+              circlePoints(panel.center, panel.radius),
+              true
+            ),
+            class: "l2-shape"
+          }));
+        }
+
+        append(make("line", {
+          x1: sx(panel.leader.from.x),
+          y1: sy(panel.leader.from.y),
+          x2: sx(panel.leader.to.x),
+          y2: sy(panel.leader.to.y),
+          class: "leader"
+        }));
+
+        append(make("circle", {
+          cx: sx(panel.touch.x),
+          cy: sy(panel.touch.y),
+          r: Math.abs(
+            sx(panel.touch.x + data.pointRadius) - sx(panel.touch.x)
+          ),
+          class: "touch-point"
+        }));
+
+        append(make("text", {
+          x: sx(panel.title.x),
+          y: sy(panel.title.y),
+          "text-anchor": "middle",
+          class: "panel-title"
+        }, panel.title.text));
+
+        panel.labels.forEach(drawText);
+      });
+
+      data.legend.forEach(item => {
+        append(make("line", {
+          x1: sx(item.from.x),
+          y1: sy(item.from.y),
+          x2: sx(item.to.x),
+          y2: sy(item.to.y),
+          class: item.type === "loss" ? "loss-touch" : "l1-shape"
+        }));
+
+        append(make("text", {
+          x: sx(item.label.x) + item.label.dx,
+          y: sy(item.label.y) + item.label.dy,
+          "text-anchor": item.label.anchor,
+          class: "legend"
+        }, item.label.text));
+      });
+
+      drawText({
+        ...data.summary,
+        className: "summary"
+      });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Потоки данных внутри LSTM-ячейки</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #5c687c;
+    --border: #cbd4e2;
+    --input: #50647f;
+    --memory: #087f8c;
+    --forget: #6c55c5;
+    --write: #c46a16;
+    --output: #b53f73;
+    --soft-memory: #e5f6f7;
+    --soft-forget: #f0ecff;
+    --soft-write: #fff1df;
+    --soft-output: #fde9f1;
+    --formula: #edf2f8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #182131;
+      --text: #edf3ff;
+      --muted: #aebbd0;
+      --border: #40506a;
+      --input: #a9bad2;
+      --memory: #52d2d3;
+      --forget: #ad98ff;
+      --write: #ffb45f;
+      --output: #ff86b8;
+      --soft-memory: #173c43;
+      --soft-forget: #302b55;
+      --soft-write: #49331e;
+      --soft-output: #48263a;
+      --formula: #222f43;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 10px 14px 6px;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+  }
+
+  .small { font-size: 12px; fill: var(--muted); }
+  .section { font-size: 13px; font-weight: bold; fill: var(--muted); }
+  .gate-symbol { font-size: 20px; font-weight: bold; }
+  .node-symbol { font-size: 18px; font-weight: bold; }
+  .formula-text { font-size: 16px; font-weight: bold; }
+  .output-label { font-size: 16px; font-weight: bold; }
+
+  .cell-boundary {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .route {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .input-route { stroke: var(--input); }
+  .memory-route { stroke: var(--memory); }
+  .forget-route { stroke: var(--forget); }
+  .write-route { stroke: var(--write); }
+  .output-route { stroke: var(--output); }
+
+  .arrow-head { stroke: none; }
+  .arrow-head.input-route { fill: var(--input); }
+  .arrow-head.memory-route { fill: var(--memory); }
+  .arrow-head.forget-route { fill: var(--forget); }
+  .arrow-head.write-route { fill: var(--write); }
+  .arrow-head.output-route { fill: var(--output); }
+
+  .branch-dot { stroke: none; }
+  .branch-dot.input-route { fill: var(--input); }
+  .branch-dot.memory-route { fill: var(--memory); }
+
+  .merge-box {
+    fill: var(--formula);
+    stroke: var(--input);
+    stroke-width: 2px;
+  }
+
+  .forget-box {
+    fill: var(--soft-forget);
+    stroke: var(--forget);
+    stroke-width: 2px;
+  }
+
+  .write-box {
+    fill: var(--soft-write);
+    stroke: var(--write);
+    stroke-width: 2px;
+  }
+
+  .output-box {
+    fill: var(--soft-output);
+    stroke: var(--output);
+    stroke-width: 2px;
+  }
+
+  .memory-node {
+    fill: var(--soft-memory);
+    stroke: var(--memory);
+    stroke-width: 2px;
+  }
+
+  .write-node {
+    fill: var(--soft-write);
+    stroke: var(--write);
+    stroke-width: 2px;
+  }
+
+  .output-node {
+    fill: var(--soft-output);
+    stroke: var(--output);
+    stroke-width: 2px;
+  }
+
+  .formula-box {
+    fill: var(--formula);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  #fallback, noscript {
+    display: block;
+    margin: 0;
+    padding: 18px;
+    color: var(--text);
+    background: var(--panel);
+    font-size: 15px;
+  }
+
+  #fallback[hidden] { display: none; }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Потоки данных внутри LSTM-ячейки</h1>
+  <svg id="diagram" viewBox="0 0 1200 450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Старая память и общий вход проходят через гейты забывания, записи, кандидата и выхода, образуя новую память c_t и скрытое состояние h_t."></svg>
+  <p id="fallback" hidden>
+    Схема должна показать, как xₜ, hₜ₋₁ и cₜ₋₁ проходят через гейты f, i, g и o:
+    cₜ = f · cₜ₋₁ + i · g, а hₜ = o · tanh(cₜ).
+  </p>
+  <noscript>
+    Схема: cₜ = f · cₜ₋₁ + i · g; hₜ = o · tanh(cₜ).
+  </noscript>
+</figure>
+
+<script>
+const diagramData = [
+  [46, 2],
+  [7.15, 7.15],
+  [
+    ["cStart", 25, 16], ["forgetLeft", 42.7, 16],
+    ["forgetRight", 47.3, 16], ["addLeft", 84.7, 16],
+    ["addRight", 89.3, 16], ["memoryBranch", 97, 16],
+    ["cOut", 145, 16], ["xStart", 12, 44],
+    ["xMerge", 17, 44], ["hStart", 12, 51],
+    ["hMerge", 17, 51], ["mergeOut", 29, 47.5],
+    ["busF", 39.5, 47.5], ["busI", 56.5, 47.5],
+    ["busG", 73.5, 47.5], ["busO", 92.5, 47.5],
+    ["busEnd", 98, 47.5], ["fBottom", 39.5, 38],
+    ["fTop", 39.5, 31], ["forgetEntry", 45, 18.3],
+    ["iBottom", 56.5, 38], ["iTop", 56.5, 31],
+    ["gBottom", 73.5, 38], ["gTop", 73.5, 31],
+    ["oBottom", 92.5, 38], ["oTop", 92.5, 31],
+    ["candidateLeft", 72.7, 24], ["candidateBottom", 75, 26.3],
+    ["candidateRight", 77.3, 24], ["candidateTurn", 82, 24],
+    ["candidateAdd", 85.4, 17.6], ["tanhTop", 105.5, 22],
+    ["tanhRight", 111, 25], ["outputLeft", 120.7, 27],
+    ["outputRight", 125.3, 27], ["hOut", 145, 27],
+    ["outputTurnA", 116, 25], ["outputTurnB", 118, 27],
+    ["oTurnA", 92.5, 42], ["oTurnB", 116, 42],
+    ["oTurnC", 116, 29], ["cellTitle", 33, 9.5],
+    ["inputsTitle", 3, 38.5], ["outputsTitle", 145, 9.5],
+    ["cInputLabel", 24, 12.5], ["xInputLabel", 4, 44],
+    ["hInputLabel", 4, 51], ["mergeCaption", 23, 55],
+    ["memoryCaption", 67, 12], ["newCaption", 75, 20],
+    ["cOutputLabel", 145, 12.5], ["hOutputLabel", 145, 31],
+    ["formulaOne", 58, 58], ["formulaTwo", 109, 58],
+    ["forgetNode", 45, 16], ["candidateNode", 75, 24],
+    ["addNode", 87, 16], ["outputNode", 123, 27]
+  ],
+  [
+    ["merge", 17, 42, 29, 53, "общий", "вход", "merge-box"],
+    ["forget", 34, 31, 45, 38, "f", "забыть", "forget-box"],
+    ["input", 51, 31, 62, 38, "i", "записать", "write-box"],
+    ["candidate", 68, 31, 79, 38, "g", "кандидат", "write-box"],
+    ["output", 87, 31, 98, 38, "o", "показать", "output-box"],
+    ["tanh", 100, 22, 111, 28, "tanh", "", "memory-node"]
+  ],
+  [
+    ["memory", 32, 54.5, 84, 61.5, "cₜ = f · cₜ₋₁ + i · g"],
+    ["hidden", 88, 54.5, 130, 61.5, "hₜ = o · tanh(cₜ)"]
+  ],
+  [
+    ["input-route", true, ["xStart", "xMerge"]],
+    ["input-route", true, ["hStart", "hMerge"]],
+    ["input-route", true, ["mergeOut", "busEnd"]],
+    ["input-route", true, ["busF", "fBottom"]],
+    ["input-route", true, ["busI", "iBottom"]],
+    ["input-route", true, ["busG", "gBottom"]],
+    ["input-route", true, ["busO", "oBottom"]],
+    ["memory-route", true, ["cStart", "forgetLeft"]],
+    ["forget-route", true, ["fTop", "forgetEntry"]],
+    ["memory-route", true, ["forgetRight", "addLeft"]],
+    ["write-route", true, ["iTop", "candidateLeft"]],
+    ["write-route", true, ["gTop", "candidateBottom"]],
+    ["write-route", true, ["candidateRight", "candidateTurn", "candidateAdd"]],
+    ["memory-route", true, ["addRight", "cOut"]],
+    ["memory-route", true, ["memoryBranch", "tanhTop"]],
+    ["memory-route", true, ["tanhRight", "outputTurnA", "outputTurnB", "outputLeft"]],
+    ["output-route", true, ["oTop", "oTurnA", "oTurnB", "oTurnC", "outputLeft"]],
+    ["output-route", true, ["outputRight", "hOut"]]
+  ],
+  [
+    ["forgetNode", "×", "memory-node"],
+    ["candidateNode", "×", "write-node"],
+    ["addNode", "+", "memory-node"],
+    ["outputNode", "×", "output-node"]
+  ],
+  [
+    ["busF", "input-route"], ["busI", "input-route"],
+    ["busG", "input-route"], ["busO", "input-route"],
+    ["memoryBranch", "memory-route"]
+  ],
+  [
+    ["cellTitle", "LSTM-ячейка: один шаг", "start", "section"],
+    ["inputsTitle", "входы", "start", "section"],
+    ["outputsTitle", "выходы", "end", "section"],
+    ["cInputLabel", "cₜ₋₁ — прежняя память", "start", "output-label"],
+    ["xInputLabel", "xₜ", "start", "output-label"],
+    ["hInputLabel", "hₜ₋₁", "start", "output-label"],
+    ["mergeCaption", "xₜ и hₜ₋₁ расходятся по четырём ветвям", "middle", "small"],
+    ["memoryCaption", "сохранённая часть", "middle", "small"],
+    ["newCaption", "новая запись", "middle", "small"],
+    ["cOutputLabel", "cₜ — память", "middle", "output-label"],
+    ["hOutputLabel", "hₜ — видимая часть", "middle", "output-label"]
+  ],
+  [2, 2.3, 1.15, 0.8, 1.3, 3.2, 1.8]
+];
+
+const [
+  origin, scale, pointRows, gateRows, formulaRows,
+  routeRows, nodeRows, dotRows, labelRows, measures
+] = diagramData;
+const [originX, originY] = origin;
+const [scaleX, scaleY] = scale;
+const sx = x => originX + x * scaleX;
+const sy = y => originY + y * scaleY;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+  const [
+    two, nodeRadius, arrowLength, arrowHalfWidth,
+    dotRadius, cornerRadius, gateTextGap
+  ] = measures;
+  const points = new Map(
+    pointRows.map(([name, x, y]) => [name, { x, y }])
+  );
+
+  const make = (tag, attrs, text) => {
+    const element = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      element.setAttribute(name, value);
+    }
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+
+  const add = element => {
+    svg.appendChild(element);
+    return element;
+  };
+
+  const point = name => {
+    const value = points.get(name);
+    if (!value) throw new Error(`Не найдена точка ${name}`);
+    return value;
+  };
+
+  const roundedRect = (x1, y1, x2, y2, className) =>
+    make("rect", {
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1),
+      rx: sx(cornerRadius) - sx(0),
+      ry: sy(cornerRadius) - sy(0),
+      class: className
+    });
+
+  const textAt = (p, content, anchor, className) =>
+    make("text", {
+      x: sx(p.x),
+      y: sy(p.y),
+      "text-anchor": anchor,
+      "dominant-baseline": "middle",
+      class: className
+    }, content);
+
+  const arrowHead = (from, to, className) => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy);
+    if (!length) throw new Error("Стрелка имеет нулевую длину");
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = to.x - ux * arrowLength;
+    const baseY = to.y - uy * arrowLength;
+    const sideX = -uy * arrowHalfWidth;
+    const sideY = ux * arrowHalfWidth;
+    const vertices = [
+      [to.x, to.y],
+      [baseX + sideX, baseY + sideY],
+      [baseX - sideX, baseY - sideY]
+    ];
+    return make("polygon", {
+      points: vertices.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+      class: `arrow-head ${className}`
+    });
+  };
+
+  const route = (className, hasArrow, names) => {
+    const routePoints = names.map(point);
+    add(make("polyline", {
+      points: routePoints.map(({ x, y }) => `${sx(x)},${sy(y)}`).join(" "),
+      class: `route ${className}`
+    }));
+    if (hasArrow) {
+      const to = routePoints.at(-1);
+      const from = routePoints.at(-two);
+      add(arrowHead(from, to, className));
+    }
+  };
+
+  add(roundedRect(31, 7, 132, 52, "cell-boundary"));
+
+  for (const [className, hasArrow, names] of routeRows) {
+    route(className, hasArrow, names);
+  }
+
+  for (const [name, className] of dotRows) {
+    const p = point(name);
+    add(make("circle", {
+      cx: sx(p.x),
+      cy: sy(p.y),
+      r: sx(dotRadius) - sx(0),
+      class: `branch-dot ${className}`
+    }));
+  }
+
+  for (const [, x1, y1, x2, y2, symbol, caption, className] of gateRows) {
+    add(roundedRect(x1, y1, x2, y2, className));
+    const middleX = (x1 + x2) / two;
+    const middleY = (y1 + y2) / two;
+    const symbolY = caption ? middleY - gateTextGap : middleY;
+    add(textAt(
+      { x: middleX, y: symbolY },
+      symbol,
+      "middle",
+      symbol.length === two ? "formula-text" : "gate-symbol"
+    ));
+    if (caption) {
+      add(textAt(
+        { x: middleX, y: middleY + gateTextGap },
+        caption,
+        "middle",
+        "small"
+      ));
+    }
+  }
+
+  for (const [name, symbol, className] of nodeRows) {
+    const p = point(name);
+    add(make("circle", {
+      cx: sx(p.x),
+      cy: sy(p.y),
+      r: sx(nodeRadius) - sx(0),
+      class: className
+    }));
+    add(textAt(p, symbol, "middle", "node-symbol"));
+  }
+
+  for (const [, x1, y1, x2, y2, formula] of formulaRows) {
+    add(roundedRect(x1, y1, x2, y2, "formula-box"));
+    add(textAt(
+      { x: (x1 + x2) / two, y: (y1 + y2) / two },
+      formula,
+      "middle",
+      "formula-text"
+    ));
+  }
+
+  for (const [name, content, anchor, className] of labelRows) {
+    add(textAt(point(name), content, anchor, className));
+  }
+
+  fallback.hidden = true;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  const fallback = document.getElementById("fallback");
+  fallback.hidden = false;
+  fallback.textContent =
+    "Схема должна показать потоки через гейты f, i, g и o: " +
+    "cₜ = f · cₜ₋₁ + i · g, а hₜ = o · tanh(cₜ).";
+}
+</script>
+</body>
+</html>

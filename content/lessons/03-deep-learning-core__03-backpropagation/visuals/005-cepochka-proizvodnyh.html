@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как локальные производные перемножаются вдоль цепочки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --lane: #f2f6fb;
+      --lane-back: #eef4ff;
+      --formula-panel: #fff8e8;
+      --ink: #172033;
+      --muted: #53627a;
+      --border: #cbd5e1;
+      --forward: #64748b;
+      --backward: #2563eb;
+      --node-fill: #ffffff;
+      --node-stroke: #94a3b8;
+      --accent-fill: #dbeafe;
+      --accent-stroke: #2563eb;
+      --formula: #9a3412;
+      --shadow: #dbe4ef;
+      --error: #991b1b;
+      --error-bg: #fee2e2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101521;
+        --panel: #171e2c;
+        --lane: #1d2636;
+        --lane-back: #162743;
+        --formula-panel: #302717;
+        --ink: #edf3ff;
+        --muted: #b7c3d6;
+        --border: #3f4c61;
+        --forward: #aab7ca;
+        --backward: #67a5ff;
+        --node-fill: #202a3b;
+        --node-stroke: #708099;
+        --accent-fill: #17365f;
+        --accent-stroke: #67a5ff;
+        --formula: #fdba74;
+        --shadow: #0b0f18;
+        --error: #fecaca;
+        --error-bg: #451a1a;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: 12px;
+    }
+
+    .diagram-shell {
+      width: 100%;
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 14px 16px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 20px;
+      text-align: center;
+    }
+
+    .subtitle {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    .lane {
+      fill: var(--lane);
+      stroke: var(--border);
+    }
+
+    .back-lane {
+      fill: var(--lane-back);
+      stroke: var(--border);
+    }
+
+    .formula-panel {
+      fill: var(--formula-panel);
+      stroke: var(--border);
+    }
+
+    .node {
+      fill: var(--node-fill);
+      stroke: var(--node-stroke);
+    }
+
+    .node-accent {
+      fill: var(--accent-fill);
+      stroke: var(--accent-stroke);
+    }
+
+    .forward-line,
+    .forward-head {
+      stroke: var(--forward);
+      fill: var(--forward);
+    }
+
+    .back-line,
+    .back-head {
+      stroke: var(--backward);
+      fill: var(--backward);
+    }
+
+    .signal-guide {
+      stroke: var(--border);
+      fill: none;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 18px;
+    }
+
+    .node-label {
+      fill: var(--ink);
+      font-size: 21px;
+      font-weight: bold;
+    }
+
+    .node-note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .lane-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .derivative-label {
+      fill: var(--backward);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .formula-label {
+      fill: var(--formula);
+      font-size: 25px;
+      font-weight: bold;
+    }
+
+    .formula-note {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .fallback {
+      margin: 12px 0 0;
+      padding: 14px 16px;
+      color: var(--error);
+      background: var(--error-bg);
+      border: 1px solid var(--error);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram-shell">
+    <h1 id="diagram-title">Как локальные производные перемножаются вдоль цепочки</h1>
+    <p class="subtitle">Прямой проход несёт значения вправо, обратный — производные влево</p>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1040 430"
+      width="1040"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title"
+    ></svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна показывать цепочку x → g(x) → f(g(x)) → L и обратные
+      стрелки с локальными производными 2, 0,5 и −3. Итог:
+      dL/dx = 2 · 0,5 · (−3) = −3.
+    </p>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      zero: 0,
+      direction: { right: 1, left: -1 },
+      head: { depth: 0.14, wing: 0.10 },
+      geometry: {
+        forwardLane: { x1: 0.05, y1: 0.30, x2: 9.95, y2: 2.42 },
+        backwardLane: { x1: 0.05, y1: 2.55, x2: 9.95, y2: 3.68 },
+        formulaPanel: { x1: 0.35, y1: 4.02, x2: 9.65, y2: 5.50 },
+        forwardY: 1.73,
+        backwardY: 2.91
+      },
+      nodes: [
+        {
+          box: { x1: 0.18, y1: 1.18, x2: 1.30, y2: 2.20 },
+          anchor: { x: 0.74, y: 1.57 },
+          noteAnchor: { x: 0.74, y: 1.94 },
+          label: "x",
+          note: "вес",
+          accent: false
+        },
+        {
+          box: { x1: 2.45, y1: 1.18, x2: 4.18, y2: 2.20 },
+          anchor: { x: 3.315, y: 1.57 },
+          noteAnchor: { x: 3.315, y: 1.94 },
+          label: "g(x)",
+          note: "первая операция",
+          accent: false
+        },
+        {
+          box: { x1: 5.25, y1: 1.18, x2: 7.72, y2: 2.20 },
+          anchor: { x: 6.485, y: 1.57 },
+          noteAnchor: { x: 6.485, y: 1.94 },
+          label: "f(g(x))",
+          note: "следующая операция",
+          accent: false
+        },
+        {
+          box: { x1: 8.88, y1: 1.18, x2: 9.82, y2: 2.20 },
+          anchor: { x: 9.35, y: 1.57 },
+          noteAnchor: { x: 9.35, y: 1.94 },
+          label: "L",
+          note: "потеря",
+          accent: true
+        }
+      ],
+      forwardEdges: [
+        { start: { x: 1.30, y: 1.73 }, end: { x: 2.45, y: 1.73 } },
+        { start: { x: 4.18, y: 1.73 }, end: { x: 5.25, y: 1.73 } },
+        { start: { x: 7.72, y: 1.73 }, end: { x: 8.88, y: 1.73 } }
+      ],
+      backwardEdges: [
+        {
+          start: { x: 2.45, y: 2.91 },
+          end: { x: 1.30, y: 2.91 },
+          labelAnchor: { x: 1.875, y: 3.30 },
+          label: "локально: ∂g/∂x = 2"
+        },
+        {
+          start: { x: 5.25, y: 2.91 },
+          end: { x: 4.18, y: 2.91 },
+          labelAnchor: { x: 4.715, y: 3.30 },
+          label: "локально: ∂f/∂g = 0,5"
+        },
+        {
+          start: { x: 8.88, y: 2.91 },
+          end: { x: 7.72, y: 2.91 },
+          labelAnchor: { x: 8.30, y: 3.30 },
+          label: "локально: ∂L/∂f = −3"
+        }
+      ],
+      labels: [
+        {
+          anchor: { x: 0.28, y: 0.68 },
+          dx: 0,
+          dy: 0,
+          text: "ПРЯМОЙ ПРОХОД  →",
+          className: "lane-label",
+          textAnchor: "start"
+        },
+        {
+          anchor: { x: 9.72, y: 2.78 },
+          dx: 0,
+          dy: 0,
+          text: "←  ОБРАТНЫЙ ПРОХОД",
+          className: "lane-label",
+          textAnchor: "end"
+        },
+        {
+          anchor: { x: 5.00, y: 4.55 },
+          dx: 0,
+          dy: 0,
+          text: "dL/dx = 2 · 0,5 · (−3) = −3",
+          className: "formula-label",
+          textAnchor: "middle"
+        },
+        {
+          anchor: { x: 5.00, y: 5.10 },
+          dx: 0,
+          dy: 0,
+          text: "Итоговая производная — произведение всех локальных производных",
+          className: "formula-note",
+          textAnchor: "middle"
+        }
+      ],
+      style: {
+        laneWidth: 1,
+        nodeWidth: 2,
+        arrowWidth: 3,
+        guideWidth: 1,
+        labelPadding: 0
+      }
+    });
+
+    const origin = Object.freeze({ x: 70, y: 15 });
+    const scale = Object.freeze({ x: 90, y: 72 });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, textContent) => {
+        const element = document.createElementNS(NS, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        if (textContent !== undefined) {
+          element.textContent = textContent;
+        }
+        return element;
+      };
+
+      const addRect = (box, className, strokeWidth) => {
+        const rectangle = make("rect", {
+          x: sx(box.x1),
+          y: sy(box.y1),
+          width: sx(box.x2) - sx(box.x1),
+          height: sy(box.y2) - sy(box.y1),
+          class: className,
+          "stroke-width": strokeWidth,
+          "vector-effect": "non-scaling-stroke"
+        });
+        svg.appendChild(rectangle);
+        return rectangle;
+      };
+
+      const addText = ({
+        anchor,
+        dx,
+        dy,
+        text,
+        className,
+        textAnchor
+      }) => {
+        const label = make(
+          "text",
+          {
+            x: sx(anchor.x),
+            y: sy(anchor.y),
+            dx: dx ?? DATA.style.labelPadding,
+            dy: dy ?? DATA.style.labelPadding,
+            class: className,
+            "text-anchor": textAnchor,
+            "dominant-baseline": "middle"
+          },
+          text
+        );
+        svg.appendChild(label);
+        return label;
+      };
+
+      const addArrow = (edge, kind) => {
+        const isForward = kind === "forward";
+        const direction = edge.end.x > edge.start.x
+          ? DATA.direction.right
+          : DATA.direction.left;
+        const lineClass = isForward ? "forward-line" : "back-line";
+        const headClass = isForward ? "forward-head" : "back-head";
+        const lineWidth = DATA.style.arrowWidth;
+
+        const shaft = make("line", {
+          x1: sx(edge.start.x),
+          y1: sy(edge.start.y),
+          x2: sx(edge.end.x),
+          y2: sy(edge.end.y),
+          class: lineClass,
+          "stroke-width": lineWidth,
+          "stroke-linecap": "round",
+          "vector-effect": "non-scaling-stroke"
+        });
+        svg.appendChild(shaft);
+
+        const baseX = edge.end.x - direction * DATA.head.depth;
+        const headPoints = [
+          { x: edge.end.x, y: edge.end.y },
+          { x: baseX, y: edge.end.y - DATA.head.wing },
+          { x: baseX, y: edge.end.y + DATA.head.wing }
+        ];
+
+        const arrowhead = make("polygon", {
+          points: headPoints
+            .map((point) => `${sx(point.x)},${sy(point.y)}`)
+            .join(" "),
+          class: headClass
+        });
+        svg.appendChild(arrowhead);
+      };
+
+      svg.replaceChildren();
+
+      const description = make(
+        "desc",
+        {},
+        "Значения идут по цепочке x, g(x), f(g(x), L. При обратном проходе локальные производные 2, 0,5 и минус 3 перемножаются и дают dL/dx, равную минус 3."
+      );
+      svg.appendChild(description);
+
+      addRect(
+        DATA.geometry.forwardLane,
+        "lane",
+        DATA.style.laneWidth
+      );
+      addRect(
+        DATA.geometry.backwardLane,
+        "back-lane",
+        DATA.style.laneWidth
+      );
+      addRect(
+        DATA.geometry.formulaPanel,
+        "formula-panel",
+        DATA.style.nodeWidth
+      );
+
+      DATA.forwardEdges.forEach((edge) => addArrow(edge, "forward"));
+
+      DATA.nodes.forEach((node) => {
+        addRect(
+          node.box,
+          node.accent ? "node-accent" : "node",
+          DATA.style.nodeWidth
+        );
+        addText({
+          anchor: node.anchor,
+          dx: DATA.style.labelPadding,
+          dy: DATA.style.labelPadding,
+          text: node.label,
+          className: "node-label",
+          textAnchor: "middle"
+        });
+        addText({
+          anchor: node.noteAnchor,
+          dx: DATA.style.labelPadding,
+          dy: DATA.style.labelPadding,
+          text: node.note,
+          className: "node-note",
+          textAnchor: "middle"
+        });
+      });
+
+      DATA.backwardEdges.forEach((edge) => {
+        addArrow(edge, "back");
+        addText({
+          anchor: edge.labelAnchor,
+          dx: DATA.style.labelPadding,
+          dy: DATA.style.labelPadding,
+          text: edge.label,
+          className: "derivative-label",
+          textAnchor: "middle"
+        });
+      });
+
+      DATA.labels.forEach(addText);
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -35,8 +35,8 @@ describe("buildCoveredContext", () => {
   it("перечисляет заголовки предыдущих шагов с их номерами в плане", () => {
     const dir = fixture([{ id: "001-t" }, { id: "002-visual" }]);
     const out = covered(dir, "003-dlina");
-    expect(out).toContain("1. Точки и правила");
-    expect(out).toContain("2. Вектор на плоскости");
+    expect(out).toContain("[шаг 1](#step-1): Точки и правила");
+    expect(out).toContain("[шаг 2](#step-2): Вектор на плоскости");
   });
 
   it("текущий шаг и те, что после него, в контекст не попадают", () => {
@@ -62,7 +62,7 @@ describe("buildCoveredContext", () => {
     ]);
     const out = covered(dir, "003-dlina");
     expect(out).toContain("|v| = \\sqrt{x^2 + y^2}");
-    expect(out).toContain("шаг 2");
+    expect(out).toContain("[шаг 2](#step-2)");
   });
 
   it("одна и та же формула из двух шагов — один пункт, по первому шагу", () => {
@@ -72,8 +72,9 @@ describe("buildCoveredContext", () => {
     ]);
     const out = covered(dir, "003-dlina");
     expect(out.match(/a \\cdot b/g)).toHaveLength(1);
-    expect(out).toContain("шаг 1");
-    expect(out).not.toContain("шаг 2");
+    const formulas = out.split("Формулы, которые в уроке уже выведены")[1];
+    expect(formulas).toContain("[шаг 1](#step-1)");
+    expect(formulas).not.toContain("[шаг 2](#step-2)");
   });
 
   it("сюжет аналогии попадает в контекст, чтобы его не переиспользовали", () => {

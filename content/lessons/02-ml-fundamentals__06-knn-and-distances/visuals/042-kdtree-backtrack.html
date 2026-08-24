@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Спуск и возврат по KD-дереву</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5b6475;
+      --grid: #cbd5e1;
+      --axis: #475569;
+      --split-x: #7c3aed;
+      --split-y: #2563eb;
+      --descent: #0891b2;
+      --return: #d97706;
+      --near: #059669;
+      --skip: #dc2626;
+      --left-fill: #f3e8ff;
+      --lower-fill: #dbeafe;
+      --upper-fill: #ecfeff;
+      --node: #f8fafc;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #172033;
+        --ink: #f1f5f9;
+        --muted: #b7c0cf;
+        --grid: #475569;
+        --axis: #94a3b8;
+        --split-x: #c4b5fd;
+        --split-y: #93c5fd;
+        --descent: #67e8f9;
+        --return: #fbbf24;
+        --near: #6ee7b7;
+        --skip: #fca5a5;
+        --left-fill: #312e4f;
+        --lower-fill: #1e3a5f;
+        --upper-fill: #164e63;
+        --node: #1e293b;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: unset;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .heading {
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+    }
+
+    .region-left { fill: var(--left-fill); }
+    .region-lower { fill: var(--lower-fill); }
+    .region-upper { fill: var(--upper-fill); }
+    .axis, .tick { stroke: var(--axis); stroke-width: 2px; fill: none; }
+    .grid { stroke: var(--grid); stroke-width: 1px; fill: none; }
+    .split-x { stroke: var(--split-x); stroke-width: 3px; fill: none; }
+    .split-y { stroke: var(--split-y); stroke-width: 3px; fill: none; }
+    .distance { stroke: var(--muted); stroke-width: 1.5px; fill: none; }
+    .radius-old { stroke: var(--return); stroke-width: 2px; fill: none; }
+    .radius-new { stroke: var(--near); stroke-width: 2.5px; fill: none; }
+    .edge { stroke: var(--grid); stroke-width: 2px; fill: none; }
+    .descent { stroke: var(--descent); stroke-width: 3px; fill: none; }
+    .backtrack { stroke: var(--return); stroke-width: 2.5px; fill: none; }
+    .check { stroke: var(--return); stroke-width: 3px; fill: none; }
+    .skip { stroke: var(--skip); stroke-width: 2.5px; fill: none; }
+    .query { fill: var(--descent); stroke: var(--panel); stroke-width: 2px; }
+    .candidate { fill: var(--return); stroke: var(--panel); stroke-width: 2px; }
+    .better { fill: var(--near); stroke: var(--panel); stroke-width: 2px; }
+    .node {
+      fill: var(--node);
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+    .node-active { stroke: var(--descent); stroke-width: 3px; }
+    .node-check { stroke: var(--return); stroke-width: 3px; }
+    .node-best { stroke: var(--near); stroke-width: 3px; }
+    .node-skip { stroke: var(--skip); stroke-width: 2px; }
+    .label {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+    .small {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+    .strong {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .decision {
+      fill: var(--ink);
+      font-size: 13px;
+      font-weight: bold;
+    }
+    .fallback {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="diagram-heading">
+    <figcaption class="heading" id="diagram-heading">Спуск и возврат по KD-дереву</figcaption>
+    <svg id="diagram" viewBox="0 0 960 455" width="960" height="455"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-label="Разбиение двумерного пространства и путь поиска ближайшего соседа в KD-дереве">
+      <title>Проверка соседней ветви при возврате по KD-дереву</title>
+      <desc>Запрос спускается к кандидату на расстоянии 4. Граница x2 находится на расстоянии 2, поэтому соседняя ветвь проверяется и даёт точку на расстоянии 3. Граница x1 находится на расстоянии 6, поэтому дальняя ветвь отсекается.</desc>
+      <g id="scene"></g>
+    </svg>
+  </figure>
+
+  <script>
+    const diagramData = [{
+      originX: 75, originY: 360, scale: 24, zero: 0, two: 2,
+      plot: { x: 0, y: 0, w: 13, h: 11 },
+      splitX: 5, splitY: 3,
+      query: { x: 11, y: 5 },
+      candidate: { x: 11, y: 9 },
+      better: { x: 11, y: 2 },
+      oldRadius: 4, newRadius: 3,
+      pointRadius: 0.23, queryRadius: 0.28, corner: 0.18,
+      arrowHead: 0.42, arrowWing: 0.22,
+      tickHalf: 0.16, crossHalf: 0.28,
+      dash: "7 6", dotDash: "3 5",
+      labelPad: 8, labelLift: -8, labelDrop: 16,
+      tree: {
+        root:  { x: 25, y: 10, w: 5, h: 1.35, text: "x₁ = 5.0" },
+        left:  { x: 19, y: 7,  w: 5, h: 1.35, text: "левая ветвь" },
+        split: { x: 30, y: 7,  w: 5, h: 1.35, text: "x₂ = 3.0" },
+        lower: { x: 27, y: 3.7, w: 5, h: 1.35, text: "соседний лист" },
+        upper: { x: 34, y: 3.7, w: 4, h: 1.35, text: "лист: d = 4" }
+      },
+      returnPath: [
+        { x: 34, y: 4.38 },
+        { x: 33, y: 5.5 },
+        { x: 31, y: 6.28 }
+      ],
+      legend: [
+        { x: 17, y: 1.15, text: "Спуск → первый кандидат: d = 4", cls: "descent" },
+        { x: 17, y: 0.15, text: "2 < 4 → соседнюю ветвь проверить", cls: "check" },
+        { x: 17, y: -0.85, text: "Найдена точка d = 3 → радиус уменьшить", cls: "radius-new" },
+        { x: 17, y: -1.85, text: "6 > 3 → дальнюю ветвь пропустить", cls: "skip" }
+      ],
+      fallback: { x: 1, y: 7, dx: 0, dy: 0 }
+    }];
+
+    const [d] = diagramData;
+    const origin = Object.freeze({ x: d.originX, y: d.originY });
+    const scale = d.scale;
+
+    function sx(x) { return origin.x + x * scale; }
+    function sy(y) { return origin.y - y * scale; }
+
+    try {
+      const svgNS = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+
+      function el(name, attrs, parent = scene) {
+        const node = document.createElementNS(svgNS, name);
+        for (const [key, value] of Object.entries(attrs)) {
+          node.setAttribute(key, value);
+        }
+        parent.appendChild(node);
+        return node;
+      }
+
+      function line(a, b, cls, dash) {
+        const node = el("line", {
+          x1: sx(a.x), y1: sy(a.y),
+          x2: sx(b.x), y2: sy(b.y),
+          class: cls
+        });
+        if (dash) node.setAttribute("stroke-dasharray", dash);
+        return node;
+      }
+
+      function rect(x, y, w, h, cls) {
+        return el("rect", {
+          x: sx(x),
+          y: sy(y + h),
+          width: sx(x + w) - sx(x),
+          height: sy(y) - sy(y + h),
+          rx: Math.abs(sx(d.corner) - sx(d.zero)),
+          class: cls
+        });
+      }
+
+      function circle(point, radius, cls, dash) {
+        const node = el("circle", {
+          cx: sx(point.x),
+          cy: sy(point.y),
+          r: Math.abs(sx(radius) - sx(d.zero)),
+          class: cls
+        });
+        if (dash) node.setAttribute("stroke-dasharray", dash);
+        return node;
+      }
+
+      function textAt(point, value, cls, anchor, dx, dy) {
+        const node = el("text", {
+          x: sx(point.x),
+          y: sy(point.y),
+          dx: dx,
+          dy: dy,
+          class: cls,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        });
+        node.textContent = value;
+        return node;
+      }
+
+      function arrow(from, to, cls, dash) {
+        const shaft = line(from, to, cls, dash);
+        const vx = to.x - from.x;
+        const vy = to.y - from.y;
+        const length = Math.hypot(vx, vy);
+        const ux = vx / length;
+        const uy = vy / length;
+        const bx = to.x - ux * d.arrowHead;
+        const by = to.y - uy * d.arrowHead;
+        const px = -uy * d.arrowWing;
+        const py = ux * d.arrowWing;
+        el("polygon", {
+          points: [
+            `${sx(to.x)},${sy(to.y)}`,
+            `${sx(bx + px)},${sy(by + py)}`,
+            `${sx(bx - px)},${sy(by - py)}`
+          ].join(" "),
+          class: cls
+        });
+        return shaft;
+      }
+
+      function polyArrow(points, cls, dash) {
+        const path = el("polyline", {
+          points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          class: cls
+        });
+        if (dash) path.setAttribute("stroke-dasharray", dash);
+        const reversed = [...points].reverse();
+        const [to, from] = reversed;
+        const vx = to.x - from.x;
+        const vy = to.y - from.y;
+        const length = Math.hypot(vx, vy);
+        const ux = vx / length;
+        const uy = vy / length;
+        const bx = to.x - ux * d.arrowHead;
+        const by = to.y - uy * d.arrowHead;
+        const px = -uy * d.arrowWing;
+        const py = ux * d.arrowWing;
+        el("polygon", {
+          points: [
+            `${sx(to.x)},${sy(to.y)}`,
+            `${sx(bx + px)},${sy(by + py)}`,
+            `${sx(bx - px)},${sy(by - py)}`
+          ].join(" "),
+          class: cls
+        });
+      }
+
+      function nodeBox(node, cls) {
+        rect(node.x - node.w / d.two, node.y - node.h / d.two, node.w, node.h, `node ${cls}`);
+        textAt(node, node.text, "strong", "middle", d.zero, d.zero);
+      }
+
+      function cross(point, cls) {
+        line(
+          { x: point.x - d.crossHalf, y: point.y - d.crossHalf },
+          { x: point.x + d.crossHalf, y: point.y + d.crossHalf },
+          cls
+        );
+        line(
+          { x: point.x - d.crossHalf, y: point.y + d.crossHalf },
+          { x: point.x + d.crossHalf, y: point.y - d.crossHalf },
+          cls
+        );
+      }
+
+      rect(d.plot.x, d.plot.y, d.splitX, d.plot.h, "region-left");
+      rect(d.splitX, d.plot.y, d.plot.w - d.splitX, d.splitY, "region-lower");
+      rect(d.splitX, d.splitY, d.plot.w - d.splitX, d.plot.h - d.splitY, "region-upper");
+
+      arrow(
+        { x: d.plot.x, y: d.plot.y },
+        { x: d.plot.x + d.plot.w, y: d.plot.y },
+        "axis"
+      );
+      arrow(
+        { x: d.plot.x, y: d.plot.y },
+        { x: d.plot.x, y: d.plot.y + d.plot.h },
+        "axis"
+      );
+
+      line(
+        { x: d.splitX, y: d.plot.y },
+        { x: d.splitX, y: d.plot.y + d.plot.h },
+        "split-x"
+      );
+      line(
+        { x: d.splitX, y: d.splitY },
+        { x: d.plot.x + d.plot.w, y: d.splitY },
+        "split-y"
+      );
+
+      line(
+        { x: d.splitX, y: d.plot.y - d.tickHalf },
+        { x: d.splitX, y: d.plot.y + d.tickHalf },
+        "tick"
+      );
+      line(
+        { x: d.plot.x - d.tickHalf, y: d.splitY },
+        { x: d.plot.x + d.tickHalf, y: d.splitY },
+        "tick"
+      );
+
+      textAt(
+        { x: d.plot.x + d.plot.w, y: d.plot.y },
+        "x₁", "strong", "end", d.zero, d.labelDrop
+      );
+      textAt(
+        { x: d.plot.x, y: d.plot.y + d.plot.h },
+        "x₂", "strong", "start", d.labelPad, d.zero
+      );
+      textAt(
+        { x: d.splitX, y: d.plot.y },
+        "5", "small", "middle", d.zero, d.labelDrop
+      );
+      textAt(
+        { x: d.plot.x, y: d.splitY },
+        "3", "small", "end", -d.labelPad, d.zero
+      );
+      textAt(
+        { x: d.splitX, y: d.plot.y + d.plot.h },
+        "разбиение x₁ = 5.0", "strong", "end", -d.labelPad, d.labelDrop
+      );
+      textAt(
+        { x: d.plot.x + d.plot.w, y: d.splitY },
+        "разбиение x₂ = 3.0", "strong", "end", -d.labelPad, d.labelLift
+      );
+
+      circle(d.query, d.oldRadius, "radius-old", d.dash);
+      circle(d.query, d.newRadius, "radius-new", d.dotDash);
+
+      line(
+        { x: d.splitX, y: d.query.y },
+        d.query,
+        "distance",
+        d.dotDash
+      );
+      textAt(
+        { x: d.splitX + d.newRadius, y: d.query.y },
+        "6", "decision", "middle", d.zero, d.labelLift
+      );
+
+      line(
+        d.query,
+        d.candidate,
+        "distance",
+        d.dotDash
+      );
+      textAt(
+        { x: d.candidate.x, y: d.query.y + d.oldRadius / d.two },
+        "4", "decision", "start", d.labelPad, d.zero
+      );
+
+      line(
+        d.query,
+        d.better,
+        "distance",
+        d.dotDash
+      );
+      textAt(
+        { x: d.better.x, y: d.query.y - d.newRadius / d.two },
+        "3", "decision", "start", d.labelPad, d.zero
+      );
+
+      line(
+        { x: d.query.x + d.newRadius / d.newRadius, y: d.query.y },
+        { x: d.query.x + d.newRadius / d.newRadius, y: d.splitY },
+        "check",
+        d.dash
+      );
+      textAt(
+        { x: d.query.x + d.newRadius / d.newRadius, y: d.splitY + d.newRadius / d.newRadius },
+        "2 < 4", "decision", "start", d.labelPad, d.zero
+      );
+
+      circle(d.query, d.queryRadius, "query");
+      circle(d.candidate, d.pointRadius, "candidate");
+      circle(d.better, d.pointRadius, "better");
+
+      textAt(d.query, "запрос", "strong", "end", -d.labelPad, d.labelLift);
+      textAt(d.candidate, "первый кандидат", "label", "end", -d.labelPad, d.zero);
+      textAt(d.better, "ближайшая точка", "label", "end", -d.labelPad, d.labelDrop);
+
+      const { root, left, split, lower, upper } = d.tree;
+
+      line(
+        { x: root.x, y: root.y - root.h / d.two },
+        { x: left.x, y: left.y + left.h / d.two },
+        "edge"
+      );
+      line(
+        { x: root.x, y: root.y - root.h / d.two },
+        { x: split.x, y: split.y + split.h / d.two },
+        "edge"
+      );
+      line(
+        { x: split.x, y: split.y - split.h / d.two },
+        { x: lower.x, y: lower.y + lower.h / d.two },
+        "edge"
+      );
+      line(
+        { x: split.x, y: split.y - split.h / d.two },
+        { x: upper.x, y: upper.y + upper.h / d.two },
+        "edge"
+      );
+
+      arrow(
+        { x: root.x, y: root.y - root.h / d.two },
+        { x: split.x, y: split.y + split.h / d.two },
+        "descent"
+      );
+      arrow(
+        { x: split.x, y: split.y - split.h / d.two },
+        { x: upper.x, y: upper.y + upper.h / d.two },
+        "descent"
+      );
+      polyArrow(d.returnPath, "backtrack", d.dash);
+      arrow(
+        { x: split.x, y: split.y - split.h / d.two },
+        { x: lower.x, y: lower.y + lower.h / d.two },
+        "check"
+      );
+
+      nodeBox(root, "node-active");
+      nodeBox(left, "node-skip");
+      nodeBox(split, "node-check");
+      nodeBox(lower, "node-best");
+      nodeBox(upper, "node-active");
+
+      textAt(
+        { x: root.x + d.newRadius / d.two, y: root.y - d.newRadius / d.two },
+        "спуск", "small", "start", d.labelPad, d.zero
+      );
+      textAt(
+        { x: upper.x - d.newRadius / d.two, y: upper.y + d.newRadius / d.two },
+        "возврат", "small", "end", -d.labelPad, d.zero
+      );
+      textAt(
+        { x: split.x - d.newRadius / d.two, y: split.y - d.newRadius / d.two },
+        "проверить: 2 < 4", "decision", "end", -d.labelPad, d.zero
+      );
+
+      const skipPoint = {
+        x: root.x - newRadiusRatio(),
+        y: root.y - newRadiusRatio()
+      };
+
+      function newRadiusRatio() {
+        return d.newRadius / d.newRadius;
+      }
+
+      cross(skipPoint, "skip");
+      textAt(
+        { x: left.x, y: left.y - left.h },
+        "6 > 3: пропустить", "decision", "middle", d.zero, d.labelDrop
+      );
+
+      for (const item of d.legend) {
+        line(
+          { x: item.x, y: item.y },
+          { x: item.x + d.newRadius / d.two, y: item.y },
+          item.cls,
+          item.cls === "backtrack" ? d.dash : null
+        );
+        textAt(
+          { x: item.x + d.newRadius / d.two, y: item.y },
+          item.text, "label", "start", d.labelPad, d.zero
+        );
+      }
+    } catch (error) {
+      const scene = document.getElementById("scene");
+      scene.replaceChildren();
+      const message = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      message.setAttribute("x", sx(d.fallback.x));
+      message.setAttribute("y", sy(d.fallback.y));
+      message.setAttribute("dx", d.fallback.dx);
+      message.setAttribute("dy", d.fallback.dy);
+      message.setAttribute("class", "fallback");
+      message.textContent = "Схема должна показать спуск к листу и проверку соседней ветви по текущему лучшему расстоянию.";
+      scene.appendChild(message);
+    }
+  </script>
+</body>
+</html>

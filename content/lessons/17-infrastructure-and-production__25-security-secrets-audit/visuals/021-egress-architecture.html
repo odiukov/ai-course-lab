@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь разрешённого и заблокированного исходящего трафика</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:white;
+  --panel:aliceblue;
+  --card:white;
+  --ink:darkslategray;
+  --muted:slategray;
+  --line:lightslategray;
+  --allow:seagreen;
+  --allow-fill:honeydew;
+  --deny:crimson;
+  --deny-fill:mistyrose;
+  --policy:royalblue;
+  --policy-fill:lavender;
+  --note:darkgoldenrod;
+  --note-fill:cornsilk;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:black;
+    --panel:midnightblue;
+    --card:darkslategray;
+    --ink:whitesmoke;
+    --muted:lightgray;
+    --line:slategray;
+    --allow:mediumseagreen;
+    --allow-fill:darkgreen;
+    --deny:lightcoral;
+    --deny-fill:maroon;
+    --policy:lightskyblue;
+    --policy-fill:darkslateblue;
+    --note:gold;
+    --note-fill:darkgoldenrod;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:unset;
+  background:var(--page);
+  color:var(--ink);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+header{
+  padding:var(--pad-y) var(--pad-x);
+  background:var(--page);
+  border-bottom:1px solid var(--line);
+}
+h1{
+  margin:unset;
+  font-size:20px;
+  font-weight:bold;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  background:var(--page);
+}
+text{fill:var(--ink);font-size:15px}
+.zone{fill:var(--panel);stroke:var(--line);stroke-width:2}
+.card{fill:var(--card);stroke:var(--line);stroke-width:2}
+.pod{fill:var(--policy-fill);stroke:var(--policy)}
+.policy-card{fill:var(--policy-fill);stroke:var(--policy)}
+.allowed-card{fill:var(--allow-fill);stroke:var(--allow)}
+.attacker-card{fill:var(--deny-fill);stroke:var(--deny)}
+.route,.policy-link,.bar{
+  fill:none;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.route{stroke-width:3}
+.route.allow{stroke:var(--allow)}
+.route.blocked{stroke:var(--deny)}
+.route.ghost{stroke:var(--deny);stroke-width:2}
+.policy-link{stroke:var(--policy);stroke-width:2}
+.bar{stroke:var(--deny);stroke-width:3}
+.head.allow{fill:var(--allow)}
+.label-title{font-size:16px;font-weight:bold}
+.label-small{font-size:13px;fill:var(--muted)}
+.label-route{font-size:13px;font-weight:bold}
+.label-allow{fill:var(--allow)}
+.label-deny{fill:var(--deny)}
+.label-policy{fill:var(--policy);font-weight:bold}
+.eyebrow{font-size:13px;font-weight:bold;fill:var(--muted)}
+.note{fill:var(--note-fill);stroke:var(--note);stroke-width:2}
+.note-text{font-size:13px}
+.fail{font-size:16px;fill:var(--deny)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Путь разрешённого и заблокированного исходящего трафика</h1>
+</header>
+
+<svg id="diagram" viewBox="0 0 1200 470" width="1200" height="470"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Исходящий трафик из отдельной подсети LLM-пода</title>
+  <desc id="svg-desc">DNS и сетевой фильтр разрешают обращения только к четырём известным адресатам. DNS и HTTP к домену атакующего блокируются.</desc>
+</svg>
+
+<script>
+const D={
+  origin:{x:0,y:0},
+  scale:{x:1,y:1},
+  one:1,
+  m:{r:12,head:13,half:8,leading:20,dash:9,gap:8,padX:20,padY:12},
+  fallback:{x:55,y:220},
+  subnet:{x:25,y:50,w:680,h:325},
+  allowedZone:{x:805,y:25,w:370,h:330},
+  legend:{x:25,y:395,w:760,h:60},
+  pod:{x:60,y:190,w:190,h:90},
+  dns:{x:335,y:95,w:220,h:75},
+  filter:{x:335,y:265,w:220,h:80},
+  policy:{x:575,y:185,w:115,h:70},
+  target:{x:830,w:320,h:58,textX:850,textDy:20,subDy:41},
+  attacker:{x:830,y:380,w:320,h:62},
+  targets:[
+    {y:55,mid:84,title:"api.openai.com",sub:"провайдер модели"},
+    {y:125,mid:154,title:"api.anthropic.com",sub:"провайдер модели"},
+    {y:195,mid:224,title:"Weaviate",sub:"векторная база"},
+    {y:265,mid:294,title:"Хранилище секретов",sub:"только разрешённый эндпоинт"}
+  ],
+  routes:[
+    {kind:"allow",side:"right",p:[{x:155,y:190},{x:335,y:132}]},
+    {kind:"allow",side:"left",p:[{x:440,y:170},{x:440,y:200},{x:250,y:200}]},
+    {kind:"allow",side:"right",p:[{x:250,y:258},{x:335,y:305}]},
+    {kind:"allow",p:[{x:555,y:305},{x:760,y:305}]},
+    {kind:"allow",side:"right",p:[{x:760,y:305},{x:760,y:84},{x:830,y:84}]},
+    {kind:"allow",side:"right",p:[{x:760,y:154},{x:830,y:154}]},
+    {kind:"allow",side:"right",p:[{x:760,y:224},{x:830,y:224}]},
+    {kind:"allow",side:"right",p:[{x:760,y:294},{x:830,y:294}]},
+    {kind:"blocked",p:[{x:555,y:112},{x:675,y:112}]},
+    {kind:"blocked",p:[{x:555,y:330},{x:675,y:330}]},
+    {kind:"ghost",dashed:true,p:[{x:695,y:112},{x:780,y:112},{x:780,y:410},{x:830,y:410}]},
+    {kind:"ghost",dashed:true,p:[{x:695,y:330},{x:780,y:330},{x:780,y:410},{x:830,y:410}]}
+  ],
+  policyLinks:[
+    [{x:500,y:170},{x:575,y:210}],
+    [{x:500,y:265},{x:575,y:235}]
+  ],
+  blocks:[
+    {bar:[{x:685,y:94},{x:685,y:130}],a:[{x:678,y:103},{x:692,y:121}],b:[{x:692,y:103},{x:678,y:121}]},
+    {bar:[{x:685,y:312},{x:685,y:348}],a:[{x:678,y:321},{x:692,y:339}],b:[{x:692,y:321},{x:678,y:339}]}
+  ],
+  labels:[
+    {x:48,y:70,lines:["ОТДЕЛЬНАЯ ПОДСЕТЬ LLM-СЕРВИСА"],cls:"eyebrow",anchor:"start"},
+    {x:825,y:43,lines:["РАЗРЕШЁННЫЕ АДРЕСАТЫ"],cls:"eyebrow",anchor:"start"},
+    {x:232,y:146,lines:["DNS: api.openai.com"],cls:"label-route label-allow",anchor:"middle"},
+    {x:350,y:190,lines:["адрес возвращён"],cls:"label-small",anchor:"middle"},
+    {x:288,y:330,lines:["HTTPS"],cls:"label-route label-allow",anchor:"middle"},
+    {x:650,y:286,lines:["соединение разрешено"],cls:"label-route label-allow",anchor:"middle"},
+    {x:617,y:91,lines:["DNS: чужой домен"],cls:"label-route label-deny",anchor:"middle"},
+    {x:650,y:147,lines:["адрес не выдан"],cls:"label-route label-deny",anchor:"middle"},
+    {x:617,y:310,lines:["HTTP: чужой домен"],cls:"label-route label-deny",anchor:"middle"},
+    {x:650,y:365,lines:["DROP"],cls:"label-route label-deny",anchor:"middle"}
+  ]
+};
+
+const origin=D.origin;
+const scale=D.scale;
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const svg=document.getElementById("diagram");
+const NS="http://www.w3.org/2000/svg";
+
+function make(name,cls){
+  const n=document.createElementNS(NS,name);
+  if(cls)n.setAttribute("class",cls);
+  return n;
+}
+function attrs(n,map){
+  Object.entries(map).forEach(([k,v])=>n.setAttribute(k,String(v)));
+  return n;
+}
+function addBox(b,cls){
+  const n=make("rect",cls);
+  attrs(n,{
+    x:sx(b.x),y:sy(b.y),
+    width:sx(b.x+b.w)-sx(b.x),
+    height:sy(b.y+b.h)-sy(b.y),
+    rx:sx(D.m.r)-sx(0),
+    ry:sy(D.m.r)-sy(0)
+  });
+  svg.append(n);
+}
+function addPath(points,cls,dashed){
+  const d=points.map((p,i)=>
+    `${i===D.origin.x?"M":"L"} ${sx(p.x)} ${sy(p.y)}`
+  ).join(" ");
+  const n=make("path",cls);
+  attrs(n,{d});
+  if(dashed){
+    n.setAttribute(
+      "stroke-dasharray",
+      `${sx(D.m.dash)-sx(0)} ${sx(D.m.gap)-sx(0)}`
+    );
+  }
+  svg.append(n);
+}
+function addHead(tip,side,cls){
+  const back=side==="left"?tip.x+D.m.head:tip.x-D.m.head;
+  const pts=[
+    {x:tip.x,y:tip.y},
+    {x:back,y:tip.y-D.m.half},
+    {x:back,y:tip.y+D.m.half}
+  ];
+  const n=make("polygon",`head ${cls}`);
+  attrs(n,{points:pts.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" ")});
+  svg.append(n);
+}
+function addText(p,lines,cls,anchor){
+  lines.forEach((line,i)=>{
+    const n=make("text",cls);
+    attrs(n,{
+      x:sx(p.x),
+      y:sy(p.y+i*D.m.leading),
+      "text-anchor":anchor,
+      "dominant-baseline":"middle"
+    });
+    n.textContent=line;
+    svg.append(n);
+  });
+}
+function addRoute(r){
+  addPath(r.p,`route ${r.kind}`,r.dashed);
+  if(r.side)addHead(r.p[r.p.length-D.one],r.side,r.kind);
+}
+
+try{
+  document.documentElement.style.setProperty(
+    "--pad-x",`${sx(D.m.padX)-sx(0)}px`
+  );
+  document.documentElement.style.setProperty(
+    "--pad-y",`${sy(D.m.padY)-sy(0)}px`
+  );
+
+  addBox(D.subnet,"zone");
+  addBox(D.allowedZone,"zone");
+  addBox(D.legend,"note");
+
+  D.routes.forEach(addRoute);
+  D.policyLinks.forEach(p=>addPath(p,"policy-link"));
+
+  addBox(D.pod,"card pod");
+  addText({x:155,y:218},["LLM-под"],"label-title","middle");
+  addText({x:155,y:245},["код приложения"],"label-small","middle");
+
+  addBox(D.dns,"card");
+  addText({x:445,y:118},["DNS-резолвер"],"label-title","middle");
+  addText({x:445,y:143},["проверяет имя"],"label-small","middle");
+
+  addBox(D.filter,"card");
+  addText({x:445,y:288},["Сетевой фильтр"],"label-title","middle");
+  addText({x:445,y:315},["проверяет соединение"],"label-small","middle");
+
+  addBox(D.policy,"card policy-card");
+  addText({x:632,y:205},["ОДИН БЕЛЫЙ"],"label-policy label-small","middle");
+  addText({x:632,y:228},["СПИСОК"],"label-policy label-small","middle");
+  addText({x:632,y:247},["для обоих барьеров"],"label-small","middle");
+
+  D.targets.forEach(t=>{
+    addBox({x:D.target.x,y:t.y,w:D.target.w,h:D.target.h},"card allowed-card");
+    addText({x:D.target.textX,y:t.y+D.target.textDy},[t.title],"label-title","start");
+    addText({x:D.target.textX,y:t.y+D.target.subDy},[t.sub],"label-small","start");
+  });
+
+  addBox(D.attacker,"card attacker-card");
+  addText({x:990,y:401},["Домен атакующего"],"label-title label-deny","middle");
+  addText({x:990,y:426},["collect-data.example"],"label-small label-deny","middle");
+
+  D.blocks.forEach(b=>{
+    addPath(b.bar,"bar");
+    addPath(b.a,"bar");
+    addPath(b.b,"bar");
+  });
+
+  D.labels.forEach(l=>addText(l,l.lines,l.cls,l.anchor));
+
+  addText(
+    {x:45,y:416},
+    ["DNS-барьер: fragment-secret.attacker.example → адрес не выдан"],
+    "note-text","start"
+  );
+  addText(
+    {x:45,y:440},
+    ["Сетевой барьер: прямой HTTP к collect-data.example → DROP"],
+    "note-text","start"
+  );
+}catch(error){
+  svg.replaceChildren();
+  const fallback=make("text","fail");
+  attrs(fallback,{
+    x:sx(D.fallback.x),
+    y:sy(D.fallback.y),
+    "text-anchor":"start"
+  });
+  fallback.textContent="Схема должна показать: разрешённые адресаты доступны, а DNS и HTTP к домену атакующего блокируются.";
+  svg.append(fallback);
+}
+</script>
+</body>
+</html>

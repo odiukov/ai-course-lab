@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сглаженные вероятности слов</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f3f6fb;
+      --surface: #ffffff;
+      --surface-soft: #f7f9fd;
+      --ink: #172033;
+      --muted: #59667c;
+      --grid: #d8deea;
+      --accent: #3157c8;
+      --accent-soft: #e8edff;
+      --free: #d83e5b;
+      --money: #b86b00;
+      --meeting: #6551c7;
+      --free-fill: #ef5a6f;
+      --money-fill: #f2a31b;
+      --meeting-fill: #7564d8;
+      --bar-track: #e7ebf3;
+      --on-segment: #ffffff;
+      --error: #a8243f;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --surface: #192231;
+        --surface-soft: #202b3c;
+        --ink: #eef3ff;
+        --muted: #b6c0d3;
+        --grid: #39465b;
+        --accent: #9eb1ff;
+        --accent-soft: #28365f;
+        --free: #ff8296;
+        --money: #ffc35c;
+        --meeting: #b6a9ff;
+        --free-fill: #c93f59;
+        --money-fill: #b56c00;
+        --meeting-fill: #6554be;
+        --bar-track: #303b4d;
+        --on-segment: #ffffff;
+        --error: #ff8da0;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      background: var(--page);
+    }
+
+    header {
+      color: var(--ink);
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--page);
+      font-family: inherit;
+    }
+
+    text {
+      fill: var(--ink);
+      dominant-baseline: middle;
+    }
+
+    .card {
+      fill: var(--surface);
+      stroke: var(--grid);
+      stroke-width: 1.5;
+    }
+
+    .banner {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 1.5;
+    }
+
+    .row {
+      fill: var(--surface-soft);
+    }
+
+    .rule,
+    .leader {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+    }
+
+    .bar-track {
+      fill: var(--bar-track);
+    }
+
+    .bar-outline {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1.5;
+    }
+
+    .segment {
+      stroke: none;
+    }
+
+    .segment.word-free {
+      fill: var(--free-fill);
+    }
+
+    .segment.word-money {
+      fill: var(--money-fill);
+    }
+
+    .segment.word-meeting {
+      fill: var(--meeting-fill);
+    }
+
+    .leader.word-free {
+      stroke: var(--free);
+    }
+
+    .leader.word-money {
+      stroke: var(--money);
+    }
+
+    .leader.word-meeting {
+      stroke: var(--meeting);
+    }
+
+    .diagram-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .banner-text {
+      fill: var(--accent);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .column-title,
+    .class-title {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .cell {
+      font-size: 13px;
+    }
+
+    .word-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .formula {
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .total {
+      font-size: 12px;
+      fill: var(--muted);
+    }
+
+    .word-label.word-free,
+    .formula.word-free {
+      fill: var(--free);
+    }
+
+    .word-label.word-money,
+    .formula.word-money {
+      fill: var(--money);
+    }
+
+    .word-label.word-meeting,
+    .formula.word-meeting {
+      fill: var(--meeting);
+    }
+
+    .error {
+      color: var(--error);
+      font-size: 16px;
+      font-weight: bold;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-heading">
+    <header id="diagram-heading">Сглаженные вероятности слов</header>
+    <svg
+      id="diagram"
+      width="940"
+      height="450"
+      viewBox="0 0 940 450"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-heading diagram-description"
+    >
+      <desc id="diagram-description">
+        Таблица счётчиков free, money и meeting для спама и обычной почты,
+        а рядом две полосы вероятностей после сглаживания с alpha равным единице.
+      </desc>
+    </svg>
+    <noscript>
+      Схема должна показать, как счётчики 80, 60, 10 и 5, 10, 100 после
+      добавления единицы превращаются в вероятности со знаменателями 153 и 118.
+    </noscript>
+  </figure>
+
+  <script>
+    const data = [
+      {
+        kind: "layout",
+        zero: 0,
+        half: 0.5,
+        radius: 1.2,
+        banner: { x: 2, y: 1, width: 100, height: 5, textX: 52, textY: 3.5 },
+        left: {
+          x: 2, y: 8, width: 46, height: 40,
+          titleX: 5, titleY: 12,
+          headerY: 17,
+          wordX: 5, spamX: 25, hamX: 39,
+          rowX: 4, rowWidth: 42, rowHeight: 5,
+          rules: [25, 31, 37],
+          totalRuleY: 38.5,
+          spamTotalY: 42,
+          hamTotalY: 46
+        },
+        right: {
+          x: 51, y: 8, width: 51, height: 40,
+          titleX: 54, titleY: 12
+        },
+        bar: { x: 54, width: 45, height: 5 },
+        error: {
+          message:
+            "Схема должна была показать таблицу счётчиков free, money и meeting и две полосы вероятностей после сглаживания: знаменатели 153 для спама и 118 для обычной почты."
+        }
+      },
+      {
+        kind: "word",
+        key: "free",
+        label: "free",
+        y: 22,
+        boxY: 19.5,
+        spam: { raw: 80, smooth: 81, probability: "0,529" },
+        ham: { raw: 5, smooth: 6, probability: "0,051" }
+      },
+      {
+        kind: "word",
+        key: "money",
+        label: "money",
+        y: 28,
+        boxY: 25.5,
+        spam: { raw: 60, smooth: 61, probability: "0,399" },
+        ham: { raw: 10, smooth: 11, probability: "0,093" }
+      },
+      {
+        kind: "word",
+        key: "meeting",
+        label: "meeting",
+        y: 34,
+        boxY: 31.5,
+        spam: { raw: 10, smooth: 11, probability: "0,072" },
+        ham: { raw: 100, smooth: 101, probability: "0,856" }
+      },
+      {
+        kind: "class",
+        key: "spam",
+        title: "СПАМ · сумма вероятностей = 1",
+        rawTotal: 150,
+        denominator: 153,
+        titleX: 54,
+        titleY: 16,
+        barY: 18,
+        leaderY: 24.5,
+        formulaY: 27.5,
+        anchors: [
+          { word: "free", x: 59 },
+          { word: "money", x: 77 },
+          { word: "meeting", x: 95 }
+        ]
+      },
+      {
+        kind: "class",
+        key: "ham",
+        title: "ОБЫЧНАЯ ПОЧТА · сумма вероятностей = 1",
+        rawTotal: 115,
+        denominator: 118,
+        titleX: 54,
+        titleY: 31.5,
+        barY: 33.5,
+        leaderY: 40,
+        formulaY: 44.5,
+        anchors: [
+          { word: "free", x: 59 },
+          { word: "money", x: 77 },
+          { word: "meeting", x: 95 }
+        ]
+      }
+    ];
+
+    const origin = { x: 10, y: 5 };
+    const scale = 9;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    const labelPadding = 1;
+    const lineThickness = 1.5;
+    const fontSize = 12;
+
+    const svg = document.getElementById("diagram");
+    const namespace = "http://www.w3.org/2000/svg";
+    const layout = data.find(item => item.kind === "layout");
+    const words = data.filter(item => item.kind === "word");
+    const classes = data.filter(item => item.kind === "class");
+
+    function append(tag, attributes, content, parent) {
+      const element = document.createElementNS(namespace, tag);
+      Object.entries(attributes).forEach(([name, value]) => {
+        if (value !== undefined) element.setAttribute(name, value);
+      });
+      if (content !== undefined) element.textContent = content;
+      (parent || svg).appendChild(element);
+      return element;
+    }
+
+    function plainRect(parent, x, y, width, height, className, extra) {
+      return append("rect", Object.assign({
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + width) - sx(x),
+        height: sy(y + height) - sy(y),
+        class: className
+      }, extra || {}), undefined, parent);
+    }
+
+    function roundedRect(parent, x, y, width, height, className, radius, extra) {
+      return append("rect", Object.assign({
+        x: sx(x),
+        y: sy(y),
+        width: sx(x + width) - sx(x),
+        height: sy(y + height) - sy(y),
+        rx: sx(radius) - sx(layout.zero),
+        ry: sy(radius) - sy(layout.zero),
+        class: className
+      }, extra || {}), undefined, parent);
+    }
+
+    function drawLine(parent, x1, y1, x2, y2, className) {
+      return append("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: className
+      }, undefined, parent);
+    }
+
+    function drawLabel(parent, x, y, content, className, anchor) {
+      return append("text", {
+        x: sx(x),
+        y: sy(y),
+        dy: labelPadding,
+        class: className,
+        "text-anchor": anchor
+      }, content, parent);
+    }
+
+    function drawTable(parent) {
+      const box = layout.left;
+
+      roundedRect(
+        parent, box.x, box.y, box.width, box.height,
+        "card", layout.radius
+      );
+
+      drawLabel(
+        parent, box.titleX, box.titleY,
+        "Сырые счётчики  →  после +1",
+        "diagram-title", "start"
+      );
+
+      drawLabel(parent, box.wordX, box.headerY, "слово", "column-title", "start");
+      drawLabel(parent, box.spamX, box.headerY, "спам", "column-title", "middle");
+      drawLabel(
+        parent, box.hamX, box.headerY,
+        "обычная почта", "column-title", "middle"
+      );
+
+      words.forEach(word => {
+        plainRect(
+          parent, box.rowX, word.boxY,
+          box.rowWidth, box.rowHeight, "row"
+        );
+
+        drawLabel(
+          parent, box.wordX, word.y, word.label,
+          "word-label word-" + word.key, "start"
+        );
+
+        drawLabel(
+          parent, box.spamX, word.y,
+          word.spam.raw + " + 1 → " + word.spam.smooth,
+          "cell", "middle"
+        );
+
+        drawLabel(
+          parent, box.hamX, word.y,
+          word.ham.raw + " + 1 → " + word.ham.smooth,
+          "cell", "middle"
+        );
+      });
+
+      box.rules.forEach(ruleY => {
+        drawLine(
+          parent, box.rowX, ruleY,
+          box.rowX + box.rowWidth, ruleY, "rule"
+        );
+      });
+
+      drawLine(
+        parent, box.rowX, box.totalRuleY,
+        box.rowX + box.rowWidth, box.totalRuleY, "rule"
+      );
+
+      const spamClass = classes.find(item => item.key === "spam");
+      const hamClass = classes.find(item => item.key === "ham");
+
+      drawLabel(
+        parent, box.spamX, box.spamTotalY,
+        "спам: " + spamClass.rawTotal + " + 3 = " + spamClass.denominator,
+        "total", "middle"
+      );
+
+      drawLabel(
+        parent, box.spamX, box.hamTotalY,
+        "обычная: " + hamClass.rawTotal + " + 3 = " + hamClass.denominator,
+        "total", "middle"
+      );
+    }
+
+    function drawProbabilityBars(parent) {
+      const box = layout.right;
+      const bar = layout.bar;
+      const definitions = append("defs", {}, undefined, parent);
+
+      roundedRect(
+        parent, box.x, box.y, box.width, box.height,
+        "card", layout.radius
+      );
+
+      drawLabel(
+        parent, box.titleX, box.titleY,
+        "Вероятности после сглаживания",
+        "diagram-title", "start"
+      );
+
+      classes.forEach(classData => {
+        drawLabel(
+          parent, classData.titleX, classData.titleY,
+          classData.title, "class-title", "start"
+        );
+
+        roundedRect(
+          parent, bar.x, classData.barY,
+          bar.width, bar.height, "bar-track", layout.radius
+        );
+
+        const clipPath = append("clipPath", {
+          id: classData.key + "-bar-clip"
+        }, undefined, definitions);
+
+        roundedRect(
+          clipPath, bar.x, classData.barY,
+          bar.width, bar.height, undefined, layout.radius
+        );
+
+        let cursor = bar.x;
+        const centers = new Map();
+
+        words.forEach(word => {
+          const smoothed = word[classData.key].smooth;
+          const segmentWidth =
+            bar.width * smoothed / classData.denominator;
+
+          plainRect(
+            parent, cursor, classData.barY,
+            segmentWidth, bar.height,
+            "segment word-" + word.key,
+            { "clip-path": "url(#" + classData.key + "-bar-clip)" }
+          );
+
+          centers.set(
+            word.key,
+            cursor + segmentWidth * layout.half
+          );
+
+          cursor += segmentWidth;
+        });
+
+        roundedRect(
+          parent, bar.x, classData.barY,
+          bar.width, bar.height, "bar-outline", layout.radius
+        );
+
+        classData.anchors.forEach(anchor => {
+          const word = words.find(item => item.key === anchor.word);
+          const value = word[classData.key];
+
+          drawLine(
+            parent,
+            centers.get(word.key),
+            classData.barY + bar.height,
+            anchor.x,
+            classData.leaderY,
+            "leader word-" + word.key
+          );
+
+          drawLabel(
+            parent,
+            anchor.x,
+            classData.formulaY,
+            value.smooth + "/" + classData.denominator +
+              " = " + value.probability,
+            "formula word-" + word.key,
+            "middle"
+          );
+        });
+      });
+    }
+
+    function draw() {
+      const root = append("g", {
+        "data-line-thickness": lineThickness,
+        "data-font-size": fontSize
+      });
+
+      roundedRect(
+        root,
+        layout.banner.x,
+        layout.banner.y,
+        layout.banner.width,
+        layout.banner.height,
+        "banner",
+        layout.radius
+      );
+
+      drawLabel(
+        root,
+        layout.banner.textX,
+        layout.banner.textY,
+        "α = 1: к каждому слову в каждом классе добавляем единицу",
+        "banner-text",
+        "middle"
+      );
+
+      drawTable(root);
+      drawProbabilityBars(root);
+    }
+
+    try {
+      draw();
+    } catch (error) {
+      const fallback = document.createElement("p");
+      fallback.className = "error";
+      fallback.textContent = layout.error.message;
+      svg.replaceWith(fallback);
+    }
+  </script>
+</body>
+</html>

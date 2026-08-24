@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Один обучающий ход AlphaZero</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --panel-strong: #eef3ff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #75829a;
+    --accent: #2764d8;
+    --accent-soft: #dce8ff;
+    --success: #16835b;
+    --success-soft: #dff5eb;
+    --board: #f1d9a6;
+    --piece: #25324a;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #192231;
+      --panel-strong: #202e45;
+      --ink: #eef3ff;
+      --muted: #aeb9cc;
+      --line: #8795ad;
+      --accent: #79a7ff;
+      --accent-soft: #263d67;
+      --success: #65d3a6;
+      --success-soft: #183e35;
+      --board: #665536;
+      --piece: #edf3ff;
+    }
+  }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+  }
+
+  figcaption {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 8px 18px 4px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--bg);
+  }
+
+  .edge, .tree, .grid {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .tree {
+    stroke: var(--ink);
+  }
+
+  .soft {
+    stroke-width: 1.5px;
+    stroke: var(--line);
+  }
+
+  .accent-edge {
+    stroke: var(--accent);
+    stroke-width: 4px;
+  }
+
+  .arrowhead {
+    fill: var(--line);
+  }
+
+  .accent-head {
+    fill: var(--accent);
+  }
+
+  .box {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .network {
+    fill: var(--panel-strong);
+    stroke: var(--accent);
+  }
+
+  .target {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+  }
+
+  .result {
+    fill: var(--success-soft);
+    stroke: var(--success);
+  }
+
+  .sample {
+    fill: var(--panel-strong);
+    stroke: var(--success);
+  }
+
+  .board {
+    fill: var(--board);
+    stroke: var(--line);
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--ink);
+    stroke-width: 2px;
+  }
+
+  .chosen {
+    fill: var(--accent);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .piece {
+    fill: var(--piece);
+    stroke: var(--panel);
+    stroke-width: 1.5px;
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .strong {
+    font-weight: bold;
+  }
+
+  .accent-text {
+    fill: var(--accent);
+  }
+
+  .success-text {
+    fill: var(--success);
+  }
+
+  .halo {
+    paint-order: stroke;
+    stroke: var(--bg);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+  }
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>Один обучающий ход AlphaZero</figcaption>
+  <svg id="diagram" viewBox="0 0 1160 460" width="1160" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Один обучающий ход AlphaZero</title>
+    <desc id="svg-desc">Позиция разветвляется в дерево MCTS, посещения образуют распределение пи, а пи и итог партии обновляют policy-value сеть.</desc>
+  </svg>
+</figure>
+
+<script>
+"use strict";
+
+const data = Object.freeze({
+  boxes: [
+    { x: 4, y: 4, w: 25, h: 13, r: 1.4, cls: "box network" },
+    { x: 8, y: 24, w: 12, h: 13, r: 0.8, cls: "box board" },
+    { x: 82, y: 18, w: 22, h: 16, r: 1.4, cls: "box target" },
+    { x: 107, y: 5, w: 19, h: 9, r: 1.4, cls: "box result" },
+    { x: 78, y: 40, w: 48, h: 9, r: 1.4, cls: "box sample" }
+  ],
+  boardLines: [
+    [10.4, 24, 10.4, 37], [12.8, 24, 12.8, 37],
+    [15.2, 24, 15.2, 37], [17.6, 24, 17.6, 37],
+    [8, 26.6, 20, 26.6], [8, 29.2, 20, 29.2],
+    [8, 31.8, 20, 31.8], [8, 34.4, 20, 34.4]
+  ],
+  treeLines: [
+    { pts: [[44, 25], [55, 18], [69, 14]], cls: "tree" },
+    { pts: [[44, 25], [55, 25], [69, 25]], cls: "tree accent-edge" },
+    { pts: [[44, 25], [55, 32], [69, 36]], cls: "tree" },
+    { pts: [[69, 14], [75, 10.5]], cls: "soft" },
+    { pts: [[69, 14], [75, 17.5]], cls: "soft" },
+    { pts: [[69, 25], [75, 21.5]], cls: "soft" },
+    { pts: [[69, 25], [75, 28.5]], cls: "soft" },
+    { pts: [[69, 36], [75, 32.5]], cls: "soft" },
+    { pts: [[69, 36], [75, 39.5]], cls: "soft" }
+  ],
+  arrows: [
+    {
+      pts: [[14, 24], [14, 17]],
+      head: [[14, 17], [12.9, 19], [15.1, 19]],
+      cls: "edge", headCls: "arrowhead"
+    },
+    {
+      pts: [[20, 28], [31, 28], [42.4, 25.3]],
+      head: [[42.4, 25.3], [40.1, 24], [40.5, 26.5]],
+      cls: "edge", headCls: "arrowhead"
+    },
+    {
+      pts: [[29, 10], [38, 10], [43.1, 23.2]],
+      head: [[43.1, 23.2], [40.9, 21.8], [40.8, 24.3]],
+      cls: "edge", headCls: "arrowhead"
+    },
+    {
+      pts: [[76, 25], [82, 25]],
+      head: [[82, 25], [80, 23.9], [80, 26.1]],
+      cls: "edge accent-edge", headCls: "accent-head"
+    },
+    {
+      pts: [[104, 23], [107, 23], [107, 16], [112, 14]],
+      head: [[112, 14], [109.6, 14.2], [110.5, 16.4]],
+      cls: "edge", headCls: "arrowhead"
+    },
+    {
+      pts: [[93, 34], [93, 40]],
+      head: [[93, 40], [91.9, 38], [94.1, 38]],
+      cls: "edge accent-edge", headCls: "accent-head"
+    },
+    {
+      pts: [[119, 14], [119, 40]],
+      head: [[119, 40], [117.9, 38], [120.1, 38]],
+      cls: "edge", headCls: "arrowhead"
+    },
+    {
+      pts: [[78, 45], [72, 45], [72, 49], [32, 49], [32, 16], [29, 16]],
+      head: [[29, 16], [31, 14.9], [31, 17.1]],
+      cls: "edge", headCls: "arrowhead"
+    }
+  ],
+  circles: [
+    { x: 44, y: 25, r: 1.35, cls: "node" },
+    { x: 69, y: 14, r: 1.05, cls: "node" },
+    { x: 69, y: 25, r: 1.25, cls: "chosen" },
+    { x: 69, y: 36, r: 1.05, cls: "node" },
+    { x: 10.4, y: 26.6, r: 0.8, cls: "piece" },
+    { x: 15.2, y: 29.2, r: 0.8, cls: "piece" },
+    { x: 17.6, y: 34.4, r: 0.8, cls: "piece" },
+    { x: 12.8, y: 31.8, r: 0.8, cls: "piece" }
+  ],
+  texts: [
+    { x: 16.5, y: 7.1, text: "policy-value сеть", cls: "strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 16.5, y: 11, text: "p: 55% · 30% · 15%", cls: "", anchor: "middle", ox: 0, oy: 0 },
+    { x: 16.5, y: 14.4, text: "v: +0,2", cls: "accent-text strong", anchor: "middle", ox: 0, oy: 0 },
+
+    { x: 14, y: 39, text: "позиция sₜ", cls: "strong", anchor: "middle", ox: 0, oy: 1 },
+    { x: 12.5, y: 20.8, text: "sₜ", cls: "small halo", anchor: "end", ox: -1, oy: 0 },
+    { x: 31, y: 8.2, text: "приоры p и оценка v", cls: "small halo", anchor: "start", ox: 1, oy: -1 },
+
+    { x: 57, y: 5.5, text: "MCTS · 100 продолжений", cls: "strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 56.5, y: 16.6, text: "N=25", cls: "small strong halo", anchor: "middle", ox: 0, oy: -1 },
+    { x: 56.5, y: 23.4, text: "N=60", cls: "small strong accent-text halo", anchor: "middle", ox: 0, oy: -1 },
+    { x: 56.5, y: 34.4, text: "N=15", cls: "small strong halo", anchor: "middle", ox: 0, oy: 1 },
+
+    { x: 93, y: 21.6, text: "цель политики πₜ", cls: "strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 93, y: 26, text: "25% · 60% · 15%", cls: "accent-text strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 93, y: 30.5, text: "реальный ход: B", cls: "small", anchor: "middle", ox: 0, oy: 0 },
+
+    { x: 116.5, y: 8.2, text: "конец партии", cls: "small strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 116.5, y: 11.7, text: "z=+1", cls: "success-text strong", anchor: "middle", ox: 0, oy: 0 },
+
+    { x: 95, y: 36.2, text: "πₜ сохранена", cls: "small accent-text halo", anchor: "start", ox: 1, oy: 0 },
+    { x: 117, y: 28.5, text: "исход z позже", cls: "small success-text halo", anchor: "end", ox: -1, oy: 0 },
+
+    { x: 102, y: 43.2, text: "обучающий пример: (sₜ, πₜ, z)", cls: "strong", anchor: "middle", ox: 0, oy: 0 },
+    { x: 102, y: 46.7, text: "цель: политика + ценность", cls: "small", anchor: "middle", ox: 0, oy: 0 },
+
+    { x: 52, y: 47.2, text: "loss: политика + ценность", cls: "small success-text halo", anchor: "middle", ox: 0, oy: -1 },
+    { x: 33, y: 20, text: "новые веса", cls: "small accent-text halo", anchor: "start", ox: 1, oy: 0 }
+  ],
+  fallback: {
+    x: 4,
+    y: 25,
+    text: "Схема: позиция → MCTS → π; затем π и итог z обновляют policy-value сеть."
+  }
+});
+
+const origin = Object.freeze({ x: 18, y: 8 });
+const scale = 8.9;
+const labelPad = 7;
+
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("diagram");
+
+function make(tag, attrs, cls) {
+  const el = document.createElementNS(NS, tag);
+  for (const [name, value] of Object.entries(attrs || {})) {
+    el.setAttribute(name, String(value));
+  }
+  if (cls) el.setAttribute("class", cls);
+  return el;
+}
+
+function polyline(parent, points, cls) {
+  const value = points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  parent.appendChild(make("polyline", { points: value }, cls));
+}
+
+function polygon(parent, points, cls) {
+  const value = points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+  parent.appendChild(make("polygon", { points: value }, cls));
+}
+
+try {
+  const layer = make("g", { id: "dynamic" });
+  svg.appendChild(layer);
+
+  for (const item of data.treeLines) {
+    polyline(layer, item.pts, item.cls);
+  }
+
+  for (const arrow of data.arrows) {
+    polyline(layer, arrow.pts, arrow.cls);
+    polygon(layer, arrow.head, arrow.headCls);
+  }
+
+  for (const box of data.boxes) {
+    layer.appendChild(make("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.x + box.w) - sx(box.x),
+      height: sy(box.y + box.h) - sy(box.y),
+      rx: sx(box.r) - sx(0),
+      ry: sy(box.r) - sy(0)
+    }, box.cls));
+  }
+
+  for (const [x1, y1, x2, y2] of data.boardLines) {
+    layer.appendChild(make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    }, "grid"));
+  }
+
+  for (const circle of data.circles) {
+    layer.appendChild(make("circle", {
+      cx: sx(circle.x),
+      cy: sy(circle.y),
+      r: sx(circle.r) - sx(0)
+    }, circle.cls));
+  }
+
+  for (const item of data.texts) {
+    const text = make("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      dx: item.ox * labelPad,
+      dy: item.oy * labelPad,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle"
+    }, item.cls);
+    text.textContent = item.text;
+    layer.appendChild(text);
+  }
+} catch (error) {
+  const failed = svg.querySelector("#dynamic");
+  if (failed) failed.replaceChildren();
+
+  const fallback = make("text", {
+    x: sx(data.fallback.x),
+    y: sy(data.fallback.y),
+    "text-anchor": "start",
+    "dominant-baseline": "middle"
+  }, "strong");
+  fallback.textContent = data.fallback.text;
+  (failed || svg).appendChild(fallback);
+}
+</script>
+</body>
+</html>

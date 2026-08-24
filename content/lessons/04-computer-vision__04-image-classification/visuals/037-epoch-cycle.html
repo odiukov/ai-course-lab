@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Батчи внутри эпохи и шаг scheduler после эпохи</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f4fa;
+    --ink: #172033;
+    --muted: #667085;
+    --line: #aeb8c8;
+    --batch: #dce8ff;
+    --batch-edge: #6d8fd4;
+    --step: #e9efff;
+    --step-edge: #5277c7;
+    --optimizer: #dff5ea;
+    --optimizer-edge: #31966a;
+    --scheduler: #f1e5ff;
+    --scheduler-edge: #8c57c7;
+    --curve: #8c57c7;
+    --axis: #7d8798;
+    --fallback: #9b2c2c;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111622;
+      --panel: #171e2d;
+      --panel-soft: #20293a;
+      --ink: #edf2ff;
+      --muted: #aeb9cd;
+      --line: #59667c;
+      --batch: #223c6b;
+      --batch-edge: #83a7f3;
+      --step: #25375c;
+      --step-edge: #87a9ef;
+      --optimizer: #173f34;
+      --optimizer-edge: #61c999;
+      --scheduler: #422b5d;
+      --scheduler-edge: #c59aef;
+      --curve: #c59aef;
+      --axis: #8997ad;
+      --fallback: #ffaaa5;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  main {
+    width: 100%;
+    max-width: 1200px;
+    margin-inline: auto;
+    padding: 8px 12px 10px;
+  }
+
+  h1 {
+    margin: 2px 0 6px;
+    font-size: 20px;
+    font-weight: 750;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    overflow: visible;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+
+  .epoch-frame,
+  .chart-frame {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .batch {
+    fill: var(--batch);
+    stroke: var(--batch-edge);
+    stroke-width: 1.2;
+  }
+
+  .batch-mark {
+    stroke: var(--optimizer-edge);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .step {
+    fill: var(--step);
+    stroke: var(--step-edge);
+    stroke-width: 1.5;
+  }
+
+  .optimizer {
+    fill: var(--optimizer);
+    stroke: var(--optimizer-edge);
+  }
+
+  .scheduler {
+    fill: var(--scheduler);
+    stroke: var(--scheduler-edge);
+    stroke-width: 2;
+  }
+
+  .flow {
+    stroke: var(--step-edge);
+    stroke-width: 2;
+    stroke-linecap: round;
+    fill: none;
+  }
+
+  .schedule-flow {
+    stroke: var(--scheduler-edge);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    fill: none;
+  }
+
+  .arrow-head {
+    fill: var(--step-edge);
+  }
+
+  .schedule-head {
+    fill: var(--scheduler-edge);
+  }
+
+  .axis {
+    stroke: var(--axis);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .grid {
+    stroke: var(--line);
+    stroke-width: 1;
+    stroke-dasharray: 4 6;
+  }
+
+  .curve {
+    fill: none;
+    stroke: var(--curve);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .schedule-point {
+    fill: var(--panel);
+    stroke: var(--curve);
+    stroke-width: 2;
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 750;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .scheduler-text {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: 750;
+  }
+
+  .lr-label {
+    fill: var(--curve);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  #fallback {
+    margin: 12px;
+    color: var(--fallback);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Батчи внутри эпохи → scheduler после эпохи</h1>
+  <svg id="diagram"
+       width="1200"
+       height="440"
+       viewBox="0 0 1200 440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Порядок шагов оптимизатора и планировщика</title>
+    <desc id="svg-desc">
+      Эпоха содержит 36 батчей. В каждом батче выполняются zero_grad,
+      forward, loss, backward и optimizer.step. После завершения эпохи
+      scheduler.step вызывается один раз. Learning rate плавно снижается
+      с 0.1 на протяжении 10 эпох.
+    </desc>
+  </svg>
+  <p id="fallback" hidden>
+    Схема должна была показать 36 обновлений оптимизатора внутри эпохи,
+    один scheduler.step после эпохи и плавное снижение learning rate
+    с 0.1 за 10 эпох.
+  </p>
+  <noscript>
+    Схема: 36 батчей проходят zero_grad → forward → loss → backward →
+    optimizer.step; после всей эпохи выполняется один scheduler.step.
+    Learning rate плавно снижается с 0.1 за 10 эпох.
+  </noscript>
+</main>
+
+<script>
+const DATA = Object.freeze([{
+  zero: 0,
+  one: 1,
+  two: 2,
+  half: 0.5,
+  canvas: { width: 1200, height: 440 },
+  origin: { x: 24, y: 18 },
+  scale: { x: 1, y: 1 },
+  batches: 36,
+  epochs: 10,
+  learningRate: 0.1,
+  arrow: { head: 8, wing: 5 },
+  epoch: { x: 18, y: 24, width: 850, height: 216, radius: 12 },
+  batchRow: { x: 52, y: 70, width: 780, height: 34, gap: 3, radius: 4 },
+  batchMark: { top: 78, bottom: 96 },
+  batchLabels: { y: 121 },
+  pipelineLabel: { x: 52, y: 146 },
+  pipeline: {
+    x: 52, y: 159, width: 136, height: 48, gap: 23, radius: 9
+  },
+  epochTitle: { x: 42, y: 51 },
+  scheduler: { x: 920, y: 84, width: 210, height: 112, radius: 12 },
+  schedulerText: { x: 1025, top: 111, middle: 140, bottom: 170 },
+  epochArrow: { x1: 868, y1: 140, x2: 920, y2: 140, labelY: 119 },
+  chart: { x: 18, y: 258, width: 1112, height: 154, radius: 12 },
+  chartTitle: { x: 42, y: 284 },
+  plot: { left: 72, right: 1088, top: 316, bottom: 374 },
+  tick: { top: 374, bottom: 380, labelY: 399 },
+  curve: { samples: 80, pointRadius: 4 },
+  lrLabel: { x: 72, y: 305 },
+  chartNote: { x: 1088, y: 305 },
+  labelOffset: 8,
+  lineThickness: 2,
+  fontSize: 14,
+  math: { pi: Math.PI }
+}]);
+
+const [data] = DATA;
+const origin = Object.freeze(data.origin);
+const scale = Object.freeze(data.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs = {}, className = "") => {
+    const node = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, value);
+    }
+    if (className) node.setAttribute("class", className);
+    svg.appendChild(node);
+    return node;
+  };
+
+  const rect = (x, y, width, height, radius, className) =>
+    make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(radius) - sx(data.zero),
+      ry: sy(radius) - sy(data.zero)
+    }, className);
+
+  const line = (x1, y1, x2, y2, className) =>
+    make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    }, className);
+
+  const textAt = (value, x, y, anchor, className) => {
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, className);
+    node.textContent = value;
+    return node;
+  };
+
+  const circle = (x, y, radius, className) =>
+    make("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(radius) - sx(data.zero)
+    }, className);
+
+  const arrow = (x1, y1, x2, y2, lineClass, headClass) => {
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const head = data.arrow.head;
+    const wing = data.arrow.wing;
+    const baseX = x2 - Math.cos(angle) * head;
+    const baseY = y2 - Math.sin(angle) * head;
+    const leftX = baseX + Math.sin(angle) * wing;
+    const leftY = baseY - Math.cos(angle) * wing;
+    const rightX = baseX - Math.sin(angle) * wing;
+    const rightY = baseY + Math.cos(angle) * wing;
+
+    line(x1, y1, baseX, baseY, lineClass);
+    make("polygon", {
+      points: [
+        `${sx(x2)},${sy(y2)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" ")
+    }, headClass);
+  };
+
+  rect(
+    data.epoch.x,
+    data.epoch.y,
+    data.epoch.width,
+    data.epoch.height,
+    data.epoch.radius,
+    "epoch-frame"
+  );
+
+  textAt(
+    "Эпоха: 36 батчей",
+    data.epochTitle.x,
+    data.epochTitle.y,
+    "start",
+    "section-title"
+  );
+
+  const usableBatchWidth =
+    data.batchRow.width -
+    (data.batches - data.one) * data.batchRow.gap;
+  const batchWidth = usableBatchWidth / data.batches;
+
+  for (
+    let batchIndex = data.zero;
+    batchIndex < data.batches;
+    batchIndex += data.one
+  ) {
+    const batchX =
+      data.batchRow.x +
+      batchIndex * (batchWidth + data.batchRow.gap);
+
+    rect(
+      batchX,
+      data.batchRow.y,
+      batchWidth,
+      data.batchRow.height,
+      data.batchRow.radius,
+      "batch"
+    );
+
+    const markX = batchX + batchWidth * data.half;
+    line(
+      markX,
+      data.batchMark.top,
+      markX,
+      data.batchMark.bottom,
+      "batch-mark"
+    );
+  }
+
+  textAt(
+    "батч 1",
+    data.batchRow.x,
+    data.batchLabels.y,
+    "start",
+    "small"
+  );
+
+  textAt(
+    "каждый штрих — обновление весов",
+    data.batchRow.x + data.batchRow.width * data.half,
+    data.batchLabels.y,
+    "middle",
+    "small"
+  );
+
+  textAt(
+    "батч 36",
+    data.batchRow.x + data.batchRow.width,
+    data.batchLabels.y,
+    "end",
+    "small"
+  );
+
+  textAt(
+    "В каждом батче:",
+    data.pipelineLabel.x,
+    data.pipelineLabel.y,
+    "start",
+    "small"
+  );
+
+  const steps = [
+    { label: "zero_grad()", className: "step" },
+    { label: "forward", className: "step" },
+    { label: "loss", className: "step" },
+    { label: "backward", className: "step" },
+    { label: "optimizer.step()", className: "step optimizer" }
+  ];
+
+  for (
+    let stepIndex = data.zero;
+    stepIndex < steps.length;
+    stepIndex += data.one
+  ) {
+    const stepX =
+      data.pipeline.x +
+      stepIndex * (data.pipeline.width + data.pipeline.gap);
+
+    rect(
+      stepX,
+      data.pipeline.y,
+      data.pipeline.width,
+      data.pipeline.height,
+      data.pipeline.radius,
+      steps[stepIndex].className
+    );
+
+    textAt(
+      steps[stepIndex].label,
+      stepX + data.pipeline.width * data.half,
+      data.pipeline.y + data.pipeline.height * data.half,
+      "middle",
+      "code"
+    );
+
+    if (stepIndex < steps.length - data.one) {
+      arrow(
+        stepX + data.pipeline.width,
+        data.pipeline.y + data.pipeline.height * data.half,
+        stepX + data.pipeline.width + data.pipeline.gap,
+        data.pipeline.y + data.pipeline.height * data.half,
+        "flow",
+        "arrow-head"
+      );
+    }
+  }
+
+  arrow(
+    data.epochArrow.x1,
+    data.epochArrow.y1,
+    data.epochArrow.x2,
+    data.epochArrow.y2,
+    "schedule-flow",
+    "schedule-head"
+  );
+
+  textAt(
+    "цикл по батчам завершён",
+    data.epochArrow.x1 + data.labelOffset,
+    data.epochArrow.labelY,
+    "start",
+    "small"
+  );
+
+  rect(
+    data.scheduler.x,
+    data.scheduler.y,
+    data.scheduler.width,
+    data.scheduler.height,
+    data.scheduler.radius,
+    "scheduler"
+  );
+
+  textAt(
+    "после батча 36",
+    data.schedulerText.x,
+    data.schedulerText.top,
+    "middle",
+    "small"
+  );
+
+  textAt(
+    "scheduler.step()",
+    data.schedulerText.x,
+    data.schedulerText.middle,
+    "middle",
+    "scheduler-text code"
+  );
+
+  textAt(
+    "один раз за эпоху",
+    data.schedulerText.x,
+    data.schedulerText.bottom,
+    "middle",
+    "small"
+  );
+
+  rect(
+    data.chart.x,
+    data.chart.y,
+    data.chart.width,
+    data.chart.height,
+    data.chart.radius,
+    "chart-frame"
+  );
+
+  textAt(
+    "Learning rate плавно снижается за 10 эпох",
+    data.chartTitle.x,
+    data.chartTitle.y,
+    "start",
+    "section-title"
+  );
+
+  textAt(
+    "старт: lr = 0.1",
+    data.lrLabel.x,
+    data.lrLabel.y,
+    "start",
+    "lr-label"
+  );
+
+  textAt(
+    "точка = scheduler.step() после эпохи",
+    data.chartNote.x,
+    data.chartNote.y,
+    "end",
+    "small"
+  );
+
+  line(
+    data.plot.left,
+    data.plot.bottom,
+    data.plot.right,
+    data.plot.bottom,
+    "axis"
+  );
+
+  line(
+    data.plot.left,
+    data.plot.top,
+    data.plot.left,
+    data.plot.bottom,
+    "axis"
+  );
+
+  const plotWidth = data.plot.right - data.plot.left;
+  const plotHeight = data.plot.bottom - data.plot.top;
+
+  for (
+    let epoch = data.one;
+    epoch <= data.epochs;
+    epoch += data.one
+  ) {
+    const fraction = epoch / data.epochs;
+    const tickX = data.plot.left + plotWidth * fraction;
+
+    line(
+      tickX,
+      data.tick.top,
+      tickX,
+      data.tick.bottom,
+      "axis"
+    );
+
+    line(
+      tickX,
+      data.plot.top,
+      tickX,
+      data.plot.bottom,
+      "grid"
+    );
+  }
+
+  textAt(
+    "эпоха 1",
+    data.plot.left + plotWidth / data.epochs,
+    data.tick.labelY,
+    "middle",
+    "small"
+  );
+
+  textAt(
+    "эпоха 10",
+    data.plot.right,
+    data.tick.labelY,
+    "end",
+    "small"
+  );
+
+  const curvePoints = [];
+  for (
+    let sample = data.zero;
+    sample <= data.curve.samples;
+    sample += data.one
+  ) {
+    const fraction = sample / data.curve.samples;
+    const cosine =
+      (data.one + Math.cos(data.math.pi * fraction)) / data.two;
+    const x = data.plot.left + plotWidth * fraction;
+    const y = data.plot.bottom - plotHeight * cosine;
+    curvePoints.push({ x, y });
+  }
+
+  const pathData = curvePoints
+    .map((point, index) =>
+      `${index === data.zero ? "M" : "L"} ${sx(point.x)} ${sy(point.y)}`
+    )
+    .join(" ");
+
+  make("path", { d: pathData }, "curve");
+
+  for (
+    let epoch = data.one;
+    epoch <= data.epochs;
+    epoch += data.one
+  ) {
+    const fraction = epoch / data.epochs;
+    const cosine =
+      (data.one + Math.cos(data.math.pi * fraction)) / data.two;
+    const pointX = data.plot.left + plotWidth * fraction;
+    const pointY = data.plot.bottom - plotHeight * cosine;
+
+    circle(
+      pointX,
+      pointY,
+      data.curve.pointRadius,
+      "schedule-point"
+    );
+  }
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  if (svg) svg.replaceChildren();
+  if (fallback) fallback.hidden = false;
+}
+</script>
+</body>
+</html>

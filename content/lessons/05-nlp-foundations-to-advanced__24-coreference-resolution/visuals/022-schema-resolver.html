@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Путь документа через rule-based резолвер</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --panel: #ffffff;
+      --panel-soft: #eef3fa;
+      --ink: #172033;
+      --muted: #58657a;
+      --line: #8290a6;
+      --accent: #315ec9;
+      --accent-soft: #dce7ff;
+      --good: #167253;
+      --good-soft: #dcefe8;
+      --warn: #a15b08;
+      --warn-soft: #f8ead5;
+      --empty: #d7dde7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111722;
+        --panel: #192231;
+        --panel-soft: #222d3d;
+        --ink: #edf3ff;
+        --muted: #aebbd0;
+        --line: #718098;
+        --accent: #8eaeff;
+        --accent-soft: #253b70;
+        --good: #72d5af;
+        --good-soft: #193f35;
+        --warn: #f3b964;
+        --warn-soft: #50371d;
+        --empty: #3d4859;
+      }
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 20px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--bg);
+    }
+
+    .stage {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 1.5px;
+    }
+
+    .soft {
+      fill: var(--panel-soft);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .accent {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 1.5px;
+    }
+
+    .good {
+      fill: var(--good-soft);
+      stroke: var(--good);
+      stroke-width: 1.5px;
+    }
+
+    .warning {
+      fill: var(--warn-soft);
+      stroke: var(--warn);
+      stroke-width: 1px;
+    }
+
+    .empty {
+      fill: var(--empty);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2px;
+    }
+
+    .link {
+      fill: none;
+      stroke: var(--good);
+      stroke-width: 2px;
+    }
+
+    .rule {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .code {
+      fill: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .body {
+      fill: var(--ink);
+      font-size: 13px;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 11px;
+    }
+
+    .chip {
+      fill: var(--ink);
+      font-size: 11px;
+      font-weight: bold;
+    }
+
+    .winner {
+      fill: var(--good);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .diagnostic {
+      fill: var(--ink);
+      font-size: 12px;
+    }
+
+    #fallback {
+      color: var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Путь документа через rule-based резолвер</h1>
+  <svg id="diagram" viewBox="0 0 1200 470"
+       width="1200" height="470"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Конвейер rule-based разрешения местоимений</title>
+    <desc id="svg-desc">Документ превращается в упоминания, окна кандидатов, оценки, связи с антецедентами и кластеры.</desc>
+  </svg>
+  <div id="fallback" hidden>
+    Схема должна была показать путь документа: извлечение mention, окно из 5 предыдущих кандидатов для каждого местоимения, agreement и recency scores, выбор antecedent и сборку clusters.
+  </div>
+
+  <script>
+    const diagramData = [{
+      canvas: { left: 0, top: 0, right: 1152, bottom: 438 },
+      arrow: { tip: 9, wing: 6 },
+      labelPad: { near: 5, far: 9 },
+      stages: [
+        { x1: 0, x2: 132, y1: 62, y2: 302, title: "Документ", code: "resolve_document" },
+        { x1: 164, x2: 342, y1: 62, y2: 302, title: "Mention", code: "extract_mentions" },
+        { x1: 374, x2: 600, y1: 62, y2: 302, title: "Кандидаты", code: "resolve_pronouns" },
+        { x1: 632, x2: 806, y1: 62, y2: 302, title: "Scores", code: "agreement + recency" },
+        { x1: 838, x2: 970, y1: 62, y2: 302, title: "Antecedent", code: "лучший кандидат" },
+        { x1: 1002, x2: 1152, y1: 62, y2: 302, title: "Clusters", code: "build_clusters" }
+      ],
+      stageText: {
+        titleY: 38,
+        codeY: 82,
+        dividerY: 98,
+        flowY: 184
+      },
+      documentLines: [
+        { x: 66, y: 137, text: "«Анна встретила" },
+        { x: 66, y: 160, text: "Бориса. Он" },
+        { x: 66, y: 183, text: "передал ей" },
+        { x: 66, y: 206, text: "письмо»" },
+        { x: 66, y: 258, text: "одна строка" }
+      ],
+      mentions: [
+        { x1: 181, x2: 325, y1: 112, y2: 145, label: "Анна", meta: "имя" },
+        { x1: 181, x2: 325, y1: 151, y2: 184, label: "Бориса", meta: "имя" },
+        { x1: 181, x2: 325, y1: 190, y2: 223, label: "Он", meta: "местоимение" },
+        { x1: 181, x2: 325, y1: 229, y2: 262, label: "ей", meta: "местоимение" }
+      ],
+      mentionText: {
+        labelX: 193,
+        metaX: 313,
+        centerOffsetY: 0
+      },
+      candidateHeading: [
+        { x: 487, y: 113, text: "для каждого местоимения" },
+        { x: 487, y: 131, text: "5 предыдущих позиций" }
+      ],
+      candidateRows: [
+        {
+          pronoun: "Он",
+          labelX: 386,
+          y1: 151,
+          y2: 184,
+          slots: [
+            { x1: 420, x2: 452, text: "Анна", kind: "soft" },
+            { x1: 457, x2: 489, text: "Бор.", kind: "accent" },
+            { x1: 494, x2: 526, text: "∅", kind: "empty" },
+            { x1: 531, x2: 563, text: "∅", kind: "empty" },
+            { x1: 568, x2: 600, text: "∅", kind: "empty" }
+          ]
+        },
+        {
+          pronoun: "ей",
+          labelX: 386,
+          y1: 211,
+          y2: 244,
+          slots: [
+            { x1: 420, x2: 452, text: "Анна", kind: "accent" },
+            { x1: 457, x2: 489, text: "Бор.", kind: "soft" },
+            { x1: 494, x2: 526, text: "Он", kind: "soft" },
+            { x1: 531, x2: 563, text: "∅", kind: "empty" },
+            { x1: 568, x2: 600, text: "∅", kind: "empty" }
+          ]
+        }
+      ],
+      scoreCards: [
+        { x1: 650, x2: 788, y1: 117, y2: 158, title: "agreement", note: "род и число" },
+        { x1: 650, x2: 788, y1: 174, y2: 215, title: "recency", note: "ближе — лучше" },
+        { x1: 650, x2: 788, y1: 231, y2: 272, title: "взвешенная сумма", note: "сравнение" }
+      ],
+      scoreText: {
+        titleX: 719,
+        titleOffsetY: -7,
+        noteOffsetY: 9
+      },
+      antecedents: [
+        { x1: 854, x2: 954, y1: 127, y2: 172, from: "Он", to: "Бориса" },
+        { x1: 854, x2: 954, y1: 213, y2: 258, from: "ей", to: "Анна" }
+      ],
+      antecedentText: {
+        x: 904,
+        fromOffsetY: -9,
+        toOffsetY: 10
+      },
+      clusters: [
+        {
+          x1: 1018, x2: 1136, y1: 119, y2: 178,
+          heading: "Анна",
+          members: "Анна · ей"
+        },
+        {
+          x1: 1018, x2: 1136, y1: 207, y2: 266,
+          heading: "Борис",
+          members: "Бориса · Он"
+        }
+      ],
+      clusterText: {
+        x: 1077,
+        headingOffsetY: -10,
+        membersOffsetY: 11
+      },
+      arrows: [
+        { x1: 136, y1: 184, x2: 160, y2: 184, kind: "flow", label: "отрезки", lx: 148, ly: 166 },
+        { x1: 346, y1: 184, x2: 370, y2: 184, kind: "flow", label: "по одному", lx: 358, ly: 202 },
+        { x1: 604, y1: 184, x2: 628, y2: 184, kind: "flow", label: "оценить", lx: 616, ly: 166 },
+        { x1: 810, y1: 184, x2: 834, y2: 184, kind: "flow", label: "выбрать", lx: 822, ly: 202 },
+        { x1: 974, y1: 184, x2: 998, y2: 184, kind: "link", label: "собрать", lx: 986, ly: 166 }
+      ],
+      diagnostics: {
+        headingX: 0,
+        headingY: 339,
+        heading: "Где искать место рождения ошибки",
+        cards: [
+          {
+            x1: 0, x2: 350, y1: 360, y2: 426,
+            symptom: "Неверные границы",
+            target: "→ extract_mentions",
+            kind: "warning"
+          },
+          {
+            x1: 375, x2: 777, y1: 360, y2: 426,
+            symptom: "Странный antecedent",
+            target: "→ кандидаты и scoring",
+            kind: "warning"
+          },
+          {
+            x1: 802, x2: 1152, y1: 360, y2: 426,
+            symptom: "Раздробленный cluster",
+            target: "→ build_clusters",
+            kind: "warning"
+          }
+        ],
+        symptomOffsetY: -11,
+        targetOffsetY: 13
+      }
+    }];
+
+    const origin = Object.freeze({ x: 24, y: 16 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [D] = diagramData;
+      const svg = document.getElementById("diagram");
+      const NS = "http://www.w3.org/2000/svg";
+
+      function node(name, attrs, parent = svg) {
+        const el = document.createElementNS(NS, name);
+        for (const [key, value] of Object.entries(attrs)) {
+          el.setAttribute(key, value);
+        }
+        parent.appendChild(el);
+        return el;
+      }
+
+      function rect(x1, y1, x2, y2, className, parent = svg) {
+        return node("rect", {
+          x: sx(x1),
+          y: sy(y1),
+          width: sx(x2) - sx(x1),
+          height: sy(y2) - sy(y1),
+          class: className
+        }, parent);
+      }
+
+      function line(x1, y1, x2, y2, className, parent = svg) {
+        return node("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        }, parent);
+      }
+
+      function text(x, y, value, className, anchor = "middle", dx, dy, parent = svg) {
+        const attrs = {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        };
+        if (dx !== undefined) attrs.dx = `${dx}px`;
+        if (dy !== undefined) attrs.dy = `${dy}px`;
+        const el = node("text", attrs, parent);
+        el.textContent = value;
+        return el;
+      }
+
+      function arrow(a) {
+        line(a.x1, a.y1, a.x2, a.y2, a.kind);
+        node("polygon", {
+          points: [
+            `${sx(a.x2)},${sy(a.y2)}`,
+            `${sx(a.x2 - D.arrow.tip)},${sy(a.y2 - D.arrow.wing)}`,
+            `${sx(a.x2 - D.arrow.tip)},${sy(a.y2 + D.arrow.wing)}`
+          ].join(" "),
+          class: a.kind
+        });
+        text(a.lx, a.ly, a.label, "small");
+      }
+
+      for (const stage of D.stages) {
+        rect(stage.x1, stage.y1, stage.x2, stage.y2, "stage");
+        text(
+          stage.x1 + (stage.x2 - stage.x1) / scale.x / (scale.x + scale.x),
+          D.stageText.titleY,
+          stage.title,
+          "title"
+        );
+        text(
+          stage.x1 + (stage.x2 - stage.x1) / scale.x / (scale.x + scale.x),
+          D.stageText.codeY,
+          stage.code,
+          "code"
+        );
+        line(stage.x1, D.stageText.dividerY, stage.x2, D.stageText.dividerY, "rule");
+      }
+
+      for (const a of D.arrows) arrow(a);
+
+      for (const item of D.documentLines) {
+        text(item.x, item.y, item.text, item.y === D.documentLines.at(-1).y ? "small" : "body");
+      }
+
+      for (const mention of D.mentions) {
+        rect(mention.x1, mention.y1, mention.x2, mention.y2, "soft");
+        const middleY = mention.y1 + (mention.y2 - mention.y1) / (scale.y + scale.y);
+        text(D.mentionText.labelX, middleY, mention.label, "body", "start");
+        text(D.mentionText.metaX, middleY, mention.meta, "small", "end");
+      }
+
+      for (const heading of D.candidateHeading) {
+        text(heading.x, heading.y, heading.text, "small");
+      }
+
+      for (const row of D.candidateRows) {
+        const middleY = row.y1 + (row.y2 - row.y1) / (scale.y + scale.y);
+        text(row.labelX, middleY, row.pronoun, "title", "start");
+        for (const slot of row.slots) {
+          rect(slot.x1, row.y1, slot.x2, row.y2, slot.kind);
+          text(
+            slot.x1 + (slot.x2 - slot.x1) / (scale.x + scale.x),
+            middleY,
+            slot.text,
+            "chip"
+          );
+        }
+      }
+
+      for (const score of D.scoreCards) {
+        rect(score.x1, score.y1, score.x2, score.y2, "accent");
+        const middleY = score.y1 + (score.y2 - score.y1) / (scale.y + scale.y);
+        text(D.scoreText.titleX, middleY + D.scoreText.titleOffsetY, score.title, "code");
+        text(D.scoreText.titleX, middleY + D.scoreText.noteOffsetY, score.note, "small");
+      }
+
+      for (const choice of D.antecedents) {
+        rect(choice.x1, choice.y1, choice.x2, choice.y2, "good");
+        const middleY = choice.y1 + (choice.y2 - choice.y1) / (scale.y + scale.y);
+        text(D.antecedentText.x, middleY + D.antecedentText.fromOffsetY, choice.from, "body");
+        text(D.antecedentText.x, middleY + D.antecedentText.toOffsetY, `→ ${choice.to}`, "winner");
+      }
+
+      for (const cluster of D.clusters) {
+        rect(cluster.x1, cluster.y1, cluster.x2, cluster.y2, "good");
+        const middleY = cluster.y1 + (cluster.y2 - cluster.y1) / (scale.y + scale.y);
+        text(D.clusterText.x, middleY + D.clusterText.headingOffsetY, cluster.heading, "winner");
+        text(D.clusterText.x, middleY + D.clusterText.membersOffsetY, cluster.members, "small");
+      }
+
+      text(
+        D.diagnostics.headingX,
+        D.diagnostics.headingY,
+        D.diagnostics.heading,
+        "title",
+        "start"
+      );
+
+      for (const card of D.diagnostics.cards) {
+        rect(card.x1, card.y1, card.x2, card.y2, card.kind);
+        const middleX = card.x1 + (card.x2 - card.x1) / (scale.x + scale.x);
+        const middleY = card.y1 + (card.y2 - card.y1) / (scale.y + scale.y);
+        text(
+          middleX,
+          middleY + D.diagnostics.symptomOffsetY,
+          card.symptom,
+          "diagnostic"
+        );
+        text(
+          middleX,
+          middleY + D.diagnostics.targetOffsetY,
+          card.target,
+          "code"
+        );
+      }
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

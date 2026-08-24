@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Дерево поиска причины неподвижного loss</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5c667a;
+      --line: #68758f;
+      --accent: #4357d9;
+      --accent-fill: #edf0ff;
+      --decision-fill: #f4f6ff;
+      --result-fill: #f7f8fb;
+      --warning: #a74720;
+      --warning-fill: #fff1e9;
+      --good: #227158;
+      --good-fill: #e9f7f1;
+      --border: #d9deea;
+      --shadow: #b9c1d2;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      padding: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .heading {
+      padding: 12px 18px 10px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .heading h1 {
+      margin: unset;
+      font-size: 20px;
+      font-weight: bold;
+      color: var(--ink);
+    }
+
+    .heading p {
+      margin: 4px 0 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 445px;
+      background: var(--panel);
+    }
+
+    .edge {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .edge.main {
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .arrow {
+      fill: var(--line);
+    }
+
+    .arrow.main {
+      fill: var(--accent);
+    }
+
+    .node {
+      stroke-width: 2px;
+    }
+
+    .node.start {
+      fill: var(--accent);
+      stroke: var(--accent);
+    }
+
+    .node.decision {
+      fill: var(--decision-fill);
+      stroke: var(--accent);
+    }
+
+    .node.result {
+      fill: var(--result-fill);
+      stroke: var(--border);
+    }
+
+    .node.result.warning {
+      fill: var(--warning-fill);
+      stroke: var(--warning);
+    }
+
+    .node.result.good {
+      fill: var(--good-fill);
+      stroke: var(--good);
+    }
+
+    .node-text {
+      font-size: 15px;
+      font-weight: bold;
+      fill: var(--ink);
+      dominant-baseline: middle;
+    }
+
+    .node-text.start {
+      fill: #ffffff;
+    }
+
+    .node-detail {
+      font-size: 13px;
+      font-weight: normal;
+      fill: var(--muted);
+      dominant-baseline: middle;
+    }
+
+    .node-detail.start {
+      fill: #ffffff;
+    }
+
+    .edge-label {
+      font-size: 12px;
+      font-weight: bold;
+      fill: var(--muted);
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+
+    .edge-label.main {
+      fill: var(--accent);
+    }
+
+    .fallback {
+      padding: 18px;
+      font-size: 15px;
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10131b;
+        --panel: #171b25;
+        --ink: #eef1f8;
+        --muted: #aeb7ca;
+        --line: #8591aa;
+        --accent: #91a0ff;
+        --accent-fill: #262d55;
+        --decision-fill: #202640;
+        --result-fill: #202530;
+        --warning: #ef9b75;
+        --warning-fill: #3a261f;
+        --good: #72c5a6;
+        --good-fill: #19332c;
+        --border: #343b4b;
+        --shadow: #080a0f;
+      }
+
+      .node-text.start,
+      .node-detail.start {
+        fill: #111527;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure class="diagram" aria-labelledby="diagram-title diagram-subtitle">
+    <figcaption class="heading">
+      <h1 id="diagram-title">Дерево поиска причины неподвижного loss</h1>
+      <p id="diagram-subtitle">Проверяй сверху вниз; архитектура — последняя развилка.</p>
+    </figcaption>
+
+    <svg id="tree"
+         width="1200"
+         height="445"
+         viewBox="0 0 1200 445"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Дерево отладки обучения нейросети</title>
+      <desc id="svg-desc">Loss не падает. Последовательно проверяются learning rate, градиенты, данные и только затем архитектура.</desc>
+    </svg>
+
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать путь: loss не падает → learning rate →
+      градиенты → данные → архитектура, с ветвями для колебаний,
+      нулевых градиентов и перепутанных меток.
+    </div>
+  </figure>
+
+  <script>
+    const data = [
+      {
+        kind: "config",
+        origin: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 },
+        radius: 10,
+        arrowLength: 10,
+        arrowWing: 5,
+        labelPad: 8,
+        negative: -1
+      },
+      {
+        kind: "node",
+        id: "loss",
+        role: "start",
+        x: 475, y: 8, w: 250, h: 56,
+        lines: [
+          { text: "Loss не падает", x: 600, y: 27, style: "node-text" },
+          { text: "1,84 → 1,83 за десять минут", x: 600, y: 45, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "rate",
+        role: "decision",
+        x: 480, y: 82, w: 240, h: 56,
+        lines: [
+          { text: "Проверь learning rate", x: 600, y: 102, style: "node-text" },
+          { text: "величина шага обучения", x: 600, y: 121, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "rate-high",
+        role: "result warning",
+        x: 55, y: 83, w: 270, h: 54,
+        lines: [
+          { text: "Loss колеблется", x: 190, y: 101, style: "node-text" },
+          { text: "или взрывается", x: 190, y: 120, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "rate-low",
+        role: "result",
+        x: 875, y: 83, w: 270, h: 54,
+        lines: [
+          { text: "Loss почти не движется", x: 1010, y: 101, style: "node-text" },
+          { text: "шаг слишком мал", x: 1010, y: 120, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "gradients",
+        role: "decision",
+        x: 480, y: 182, w: 240, h: 56,
+        lines: [
+          { text: "Проверь градиенты", x: 600, y: 202, style: "node-text" },
+          { text: "доходит ли сигнал", x: 600, y: 221, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "gradients-zero",
+        role: "result warning",
+        x: 55, y: 183, w: 270, h: 54,
+        lines: [
+          { text: "Нулевые градиенты", x: 190, y: 201, style: "node-text" },
+          { text: "сигнал не доходит", x: 190, y: 220, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "gradients-bad",
+        role: "result warning",
+        x: 875, y: 183, w: 270, h: 54,
+        lines: [
+          { text: "NaN или ∞", x: 1010, y: 201, style: "node-text" },
+          { text: "вычисления неустойчивы", x: 1010, y: 220, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "data",
+        role: "decision",
+        x: 480, y: 282, w: 240, h: 56,
+        lines: [
+          { text: "Проверь данные", x: 600, y: 302, style: "node-text" },
+          { text: "метки и предобработку", x: 600, y: 321, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "labels",
+        role: "result warning",
+        x: 55, y: 283, w: 270, h: 54,
+        lines: [
+          { text: "Метки перепутаны", x: 190, y: 301, style: "node-text" },
+          { text: "обучение случайно", x: 190, y: 320, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "preprocess",
+        role: "result warning",
+        x: 875, y: 283, w: 270, h: 54,
+        lines: [
+          { text: "Испорчены входы", x: 1010, y: 301, style: "node-text" },
+          { text: "модель учит шум", x: 1010, y: 320, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "architecture",
+        role: "decision",
+        x: 480, y: 382, w: 240, h: 56,
+        lines: [
+          { text: "Проверь архитектуру", x: 600, y: 402, style: "node-text" },
+          { text: "только теперь", x: 600, y: 421, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "small",
+        role: "result",
+        x: 55, y: 383, w: 270, h: 54,
+        lines: [
+          { text: "Слишком мала", x: 190, y: 401, style: "node-text" },
+          { text: "недообучение", x: 190, y: 420, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "node",
+        id: "deep",
+        role: "result",
+        x: 875, y: 383, w: 270, h: 54,
+        lines: [
+          { text: "Слишком глубока", x: 1010, y: 401, style: "node-text" },
+          { text: "сложная оптимизация", x: 1010, y: 420, style: "node-detail" }
+        ]
+      },
+      {
+        kind: "edge",
+        role: "main",
+        points: [{ x: 600, y: 64 }, { x: 600, y: 82 }]
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 480, y: 110 }, { x: 325, y: 110 }],
+        label: { text: "слишком большой", x: 446, y: 110, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 720, y: 110 }, { x: 875, y: 110 }],
+        label: { text: "слишком маленький", x: 754, y: 110, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "main",
+        points: [{ x: 600, y: 138 }, { x: 600, y: 182 }],
+        label: { text: "разумный", x: 600, y: 160, side: "right" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 480, y: 210 }, { x: 325, y: 210 }],
+        label: { text: "все нули", x: 446, y: 210, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 720, y: 210 }, { x: 875, y: 210 }],
+        label: { text: "NaN / ∞", x: 754, y: 210, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "main",
+        points: [{ x: 600, y: 238 }, { x: 600, y: 282 }],
+        label: { text: "норма", x: 600, y: 260, side: "right" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 480, y: 310 }, { x: 325, y: 310 }],
+        label: { text: "метки перепутаны", x: 446, y: 310, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 720, y: 310 }, { x: 875, y: 310 }],
+        label: { text: "сбой предобработки", x: 754, y: 310, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "main",
+        points: [{ x: 600, y: 338 }, { x: 600, y: 382 }],
+        label: { text: "данные в порядке", x: 600, y: 360, side: "right" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 480, y: 410 }, { x: 325, y: 410 }],
+        label: { text: "слишком мала", x: 446, y: 410, side: "top" }
+      },
+      {
+        kind: "edge",
+        role: "branch",
+        points: [{ x: 720, y: 410 }, { x: 875, y: 410 }],
+        label: { text: "слишком глубока", x: 754, y: 410, side: "top" }
+      }
+    ];
+
+    const config = data.find(item => item.kind === "config");
+    const origin = Object.freeze(config.origin);
+    const scale = Object.freeze(config.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("tree");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes) => {
+        const element = document.createElementNS(namespace, tag);
+        for (const [name, value] of Object.entries(attributes)) {
+          element.setAttribute(name, value);
+        }
+        return element;
+      };
+
+      const setLabelOffset = (text, label) => {
+        if (label.side === "left") {
+          text.setAttribute("text-anchor", "end");
+          text.setAttribute("dx", config.negative * config.labelPad);
+          text.setAttribute("dominant-baseline", "middle");
+        } else if (label.side === "right") {
+          text.setAttribute("text-anchor", "start");
+          text.setAttribute("dx", config.labelPad);
+          text.setAttribute("dominant-baseline", "middle");
+        } else if (label.side === "bottom") {
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("dy", config.labelPad);
+          text.setAttribute("dominant-baseline", "hanging");
+        } else {
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("dy", config.negative * config.labelPad);
+        }
+      };
+
+      const drawArrow = edge => {
+        const [first, ...remaining] = edge.points;
+        const pathData = [
+          `M ${sx(first.x)} ${sy(first.y)}`,
+          ...remaining.map(point => `L ${sx(point.x)} ${sy(point.y)}`)
+        ].join(" ");
+
+        svg.appendChild(make("path", {
+          d: pathData,
+          class: `edge ${edge.role}`
+        }));
+
+        const reversed = [...edge.points].reverse();
+        const [head, previous] = reversed;
+        const dx = head.x - previous.x;
+        const dy = head.y - previous.y;
+        const length = Math.hypot(dx, dy);
+
+        if (!Number.isFinite(length) || length === origin.x) {
+          throw new Error("У стрелки нет направления");
+        }
+
+        const ux = dx / length;
+        const uy = dy / length;
+        const base = {
+          x: head.x - ux * config.arrowLength,
+          y: head.y - uy * config.arrowLength
+        };
+        const left = {
+          x: base.x - uy * config.arrowWing,
+          y: base.y + ux * config.arrowWing
+        };
+        const right = {
+          x: base.x + uy * config.arrowWing,
+          y: base.y - ux * config.arrowWing
+        };
+
+        svg.appendChild(make("polygon", {
+          points: [head, left, right]
+            .map(point => `${sx(point.x)},${sy(point.y)}`)
+            .join(" "),
+          class: `arrow ${edge.role}`
+        }));
+
+        if (edge.label) {
+          const label = make("text", {
+            x: sx(edge.label.x),
+            y: sy(edge.label.y),
+            class: `edge-label ${edge.role}`
+          });
+          setLabelOffset(label, edge.label);
+          label.textContent = edge.label.text;
+          svg.appendChild(label);
+        }
+      };
+
+      const drawNode = node => {
+        const group = make("g", {
+          "aria-label": node.lines.map(line => line.text).join(". ")
+        });
+
+        group.appendChild(make("rect", {
+          x: sx(node.x),
+          y: sy(node.y),
+          width: sx(node.w),
+          height: sy(node.h),
+          rx: sx(config.radius),
+          ry: sy(config.radius),
+          class: `node ${node.role}`
+        }));
+
+        for (const line of node.lines) {
+          const text = make("text", {
+            x: sx(line.x),
+            y: sy(line.y),
+            "text-anchor": "middle",
+            class: `${line.style} ${node.role}`
+          });
+          text.textContent = line.text;
+          group.appendChild(text);
+        }
+
+        svg.appendChild(group);
+      };
+
+      const edges = data.filter(item => item.kind === "edge");
+      const nodes = data.filter(item => item.kind === "node");
+
+      if (!edges.length || !nodes.length) {
+        throw new Error("Нет данных для дерева");
+      }
+
+      for (const edge of edges) {
+        drawArrow(edge);
+      }
+
+      for (const node of nodes) {
+        drawNode(node);
+      }
+
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("tree");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

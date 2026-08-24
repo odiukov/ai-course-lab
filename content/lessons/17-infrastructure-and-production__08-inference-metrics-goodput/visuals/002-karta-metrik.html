@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Четыре этапа запроса и пять метрик инференса</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: white;
+    --panel: whitesmoke;
+    --text: midnightblue;
+    --muted: slategray;
+    --grid: lightsteelblue;
+    --network: lightskyblue;
+    --queue: moccasin;
+    --prefill: palegreen;
+    --decode: plum;
+    --latency: royalblue;
+    --rate: seagreen;
+    --good: darkorchid;
+    --token: indigo;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --panel: #1f2937;
+      --text: #f8fafc;
+      --muted: #cbd5e1;
+      --grid: #64748b;
+      --network: #075985;
+      --queue: #92400e;
+      --prefill: #166534;
+      --decode: #6b21a8;
+      --latency: #60a5fa;
+      --rate: #4ade80;
+      --good: #d8b4fe;
+      --token: #e9d5ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  figure {
+    margin: unset;
+    background: var(--bg);
+  }
+  figcaption {
+    padding: 12px 18px;
+    font-size: 20px;
+    font-weight: bold;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+  }
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+  .network { fill: var(--network); }
+  .queue { fill: var(--queue); }
+  .prefill { fill: var(--prefill); }
+  .decode { fill: var(--decode); }
+  .metric-box {
+    fill: var(--bg);
+    stroke: var(--latency);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+  .good-box {
+    fill: var(--panel);
+    stroke: var(--good);
+    stroke-width: 4px;
+    vector-effect: non-scaling-stroke;
+  }
+  .axis, .milestone, .bracket, .flow {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .axis { stroke: var(--text); stroke-width: 3px; }
+  .milestone { stroke: var(--muted); stroke-width: 2px; }
+  .bracket { stroke: var(--latency); stroke-width: 3px; }
+  .flow { stroke: var(--good); stroke-width: 3px; }
+  .lane { stroke: var(--rate); stroke-width: 3px; }
+  .token { fill: var(--token); }
+  text {
+    fill: var(--text);
+    font-size: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .small { fill: var(--muted); font-size: 14px; }
+  .strong { font-size: 18px; font-weight: bold; }
+  .stage-label { font-size: 16px; font-weight: bold; }
+  .metric-label { fill: var(--latency); font-size: 16px; font-weight: bold; }
+  .rate-label { fill: var(--rate); font-size: 16px; font-weight: bold; }
+  .good-label { fill: var(--good); font-size: 18px; font-weight: bold; }
+  .fallback { fill: var(--text); font-size: 18px; }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-caption diagram-title">
+  <figcaption id="diagram-caption">Четыре этапа запроса и пять метрик инференса</figcaption>
+  <svg id="diagram" viewBox="0 0 1200 470" preserveAspectRatio="xMidYMid meet"
+       role="img" aria-labelledby="diagram-title diagram-desc">
+    <title id="diagram-title">Маршрут запроса и метрики инференса</title>
+    <desc id="diagram-desc">Сеть, очередь, prefill и decode на общей временной шкале с TTFT, TPOT, E2E, throughput и goodput.</desc>
+  </svg>
+  <noscript>Схема показывает путь запроса от сети и очереди до последнего токена и связь пяти метрик инференса.</noscript>
+</figure>
+<script>
+const data = Object.freeze({
+  zero: 0,
+  origin: { x: 40, y: 18 },
+  scale: { x: 11.2, y: 4.2 },
+  arrow: { x: 1.15, y: 1.45 },
+  cap: 1.15,
+  token: { x: .62, y: .82 },
+  routePanel: { xa: 0, ya: 0, xb: 100, yb: 49 },
+  serverPanel: { xa: 0, ya: 53, xb: 48, yb: 79 },
+  limitsPanel: { xa: 52, ya: 53, xb: 100, yb: 79 },
+  goodPanel: { xa: 18, ya: 86, xb: 82, yb: 99 },
+  routeTitle: { x: 3, y: 4, dx: 0, dy: 0, anchor: "start",
+    text: "МАРШРУТ ОДНОГО ЗАПРОСА", cls: "strong" },
+  stages: [
+    { xa: 4, xb: 18, ya: 17, yb: 28, cls: "network",
+      label: { x: 11, y: 22.5, dx: 0, dy: 0, anchor: "middle", text: "Сеть" } },
+    { xa: 18, xb: 33, ya: 17, yb: 28, cls: "queue",
+      label: { x: 25.5, y: 22.5, dx: 0, dy: 0, anchor: "middle", text: "Очередь" } },
+    { xa: 33, xb: 53, ya: 17, yb: 28, cls: "prefill",
+      label: { x: 43, y: 22.5, dx: 0, dy: 0, anchor: "middle", text: "Prefill" } },
+    { xa: 53, xb: 96, ya: 17, yb: 28, cls: "decode",
+      label: { x: 74.5, y: 22.5, dx: 0, dy: 0, anchor: "middle",
+        text: "Decode · токены один за другим" } }
+  ],
+  axis: { xa: 4, xb: 96, y: 31 },
+  milestones: [
+    { x: 4, ya: 12, yb: 31,
+      label: { x: 4, y: 10, dx: 7, dy: 0, anchor: "start", text: "отправка", cls: "small" } },
+    { x: 53, ya: 12, yb: 31,
+      label: { x: 53, y: 10, dx: 0, dy: -3, anchor: "middle", text: "первый токен", cls: "small" } },
+    { x: 96, ya: 12, yb: 31,
+      label: { x: 96, y: 10, dx: -7, dy: 0, anchor: "end", text: "последний токен", cls: "small" } }
+  ],
+  outputTokens: [60, 67, 74, 81, 88, 95],
+  tokenTop: 18.5,
+  tokenBottom: 26.5,
+  brackets: [
+    { xa: 4, xb: 53, y: 35,
+      label: { x: 28.5, y: 35, dx: 0, dy: -7, anchor: "middle",
+        text: "TTFT · до первого токена" } },
+    { xa: 67, xb: 74, y: 14,
+      label: { x: 70.5, y: 14, dx: 0, dy: -8, anchor: "middle",
+        text: "TPOT / ITL", cls: "metric-label" } },
+    { xa: 4, xb: 96, y: 43,
+      label: { x: 50, y: 43, dx: 0, dy: 17, anchor: "middle",
+        text: "E2E latency · весь запрос" } }
+  ],
+  serverLabels: [
+    { x: 3, y: 57, dx: 0, dy: 0, anchor: "start",
+      text: "THROUGHPUT · весь сервер", cls: "rate-label" },
+    { x: 3, y: 61, dx: 0, dy: 1, anchor: "start",
+      text: "все выходные токены / время", cls: "small" }
+  ],
+  lanes: [
+    { y: 66, tokens: [10, 16, 22, 29, 36, 43] },
+    { y: 71, tokens: [7, 14, 20, 27, 34, 40, 45] },
+    { y: 76, tokens: [12, 18, 25, 31, 38, 44] }
+  ],
+  laneStart: 4,
+  laneEnd: 46,
+  limitsLabels: [
+    { x: 55, y: 57, dx: 0, dy: 0, anchor: "start",
+      text: "КАЧЕСТВО ОДНОГО ЗАПРОСА", cls: "metric-label" },
+    { x: 55, y: 61, dx: 0, dy: 1, anchor: "start",
+      text: "логическое И: пройдены все пределы", cls: "small" }
+  ],
+  chips: [
+    { xa: 55, xb: 66, ya: 65, yb: 73,
+      label: { x: 60.5, y: 69, dx: 0, dy: 0, anchor: "middle", text: "TTFT" } },
+    { xa: 69, xb: 81, ya: 65, yb: 73,
+      label: { x: 75, y: 69, dx: 0, dy: 0, anchor: "middle", text: "TPOT" } },
+    { xa: 84, xb: 97, ya: 65, yb: 73,
+      label: { x: 90.5, y: 69, dx: 0, dy: 0, anchor: "middle", text: "E2E" } }
+  ],
+  flows: [
+    { x: 32, ya: 79, yb: 86 },
+    { x: 72, ya: 79, yb: 86 }
+  ],
+  goodLabels: [
+    { x: 50, y: 91, dx: 0, dy: 0, anchor: "middle",
+      text: "GOODPUT", cls: "good-label" },
+    { x: 50, y: 95, dx: 0, dy: 2, anchor: "middle",
+      text: "доля всего потока, где TTFT, TPOT и E2E в пределах", cls: "small" }
+  ],
+  fallback: { x: 50, y: 48, dx: 0, dy: 0, anchor: "middle",
+    text: "Схема: сеть → очередь → prefill → decode; TTFT, TPOT, E2E, throughput и goodput." }
+});
+const origin = Object.freeze(data.origin);
+const scale = Object.freeze(data.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const ns = "http://www.w3.org/2000/svg";
+let drawing;
+
+function make(tag, attrs, text) {
+  const node = document.createElementNS(ns, tag);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function add(parent, tag, attrs, text) {
+  const node = make(tag, attrs, text);
+  parent.append(node);
+  return node;
+}
+function box(parent, b, cls) {
+  add(parent, "polygon", {
+    points: [
+      [b.xa, b.ya], [b.xb, b.ya], [b.xb, b.yb], [b.xa, b.yb]
+    ].map(p => `${sx(p[data.zero])},${sy(p[data.zero + data.cap])}`).join(" "),
+    class: cls
+  });
+}
+function line(parent, xa, ya, xb, yb, cls) {
+  add(parent, "line", {
+    x1: sx(xa), y1: sy(ya), x2: sx(xb), y2: sy(yb), class: cls
+  });
+}
+function label(parent, item, fallbackClass) {
+  add(parent, "text", {
+    x: sx(item.x), y: sy(item.y),
+    dx: item.dx, dy: item.dy,
+    "text-anchor": item.anchor,
+    "dominant-baseline": "middle",
+    class: item.cls || fallbackClass || ""
+  }, item.text);
+}
+function arrowRight(parent, a, cls) {
+  line(parent, a.xa, a.y, a.xb, a.y, cls);
+  add(parent, "polygon", {
+    points: [
+      [a.xb, a.y],
+      [a.xb - data.arrow.x, a.y - data.arrow.y],
+      [a.xb - data.arrow.x, a.y + data.arrow.y]
+    ].map(p => `${sx(p[data.zero])},${sy(p[data.zero + data.cap])}`).join(" "),
+    class: cls
+  });
+}
+function arrowDown(parent, a) {
+  line(parent, a.x, a.ya, a.x, a.yb, "flow");
+  add(parent, "polygon", {
+    points: [
+      [a.x, a.yb],
+      [a.x - data.arrow.x, a.yb - data.arrow.y],
+      [a.x + data.arrow.x, a.yb - data.arrow.y]
+    ].map(p => `${sx(p[data.zero])},${sy(p[data.zero + data.cap])}`).join(" "),
+    class: "good-box"
+  });
+}
+function bracket(parent, item) {
+  line(parent, item.xa, item.y, item.xb, item.y, "bracket");
+  line(parent, item.xa, item.y - data.cap, item.xa, item.y + data.cap, "bracket");
+  line(parent, item.xb, item.y - data.cap, item.xb, item.y + data.cap, "bracket");
+  label(parent, item.label, "metric-label");
+}
+function token(parent, x, y) {
+  box(parent, {
+    xa: x - data.token.x, xb: x + data.token.x,
+    ya: y - data.token.y, yb: y + data.token.y
+  }, "token");
+}
+
+try {
+  drawing = add(svg, "g", { "aria-hidden": "true" });
+
+  box(drawing, data.routePanel, "panel");
+  label(drawing, data.routeTitle);
+
+  data.stages.forEach(stage => {
+    box(drawing, stage, stage.cls);
+    label(drawing, stage.label, "stage-label");
+  });
+
+  arrowRight(drawing, data.axis, "axis");
+  data.milestones.forEach(mark => {
+    line(drawing, mark.x, mark.ya, mark.x, mark.yb, "milestone");
+    label(drawing, mark.label);
+  });
+  data.outputTokens.forEach(x => {
+    line(drawing, x, data.tokenTop, x, data.tokenBottom, "milestone");
+  });
+  data.brackets.forEach(item => bracket(drawing, item));
+
+  box(drawing, data.serverPanel, "panel");
+  data.serverLabels.forEach(item => label(drawing, item));
+  data.lanes.forEach(lane => {
+    line(drawing, data.laneStart, lane.y, data.laneEnd, lane.y, "lane");
+    lane.tokens.forEach(x => token(drawing, x, lane.y));
+  });
+
+  box(drawing, data.limitsPanel, "panel");
+  data.limitsLabels.forEach(item => label(drawing, item));
+  data.chips.forEach(chip => {
+    box(drawing, chip, "metric-box");
+    label(drawing, chip.label, "metric-label");
+  });
+
+  box(drawing, data.goodPanel, "good-box");
+  data.flows.forEach(flow => arrowDown(drawing, flow));
+  data.goodLabels.forEach(item => label(drawing, item));
+} catch (error) {
+  if (drawing) drawing.remove();
+  label(svg, data.fallback, "fallback");
+}
+</script>
+</body>
+</html>

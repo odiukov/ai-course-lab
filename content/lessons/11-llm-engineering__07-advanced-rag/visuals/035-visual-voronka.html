@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Воронка поиска</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5a6472;
+    --wide:#3b82f6; --narrow:#d97706; --gen:#16a34a; --line:#94a3b8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e6ebf2; --muted:#9aa7b8;
+      --wide:#60a5fa; --narrow:#fbbf24; --gen:#4ade80; --line:#64748b;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:10px 8px 14px;}
+  h2{font-size:15px;margin:0 0 6px;text-align:center;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;margin:0 auto;}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5;padding:8px 12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Воронка поиска: 2 000 000 → 50 → 5</h2>
+  <div id="host"><svg id="d" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Схема воронки: запрос, гибридный поиск, топ-50, реранкер, топ-5, промпт, генерация"></svg></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    var SVG=document.getElementById("d");
+    var NS="http://www.w3.org/2000/svg";
+
+    /* ---- данные схемы (в единицах схемы) ---- */
+    var NODES=[
+      {id:"q",  x:0,  y:0, w:11, h:5, t:"Запрос",           s:"",              c:"line"},
+      {id:"h",  x:16, y:0, w:14, h:5, t:"Гибридный поиск",  s:"весь корпус",   c:"wide"},
+      {id:"c50",x:36, y:0, w:11, h:5, t:"top-50",           s:"кандидаты",     c:"wide"},
+      {id:"rr", x:53, y:0, w:14, h:5, t:"Cross-encoder",    s:"реранкер",      c:"narrow"},
+      {id:"c5", x:73, y:0, w:11, h:5, t:"top-5",            s:"финал",         c:"narrow"},
+      {id:"p",  x:89, y:0, w:11, h:5, t:"Промпт",           s:"",              c:"gen"},
+      {id:"g",  x:105,y:0, w:13, h:5, t:"Генерация",        s:"ответ",         c:"gen"}
+    ];
+    var EDGES=[
+      {a:"q",  b:"h",  lab:"",                 side:"none"},
+      {a:"h",  b:"c50",lab:"дёшево, охват",    side:"up"},
+      {a:"c50",b:"rr", lab:"",                 side:"none"},
+      {a:"rr", b:"c5", lab:"дорого, порядок",  side:"up"},
+      {a:"c5", b:"p",  lab:"",                 side:"none"},
+      {a:"p",  b:"g",  lab:"",                 side:"none"}
+    ];
+    /* воронка: точки ломаной ширины потока (верхняя кромка) */
+    var FUNNEL=[{x:16,y:9},{x:47,y:9},{x:53,y:7.4},{x:67,y:7.4},{x:73,y:6.4},{x:118,y:6.4}];
+    var BANDS=[
+      {x0:16,x1:47,lab:"2 000 000 чанков",c:"wide",   ly:11.4},
+      {x0:53,x1:67,lab:"50",              c:"narrow", ly:9.8},
+      {x0:73,x1:118,lab:"5",              c:"gen",    ly:8.8}
+    ];
+    var PHASES=[
+      {x0:16,x1:47,lab:"широкое горло — не потерять нужное", c:"wide"},
+      {x0:53,x1:73,lab:"узкое горлышко — переставить порядок",c:"narrow"}
+    ];
+
+    /* ---- единственный перевод координат ---- */
+    var ORIGIN={x:26,y:36}, SCALE={x:5.3,y:5.3};
+    function sx(x){return ORIGIN.x + x*SCALE.x;}
+    function sy(y){return ORIGIN.y + y*SCALE.y;}
+
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function add(e){SVG.appendChild(e);return e;}
+    function txt(x,y,s,cls,anchor,fs,w){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":fs,fill:"var(--"+cls+")"});
+      if(w)t.setAttribute("font-weight",w);
+      t.textContent=s;return add(t);
+    }
+    var byId={};NODES.forEach(function(n){byId[n.id]=n;});
+    function cx(n){return n.x+n.w/2;}
+    function cy(n){return n.y+n.h/2;}
+
+    add(el("rect",{x:0,y:0,width:720,height:300,fill:"var(--bg)"}));
+
+    /* ---- полосы воронки (фон потока) ---- */
+    BANDS.forEach(function(b){
+      var pts=[];
+      FUNNEL.forEach(function(p){ if(p.x>=b.x0&&p.x<=b.x1) pts.push(p); });
+      if(!pts.length)pts=[{x:b.x0,y:FUNNEL[0].y},{x:b.x1,y:FUNNEL[0].y}];
+      var top=pts.map(function(p){return sx(p.x)+","+sy(p.y);}).join(" ");
+      var bot=pts.slice().reverse().map(function(p){return sx(p.x)+","+sy(-p.y+ (0));}).join(" ");
+      add(el("polygon",{points:top+" "+bot,fill:"var(--"+b.c+")","fill-opacity":"0.12"}));
+      /* число над потоком */
+      var mid=(b.x0+b.x1)/2;
+      txt(sx(mid),sy(b.ly*-1)-4,b.lab,b.c,"middle",13,"700");
+    });
+
+    /* ---- фазовые скобки снизу ---- */
+    PHASES.forEach(function(p){
+      var y=13.6;
+      var d="M"+sx(p.x0)+","+sy(y-0.7)+" L"+sx(p.x0)+","+sy(y)+
+            " L"+sx(p.x1)+","+sy(y)+" L"+sx(p.x1)+","+sy(y-0.7);
+      add(el("path",{d:d,fill:"none",stroke:"var(--"+p.c+")","stroke-width":1.4,"stroke-opacity":"0.75"}));
+      txt(sx((p.x0+p.x1)/2),sy(y+1.9),p.lab,"muted","middle",11);
+    });
+
+    /* ---- стрелки ---- */
+    var mk=el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"9",refY:"5",
+      markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+    mk.appendChild(el("path",{d:"M0,1 L9,5 L0,9 z",fill:"var(--line)"}));
+    var defs=el("defs",{});defs.appendChild(mk);add(defs);
+
+    EDGES.forEach(function(e){
+      var a=byId[e.a],b=byId[e.b];
+      var x1=a.x+a.w, x2=b.x, y=cy(a);
+      add(el("line",{x1:sx(x1),y1:sy(y),x2:sx(x2),y2:sy(y),
+        stroke:"var(--line)","stroke-width":1.6,"marker-end":"url(#ah)"}));
+      if(e.side==="up"){
+        /* подпись у хвоста стрелки, сверху */
+        txt(sx(x1)+4,sy(y)-9,e.lab,"muted","start",11);
+      }
+    });
+
+    /* ---- узлы ---- */
+    NODES.forEach(function(n){
+      add(el("rect",{x:sx(n.x),y:sy(n.y),
+        width:sx(n.x+n.w)-sx(n.x),height:sy(n.y+n.h)-sy(n.y),
+        rx:sx(1)-sx(0),fill:"var(--bg)",stroke:"var(--"+n.c+")","stroke-width":1.8}));
+      if(n.s){
+        txt(sx(cx(n)),sy(cy(n))-2,n.t,"fg","middle",12,"600");
+        txt(sx(cx(n)),sy(cy(n))+11,n.s,"muted","middle",10);
+      }else{
+        txt(sx(cx(n)),sy(cy(n))+4,n.t,"fg","middle",12,"600");
+      }
+    });
+
+  }catch(err){
+    host.innerHTML='<p class="fail">Схема должна была показать воронку слева направо: '+
+      'Запрос → Гибридный поиск по всему корпусу (2 000 000 чанков) → top-50 кандидатов → '+
+      'Cross-encoder реранкер → top-5 → промпт → генерация. Поток сужается на каждом шаге: '+
+      'широкое горло отвечает за охват, узкое — за порядок.</p>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>KV-кэш против памяти одной GPU</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1b2330; --muted:#69737f; --grid:#dfe4ea;
+    --mha:#c8384f; --gqa:#1f6f9c; --lim:#9a6b00; --card:#f6f8fa;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --ink:#e7ebf1; --muted:#98a2b0; --grid:#2b313a;
+      --mha:#ff8395; --gqa:#6ab8e8; --lim:#e2b444; --card:#1a1e24;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{background:var(--card);padding:12px 14px 6px;box-sizing:border-box}
+  h1{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .fb{color:var(--ink);font-size:13px;padding:8px 0}
+  text{fill:var(--ink);font-family:inherit}
+  .tick{fill:var(--muted);font-size:12px}
+  .cap{fill:var(--muted);font-size:12px}
+  .axis{stroke:var(--muted);stroke-width:1.2;fill:none}
+  .grid{stroke:var(--grid);stroke-width:1;stroke-dasharray:3 4}
+  .lim{stroke:var(--lim);stroke-width:1.6;stroke-dasharray:7 5;fill:none}
+  .limtxt{fill:var(--lim);font-size:12px;font-weight:600}
+  .mha{stroke:var(--mha);fill:var(--mha)}
+  .gqa{stroke:var(--gqa);fill:var(--gqa)}
+  .curve{fill:none;stroke-width:2.4}
+  .lbl{font-size:13px;font-weight:600}
+  .val{font-size:12px;font-weight:600}
+  .leg{font-size:12px;fill:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>KV-кэш растёт линейно и вылезает за одну GPU</h1>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    /* ---- данные схемы ---- */
+    var D={
+      xMax:128, yMax:88,
+      curves:[
+        {key:'mha', label:'MHA 7B',  note:'MHA 7B — 512 КБ/токен, батч 1',  at32:16, side:-1},
+        {key:'gqa', label:'GQA 70B', note:'GQA 70B (Llama 3 70B) — 320 КиБ/токен, батч 1', at32:10, side:1}
+      ],
+      limits:[{y:40,label:'A100, 40 ГБ'},{y:80,label:'H100, 80 ГБ'}],
+      yTicks:[16,40,80],
+      xTicks:[{x:0,label:'0'},{x:32,label:'32K'},{x:128,label:'128K'}],
+      marks:[32,128]
+    };
+    /* ---- единственный origin и scale ---- */
+    var ORIGIN={x:92,y:330}, SCALE={x:528/128, y:278/88};
+    function sx(v){return ORIGIN.x+v*SCALE.x;}
+    function sy(v){return ORIGIN.y-v*SCALE.y;}
+
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 760 404');
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+    function line(x1,y1,x2,y2,cls){return el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),'class':cls});}
+    function txt(x,y,dx,dy,s,cls,anchor){
+      var t=el('text',{x:sx(x)+dx,y:sy(y)+dy,'class':cls,'text-anchor':anchor});
+      t.appendChild(document.createTextNode(s));return t;
+    }
+    var bg=el('rect',{x:0,y:0,width:760,height:404});
+    bg.setAttribute('fill','var(--card)');
+
+    /* сетка по Y */
+    D.yTicks.forEach(function(v){ line(0,v,D.xMax,v,'grid'); });
+    /* отметки контекста */
+    D.marks.forEach(function(m){ line(m,0,m,D.yMax,'grid'); });
+
+    /* оси */
+    line(0,0,D.xMax,0,'axis');
+    line(0,0,0,D.yMax,'axis');
+
+    /* засечки и подписи по Y */
+    D.yTicks.forEach(function(v){
+      line(-1.5,v,0,v,'axis');
+      txt(-1.5,v,-4,4,String(v),'tick','end');
+    });
+    txt(-16,92,0,0,'KV-кэш, ГиБ','cap','start');
+
+    /* подписи по X */
+    D.xTicks.forEach(function(t){ txt(t.x,0,0,18,t.label,'tick','middle'); });
+    txt(D.xMax/2,0,0,18,'длина контекста, токенов','cap','middle');
+
+    /* пределы карт */
+    D.limits.forEach(function(L){
+      line(0,L.y,D.xMax,L.y,'lim');
+      txt(0,L.y,10,-6,L.label,'limtxt','start');
+    });
+
+    /* кривые */
+    D.curves.forEach(function(c){
+      var k=c.at32/32, yEnd=k*D.xMax;
+      el('polyline',{points:sx(0)+','+sy(0)+' '+sx(32)+','+sy(c.at32)+' '+sx(D.xMax)+','+sy(yEnd),
+                     'class':'curve '+c.key});
+      el('circle',{cx:sx(32),cy:sy(c.at32),r:4,'class':c.key});
+      el('circle',{cx:sx(D.xMax),cy:sy(yEnd),r:4,'class':c.key});
+      /* подпись кривой у правого конца: одна выше линии, другая ниже */
+      txt(D.xMax,yEnd,10,c.side<0?4:16,c.label,'lbl '+c.key,'start');
+    });
+    /* значения в точке 32K: одно влево-вверх, другое вправо-вниз */
+    txt(32,D.curves[0].at32,-8,-7,D.curves[0].at32+' ГиБ','val mha','end');
+    txt(32,D.curves[1].at32,9,15,D.curves[1].at32+' ГиБ','val gqa','start');
+
+    /* легенда под схемой */
+    D.curves.forEach(function(c,i){
+      var yl=-13-i*6;
+      el('line',{x1:sx(0),y1:sy(yl)-4,x2:sx(6),y2:sy(yl)-4,'class':'curve '+c.key});
+      txt(7,yl,0,0,c.note,'leg','start');
+    });
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<div class="fb">Схема: рост KV-кэша по длине контекста. '+
+      'MHA 7B (512 КБ/токен) — 16 ГиБ на 32K; GQA 70B (320 КиБ/токен) — 10 ГиБ на 32K и 40 ГиБ на 128K. '+
+      'Горизонтальные пределы: A100 40 ГБ и H100 80 ГБ.</div>';
+  }
+})();
+</script>
+</body>
+</html>

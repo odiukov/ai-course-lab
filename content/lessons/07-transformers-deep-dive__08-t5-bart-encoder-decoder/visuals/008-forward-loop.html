@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Прямой проход: энкодер один раз, декодер много</title>
+<style>
+  :root {
+    --bg: #fbfbf9;
+    --fg: #23252b;
+    --muted: #6b7280;
+    --line: #3a3f4b;
+    --enc: #1f6feb;
+    --encFill: #e3edfd;
+    --dec: #b4530a;
+    --decFill: #fdeedd;
+    --outFill: #e8f3ea;
+    --out: #2f7a45;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --fg: #e6e8ec;
+      --muted: #9aa3b0;
+      --line: #99a1ae;
+      --enc: #6ea8fe;
+      --encFill: #1d2b44;
+      --dec: #e8a05c;
+      --decFill: #3a2a17;
+      --outFill: #1c2e22;
+      --out: #79c98f;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 12px; }
+  h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 520px; background: var(--bg); }
+  .fallback { border: 1px solid var(--muted); padding: 10px; color: var(--fg); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Прямой проход: энкодер отрабатывает один раз, декодер обращается к его выходу на каждом шаге</h2>
+  <div id="slot"></div>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    // ---- данные схемы (единственные литералы-данные) ----
+    var D = {
+      encoder:   { x: 0,  y: 9, w: 15, h: 2, label: 'Энкодер', note: '1000 токенов входа' },
+      memory:    { x: 0,  y: 6, w: 15, h: 2, label: 'Выход энкодера (N_src, d_model)', note: 'считается 1 раз, лежит в памяти' },
+      target:    { x: 20, y: 11, w: 16, h: 2, label: 'Токены ответа (уже сгенерированные)' },
+      block:     { x: 19, y: 1, w: 18, h: 9.5 },
+      sub: [
+        { x: 20, y: 8,   w: 16, h: 2, label: 'Masked self-attention', tag: 'своё, меняется каждый шаг' },
+        { x: 20, y: 5,   w: 16, h: 2, label: 'Cross-attention',       tag: 'чужое, читает готовое' },
+        { x: 20, y: 2,   w: 16, h: 2, label: 'FFN',                   tag: '' }
+      ],
+      logits:    { x: 20, y: -1.5, w: 16, h: 2, label: 'Логиты следующего токена' },
+      loopNote:  { x: 37.6, y: 5.5, label: '× 50 шагов' }
+    };
+
+    // ---- одна система координат ----
+    var ORIGIN = { x: 46, y: 380 };   // положение точки (0,0) в пикселях
+    var SCALE  = 14;                  // пикселей на единицу данных
+    function sx(x) { return ORIGIN.x + x * SCALE; }
+    function sy(y) { return ORIGIN.y - y * SCALE; }
+
+    // ---- пиксельные литералы, разрешённые заданием ----
+    var VB_W = 720, VB_H = 470;
+    var PAD_LBL = 6, STROKE = 1.6, FS = 12.5, FS_SM = 11;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size) {
+      var t = el('text', { x: x, y: y, 'text-anchor': anchor, 'font-size': size || FS, fill: cls });
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + VB_W + ' ' + VB_H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img',
+      'aria-label': 'Схема прямого прохода трансформера'
+    });
+
+    var defs = el('defs');
+    function marker(id, color) {
+      var m = el('marker', { id: id, viewBox: '0 0 10 10', refX: '9', refY: '5',
+        markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' });
+      m.appendChild(el('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: color }));
+      return m;
+    }
+    defs.appendChild(marker('ar', 'var(--line)'));
+    defs.appendChild(marker('arE', 'var(--enc)'));
+    svg.appendChild(defs);
+
+    function box(b, stroke, fill) {
+      svg.appendChild(el('rect', {
+        x: sx(b.x), y: sy(b.y + b.h), width: sx(b.x + b.w) - sx(b.x),
+        height: sy(b.y) - sy(b.y + b.h), rx: sx(0.5) - sx(0),
+        fill: fill, stroke: stroke, 'stroke-width': STROKE
+      }));
+    }
+    function arrow(x1, y1, x2, y2, mk, dash) {
+      var a = { x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+                stroke: mk === 'arE' ? 'var(--enc)' : 'var(--line)',
+                'stroke-width': STROKE, 'marker-end': 'url(#' + mk + ')' };
+      if (dash) a['stroke-dasharray'] = '5 4';
+      svg.appendChild(el('line', a));
+    }
+    function poly(pts, mk) {
+      var d = pts.map(function (p, i) { return (i ? 'L' : 'M') + sx(p[0]) + ' ' + sy(p[1]); }).join(' ');
+      svg.appendChild(el('path', { d: d, fill: 'none', stroke: 'var(--enc)',
+        'stroke-width': STROKE, 'marker-end': 'url(#' + mk + ')' }));
+    }
+    function center(b) { return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }
+
+    // ---- декодерный блок (рамка) ----
+    var bl = D.block;
+    svg.appendChild(el('rect', {
+      x: sx(bl.x), y: sy(bl.y + bl.h), width: sx(bl.x + bl.w) - sx(bl.x),
+      height: sy(bl.y) - sy(bl.y + bl.h), rx: sx(0.7) - sx(0),
+      fill: 'none', stroke: 'var(--dec)', 'stroke-width': STROKE, 'stroke-dasharray': '3 4'
+    }));
+    svg.appendChild(txt(sx(bl.x), sy(bl.y + bl.h) - PAD_LBL, 'Декодерный блок', 'start', 'var(--dec)', FS_SM));
+
+    // ---- левая колонка: энкодер и его выход ----
+    box(D.encoder, 'var(--enc)', 'var(--encFill)');
+    var ec = center(D.encoder);
+    svg.appendChild(txt(sx(ec.x), sy(ec.y) + PAD_LBL * 0.7, D.encoder.label, 'middle', 'var(--fg)'));
+    svg.appendChild(txt(sx(ec.x), sy(D.encoder.y) + PAD_LBL * 2.6, D.encoder.note, 'middle', 'var(--muted)', FS_SM));
+
+    box(D.memory, 'var(--enc)', 'var(--encFill)');
+    var mc = center(D.memory);
+    svg.appendChild(txt(sx(mc.x), sy(mc.y) + PAD_LBL * 0.2, D.memory.label, 'middle', 'var(--fg)', FS_SM));
+    svg.appendChild(txt(sx(mc.x), sy(mc.y) + PAD_LBL * 2, D.memory.note, 'middle', 'var(--enc)', FS_SM));
+
+    arrow(ec.x, D.encoder.y + D.encoder.h, ec.x, D.memory.y, 'arE');
+    svg.appendChild(txt(sx(ec.x) - PAD_LBL, sy(D.encoder.y + D.encoder.h + 0.5), '1 прогон', 'end', 'var(--enc)', FS_SM));
+
+    // ---- нижний вход декодера ----
+    box(D.target, 'var(--line)', 'none');
+    var tc = center(D.target);
+    svg.appendChild(txt(sx(tc.x), sy(tc.y) + PAD_LBL * 0.2, D.target.label, 'middle', 'var(--fg)', FS_SM));
+
+    // ---- подслои ----
+    D.sub.forEach(function (s, i) {
+      box(s, 'var(--dec)', 'var(--decFill)');
+      var c = center(s);
+      svg.appendChild(txt(sx(c.x), sy(c.y) + PAD_LBL * 0.7, s.label, 'middle', 'var(--fg)'));
+      if (s.tag) svg.appendChild(txt(sx(s.x + s.w) + PAD_LBL, sy(c.y) + PAD_LBL * 2.4, s.tag, 'start', 'var(--muted)', FS_SM));
+      if (i > 0) arrow(c.x, D.sub[i - 1].y + D.sub[i - 1].h, c.x, s.y, 'ar');
+    });
+    arrow(tc.x, D.target.y + D.target.h, tc.x, D.sub[0].y, 'ar');
+
+    // ---- cross-attention: стрелка от памяти энкодера ----
+    var cross = D.sub[1];
+    poly([[D.memory.x + D.memory.w, center(D.memory).y],
+          [cross.x - 1.5, center(D.memory).y],
+          [cross.x - 1.5, center(cross).y],
+          [cross.x, center(cross).y]], 'arE');
+    svg.appendChild(txt(sx(D.memory.x + D.memory.w) + PAD_LBL, sy(center(D.memory).y) - PAD_LBL, 'тот же выход на каждом шаге', 'start', 'var(--enc)', FS_SM));
+
+    // ---- логиты ----
+    box(D.logits, 'var(--out)', 'var(--outFill)');
+    var lc = center(D.logits);
+    svg.appendChild(txt(sx(lc.x), sy(lc.y) + PAD_LBL * 0.4, D.logits.label, 'middle', 'var(--fg)', FS_SM));
+    arrow(lc.x, D.sub[2].y + D.sub[2].h, lc.x, D.logits.y + D.logits.h, 'ar');
+
+    // ---- петля авторегрессии: логиты обратно во вход декодера ----
+    var loopX = D.logits.x + D.logits.w + 1.5;
+    svg.appendChild(el('path', {
+      d: 'M' + sx(D.logits.x + D.logits.w) + ' ' + sy(lc.y) +
+         ' L' + sx(loopX) + ' ' + sy(lc.y) +
+         ' L' + sx(loopX) + ' ' + sy(center(D.target).y) +
+         ' L' + sx(D.target.x + D.target.w) + ' ' + sy(center(D.target).y),
+      fill: 'none', stroke: 'var(--line)', 'stroke-width': STROKE,
+      'stroke-dasharray': '5 4', 'marker-end': 'url(#ar)'
+    }));
+    svg.appendChild(txt(sx(D.loopNote.x) + PAD_LBL, sy(D.loopNote.y), D.loopNote.label, 'start', 'var(--muted)', FS_SM));
+
+    slot.appendChild(svg);
+  } catch (e) {
+    var f = document.createElement('div');
+    f.className = 'fallback';
+    f.textContent = 'Схема не отрисовалась. Она должна показывать: энкодер прогоняет 1000 входных токенов один раз ' +
+      'и даёт матрицу (N_src, d_model), которая лежит в памяти. Декодерный блок из трёх подслоёв — masked ' +
+      'self-attention, cross-attention (в него приходит стрелка от сохранённого выхода энкодера) и FFN — ' +
+      'сверху выдаёт логиты следующего токена; логиты дописываются во вход декодера, и так 50 шагов, ' +
+      'а энкодер за всё это время не запускается ни разу больше.';
+    slot.appendChild(f);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Путь от признаков до ответа модели</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f7f9fc;
+      --surface: #ffffff;
+      --feature: #eef6ff;
+      --linear: #f3efff;
+      --sigmoid: #eaf9f3;
+      --decision: #fff5dc;
+      --positive: #e7f8ec;
+      --negative: #f4f6f8;
+      --ink: #172033;
+      --muted: #5d687c;
+      --line: #52637d;
+      --accent: #1769aa;
+      --decision-line: #a66b00;
+      --positive-line: #278447;
+      --negative-line: #687386;
+      --divider: #c7cfda;
+    }
+
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    h1 {
+      font-size: 22px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      box-sizing: border-box;
+      background: var(--surface);
+      border: 1px solid var(--divider);
+    }
+
+    .node,
+    .decision,
+    .arrow-line,
+    .arrow-head,
+    .divider {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node {
+      stroke-width: 2;
+    }
+
+    .feature {
+      fill: var(--feature);
+      stroke: var(--accent);
+    }
+
+    .linear {
+      fill: var(--linear);
+      stroke: #7655b5;
+    }
+
+    .sigmoid {
+      fill: var(--sigmoid);
+      stroke: #237c68;
+    }
+
+    .positive {
+      fill: var(--positive);
+      stroke: var(--positive-line);
+    }
+
+    .negative {
+      fill: var(--negative);
+      stroke: var(--negative-line);
+    }
+
+    .decision {
+      fill: var(--decision);
+      stroke: var(--decision-line);
+      stroke-width: 2;
+    }
+
+    .arrow-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+      stroke: var(--line);
+      stroke-width: 1;
+      stroke-linejoin: round;
+    }
+
+    .divider {
+      stroke: var(--divider);
+      stroke-width: 1;
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .stage {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .node-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .formula {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .chip {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .decision-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .flow-label {
+      fill: var(--accent);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .branch-label {
+      fill: var(--decision-line);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .result {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .legend {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    #fallback {
+      background: var(--surface);
+      border: 1px solid var(--divider);
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page: #10141d;
+        --surface: #171d28;
+        --feature: #172a3b;
+        --linear: #29213b;
+        --sigmoid: #17332d;
+        --decision: #3a2d16;
+        --positive: #183522;
+        --negative: #252b35;
+        --ink: #edf2f8;
+        --muted: #b2bdcc;
+        --line: #a9b8cb;
+        --accent: #77baf0;
+        --decision-line: #e7b455;
+        --positive-line: #72c989;
+        --negative-line: #a8b2c0;
+        --divider: #3d4858;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-heading">Путь от признаков до ответа модели</h1>
+
+    <svg id="diagram"
+         viewBox="0 0 1200 390"
+         width="1200"
+         height="390"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-heading diagram-description">
+      <title>Цепочка обработки данных в логистической регрессии</title>
+      <desc id="diagram-description">
+        Признаки x переходят в балл z, затем в вероятность p.
+        Сравнение p с порогом 0,5 даёт итоговую метку 0 или 1.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать: x → z = wx + b → sigmoid(z) = p →
+      сравнение p с порогом 0,5 → метка 0 или 1.
+    </p>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze({
+      zero: [0, 0],
+      radius: 0.12,
+      arrow: [0.13, 0.07],
+
+      boxes: [
+        [[0.45, 0.88], [2.25, 2.55], "feature"],
+        [[2.80, 0.88], [5.00, 2.55], "linear"],
+        [[5.55, 0.88], [7.85, 2.55], "sigmoid"],
+        [[10.65, 0.86], [11.65, 1.56], "positive"],
+        [[10.65, 2.05], [11.65, 2.75], "negative"]
+      ],
+
+      decision: [
+        [8.35, 1.80],
+        [9.15, 1.05],
+        [9.95, 1.80],
+        [9.15, 2.55]
+      ],
+
+      arrows: [
+        [
+          [[2.25, 1.80], [2.80, 1.80]],
+          [2.80, 1.80]
+        ],
+        [
+          [[5.00, 1.80], [5.55, 1.80]],
+          [5.55, 1.80]
+        ],
+        [
+          [[7.85, 1.80], [8.35, 1.80]],
+          [8.35, 1.80]
+        ],
+        [
+          [[9.95, 1.80], [10.25, 1.20], [10.65, 1.20]],
+          [10.65, 1.20]
+        ],
+        [
+          [[9.95, 1.80], [10.25, 2.40], [10.65, 2.40]],
+          [10.65, 2.40]
+        ]
+      ],
+
+      divider: [[0.45, 3.08], [11.65, 3.08]],
+
+      labels: [
+        [[1.35, 0.57], [0, 0], "ПРИЗНАКИ", "stage", "middle"],
+        [[3.90, 0.57], [0, 0], "БАЛЛ", "stage", "middle"],
+        [[6.70, 0.57], [0, 0], "ВЕРОЯТНОСТЬ", "stage", "middle"],
+        [[9.15, 0.57], [0, 0], "ПОРОГ", "stage", "middle"],
+        [[11.15, 0.57], [0, 0], "КЛАСС", "stage", "middle"],
+
+        [[1.35, 1.17], [0, 0], "Датчики", "node-title", "middle"],
+        [[1.35, 1.62], [0, 0], "x", "formula", "middle"],
+        [[1.35, 2.10], [0, 0], "температура", "chip", "middle"],
+        [[1.35, 2.36], [0, 0], "влажность", "chip", "middle"],
+
+        [[3.90, 1.17], [0, 0], "Линейная часть", "node-title", "middle"],
+        [[3.90, 1.72], [0, 0], "z = wx + b", "formula", "middle"],
+        [[3.90, 2.20], [0, 0], "общий балл", "note", "middle"],
+
+        [[6.70, 1.17], [0, 0], "Сигмоида", "node-title", "middle"],
+        [[6.70, 1.72], [0, 0], "sigmoid(z) = p", "formula", "middle"],
+        [[6.70, 2.20], [0, 0], "p — вероятность класса 1", "note", "middle"],
+
+        [[9.15, 1.66], [0, 0], "Сравнить p", "decision-label", "middle"],
+        [[9.15, 1.96], [0, 0], "с порогом 0,5", "decision-label", "middle"],
+
+        [[11.15, 1.10], [0, 0], "метка 1", "result", "middle"],
+        [[11.15, 1.38], [0, 0], "вентиляция: да", "chip", "middle"],
+        [[11.15, 2.29], [0, 0], "метка 0", "result", "middle"],
+        [[11.15, 2.57], [0, 0], "вентиляция: нет", "chip", "middle"],
+
+        [[2.52, 1.53], [0, 0], "x", "flow-label", "middle"],
+        [[5.27, 2.08], [0, 0], "z", "flow-label", "middle"],
+        [[8.10, 1.53], [0, 0], "p", "flow-label", "middle"],
+        [[10.22, 1.02], [0, 0], "да", "branch-label", "middle"],
+        [[10.22, 2.83], [0, 0], "нет", "branch-label", "middle"],
+
+        [[0.45, 3.45], [0, 0],
+          "Один путь: x — признаки · z — балл · p — вероятность класса 1 · метка — 0 или 1",
+          "legend", "start"]
+      ]
+    });
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 100, y: 100 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const namespace = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+      const [zeroX, zeroY] = diagramData.zero;
+      const [headBack, headHalf] = diagramData.arrow;
+
+      function createSvg(name, attributes) {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        drawing.appendChild(element);
+        return element;
+      }
+
+      function pointList(points) {
+        return points
+          .map(([x, y]) => `${sx(x)},${sy(y)}`)
+          .join(" ");
+      }
+
+      function routePath(points) {
+        return "M " + points
+          .map(([x, y]) => `${sx(x)} ${sy(y)}`)
+          .join(" L ");
+      }
+
+      function drawBox(specification) {
+        const [[left, top], [right, bottom], kind] = specification;
+        createSvg("rect", {
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top),
+          rx: sx(diagramData.radius) - sx(zeroX),
+          ry: sy(diagramData.radius) - sy(zeroY),
+          class: `node ${kind}`
+        });
+      }
+
+      function drawArrow(specification) {
+        const [route, [endX, endY]] = specification;
+
+        createSvg("path", {
+          d: routePath(route),
+          class: "arrow-line"
+        });
+
+        createSvg("polygon", {
+          points: pointList([
+            [endX, endY],
+            [endX - headBack, endY - headHalf],
+            [endX - headBack, endY + headHalf]
+          ]),
+          class: "arrow-head"
+        });
+      }
+
+      function drawLabel(specification) {
+        const [[anchorX, anchorY], [offsetX, offsetY],
+          value, className, textAnchor] = specification;
+
+        const label = createSvg("text", {
+          x: sx(anchorX) + offsetX,
+          y: sy(anchorY) + offsetY,
+          class: className,
+          "text-anchor": textAnchor,
+          "dominant-baseline": "middle"
+        });
+
+        label.textContent = value;
+      }
+
+      for (const arrow of diagramData.arrows) {
+        drawArrow(arrow);
+      }
+
+      for (const box of diagramData.boxes) {
+        drawBox(box);
+      }
+
+      createSvg("polygon", {
+        points: pointList(diagramData.decision),
+        class: "decision"
+      });
+
+      createSvg("line", {
+        x1: sx(diagramData.divider[zeroX][zeroX]),
+        y1: sy(diagramData.divider[zeroX][zeroY]),
+        x2: sx(diagramData.divider[zeroY + diagramData.radius / diagramData.radius][zeroX]),
+        y2: sy(diagramData.divider[zeroY + diagramData.radius / diagramData.radius][zeroY]),
+        class: "divider"
+      });
+
+      for (const label of diagramData.labels) {
+        drawLabel(label);
+      }
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

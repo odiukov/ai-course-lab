@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LDA и BERTopic: два разложения одной задачи</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #657087;
+    --line: #cbd3e1;
+    --soft: #eef2f8;
+    --arrow: #59667e;
+    --a: #496bd8;
+    --b: #18a889;
+    --c: #e39b28;
+    --d: #ce5e7b;
+    --e: #8d69c7;
+    --cluster-fill: #e6edff;
+    --cluster-line: #7891df;
+    --other-fill: #f0e9fb;
+    --other-line: #a88bd0;
+    --focus: #e14f5c;
+    --focus-ring: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #121722;
+      --panel: #1a2130;
+      --ink: #edf2ff;
+      --muted: #aeb9cc;
+      --line: #3c475d;
+      --soft: #252e40;
+      --arrow: #aab6ca;
+      --a: #7694f2;
+      --b: #45c9ac;
+      --c: #f0b44f;
+      --d: #e6819a;
+      --e: #b18dde;
+      --cluster-fill: #26365d;
+      --cluster-line: #7894e6;
+      --other-fill: #382d4b;
+      --other-line: #ad8bd5;
+      --focus: #ff7180;
+      --focus-ring: #161c28;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--page);
+    padding: 12px 14px 14px;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 24px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  .question {
+    fill: var(--muted);
+    font-size: 15px;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .value {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .card {
+    fill: var(--soft);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .paper-line {
+    stroke: var(--muted);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .bar-outline {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 2;
+  }
+
+  .flow {
+    stroke: var(--arrow);
+    stroke-width: 3;
+    stroke-linecap: round;
+    fill: none;
+  }
+
+  .arrow-head { fill: var(--arrow); }
+
+  .cluster-main {
+    fill: var(--cluster-fill);
+    stroke: var(--cluster-line);
+    stroke-width: 3;
+  }
+
+  .cluster-other {
+    fill: var(--other-fill);
+    stroke: var(--other-line);
+    stroke-width: 2;
+  }
+
+  .dot-main { fill: var(--a); }
+  .dot-other { fill: var(--e); }
+
+  .focus-ring {
+    fill: var(--focus-ring);
+    stroke: var(--focus);
+    stroke-width: 4;
+  }
+
+  .focus-dot { fill: var(--focus); }
+
+  .pill {
+    fill: var(--soft);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 18px;
+  }
+
+  line, rect, circle, ellipse, polygon, path {
+    vector-effect: non-scaling-stroke;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Один документ — два способа найти тему</h1>
+  <svg id="diagram" viewBox="0 0 1200 430" width="1200" height="430"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Слева LDA представляет документ как смесь пяти тем, справа BERTopic представляет тот же документ одной точкой внутри кластера."></svg>
+</main>
+
+<script>
+const diagramData = [{
+  canvas: { w: 1200, h: 430 },
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  namespace: "http://www.w3.org/2000/svg",
+  start: 0,
+  empty: "",
+  panels: {
+    left:  { x: 18,  y: 18, w: 560, h: 394, r: 18 },
+    right: { x: 622, y: 18, w: 560, h: 394, r: 18 }
+  },
+  divider: { x: 600, y1: 38, y2: 392 },
+  titles: {
+    left:  { x: 44,  y: 54, text: "LDA · смесь тем" },
+    leftQ: { x: 44,  y: 82, text: "Из чего смешан этот текст?" },
+    right: { x: 648, y: 54, text: "BERTopic · кластер" },
+    rightQ:{ x: 648, y: 82, text: "Рядом с какой группой он оказался?" }
+  },
+  document: {
+    x: 44, y: 120, w: 168, h: 112, r: 12,
+    title: { x: 62, y: 147, text: "Та же новость" },
+    lines: [
+      { x1: 62, y: 170, x2: 184 },
+      { x1: 62, y: 187, x2: 172 },
+      { x1: 62, y: 204, x2: 146 }
+    ]
+  },
+  leftArrow: { x1: 222, y1: 176, x2: 266, y2: 176 },
+  arrow: { head: 13, wing: 7 },
+  bar: {
+    x: 278, y: 148, w: 272, h: 56, r: 9,
+    label: { x: 278, y: 130, text: "смесь одного документа" },
+    vector: {
+      x: 414, y: 232,
+      text: "[0.60, 0.25, 0.10, 0.03, 0.02]"
+    }
+  },
+  topics: [
+    { share: 0.60, value: "0.60", name: "тема А", color: "var(--a)", x: 54,  y: 282 },
+    { share: 0.25, value: "0.25", name: "тема Б", color: "var(--b)", x: 228, y: 282 },
+    { share: 0.10, value: "0.10", name: "тема В", color: "var(--c)", x: 402, y: 282 },
+    { share: 0.03, value: "0.03", name: "тема Г", color: "var(--d)", x: 142, y: 326 },
+    { share: 0.02, value: "0.02", name: "тема Д", color: "var(--e)", x: 340, y: 326 }
+  ],
+  legend: { swatch: 17, gap: 10, baseline: 14 },
+  leftConclusion: {
+    x: 298, y: 382,
+    text: "один текст → несколько тем",
+    w: 342, h: 42, r: 16
+  },
+  clusters: {
+    main:  { cx: 844, cy: 224, rx: 156, ry: 92 },
+    other: { cx: 1064, cy: 176, rx: 70, ry: 48 }
+  },
+  mainDots: [
+    { x: 728, y: 204 }, { x: 754, y: 247 }, { x: 780, y: 180 },
+    { x: 802, y: 222 }, { x: 821, y: 267 }, { x: 844, y: 188 },
+    { x: 864, y: 244 }, { x: 902, y: 190 }, { x: 930, y: 232 },
+    { x: 954, y: 266 }, { x: 786, y: 278 }, { x: 918, y: 282 }
+  ],
+  otherDots: [
+    { x: 1027, y: 164 }, { x: 1050, y: 193 }, { x: 1076, y: 151 },
+    { x: 1097, y: 184 }
+  ],
+  dots: { r: 7, focusRing: 13, focus: 7 },
+  focus: { x: 878, y: 218 },
+  focusLabel: {
+    x: 904, y: 111, text: "тот же документ",
+    arrow: { x1: 916, y1: 121, x2: 884, y2: 199 }
+  },
+  clusterLabel: {
+    x: 844, y: 338, text: "одна точка внутри одного кластера"
+  },
+  rightConclusion: {
+    x: 902, y: 382,
+    text: "один текст → одна метка",
+    w: 354, h: 42, r: 16
+  },
+  offsets: { none: 0, text: 8 },
+  strokes: { normal: 2 },
+  fallback: {
+    x: 600, y: 210,
+    text: "LDA: смесь пяти тем [0.60, 0.25, 0.10, 0.03, 0.02]. BERTopic: одна точка внутри кластера."
+  }
+}];
+
+const [D] = diagramData;
+const origin = Object.freeze(D.origin);
+const scale = Object.freeze(D.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+
+  const make = (tag, attrs, content) => {
+    const element = document.createElementNS(D.namespace, tag);
+    for (const [name, value] of Object.entries(attrs || {})) {
+      element.setAttribute(name, String(value));
+    }
+    if (content !== undefined) element.textContent = content;
+    return element;
+  };
+
+  const add = (parent, child) => {
+    parent.appendChild(child);
+    return child;
+  };
+
+  const group = klass => make("g", { class: klass });
+
+  const rect = (x, y, w, h, r, klass, extra) => make("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    rx: sx(x + r) - sx(x),
+    ry: sy(y + r) - sy(y),
+    class: klass,
+    ...(extra || {})
+  });
+
+  const line = (x1, y1, x2, y2, klass) => make("line", {
+    x1: sx(x1), y1: sy(y1),
+    x2: sx(x2), y2: sy(y2),
+    class: klass
+  });
+
+  const circle = (x, y, r, klass) => make("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(x + r) - sx(x),
+    class: klass
+  });
+
+  const ellipse = (cx, cy, rx, ry, klass) => make("ellipse", {
+    cx: sx(cx),
+    cy: sy(cy),
+    rx: sx(cx + rx) - sx(cx),
+    ry: sy(cy + ry) - sy(cy),
+    class: klass
+  });
+
+  const text = (x, y, content, klass, anchor, dx, dy) => make("text", {
+    x: sx(x),
+    y: sy(y),
+    dx: dx === undefined ? D.offsets.none : dx,
+    dy: dy === undefined ? D.offsets.none : dy,
+    class: klass,
+    "text-anchor": anchor || "start"
+  }, content);
+
+  const arrow = (parent, spec) => {
+    add(parent, line(spec.x1, spec.y1, spec.x2, spec.y2, "flow"));
+    const vx = spec.x2 - spec.x1;
+    const vy = spec.y2 - spec.y1;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = spec.x2 - ux * D.arrow.head;
+    const by = spec.y2 - uy * D.arrow.head;
+    const px = -uy * D.arrow.wing;
+    const py = ux * D.arrow.wing;
+    add(parent, make("polygon", {
+      points: [
+        `${sx(spec.x2)},${sy(spec.y2)}`,
+        `${sx(bx + px)},${sy(by + py)}`,
+        `${sx(bx - px)},${sy(by - py)}`
+      ].join(" "),
+      class: "arrow-head"
+    }));
+  };
+
+  const defs = add(svg, make("defs"));
+  const clip = add(defs, make("clipPath", { id: "mixture-clip" }));
+  add(clip, rect(D.bar.x, D.bar.y, D.bar.w, D.bar.h, D.bar.r, D.empty));
+
+  add(svg, rect(
+    D.panels.left.x, D.panels.left.y, D.panels.left.w,
+    D.panels.left.h, D.panels.left.r, "panel"
+  ));
+  add(svg, rect(
+    D.panels.right.x, D.panels.right.y, D.panels.right.w,
+    D.panels.right.h, D.panels.right.r, "panel"
+  ));
+  add(svg, line(D.divider.x, D.divider.y1, D.divider.x, D.divider.y2, "divider"));
+
+  add(svg, text(D.titles.left.x, D.titles.left.y, D.titles.left.text, "heading", "start"));
+  add(svg, text(D.titles.leftQ.x, D.titles.leftQ.y, D.titles.leftQ.text, "question", "start"));
+  add(svg, text(D.titles.right.x, D.titles.right.y, D.titles.right.text, "heading", "start"));
+  add(svg, text(D.titles.rightQ.x, D.titles.rightQ.y, D.titles.rightQ.text, "question", "start"));
+
+  const documentGroup = add(svg, group("document"));
+  add(documentGroup, rect(
+    D.document.x, D.document.y, D.document.w,
+    D.document.h, D.document.r, "card"
+  ));
+  add(documentGroup, text(
+    D.document.title.x, D.document.title.y,
+    D.document.title.text, "label", "start"
+  ));
+  for (const paperLine of D.document.lines) {
+    add(documentGroup, line(
+      paperLine.x1, paperLine.y,
+      paperLine.x2, paperLine.y,
+      "paper-line"
+    ));
+  }
+
+  arrow(svg, D.leftArrow);
+  add(svg, text(D.bar.label.x, D.bar.label.y, D.bar.label.text, "small", "start"));
+
+  const mixture = add(svg, group("mixture"));
+  let cursor = D.start;
+  for (const topic of D.topics) {
+    const width = D.bar.w * topic.share;
+    add(mixture, rect(
+      D.bar.x + cursor, D.bar.y, width, D.bar.h,
+      D.start, D.empty,
+      { fill: topic.color, "clip-path": "url(#mixture-clip)" }
+    ));
+    cursor += width;
+  }
+  add(mixture, rect(
+    D.bar.x, D.bar.y, D.bar.w,
+    D.bar.h, D.bar.r, "bar-outline"
+  ));
+  add(svg, text(
+    D.bar.vector.x, D.bar.vector.y,
+    D.bar.vector.text, "value", "middle"
+  ));
+
+  for (const topic of D.topics) {
+    add(svg, rect(
+      topic.x, topic.y,
+      D.legend.swatch, D.legend.swatch,
+      D.start, D.empty, { fill: topic.color }
+    ));
+    add(svg, text(
+      topic.x + D.legend.swatch + D.legend.gap,
+      topic.y + D.legend.baseline,
+      `${topic.name} — ${topic.value}`,
+      "label", "start"
+    ));
+  }
+
+  add(svg, rect(
+    D.leftConclusion.x - D.leftConclusion.w / D.strokes.normal,
+    D.leftConclusion.y - D.leftConclusion.h / D.strokes.normal,
+    D.leftConclusion.w, D.leftConclusion.h,
+    D.leftConclusion.r, "pill"
+  ));
+  add(svg, text(
+    D.leftConclusion.x, D.leftConclusion.y + D.offsets.text,
+    D.leftConclusion.text, "value", "middle"
+  ));
+
+  add(svg, ellipse(
+    D.clusters.main.cx, D.clusters.main.cy,
+    D.clusters.main.rx, D.clusters.main.ry,
+    "cluster-main"
+  ));
+  add(svg, ellipse(
+    D.clusters.other.cx, D.clusters.other.cy,
+    D.clusters.other.rx, D.clusters.other.ry,
+    "cluster-other"
+  ));
+
+  for (const point of D.mainDots) {
+    add(svg, circle(point.x, point.y, D.dots.r, "dot-main"));
+  }
+  for (const point of D.otherDots) {
+    add(svg, circle(point.x, point.y, D.dots.r, "dot-other"));
+  }
+
+  arrow(svg, D.focusLabel.arrow);
+  add(svg, text(
+    D.focusLabel.x, D.focusLabel.y,
+    D.focusLabel.text, "value", "start"
+  ));
+  add(svg, circle(
+    D.focus.x, D.focus.y,
+    D.dots.focusRing, "focus-ring"
+  ));
+  add(svg, circle(
+    D.focus.x, D.focus.y,
+    D.dots.focus, "focus-dot"
+  ));
+
+  add(svg, text(
+    D.clusterLabel.x, D.clusterLabel.y,
+    D.clusterLabel.text, "label", "middle"
+  ));
+
+  add(svg, rect(
+    D.rightConclusion.x - D.rightConclusion.w / D.strokes.normal,
+    D.rightConclusion.y - D.rightConclusion.h / D.strokes.normal,
+    D.rightConclusion.w, D.rightConclusion.h,
+    D.rightConclusion.r, "pill"
+  ));
+  add(svg, text(
+    D.rightConclusion.x, D.rightConclusion.y + D.offsets.text,
+    D.rightConclusion.text, "value", "middle"
+  ));
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  svg.replaceChildren();
+  const fallback = document.createElementNS(D.namespace, "text");
+  fallback.setAttribute("x", sx(D.fallback.x));
+  fallback.setAttribute("y", sy(D.fallback.y));
+  fallback.setAttribute("text-anchor", "middle");
+  fallback.setAttribute("class", "fallback");
+  fallback.textContent = D.fallback.text;
+  svg.appendChild(fallback);
+}
+</script>
+</body>
+</html>

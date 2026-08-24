@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как маска встраивается между моделью и сэмплером</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #eef3f8;
+    --ink: #182230;
+    --muted: #5f6f82;
+    --line: #8292a6;
+    --accent: #1769aa;
+    --accent-soft: #dceeff;
+    --valid: #16794b;
+    --valid-soft: #dcf6e9;
+    --blocked: #a33939;
+    --blocked-soft: #f9e1e1;
+    --processor: #7047a8;
+    --processor-soft: #eee5fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #11161d;
+      --panel: #19212b;
+      --panel-soft: #202b37;
+      --ink: #edf3fa;
+      --muted: #aebdcb;
+      --line: #73879b;
+      --accent: #72b7f2;
+      --accent-soft: #173c59;
+      --valid: #69d49c;
+      --valid-soft: #163d2d;
+      --blocked: #ff9999;
+      --blocked-soft: #4a2528;
+      --processor: #c5a1f2;
+      --processor-soft: #392a4d;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: unset;
+    padding: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    background: var(--page);
+  }
+
+  h1 {
+    margin: unset;
+    padding: unset;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--page);
+  }
+
+  .box {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .state {
+    fill: var(--panel-soft);
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+
+  .processor {
+    fill: var(--processor-soft);
+    stroke: var(--processor);
+    stroke-width: 2;
+  }
+
+  .valid-box {
+    fill: var(--valid-soft);
+    stroke: var(--valid);
+    stroke-width: 2;
+  }
+
+  .blocked-box {
+    fill: var(--blocked-soft);
+    stroke: var(--blocked);
+    stroke-width: 2;
+  }
+
+  .footer {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .bar-valid {
+    fill: var(--valid);
+  }
+
+  .bar-neutral {
+    fill: var(--accent);
+  }
+
+  .bar-blocked {
+    fill: var(--blocked);
+  }
+
+  .rule,
+  .arrow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .arrowhead {
+    fill: var(--line);
+  }
+
+  .text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .emphasis {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .valid-text {
+    fill: var(--valid);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .blocked-text {
+    fill: var(--blocked);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .processor-text {
+    fill: var(--processor);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Как маска встраивается между моделью и сэмплером</h1>
+  <svg id="diagram"
+       width="1040"
+       height="460"
+       viewBox="0 0 1040 460"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-description"></svg>
+  <p id="diagram-description" hidden>
+    Модель выдаёт вектор из 100 000 логитов. Logit processor сохраняет
+    логиты трёх допустимых токенов, заменяет логиты остальных 99 997 токенов
+    на минус бесконечность и передаёт результат через softmax сэмплеру.
+  </p>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать поток от модели к сэмплеру: из 100 000
+    логитов маска сохраняет три допустимых, а остальным 99 997 присваивает
+    минус бесконечность перед softmax.
+  </div>
+</main>
+
+<script>
+(() => {
+  const data = Object.freeze([{
+    arrow: { head: 9, wing: 6, right: 1, left: -1 },
+    boxes: [
+      { x: 24, y: 15, w: 992, h: 50, cls: "state" },
+      { x: 24, y: 124, w: 118, h: 136, cls: "box" },
+      { x: 174, y: 82, w: 195, h: 226, cls: "box" },
+      { x: 403, y: 108, w: 175, h: 174, cls: "processor" },
+      { x: 612, y: 82, w: 170, h: 135, cls: "valid-box" },
+      { x: 612, y: 231, w: 170, h: 77, cls: "blocked-box" },
+      { x: 817, y: 120, w: 80, h: 162, cls: "box" },
+      { x: 926, y: 120, w: 90, h: 162, cls: "box" },
+      { x: 24, y: 344, w: 992, h: 93, cls: "footer" }
+    ],
+    bars: [
+      { x: 282, y: 131, w: 62, h: 10, cls: "bar-valid" },
+      { x: 282, y: 160, w: 48, h: 10, cls: "bar-valid" },
+      { x: 282, y: 189, w: 70, h: 10, cls: "bar-valid" },
+      { x: 282, y: 225, w: 38, h: 10, cls: "bar-neutral" },
+      { x: 282, y: 254, w: 57, h: 10, cls: "bar-neutral" },
+      { x: 282, y: 283, w: 29, h: 10, cls: "bar-neutral" },
+      { x: 706, y: 126, w: 53, h: 9, cls: "bar-valid" },
+      { x: 706, y: 155, w: 41, h: 9, cls: "bar-valid" },
+      { x: 706, y: 184, w: 61, h: 9, cls: "bar-valid" }
+    ],
+    lines: [
+      { x1: 190, y1: 119, x2: 353, y2: 119, cls: "rule" },
+      { x1: 420, y1: 154, x2: 561, y2: 154, cls: "rule" },
+      { x1: 420, y1: 231, x2: 561, y2: 231, cls: "rule" },
+      { x1: 502, y1: 344, x2: 502, y2: 437, cls: "rule" }
+    ],
+    arrows: [
+      { points: [{ x: 142, y: 193 }, { x: 174, y: 193 }] },
+      { points: [{ x: 369, y: 193 }, { x: 403, y: 193 }] },
+      { points: [{ x: 578, y: 153 }, { x: 612, y: 153 }] },
+      { points: [{ x: 578, y: 269 }, { x: 612, y: 269 }] },
+      { points: [{ x: 782, y: 153 }, { x: 817, y: 153 }] },
+      { points: [{ x: 782, y: 269 }, { x: 817, y: 269 }] },
+      { points: [{ x: 897, y: 201 }, { x: 926, y: 201 }] },
+      { points: [{ x: 164, y: 389 }, { x: 238, y: 389 }] },
+      { points: [{ x: 324, y: 389 }, { x: 408, y: 389 }] },
+      { points: [{ x: 666, y: 389 }, { x: 740, y: 389 }] },
+      { points: [{ x: 826, y: 389 }, { x: 916, y: 389 }] }
+    ],
+    texts: [
+      { x: 45, y: 40, dx: 0, dy: 0, anchor: "start", value: "Уже напечатано:", cls: "label" },
+      { x: 212, y: 40, dx: 0, dy: 0, anchor: "start", value: '{"role": "', cls: "emphasis code" },
+      { x: 997, y: 40, dx: 0, dy: 0, anchor: "end", value: "текущее состояние грамматики", cls: "small" },
+
+      { x: 83, y: 167, dx: 0, dy: 0, anchor: "middle", value: "Модель", cls: "label" },
+      { x: 83, y: 196, dx: 0, dy: 0, anchor: "middle", value: "предлагает", cls: "text" },
+      { x: 83, y: 220, dx: 0, dy: 0, anchor: "middle", value: "продолжения", cls: "text" },
+
+      { x: 271, y: 103, dx: 0, dy: 0, anchor: "middle", value: "100 000 логитов", cls: "label" },
+      { x: 190, y: 136, dx: 0, dy: 0, anchor: "start", value: "admin", cls: "text code" },
+      { x: 190, y: 165, dx: 0, dy: 0, anchor: "start", value: "user", cls: "text code" },
+      { x: 190, y: 194, dx: 0, dy: 0, anchor: "start", value: "assistant", cls: "text code" },
+      { x: 190, y: 230, dx: 0, dy: 0, anchor: "start", value: "число", cls: "small" },
+      { x: 190, y: 259, dx: 0, dy: 0, anchor: "start", value: "}", cls: "small code" },
+      { x: 190, y: 288, dx: 0, dy: 0, anchor: "start", value: "другие", cls: "small" },
+
+      { x: 490, y: 133, dx: 0, dy: 0, anchor: "middle", value: "logit processor", cls: "label" },
+      { x: 490, y: 177, dx: 0, dy: 0, anchor: "middle", value: "читает состояние", cls: "text" },
+      { x: 490, y: 202, dx: 0, dy: 0, anchor: "middle", value: "грамматики", cls: "text" },
+      { x: 490, y: 254, dx: 0, dy: 0, anchor: "middle", value: "применяет маску", cls: "processor-text" },
+
+      { x: 697, y: 104, dx: 0, dy: 0, anchor: "middle", value: "3 допустимых", cls: "valid-text" },
+      { x: 628, y: 131, dx: 0, dy: 0, anchor: "start", value: "admin", cls: "text code" },
+      { x: 628, y: 160, dx: 0, dy: 0, anchor: "start", value: "user", cls: "text code" },
+      { x: 628, y: 189, dx: 0, dy: 0, anchor: "start", value: "assistant", cls: "text code" },
+      { x: 697, y: 207, dx: 0, dy: 0, anchor: "middle", value: "логиты сохранены", cls: "small" },
+
+      { x: 628, y: 252, dx: 0, dy: 0, anchor: "start", value: "99 997 остальных", cls: "blocked-text" },
+      { x: 697, y: 283, dx: 0, dy: 0, anchor: "middle", value: "логит = −∞", cls: "emphasis code" },
+
+      { x: 857, y: 178, dx: 0, dy: 0, anchor: "middle", value: "softmax", cls: "label" },
+      { x: 857, y: 209, dx: 0, dy: 0, anchor: "middle", value: "масса только", cls: "small" },
+      { x: 857, y: 233, dx: 0, dy: 0, anchor: "middle", value: "на разрешённых", cls: "small" },
+
+      { x: 971, y: 177, dx: 0, dy: 0, anchor: "middle", value: "Сэмплер", cls: "label" },
+      { x: 971, y: 209, dx: 0, dy: 0, anchor: "middle", value: "выбирает", cls: "text" },
+      { x: 971, y: 233, dx: 0, dy: 0, anchor: "middle", value: "токен", cls: "text" },
+
+      { x: 263, y: 364, dx: 0, dy: 0, anchor: "middle", value: "Допустимый путь", cls: "valid-text" },
+      { x: 82, y: 389, dx: 0, dy: 0, anchor: "start", value: "логит", cls: "text" },
+      { x: 281, y: 389, dx: 0, dy: 0, anchor: "middle", value: "сохранён", cls: "valid-text" },
+      { x: 456, y: 389, dx: 0, dy: 0, anchor: "end", value: "участвует в выборе", cls: "text" },
+
+      { x: 759, y: 364, dx: 0, dy: 0, anchor: "middle", value: "Недопустимый путь", cls: "blocked-text" },
+      { x: 548, y: 389, dx: 0, dy: 0, anchor: "start", value: "логит", cls: "text" },
+      { x: 783, y: 389, dx: 0, dy: 0, anchor: "middle", value: "−∞", cls: "blocked-text code" },
+      { x: 986, y: 389, dx: 0, dy: 0, anchor: "end", value: "не доходит до выбора", cls: "text" },
+      { x: 520, y: 421, dx: 0, dy: 0, anchor: "middle", value: "Выбранный токен обновляет состояние грамматики — цикл повторяется", cls: "small" }
+    ]
+  }]);
+
+  const origin = Object.freeze({ x: 0, y: 0 });
+  const scale = Object.freeze({ x: 1, y: 1 });
+  const labelPad = 7;
+
+  function sx(x) {
+    return origin.x + x * scale.x;
+  }
+
+  function sy(y) {
+    return origin.y + y * scale.y;
+  }
+
+  const [d] = data;
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+
+  function make(tag, attributes) {
+    const element = document.createElementNS(svg.namespaceURI, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, String(value));
+    }
+    svg.appendChild(element);
+    return element;
+  }
+
+  function drawRect(item) {
+    make("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x + item.w) - sx(item.x),
+      height: sy(item.y + item.h) - sy(item.y),
+      class: item.cls
+    });
+  }
+
+  function drawLine(item) {
+    make("line", {
+      x1: sx(item.x1),
+      y1: sy(item.y1),
+      x2: sx(item.x2),
+      y2: sy(item.y2),
+      class: item.cls
+    });
+  }
+
+  function drawArrow(item) {
+    const [end, previous] = [...item.points].reverse();
+    const direction = end.x > previous.x ? d.arrow.right : d.arrow.left;
+    const points = item.points
+      .map(point => `${sx(point.x)},${sy(point.y)}`)
+      .join(" ");
+
+    make("polyline", { points, class: "arrow" });
+
+    const baseX = end.x - direction * d.arrow.head;
+    const head = [
+      { x: end.x, y: end.y },
+      { x: baseX, y: end.y - d.arrow.wing },
+      { x: baseX, y: end.y + d.arrow.wing }
+    ].map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+    make("polygon", { points: head, class: "arrowhead" });
+  }
+
+  function drawText(item) {
+    const element = make("text", {
+      x: sx(item.x) + item.dx * labelPad,
+      y: sy(item.y) + item.dy * labelPad,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle",
+      class: item.cls
+    });
+    element.textContent = item.value;
+  }
+
+  try {
+    d.boxes.forEach(drawRect);
+    d.bars.forEach(drawRect);
+    d.lines.forEach(drawLine);
+    d.arrows.forEach(drawArrow);
+    d.texts.forEach(drawText);
+  } catch (error) {
+    svg.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

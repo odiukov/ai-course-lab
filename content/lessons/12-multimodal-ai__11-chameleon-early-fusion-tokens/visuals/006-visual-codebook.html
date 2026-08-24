@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Codebook как набор кистей</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d1f25; --mut:#5d6472; --line:#9aa2b1;
+    --acc:#b4432b; --panel:#efece5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14161b; --fg:#e8eaf0; --mut:#9aa2b1; --line:#5d6472;
+           --acc:#ff9a76; --panel:#1f232b; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+  figure{margin:0;padding:10px 12px 12px}
+  figcaption{font-weight:600;margin-bottom:6px}
+  .ctl{display:flex;gap:10px;align-items:center;color:var(--mut);margin-bottom:4px}
+  .ctl input{width:150px}
+  .ctl b{color:var(--fg);font-variant-numeric:tabular-nums}
+  svg{display:block;width:100%;height:auto;max-height:370px;background:var(--bg)}
+  .cap{margin-top:6px;color:var(--fg)}
+  .lg{margin-top:3px;color:var(--mut);font-size:12.5px}
+  text{font:12px system-ui,sans-serif;fill:var(--fg)}
+  .mut{fill:var(--mut);font-size:11.5px}
+  .ttl{font-weight:600}
+  .ln{stroke:var(--line);fill:none;stroke-width:1}
+  .cell{stroke:var(--bg);stroke-width:.5}
+  .box{fill:none;stroke:var(--acc);stroke-width:2}
+  .dash{stroke:var(--acc);stroke-width:1;stroke-dasharray:4 3;fill:none}
+  .strip{fill:var(--panel);stroke:var(--line);stroke-width:1}
+  .hl{stroke:var(--acc);stroke-width:2}
+  .wave{fill:none;stroke:var(--mut);stroke-width:1}
+  .arr{fill:var(--acc);stroke:none}
+  #fb{color:var(--fg)}
+</style>
+<figure>
+  <figcaption>Codebook как набор кистей: 1024 участка становятся 1024 номерами</figcaption>
+  <div class="ctl"><label for="k">размер набора K</label>
+    <input id="k" type="range" min="0" max="2" step="1" value="1"><b id="kv">8192</b></div>
+  <svg id="svg" viewBox="0 0 960 450" preserveAspectRatio="xMidYMid meet" role="img"></svg>
+  <div class="cap" id="cap"></div>
+  <div class="lg" id="lg"></div>
+  <div id="fb" hidden></div>
+</figure>
+<script>
+(function(){
+  var svg=document.getElementById('svg');
+  try{
+    /* ---- данные схемы ---- */
+    var D={ N:32, dim:256, total:1024, ks:[16,8192,1000000], block:[12,9],
+            rowsTop:[0,1,2] };
+    var L={ grid:{x:0,y:0}, inset:{x:36,y:4,c:3},
+            cb:{x:52,w:20,y:5,step:3.2,h:2}, ell:17.6, last:20.6, meas:23.5 };
+    /* ---- одна пара функций перевода ---- */
+    var OX=56, OY=30, S=12;
+    function sx(x){ return OX+x*S; }
+    function sy(y){ return OY+y*S; }
+
+    function add(p,t,a,txt){ var e=document.createElementNS('http://www.w3.org/2000/svg',t);
+      for(var k in a) e.setAttribute(k,a[k]);
+      if(txt!=null) e.textContent=txt; p.appendChild(e); return e; }
+    var SUB='₀₁₂₃₄₅₆₇₈₉';
+    function sub(n){ return String(n).split('').map(function(d){return SUB[+d];}).join(''); }
+    function ru(n){ return String(n).replace(/\B(?=(\d{3})+$)/g,' '); }
+    function cl(v,a,b){ return v<a?a:(v>b?b:v); }
+
+    function field(i,j){ var u=i/(D.N-1), v=j/(D.N-1);
+      return cl(0.5+0.3*Math.sin(3.1*u+0.6)*Math.cos(2.4*v+0.5)
+        +0.13*Math.sin(6.5*v-1.0)+0.08*Math.cos(5.0*u+2.0),0,0.999); }
+    function codeOf(i,j,K){ return Math.min(K-1,Math.floor(field(i,j)*K)); }
+    function tone(code,K){ return (code+0.5)/K; }
+    function fill(code,K){ var t=tone(code,K);
+      return 'hsl('+(212-190*t).toFixed(0)+' 52% '+(38+34*t).toFixed(0)+'%)'; }
+    function ink(code,K){ return tone(code,K)>0.58?'#14161b':'#f7f7f7'; }
+    function lcg(s){ return function(){ s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; }; }
+
+    function head(p,x0,y0,x1,y1){
+      var dx=x1-x0, dy=y1-y0, n=Math.sqrt(dx*dx+dy*dy), ux=dx/n, uy=dy/n, h=0.7, w=0.34;
+      var bx=x1-ux*h, by=y1-uy*h;
+      add(p,'polygon',{'class':'arr',points:
+        sx(x1)+','+sy(y1)+' '+sx(bx-uy*w)+','+sy(by+ux*w)+' '+sx(bx+uy*w)+','+sy(by-ux*w)});
+    }
+
+    function draw(K){
+      while(svg.firstChild) svg.removeChild(svg.firstChild);
+      var g=add(svg,'g',{});
+
+      /* сетка 32x32 */
+      add(g,'text',{x:sx(D.N/2),y:sy(L.grid.y)-10,'text-anchor':'middle','class':'ttl'},
+        'выход энкодера: сетка '+D.N+' × '+D.N);
+      for(var j=0;j<D.N;j++) for(var i=0;i<D.N;i++){
+        var c=codeOf(i,j,K);
+        add(g,'rect',{'class':'cell',x:sx(i),y:sy(j),width:sx(i+1)-sx(i),height:sy(j+1)-sy(j),
+          fill:fill(c,K)});
+      }
+      add(g,'rect',{'class':'box',x:sx(D.block[0]),y:sy(D.block[1]),
+        width:sx(D.block[0]+3)-sx(D.block[0]),height:sy(D.block[1]+3)-sy(D.block[1])});
+      add(g,'text',{x:sx(D.N/2),y:sy(D.N)+18,'text-anchor':'middle','class':'mut'},
+        D.N+' × '+D.N+' = '+D.total+' участков, у каждого свой индекс');
+
+      /* увеличенный блок 3×3 с индексами */
+      var IN=L.inset;
+      add(g,'path',{'class':'dash',d:'M'+sx(D.block[0]+3)+' '+sy(D.block[1])+
+        'L'+sx(IN.x)+' '+sy(IN.y)});
+      add(g,'path',{'class':'dash',d:'M'+sx(D.block[0]+3)+' '+sy(D.block[1]+3)+
+        'L'+sx(IN.x)+' '+sy(IN.y+3*IN.c)});
+      add(g,'text',{x:sx(IN.x+1.5*IN.c),y:sy(IN.y)-8,'text-anchor':'middle','class':'ttl'},
+        '9 участков крупно');
+      var fs=K>99999?8.5:11;
+      for(var b=0;b<3;b++) for(var a=0;a<3;a++){
+        var ci=D.block[0]+a, cj=D.block[1]+b, cd=codeOf(ci,cj,K);
+        var x0=IN.x+a*IN.c, y0=IN.y+b*IN.c;
+        add(g,'rect',{x:sx(x0),y:sy(y0),width:sx(x0+IN.c)-sx(x0),height:sy(y0+IN.c)-sy(y0),
+          fill:fill(cd,K),stroke:'var(--bg)','stroke-width':1});
+        add(g,'text',{x:sx(x0+IN.c/2),y:sy(y0+IN.c/2),'text-anchor':'middle',
+          'dominant-baseline':'central',fill:ink(cd,K),'font-size':fs},String(cd));
+      }
+      add(g,'text',{x:sx(IN.x+1.5*IN.c),y:sy(IN.y+3*IN.c)+18,'text-anchor':'middle','class':'mut'},
+        'квантование');
+      add(g,'text',{x:sx(IN.x+1.5*IN.c),y:sy(IN.y+3*IN.c)+34,'text-anchor':'middle','class':'mut'},
+        'участок заменяется номером');
+
+      /* столбец векторов codebook */
+      var CB=L.cb, mid=CB.x+CB.w/2, hit=codeOf(D.block[0]+1,D.block[1]+1,K);
+      add(g,'text',{x:sx(mid),y:sy(CB.y)-26,'text-anchor':'middle','class':'ttl'},'codebook');
+      add(g,'text',{x:sx(mid),y:sy(CB.y)-10,'text-anchor':'middle','class':'mut'},
+        'K = '+ru(K)+' векторов по '+D.dim+' чисел');
+      var rows=D.rowsTop.map(function(c,n){ return {code:c,y:CB.y+n*CB.step,hl:false}; });
+      rows.push({code:hit,y:CB.y+3*CB.step,hl:true});
+      rows.push({code:K-1,y:L.last,hl:false});
+      rows.forEach(function(r){
+        add(g,'rect',{'class':'strip'+(r.hl?' hl':''),x:sx(CB.x),y:sy(r.y),
+          width:sx(CB.x+CB.w)-sx(CB.x),height:sy(r.y+CB.h)-sy(r.y)});
+        var rnd=lcg(r.code+7), pts=[];
+        for(var t=0;t<D.dim;t++) pts.push(sx(CB.x+CB.w*t/(D.dim-1)).toFixed(1)+','+
+          sy(r.y+0.25+1.5*rnd()).toFixed(1));
+        add(g,'polyline',{'class':'wave',points:pts.join(' ')});
+        add(g,'text',{x:sx(CB.x)-8,y:sy(r.y+CB.h/2),'text-anchor':'end',
+          'dominant-baseline':'central','font-weight':r.hl?'600':'400',
+          fill:r.hl?'var(--acc)':'var(--fg)'},'v'+sub(r.code));
+      });
+      add(g,'text',{x:sx(mid),y:sy(L.ell),'text-anchor':'middle','class':'mut'},'…');
+
+      /* стрелка: участок → его вектор в codebook */
+      var hy=CB.y+3*CB.step+CB.h/2, ax0=IN.x+3*IN.c+0.4, ax1=CB.x-0.6;
+      add(g,'path',{'class':'dash','stroke-dasharray':'none',
+        d:'M'+sx(ax0)+' '+sy(IN.y+1.5*IN.c)+'L'+sx(ax1)+' '+sy(hy)});
+      head(g,ax0,IN.y+1.5*IN.c,ax1,hy);
+
+      /* мерная линия размерности 256 */
+      add(g,'path',{'class':'ln',d:'M'+sx(CB.x)+' '+sy(L.meas)+'L'+sx(CB.x+CB.w)+' '+sy(L.meas)});
+      add(g,'path',{'class':'ln',d:'M'+sx(CB.x)+' '+sy(L.meas-0.35)+'L'+sx(CB.x)+' '+sy(L.meas+0.35)});
+      add(g,'path',{'class':'ln',d:'M'+sx(CB.x+CB.w)+' '+sy(L.meas-0.35)+
+        'L'+sx(CB.x+CB.w)+' '+sy(L.meas+0.35)});
+      add(g,'text',{x:sx(mid),y:sy(L.meas)+18,'text-anchor':'middle','class':'mut'},
+        'размерность '+D.dim);
+
+      /* подписи под схемой */
+      var caps=[
+        'K = 16: небо, кожа и асфальт делят один мазок — после декодера плакат из нескольких оттенков.',
+        'K = 8192: '+D.total+' векторов по '+D.dim+' чисел превращаются в '+D.total+
+          ' целых чисел от 0 до 8191. Найденный компромисс.',
+        'K = 1 000 000: реконструкция чуть точнее, но каждый мазок встречается так редко, что модель не выучит, где его ставить.'];
+      document.getElementById('cap').textContent=caps[D.ks.indexOf(K)];
+      document.getElementById('kv').textContent=ru(K);
+      document.getElementById('lg').textContent=
+        'v₀ … v'+sub(K-1)+' — векторы codebook, по '+D.dim+
+        ' чисел каждый; число в клетке — индекс кода, выбранного для этого участка (0 … '+(K-1)+').';
+    }
+
+    var inp=document.getElementById('k');
+    inp.addEventListener('input',function(){ draw(D.ks[+inp.value]); });
+    draw(D.ks[+inp.value]);
+  }catch(e){
+    svg.setAttribute('hidden','');
+    var fb=document.getElementById('fb'); fb.hidden=false;
+    fb.textContent='Схема должна показывать: сетку 32 × 32 = 1024 участка, '+
+      'у каждого участка подписан индекс кода из словаря на 8192, '+
+      'и сбоку столбец из K векторов размерности 256 — сами кисти codebook. '+
+      'Квантование заменяет вектор участка номером ближайшей кисти.';
+  }
+})();
+</script>

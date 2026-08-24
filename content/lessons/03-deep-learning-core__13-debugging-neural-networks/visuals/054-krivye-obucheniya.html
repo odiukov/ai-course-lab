@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кривые обучения</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5e687b;
+      --axis: #718096;
+      --grid: #dbe2ec;
+      --train: #2563eb;
+      --validation: #e05278;
+      --healthy: #168a62;
+      --underfit: #b36b00;
+      --overfit: #a03cc1;
+      --best: #7a3bb2;
+      --fallback: #9b2c2c;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111722;
+        --panel: #18202d;
+        --text: #edf2f7;
+        --muted: #aab5c6;
+        --axis: #9aa8bc;
+        --grid: #354156;
+        --train: #70a5ff;
+        --validation: #ff7ca3;
+        --healthy: #55d6a7;
+        --underfit: #ffc267;
+        --overfit: #d591ed;
+        --best: #d6a0ec;
+        --fallback: #ff9b9b;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    figure {
+      width: 100%;
+      margin: 0;
+      padding: 10px 12px 8px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      text-align: center;
+      font-size: 21px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 474px;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 10px;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .guide {
+      stroke: var(--grid);
+      stroke-width: 1.5;
+      fill: none;
+      stroke-dasharray: 5 7;
+    }
+
+    .separator {
+      stroke: var(--grid);
+      stroke-width: 1.5;
+      fill: none;
+      stroke-dasharray: 3 8;
+    }
+
+    .train {
+      stroke: var(--train);
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .validation {
+      stroke: var(--validation);
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 10 7;
+    }
+
+    .best-line {
+      stroke: var(--best);
+      stroke-width: 2;
+      fill: none;
+      stroke-dasharray: 5 5;
+    }
+
+    .best-mark {
+      stroke: var(--best);
+      stroke-width: 3;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 17px;
+    }
+
+    .plot-title {
+      font-size: 21px;
+      font-weight: 750;
+    }
+
+    .healthy-title {
+      fill: var(--healthy);
+    }
+
+    .underfit-title {
+      fill: var(--underfit);
+    }
+
+    .overfit-title {
+      fill: var(--overfit);
+    }
+
+    .plot-note,
+    .axis-label,
+    .epoch-label {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .curve-label {
+      font-size: 15px;
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4;
+      stroke-linejoin: round;
+    }
+
+    .train-label {
+      fill: var(--train);
+    }
+
+    .validation-label {
+      fill: var(--validation);
+    }
+
+    .best-label {
+      fill: var(--best);
+      font-size: 15px;
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4;
+      stroke-linejoin: round;
+    }
+
+    .legend-label {
+      font-size: 15px;
+      fill: var(--text);
+    }
+
+    #fallback {
+      margin: 12px;
+      padding: 12px;
+      color: var(--fallback);
+      background: var(--panel);
+      border: 1px solid currentColor;
+      border-radius: 8px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Train и validation loss показывают разные режимы обучения</h1>
+    <svg id="diagram" viewBox="0 0 1200 455" width="1200" height="455"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Здоровое обучение, недообучение и переобучение</title>
+      <desc id="svg-description">
+        Три пары кривых ошибки. При здоровом обучении обе ошибки снижаются.
+        При недообучении обе остаются высокими. При переобучении обучающая
+        ошибка падает, а валидационная после минимума начинает расти.
+      </desc>
+    </svg>
+    <div id="fallback" hidden>
+      Схема должна была показать три режима: обе ошибки снижаются при здоровом
+      обучении, обе остаются высокими при недообучении, а при переобучении
+      train loss падает, пока validation loss после минимума растёт.
+    </div>
+  </figure>
+
+  <script>
+    const DATA = {
+      axes: [
+        [[0, 0], [34, 0]],
+        [[0, 0], [0, 12.25]],
+        [[34, 0], [33.55, 0.22]],
+        [[34, 0], [33.55, -0.22]],
+        [[0, 12.25], [-0.22, 11.82]],
+        [[0, 12.25], [0.22, 11.82]]
+      ],
+      guides: [
+        [[0, 3], [34, 3]],
+        [[0, 6], [34, 6]],
+        [[0, 9], [34, 9]]
+      ],
+      separators: [
+        [[11.55, -0.15], [11.55, 12.05]],
+        [[23, -0.15], [23, 12.05]]
+      ],
+      epochArrows: [
+        [[1.3, -0.55], [10.65, -0.55]],
+        [[10.65, -0.55], [10.25, -0.35]],
+        [[10.65, -0.55], [10.25, -0.75]],
+        [[12.75, -0.55], [22.05, -0.55]],
+        [[22.05, -0.55], [21.65, -0.35]],
+        [[22.05, -0.55], [21.65, -0.75]],
+        [[24.2, -0.55], [33.5, -0.55]],
+        [[33.5, -0.55], [33.1, -0.35]],
+        [[33.5, -0.55], [33.1, -0.75]]
+      ],
+      curves: [
+        {
+          className: "train",
+          points: [
+            [1.35, 8.65], [2.05, 7.75], [2.8, 6.8], [3.6, 5.85],
+            [4.5, 5.05], [5.45, 4.35], [6.4, 3.75], [7.35, 3.18],
+            [8.35, 2.72], [9.35, 2.35], [10.5, 2.02]
+          ]
+        },
+        {
+          className: "validation",
+          points: [
+            [1.35, 8.9], [2.05, 8.05], [2.8, 7.2], [3.6, 6.3],
+            [4.5, 5.55], [5.45, 4.85], [6.4, 4.25], [7.35, 3.72],
+            [8.35, 3.25], [9.35, 2.88], [10.5, 2.55]
+          ]
+        },
+        {
+          className: "train",
+          points: [
+            [12.75, 8.7], [13.55, 8.42], [14.4, 8.15], [15.3, 7.92],
+            [16.25, 7.72], [17.2, 7.55], [18.15, 7.4], [19.1, 7.25],
+            [20.05, 7.12], [21.05, 7.02], [22.05, 6.92]
+          ]
+        },
+        {
+          className: "validation",
+          points: [
+            [12.75, 8.95], [13.55, 8.7], [14.4, 8.48], [15.3, 8.28],
+            [16.25, 8.1], [17.2, 7.95], [18.15, 7.82], [19.1, 7.7],
+            [20.05, 7.6], [21.05, 7.5], [22.05, 7.42]
+          ]
+        },
+        {
+          className: "train",
+          points: [
+            [24.2, 8.75], [25, 7.8], [25.85, 6.85], [26.7, 5.9],
+            [27.55, 5], [28.4, 4.18], [29.3, 3.43], [30.2, 2.76],
+            [31.15, 2.18], [32.15, 1.68], [33.35, 1.24]
+          ]
+        },
+        {
+          className: "validation",
+          points: [
+            [24.2, 8.95], [25, 7.75], [25.85, 6.55], [26.7, 5.35],
+            [27.55, 4.25], [28.4, 3.45], [29.3, 3.62], [30.2, 4.05],
+            [31.15, 4.65], [32.15, 5.35], [33.35, 6.2]
+          ]
+        }
+      ],
+      titles: [
+        { point: [5.85, 11.55], text: "Здоровое обучение", className: "plot-title healthy-title" },
+        { point: [17.3, 11.55], text: "Недообучение", className: "plot-title underfit-title" },
+        { point: [28.75, 11.55], text: "Переобучение", className: "plot-title overfit-title" }
+      ],
+      notes: [
+        { point: [5.85, 10.75], text: "обе ошибки снижаются", className: "plot-note" },
+        { point: [17.3, 10.75], text: "обе ошибки остаются высокими", className: "plot-note" },
+        { point: [28.75, 10.75], text: "между ошибками растёт разрыв", className: "plot-note" }
+      ],
+      curveLabels: [
+        { point: [10.5, 2.02], dx: 8, dy: 16, text: "обучение", className: "curve-label train-label", anchor: "start" },
+        { point: [10.5, 2.55], dx: 8, dy: -10, text: "валидация", className: "curve-label validation-label", anchor: "start" },
+        { point: [22.05, 6.92], dx: -8, dy: 17, text: "обучение", className: "curve-label train-label", anchor: "end" },
+        { point: [22.05, 7.42], dx: 8, dy: -10, text: "валидация", className: "curve-label validation-label", anchor: "start" },
+        { point: [33.35, 1.24], dx: -8, dy: 17, text: "обучение", className: "curve-label train-label", anchor: "end" },
+        { point: [33.35, 6.2], dx: -8, dy: -10, text: "валидация", className: "curve-label validation-label", anchor: "end" }
+      ],
+      epochLabels: [
+        { point: [5.95, -0.55], dx: 0, dy: -9, text: "эпохи", anchor: "middle" },
+        { point: [17.4, -0.55], dx: 0, dy: -9, text: "эпохи", anchor: "middle" },
+        { point: [28.85, -0.55], dx: 0, dy: -9, text: "эпохи", anchor: "middle" }
+      ],
+      axisLabels: [
+        { point: [0, 12.25], dx: 12, dy: 18, text: "Ошибка (loss)", anchor: "start" }
+      ],
+      best: {
+        line: [[28.4, 0], [28.4, 3.45]],
+        cross: [
+          [[28.18, 3.23], [28.62, 3.67]],
+          [[28.18, 3.67], [28.62, 3.23]]
+        ],
+        label: {
+          point: [28.4, 3.45],
+          dx: 0,
+          dy: -18,
+          text: "минимум validation loss — лучшее состояние",
+          anchor: "middle"
+        }
+      },
+      legend: [
+        {
+          line: [[8.2, -1.75], [10.05, -1.75]],
+          textPoint: [10.25, -1.75],
+          dx: 6,
+          dy: 5,
+          text: "train loss — обучающая ошибка",
+          lineClass: "train",
+          anchor: "start"
+        },
+        {
+          line: [[20.8, -1.75], [22.65, -1.75]],
+          textPoint: [22.85, -1.75],
+          dx: 6,
+          dy: 5,
+          text: "validation loss — ошибка на новых примерах",
+          lineClass: "validation",
+          anchor: "start"
+        }
+      ]
+    };
+
+    const origin = { x: 62, y: 372 };
+    const scale = { x: 33.1, y: 27.2 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        parent.appendChild(element);
+        return element;
+      };
+
+      const drawLine = (segment, className, parent = svg) => {
+        const [start, end] = segment;
+        const [startX, startY] = start;
+        const [endX, endY] = end;
+        return make("line", {
+          x1: sx(startX),
+          y1: sy(startY),
+          x2: sx(endX),
+          y2: sy(endY),
+          class: className
+        }, parent);
+      };
+
+      const drawText = item => {
+        const [x, y] = item.point;
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          dx: item.dx ?? "",
+          dy: item.dy ?? "",
+          class: item.className,
+          "text-anchor": item.anchor ?? "middle",
+          "dominant-baseline": "middle"
+        });
+        node.textContent = item.text;
+        return node;
+      };
+
+      const pathData = points => {
+        let result = "";
+        let first = true;
+        for (const point of points) {
+          const [x, y] = point;
+          result += `${first ? "M" : "L"} ${sx(x)} ${sy(y)} `;
+          first = false;
+        }
+        return result.trim();
+      };
+
+      const construction = make("g", { "aria-hidden": "true" });
+      for (const segment of DATA.guides) drawLine(segment, "guide", construction);
+      for (const segment of DATA.separators) drawLine(segment, "separator", construction);
+      for (const segment of DATA.axes) drawLine(segment, "axis", construction);
+      for (const segment of DATA.epochArrows) drawLine(segment, "axis", construction);
+
+      const curveGroup = make("g", { "aria-hidden": "true" });
+      for (const curve of DATA.curves) {
+        make("path", {
+          d: pathData(curve.points),
+          class: curve.className,
+          "vector-effect": "non-scaling-stroke"
+        }, curveGroup);
+      }
+
+      drawLine(DATA.best.line, "best-line");
+      for (const segment of DATA.best.cross) drawLine(segment, "best-mark");
+
+      for (const item of DATA.titles) drawText(item);
+      for (const item of DATA.notes) drawText(item);
+      for (const item of DATA.curveLabels) drawText(item);
+      for (const item of DATA.epochLabels) {
+        drawText({ ...item, className: "epoch-label" });
+      }
+      for (const item of DATA.axisLabels) {
+        drawText({ ...item, className: "axis-label" });
+      }
+      drawText({
+        ...DATA.best.label,
+        className: "best-label"
+      });
+
+      for (const item of DATA.legend) {
+        drawLine(item.line, item.lineClass);
+        drawText({
+          point: item.textPoint,
+          dx: item.dx,
+          dy: item.dy,
+          text: item.text,
+          anchor: item.anchor,
+          className: "legend-label"
+        });
+      }
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

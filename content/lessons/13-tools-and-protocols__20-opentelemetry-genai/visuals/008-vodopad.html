@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Водопад спанов одного запроса</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1b1f24; --muted:#6b7280; --grid:#dfe3ea;
+    --bar:#9aa7b8; --barStroke:#7d8b9e; --accent:#d9720b; --accentSoft:#f3b169;
+    --root:#c8cfda;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8ecf1; --muted:#98a2b3; --grid:#2b303a;
+      --bar:#4d5a6d; --barStroke:#697a91; --accent:#ff9f45; --accentSoft:#8a5a22;
+      --root:#333b47;
+    }
+  }
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);
+       font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{padding:10px 12px 14px}
+  h1{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .err{color:var(--muted);font-size:13px;margin:8px 0 0}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .name{font-size:13px;fill:var(--fg)}
+  .name.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .dur{font-size:12px;fill:var(--muted)}
+  .dur.hot{fill:var(--accent);font-weight:600}
+  .tick{font-size:11.5px;fill:var(--muted)}
+  .cap{font-size:12px;fill:var(--muted)}
+  .axis{stroke:var(--grid)}
+  .grid{stroke:var(--grid);stroke-dasharray:3 4}
+  .lead{stroke:var(--grid);stroke-dasharray:2 4}
+  .tree{stroke:var(--grid);fill:none}
+</style>
+<div class="wrap">
+  <h1>Один запрос к агенту: 6 спанов, 3 уровня, водопад по времени</h1>
+  <svg id="s" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Водопад из шести спанов: agent.invoke_agent 4.2 с, внутри llm.chat 0.8, tool.execute 3.1 с вложенным mcp.call 3.0, llm.chat 0.5 и subagent.invoke 0.2"></svg>
+  <p class="err" id="fallback" hidden></p>
+</div>
+<script>
+(function(){
+  var svg=document.getElementById('s');
+  try{
+    /* ---- данные ---- */
+    var spans=[
+      {n:'agent.invoke_agent', d:0, t0:0.00, t1:4.20, dur:'4.2 с', kind:'root'},
+      {n:'llm.chat',           d:1, t0:0.05, t1:0.85, dur:'0.8 с', kind:'plain'},
+      {n:'tool.execute',       d:1, t0:0.90, t1:4.00, dur:'3.1 с', kind:'hot'},
+      {n:'mcp.call',           d:2, t0:0.95, t1:3.95, dur:'3.0 с', kind:'hot'},
+      {n:'llm.chat',           d:1, t0:0.90, t1:1.40, dur:'0.5 с', kind:'plain'},
+      {n:'subagent.invoke',    d:1, t0:1.50, t1:1.70, dur:'0.2 с', kind:'plain'}
+    ];
+    var ticks=[0,1,2,3,4];
+    var TMAX=4.2, ROWS=spans.length;
+    var LABX=-2.15, INDENT=0.25;      /* колонка подписей живёт в тех же единицах */
+
+    /* ---- одна система координат ---- */
+    var origin={x:300,y:70}, scale={x:130,y:34};
+    function sx(x){return origin.x + x*scale.x;}
+    function sy(y){return origin.y + y*scale.y;}
+
+    /* ---- литералы только для пикселей ---- */
+    var PAD=8, STROKE=1, FS=13;
+
+    var o=[];
+    function esc(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+    function line(x1,y1,x2,y2,cls){o.push('<line class="'+cls+'" x1="'+x1+'" y1="'+y1+
+      '" x2="'+x2+'" y2="'+y2+'" stroke-width="'+STROKE+'"/>');}
+    function txt(x,y,cls,anchor,t){o.push('<text class="'+cls+'" x="'+x+'" y="'+y+
+      '" text-anchor="'+anchor+'" dominant-baseline="middle">'+esc(t)+'</text>');}
+
+    /* сетка и ось времени */
+    line(sx(0),sy(-0.9),sx(TMAX),sy(-0.9),'axis');
+    ticks.forEach(function(t){
+      line(sx(t),sy(-0.9),sx(t),sy(ROWS-0.4),'grid');
+      line(sx(t),sy(-0.9),sx(t),sy(-1.0),'axis');
+      txt(sx(t),sy(-1.25),'tick','middle', t===ticks[ticks.length-1]? t+' с' : String(t));
+    });
+
+    /* полоски */
+    spans.forEach(function(s,i){
+      var x0=sx(s.t0), x1=sx(s.t1);
+      var yTop=sy(i-0.3), yBot=sy(i+0.3);
+      var fill = s.kind==='root' ? 'var(--root)' : (s.kind==='hot' ? 'var(--accentSoft)' : 'var(--bar)');
+      var stroke = s.kind==='hot' ? 'var(--accent)' : 'var(--barStroke)';
+      var sw = s.kind==='hot' ? STROKE*2 : STROKE;
+      o.push('<rect x="'+x0+'" y="'+yTop+'" width="'+(x1-x0)+'" height="'+(yBot-yTop)+
+             '" rx="3" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'"/>');
+
+      /* подпись имени: слева, отступ по глубине — тоже через sx */
+      var lx=sx(LABX + s.d*INDENT);
+      txt(lx, sy(i), 'name mono', 'start', s.n);
+
+      /* поводок от подписи к началу полоски */
+      line(sx(LABX + s.d*INDENT + 1.5), sy(i), x0-PAD, sy(i), 'lead');
+
+      /* длительность: справа от хвоста полоски */
+      txt(x1+PAD, sy(i), 'dur'+(s.kind==='hot'?' hot':''), 'start', s.dur);
+
+      /* уголок дерева к родителю */
+      if(s.d>0){
+        var px=sx(LABX + (s.d-1)*INDENT + 0.06);
+        var parent=i-1; while(parent>=0 && spans[parent].d>=s.d) parent--;
+        o.push('<path class="tree" d="M '+px+' '+sy(parent+0.35)+
+               ' V '+sy(i)+' H '+(lx-PAD/2)+'" stroke-width="'+STROKE+'"/>');
+      }
+    });
+
+    /* легенда */
+    function chip(xv,color,stroke,label){
+      var x0=sx(xv), x1=sx(xv+0.15), y0=sy(ROWS+0.55), y1=sy(ROWS+0.9);
+      o.push('<rect x="'+x0+'" y="'+y0+'" width="'+(x1-x0)+'" height="'+(y1-y0)+
+             '" rx="2" fill="'+color+'" stroke="'+stroke+'" stroke-width="'+STROKE+'"/>');
+      txt(x1+PAD, sy(ROWS+0.72), 'cap', 'start', label);
+    }
+    chip(LABX,'var(--accentSoft)','var(--accent)','самая длинная полоска нижних уровней и её ребёнок');
+    chip(1.75,'var(--bar)','var(--barStroke)','остальные спаны');
+    txt(sx(LABX), sy(ROWS+1.35),'cap','start',
+        'Верхняя полоска 4.2 с длиннее всех, но она лишь обнимает остальные — искать надо ниже.');
+
+    svg.innerHTML=o.join('');
+  }catch(e){
+    var f=document.getElementById('fallback');
+    f.hidden=false;
+    f.textContent='Схема не построилась. Она показывает водопад из шести спанов одного запроса: '+
+      'сверху agent.invoke_agent на 4.2 с, под ним на втором уровне llm.chat 0.8 с, '+
+      'tool.execute 3.1 с, llm.chat 0.5 с и subagent.invoke 0.2 с, а на третьем уровне — '+
+      'mcp.call 3.0 с внутри tool.execute. Подсвечена связка tool.execute + mcp.call: '+
+      'самая длинная полоска на нижних уровнях, в ней и сидят три секунды из четырёх.';
+    svg.remove();
+  }
+})();
+</script>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Три поколения эмбеддингов</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #fbfbfd; color: #1c1c22; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 8px 4px 12px; }
+  h2 { font-size: 15px; margin: 4px 6px 6px; font-weight: 600; }
+  svg { display: block; width: 100%; height: auto; max-height: 520px; background: #fbfbfd; }
+  .fail { padding: 10px; font-size: 13px; line-height: 1.5; }
+  text { fill: #1c1c22; font-family: system-ui, sans-serif; }
+  .muted { fill: #5d5d6b; }
+  .card { fill: #ffffff; stroke: #c9c9d6; }
+  .vec { fill: #d8dce6; stroke: #7d8496; }
+  .arr { stroke: #7d8496; fill: none; }
+  .g1 { stroke: #b06a1f; fill: #b06a1f; }
+  .g2 { stroke: #1f6f9b; fill: #1f6f9b; }
+  .g3 { stroke: #2f7d51; fill: #2f7d51; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #14141a; color: #e9e9f0; }
+    svg { background: #14141a; }
+    text { fill: #e9e9f0; }
+    .muted { fill: #9b9bad; }
+    .card { fill: #1e1e27; stroke: #3c3c4c; }
+    .vec { fill: #2b2b38; stroke: #8b90a2; }
+    .arr { stroke: #8b90a2; }
+    .g1 { stroke: #e0a25c; fill: #e0a25c; }
+    .g2 { stroke: #6cb6de; fill: #6cb6de; }
+    .g3 { stroke: #6cc38c; fill: #6cc38c; }
+  }
+</style>
+<div class="wrap">
+  <h2>Три поколения эмбеддингов: менялась не размерность, а задание</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function () {
+  var host = document.getElementById('host');
+  try {
+    // ---- данные схемы -------------------------------------------------
+    var GENS = [
+      { x: 0, cls: 'g1', year: '2013', name: 'Word2Vec',
+        task: 'предсказать соседей по слову',
+        dim: '300 чисел на слово',
+        rows: [{ label: 'king', note: 'один вектор навсегда' }] },
+      { x: 1, cls: 'g2', year: '2019', name: 'Sentence-BERT',
+        task: 'сближать похожие пары',
+        dim: '768 чисел на фразу',
+        rows: [{ label: '«как сбросить пароль?»', note: '' },
+               { label: '«надо сменить пароль»', note: 'векторы почти совпали' }] },
+      { x: 2, cls: 'g3', year: '2024', name: 'instruction-tuned (e5)',
+        task: 'тот же текст под разную роль',
+        dim: '768 чисел на фразу',
+        rows: [{ label: 'search_query:', note: '' },
+               { label: 'search_document:', note: 'префикс задаёт роль' }] }
+    ];
+
+    // ---- одна система координат ---------------------------------------
+    var ORIGIN = { x: 26, y: 22 };   // пиксель точки (0,0) схемы
+    var SCALE  = { x: 104, y: 15 };  // пикселей на единицу схемы
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y + y * SCALE.y; }
+
+    // ---- пиксельные литералы (разрешённые) -----------------------------
+    var VB_W = 760, VB_H = 320, PAD = 6, LW = 1.4, FS = 12, FS_SM = 10.5, FS_BIG = 13.5;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a, t) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      if (t != null) e.textContent = t;
+      return e;
+    }
+    var svg = el('svg', {
+      viewBox: '0 0 ' + VB_W + ' ' + VB_H,
+      preserveAspectRatio: 'xMidYMid meet',
+      role: 'img',
+      'aria-label': 'Три поколения эмбеддингов: Word2Vec 2013, Sentence-BERT 2019, instruction-tuned 2024'
+    });
+
+    function txt(x, y, s, cls, anchor, size, dy) {
+      var e = el('text', {
+        x: sx(x), y: sy(y), 'text-anchor': anchor || 'start',
+        'font-size': size || FS, dy: (dy || 0)
+      }, s);
+      if (cls) e.setAttribute('class', cls);
+      svg.appendChild(e);
+    }
+
+    // наконечник стрелки — вершины тоже через sx/sy
+    function arrow(x0, y0, x1, y1, cls) {
+      svg.appendChild(el('line', {
+        x1: sx(x0), y1: sy(y0), x2: sx(x1), y2: sy(y1),
+        class: 'arr ' + (cls || ''), 'stroke-width': LW
+      }));
+      var hx = 0.028, hy = 0.34;
+      svg.appendChild(el('polygon', {
+        class: cls, points: [
+          sx(x1) + ',' + sy(y1),
+          sx(x1 - hx) + ',' + sy(y1 - hy),
+          sx(x1 - hx) + ',' + sy(y1 + hy)
+        ].join(' ')
+      }));
+    }
+
+    // столбик-вектор из ячеек
+    function vector(x, y, cells, cls) {
+      var w = 0.037, gap = 0.006;
+      for (var i = 0; i < cells.length; i++) {
+        svg.appendChild(el('rect', {
+          class: 'vec', x: sx(x + i * (w + gap)), y: sy(y - 0.55),
+          width: sx(w) - sx(0), height: sy(1.1) - sy(0), rx: 2, 'stroke-width': 1
+        }));
+        svg.appendChild(el('text', {
+          x: sx(x + i * (w + gap) + w / 2), y: sy(y), dy: 4,
+          'text-anchor': 'middle', 'font-size': FS_SM
+        }, cells[i]));
+      }
+    }
+
+    // ---- рисуем три колонки -------------------------------------------
+    var COL_W = 0.86;               // ширина карточки в единицах x
+    GENS.forEach(function (g) {
+      var x0 = g.x * 1.0 - 0.06;    // левый край карточки
+      svg.appendChild(el('rect', {
+        class: 'card', x: sx(x0), y: sy(0.2),
+        width: sx(x0 + COL_W) - sx(x0), height: sy(18.2) - sy(0.2),
+        rx: 6, 'stroke-width': 1
+      }));
+
+      // заголовок: год и модель — разные строки, оба middle по центру карточки
+      var cx = x0 + COL_W / 2;
+      txt(cx, 1.6, g.year, g.cls, 'middle', FS_BIG);
+      txt(cx, 3.0, g.name, null, 'middle', FS);
+      txt(cx, 4.3, 'цель обучения:', 'muted', 'middle', FS_SM);
+      txt(cx, 5.4, g.task, 'muted', 'middle', FS_SM);
+
+      // входы и векторы
+      var top = 7.4;
+      g.rows.forEach(function (r, i) {
+        var y = top + i * 4.2;
+        txt(x0 + 0.06, y, r.label, null, 'start', FS);          // подпись входа слева сверху
+        arrow(x0 + 0.06, y + 1.0, x0 + 0.06 + 0.30, y + 1.0, g.cls);
+        vector(x0 + 0.44, y + 1.0, ['0.02', '−0.4', '0.9', '…'], g.cls);
+        if (r.note) txt(cx, y + 2.5, r.note, g.cls, 'middle', FS_SM); // примечание ниже вектора
+      });
+
+      // размерность — низ карточки
+      txt(cx, 17.4, g.dim, 'muted', 'middle', FS_SM);
+    });
+
+    // ---- нижняя ось «что менялось» -------------------------------------
+    var axY = 19.6;
+    var axL = -0.06, axR = 2.0 - 0.06 + COL_W;
+    svg.appendChild(el('line', {
+      x1: sx(axL), y1: sy(axY), x2: sx(axR - 0.02), y2: sy(axY),
+      class: 'arr', 'stroke-width': LW
+    }));
+    svg.appendChild(el('polygon', {
+      class: 'muted', points: [
+        sx(axR) + ',' + sy(axY),
+        sx(axR - 0.028) + ',' + sy(axY - 0.34),
+        sx(axR - 0.028) + ',' + sy(axY + 0.34)
+      ].join(' ')
+    }));
+    GENS.forEach(function (g) {
+      var tx = g.x * 1.0 - 0.06 + COL_W / 2;
+      svg.appendChild(el('line', {
+        x1: sx(tx), y1: sy(axY - 0.4), x2: sx(tx), y2: sy(axY + 0.4),
+        class: 'arr', 'stroke-width': 1
+      }));
+    });
+    txt(axL, axY + 1.8, 'меняется не длина вектора, а то, за что модель хвалили на обучении',
+        'muted', 'start', FS_SM);
+
+    host.appendChild(svg);
+  } catch (e) {
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она должна была показать три поколения: ' +
+      '2013 Word2Vec — слово «king» превращается в один вектор на 300 чисел, одинаковый в любом контексте; ' +
+      '2019 Sentence-BERT — два перефраза про смену пароля дают два почти совпавших вектора на 768 чисел; ' +
+      '2024 instruction-tuned (e5) — префиксы search_query: и search_document: задают роль текста, ' +
+      'те же 768 чисел. Размерность почти не менялась — менялась цель обучения.</div>';
+  }
+})();
+</script>
+</html>

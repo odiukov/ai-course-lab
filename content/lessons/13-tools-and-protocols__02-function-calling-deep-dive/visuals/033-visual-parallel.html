@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>400 мс вместо 1,2 секунды</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1c1c1a; --muted:#6b6b66;
+    --seq:#b4553a; --par:#2f7a5e; --axis:#9a9a92; --grid:#e4e4de;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16181a; --fg:#e9e9e4; --muted:#9d9d96;
+      --seq:#e0876a; --par:#63c39b; --axis:#5e6165; --grid:#2a2d30;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:14px 12px 12px;
+    font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  h2{margin:0 0 8px;font-size:15px;font-weight:600;letter-spacing:.01em}
+  svg{display:block;width:100%;height:auto;max-height:470px}
+  .fail{color:var(--muted);font-size:13px;margin:0}
+  text{font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;fill:var(--fg)}
+  text.small{font-size:11px;fill:var(--muted)}
+  text.b{font-weight:600}
+</style>
+<div class="wrap">
+  <h2>400 мс вместо 1,2 секунды: три вызова по очереди и разом</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    // ---- данные схемы ----
+    var CALLS=[
+      {id:"call_a1", city:"Лондон", ms:400},
+      {id:"call_b2", city:"Токио",  ms:400},
+      {id:"call_c3", city:"Осло",   ms:400}
+    ];
+    var DUR=400, TOTAL_SEQ=1200, TOTAL_PAR=400;
+    var LANE=28;            // единиц данных на дорожку по вертикали
+    var W=760, H=430;       // холст, px
+    var PAD=6;              // отступ подписи от точки привязки, px
+    var LW=1;               // толщина линии
+    var BARH=16;            // высота полосы в единицах данных
+
+    // ---- единственный перевод координат ----
+    var origin={x:150,y:40}, scale={x:0.44,y:1};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,cls,anchor){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"start"});
+      if(cls)t.setAttribute("class",cls);
+      t.appendChild(document.createTextNode(s)); return t;
+    }
+
+    var svg=el("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet",
+      role:"img","aria-label":"Три последовательных вызова по 400 мс дают 1200 мс, три параллельных — 400 мс"});
+    var g=el("g",{}); svg.appendChild(g);
+
+    var mk=el("marker",{id:"ah",viewBox:"0 0 8 8",refX:"7",refY:"4",
+      markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+    mk.appendChild(el("path",{d:"M0,0 L8,4 L0,8 z",fill:"var(--axis)"}));
+    var defs=el("defs",{}); defs.appendChild(mk); svg.appendChild(defs);
+
+    function line(x1,y1,x2,y2,stroke,extra){
+      var a={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),stroke:stroke,"stroke-width":LW};
+      if(extra)for(var k in extra)a[k]=extra[k];
+      g.appendChild(el("line",a));
+    }
+    function bar(x,ms,yTop,fill){
+      g.appendChild(el("rect",{x:sx(x),y:sy(yTop),width:sx(x+ms)-sx(x),height:sy(yTop+BARH)-sy(yTop),
+        rx:3,fill:fill,"fill-opacity":.20,stroke:fill,"stroke-width":LW}));
+    }
+
+    // вертикальные линии времени: 0, 400, 800, 1200
+    var ticks=[0,400,800,1200];
+    var yTopGrid=0, yBotGrid=LANE*8;
+    ticks.forEach(function(t){
+      line(t,yTopGrid,t,yBotGrid,"var(--grid)");
+      g.appendChild(txt(sx(t),sy(yBotGrid)+PAD+11,t+" мс","small","middle"));
+    });
+    g.appendChild(txt(sx(TOTAL_SEQ),sy(yBotGrid)+PAD+26,"время","small","end"));
+
+    // ---------- блок 1: по очереди ----------
+    var y0=0;
+    g.appendChild(txt(sx(0)-PAD,sy(y0+12),"По очереди","b","end"));
+    g.appendChild(txt(sx(0)-PAD,sy(y0+28),"вызов → ответ → вызов","small","end"));
+
+    CALLS.forEach(function(c,i){
+      var top=y0+LANE+i*LANE, start=i*DUR;
+      bar(start,DUR,top,"var(--seq)");
+      g.appendChild(txt(sx(start)+PAD,sy(top+BARH/2)+4,c.city+" · "+DUR+" мс","",'start'));
+      g.appendChild(txt(sx(0)-PAD,sy(top+BARH/2)+4,c.id,"small","end"));
+    });
+
+    // итог последовательного: линия под тремя полосами
+    var ySum=y0+LANE+3*LANE+10;
+    line(0,ySum,TOTAL_SEQ,ySum,"var(--seq)",{"marker-start":"url(#ah)","marker-end":"url(#ah)"});
+    g.appendChild(txt(sx(TOTAL_SEQ/2),sy(ySum)+PAD+13,"итого "+TOTAL_SEQ+" мс = 1,2 с","b","middle"));
+
+    // разделитель блоков
+    var ySep=ySum+LANE;
+    line(0,ySep,TOTAL_SEQ,ySep,"var(--axis)",{"stroke-dasharray":"3 4","stroke-opacity":".6"});
+
+    // ---------- блок 2: разом ----------
+    var y1=ySep+14;
+    g.appendChild(txt(sx(0)-PAD,sy(y1+12),"Разом","b","end"));
+    g.appendChild(txt(sx(0)-PAD,sy(y1+28),"три tool_calls в одном","small","end"));
+    g.appendChild(txt(sx(0)-PAD,sy(y1+42),"сообщении","small","end"));
+
+    var barH2=14, gap2=4;
+    CALLS.forEach(function(c,i){
+      var top=y1+8+i*(barH2+gap2);
+      g.appendChild(el("rect",{x:sx(0),y:sy(top),width:sx(DUR)-sx(0),height:sy(top+barH2)-sy(top),
+        rx:3,fill:"var(--par)","fill-opacity":.20,stroke:"var(--par)","stroke-width":LW}));
+      g.appendChild(txt(sx(0)+PAD,sy(top+barH2/2)+4,c.city+" · "+DUR+" мс","","start"));
+      g.appendChild(txt(sx(DUR)+PAD,sy(top+barH2/2)+4,c.id,"small","start"));
+    });
+
+    var ySum2=y1+8+3*(barH2+gap2)+8;
+    line(0,ySum2,TOTAL_PAR,ySum2,"var(--par)",{"marker-start":"url(#ah)","marker-end":"url(#ah)"});
+    g.appendChild(txt(sx(TOTAL_PAR/2),sy(ySum2)+PAD+13,"итого "+TOTAL_PAR+" мс","b","middle"));
+    g.appendChild(txt(sx(TOTAL_PAR)+PAD+52,sy(ySum2)+4,"не сумма, а самый долгий","small","start"));
+
+    // легенда: сопоставление по id, не по порядку
+    var yLeg=yBotGrid+34;
+    g.appendChild(txt(sx(0),sy(yLeg),"Ответы приходят вразнобой — сопоставление по tool_call_id, не по порядку.","small","start"));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема должна была показать два таймлайна одних и тех же трёх вызовов погоды. '+
+      'Сверху последовательно: Лондон 400 мс, затем Токио 400 мс, затем Осло 400 мс — итого 1200 мс (1,2 с). '+
+      'Снизу параллельно: те же три вызова стартуют вместе и заканчиваются на 400 мс — итого 400 мс, '+
+      'то есть длительность самого долгого, а не сумма. У каждой полосы своя метка tool_call_id '+
+      '(call_a1, call_b2, call_c3), по ней результат и сопоставляется с вызовом.</p>';
+  }
+})();
+</script>
+</html>

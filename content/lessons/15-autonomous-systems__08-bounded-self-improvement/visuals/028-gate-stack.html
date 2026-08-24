@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Стек гейтов от дешёвых проверок к дорогим</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #596579;
+      --border: #b9c3d3;
+      --flow: #13736d;
+      --flow-fill: #dff4ef;
+      --cost: #5368b7;
+      --failure: #b52843;
+      --failure-fill: #fde8ec;
+      --fast: #38a678;
+      --anchor: #3f91b4;
+      --criteria: #6574c9;
+      --regression: #9b5daf;
+      --shadow: #d9dfeb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #121722;
+        --panel: #1b2230;
+        --ink: #edf2fa;
+        --muted: #aeb9ca;
+        --border: #566276;
+        --flow: #70d4c8;
+        --flow-fill: #173b39;
+        --cost: #9eafff;
+        --failure: #ff8399;
+        --failure-fill: #48242d;
+        --fast: #61c99c;
+        --anchor: #67bcdc;
+        --criteria: #929ef0;
+        --regression: #ca8bd8;
+        --shadow: #0b0e15;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: initial;
+    }
+
+    h2 {
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .gate,
+    .input-box,
+    .reject-box {
+      fill: var(--panel);
+      stroke: var(--border);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .gate-shadow {
+      fill: var(--shadow);
+      stroke: none;
+    }
+
+    .reject-box {
+      fill: var(--failure-fill);
+      stroke: var(--failure);
+      stroke-width: 2px;
+    }
+
+    .gate-bar {
+      stroke: none;
+    }
+
+    .bar-fast {
+      fill: var(--fast);
+    }
+
+    .bar-anchor {
+      fill: var(--anchor);
+    }
+
+    .bar-criteria {
+      fill: var(--criteria);
+    }
+
+    .bar-regression {
+      fill: var(--regression);
+    }
+
+    .flow-line {
+      stroke: var(--flow);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .flow-head {
+      fill: var(--flow);
+      stroke: none;
+    }
+
+    .cost-line {
+      stroke: var(--cost);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cost-head {
+      fill: var(--cost);
+      stroke: none;
+    }
+
+    .failure-line {
+      stroke: var(--failure);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .failure-head {
+      fill: var(--failure);
+      stroke: none;
+    }
+
+    .outcome-dot {
+      fill: var(--flow-fill);
+      stroke: var(--flow);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+      dominant-baseline: middle;
+    }
+
+    .gate-title {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .gate-detail {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .stage-label {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .cost-label {
+      fill: var(--cost);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .failure-label {
+      fill: var(--failure);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .reject-title {
+      fill: var(--failure);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .reject-detail {
+      fill: var(--ink);
+      font-size: 13px;
+    }
+
+    .input-title,
+    .outcome-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      color: var(--failure);
+      background: var(--failure-fill);
+      font-size: 16px;
+      padding: 14px 18px;
+      border: 2px solid var(--failure);
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h2 id="diagram-title">Стек гейтов: от дешёвых проверок к дорогим</h2>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1120 430"
+      width="1120"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Правка последовательно проходит инварианты и хеши, якорь, четыре
+        критерия и регрессии. Провал любого гейта ведёт к отклонению и паузе.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать четыре последовательных гейта: инварианты и
+      хеши, якорь, четыре критерия и регрессии. Провал любого гейта означает:
+      «Отклонить и поставить на паузу».
+    </p>
+  </figure>
+
+  <script>
+    const diagramData = [
+      {
+        kind: "settings",
+        namespace: "http://www.w3.org/2000/svg",
+        arrowLength: 10,
+        arrowHalf: 6,
+        labelPad: 12,
+        shadowShiftX: 5,
+        shadowShiftY: 6
+      },
+      {
+        kind: "arrow",
+        style: "cost",
+        x1: 130,
+        y1: 58,
+        x2: 1025,
+        y2: 58
+      },
+      {
+        kind: "label",
+        text: "ДЕШЁВЫЕ ПРОВЕРКИ",
+        x: 130,
+        y: 35,
+        anchor: "start",
+        className: "cost-label"
+      },
+      {
+        kind: "label",
+        text: "ДОРОГИЕ ПРОВЕРКИ",
+        x: 1025,
+        y: 35,
+        anchor: "end",
+        className: "cost-label"
+      },
+      {
+        kind: "node",
+        role: "input",
+        x: 20,
+        y: 128,
+        w: 80,
+        h: 68,
+        className: "input-box",
+        lines: [
+          {
+            text: "Правка",
+            x: 60,
+            y: 152,
+            anchor: "middle",
+            className: "input-title"
+          },
+          {
+            text: "кандидат",
+            x: 60,
+            y: 174,
+            anchor: "middle",
+            className: "gate-detail"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        role: "gate",
+        x: 130,
+        y: 105,
+        w: 200,
+        h: 118,
+        barH: 8,
+        className: "gate",
+        barClass: "bar-fast",
+        lines: [
+          {
+            text: "СНАЧАЛА",
+            x: 230,
+            y: 87,
+            anchor: "middle",
+            className: "stage-label"
+          },
+          {
+            text: "Инварианты и хеши",
+            x: 230,
+            y: 137,
+            anchor: "middle",
+            className: "gate-title"
+          },
+          {
+            text: "замороженные части",
+            x: 230,
+            y: 168,
+            anchor: "middle",
+            className: "gate-detail"
+          },
+          {
+            text: "файлы • хеши • текст",
+            x: 230,
+            y: 191,
+            anchor: "middle",
+            className: "gate-detail"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        role: "gate",
+        x: 370,
+        y: 105,
+        w: 170,
+        h: 118,
+        barH: 8,
+        className: "gate",
+        barClass: "bar-anchor",
+        lines: [
+          {
+            text: "ПОТОМ",
+            x: 455,
+            y: 87,
+            anchor: "middle",
+            className: "stage-label"
+          },
+          {
+            text: "Якорь",
+            x: 455,
+            y: 137,
+            anchor: "middle",
+            className: "gate-title"
+          },
+          {
+            text: "активная цель",
+            x: 455,
+            y: 168,
+            anchor: "middle",
+            className: "gate-detail"
+          },
+          {
+            text: "совпадает с якорем",
+            x: 455,
+            y: 191,
+            anchor: "middle",
+            className: "gate-detail"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        role: "gate",
+        x: 580,
+        y: 105,
+        w: 240,
+        h: 118,
+        barH: 8,
+        className: "gate",
+        barClass: "bar-criteria",
+        lines: [
+          {
+            text: "ЗАТЕМ",
+            x: 700,
+            y: 87,
+            anchor: "middle",
+            className: "stage-label"
+          },
+          {
+            text: "Четыре критерия",
+            x: 700,
+            y: 137,
+            anchor: "middle",
+            className: "gate-title"
+          },
+          {
+            text: "качество • безопасность",
+            x: 700,
+            y: 168,
+            anchor: "middle",
+            className: "gate-detail"
+          },
+          {
+            text: "справедливость • устойчивость",
+            x: 700,
+            y: 191,
+            anchor: "middle",
+            className: "gate-detail"
+          }
+        ]
+      },
+      {
+        kind: "node",
+        role: "gate",
+        x: 860,
+        y: 105,
+        w: 165,
+        h: 118,
+        barH: 8,
+        className: "gate",
+        barClass: "bar-regression",
+        lines: [
+          {
+            text: "В КОНЦЕ",
+            x: 942.5,
+            y: 87,
+            anchor: "middle",
+            className: "stage-label"
+          },
+          {
+            text: "Регрессии",
+            x: 942.5,
+            y: 137,
+            anchor: "middle",
+            className: "gate-title"
+          },
+          {
+            text: "нет просадки",
+            x: 942.5,
+            y: 168,
+            anchor: "middle",
+            className: "gate-detail"
+          },
+          {
+            text: "сверх допуска",
+            x: 942.5,
+            y: 191,
+            anchor: "middle",
+            className: "gate-detail"
+          }
+        ]
+      },
+      {
+        kind: "outcome",
+        cx: 1065,
+        cy: 164,
+        rx: 8,
+        ry: 8,
+        label: {
+          text: "Допустить",
+          x: 1074,
+          y: 195,
+          anchor: "end",
+          className: "outcome-label"
+        }
+      },
+      {
+        kind: "arrow",
+        style: "flow",
+        x1: 100,
+        y1: 164,
+        x2: 130,
+        y2: 164
+      },
+      {
+        kind: "arrow",
+        style: "flow",
+        x1: 330,
+        y1: 164,
+        x2: 370,
+        y2: 164
+      },
+      {
+        kind: "arrow",
+        style: "flow",
+        x1: 540,
+        y1: 164,
+        x2: 580,
+        y2: 164
+      },
+      {
+        kind: "arrow",
+        style: "flow",
+        x1: 820,
+        y1: 164,
+        x2: 860,
+        y2: 164
+      },
+      {
+        kind: "arrow",
+        style: "flow",
+        x1: 1025,
+        y1: 164,
+        x2: 1057,
+        y2: 164
+      },
+      {
+        kind: "arrow",
+        style: "failure",
+        x1: 230,
+        y1: 223,
+        x2: 230,
+        y2: 320,
+        label: {
+          text: "провал",
+          x: 230,
+          y: 246,
+          side: "right",
+          className: "failure-label"
+        }
+      },
+      {
+        kind: "arrow",
+        style: "failure",
+        x1: 455,
+        y1: 223,
+        x2: 455,
+        y2: 320,
+        label: {
+          text: "провал",
+          x: 455,
+          y: 246,
+          side: "right",
+          className: "failure-label"
+        }
+      },
+      {
+        kind: "arrow",
+        style: "failure",
+        x1: 700,
+        y1: 223,
+        x2: 700,
+        y2: 320,
+        label: {
+          text: "провал",
+          x: 700,
+          y: 246,
+          side: "right",
+          className: "failure-label"
+        }
+      },
+      {
+        kind: "arrow",
+        style: "failure",
+        x1: 942.5,
+        y1: 223,
+        x2: 942.5,
+        y2: 320,
+        label: {
+          text: "провал",
+          x: 942.5,
+          y: 246,
+          side: "right",
+          className: "failure-label"
+        }
+      },
+      {
+        kind: "node",
+        role: "reject",
+        x: 130,
+        y: 320,
+        w: 895,
+        h: 70,
+        className: "reject-box",
+        lines: [
+          {
+            text: "Отклонить и поставить на паузу",
+            x: 577.5,
+            y: 347,
+            anchor: "middle",
+            className: "reject-title"
+          },
+          {
+            text: "любой единичный провал останавливает ревью",
+            x: 577.5,
+            y: 373,
+            anchor: "middle",
+            className: "reject-detail"
+          }
+        ]
+      }
+    ];
+
+    const origin = Object.freeze({ x: 20, y: 10 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const settings = diagramData.find(item => item.kind === "settings");
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const svg = document.getElementById("diagram");
+
+      const make = (tag, attributes) => {
+        const element = document.createElementNS(settings.namespace, tag);
+        for (const [name, value] of Object.entries(attributes)) {
+          element.setAttribute(name, String(value));
+        }
+        plot.appendChild(element);
+        return element;
+      };
+
+      const drawText = label => {
+        make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          "text-anchor": label.anchor,
+          class: label.className
+        }).textContent = label.text;
+      };
+
+      const drawRect = (item, className, shiftX, shiftY) => {
+        make("rect", {
+          x: sx(item.x + shiftX),
+          y: sy(item.y + shiftY),
+          width: sx(item.x + shiftX + item.w) - sx(item.x + shiftX),
+          height: sy(item.y + shiftY + item.h) - sy(item.y + shiftY),
+          class: className
+        });
+      };
+
+      const drawArrow = item => {
+        const deltaX = item.x2 - item.x1;
+        const deltaY = item.y2 - item.y1;
+        const length = Math.hypot(deltaX, deltaY);
+        const unitX = deltaX / length;
+        const unitY = deltaY / length;
+        const baseX = item.x2 - unitX * settings.arrowLength;
+        const baseY = item.y2 - unitY * settings.arrowLength;
+        const leftX = baseX - unitY * settings.arrowHalf;
+        const leftY = baseY + unitX * settings.arrowHalf;
+        const rightX = baseX + unitY * settings.arrowHalf;
+        const rightY = baseY - unitX * settings.arrowHalf;
+
+        make("line", {
+          x1: sx(item.x1),
+          y1: sy(item.y1),
+          x2: sx(item.x2),
+          y2: sy(item.y2),
+          class: item.style + "-line"
+        });
+
+        make("polygon", {
+          points:
+            sx(item.x2) + "," + sy(item.y2) + " " +
+            sx(leftX) + "," + sy(leftY) + " " +
+            sx(rightX) + "," + sy(rightY),
+          class: item.style + "-head"
+        });
+
+        if (item.label) {
+          const labelX = item.label.side === "right"
+            ? item.label.x + settings.labelPad
+            : item.label.x - settings.labelPad;
+
+          drawText({
+            text: item.label.text,
+            x: labelX,
+            y: item.label.y,
+            anchor: item.label.side === "right" ? "start" : "end",
+            className: item.label.className
+          });
+        }
+      };
+
+      plot.replaceChildren();
+
+      for (const item of diagramData.filter(entry => entry.kind === "arrow")) {
+        drawArrow(item);
+      }
+
+      for (const item of diagramData.filter(entry => entry.kind === "node")) {
+        if (item.role === "gate") {
+          drawRect(
+            item,
+            "gate-shadow",
+            settings.shadowShiftX,
+            settings.shadowShiftY
+          );
+        }
+
+        drawRect(item, item.className, sx(0) - sx(0), sy(0) - sy(0));
+
+        if (item.role === "gate") {
+          make("rect", {
+            x: sx(item.x),
+            y: sy(item.y),
+            width: sx(item.x + item.w) - sx(item.x),
+            height: sy(item.y + item.barH) - sy(item.y),
+            class: "gate-bar " + item.barClass
+          });
+        }
+
+        for (const line of item.lines) {
+          drawText(line);
+        }
+      }
+
+      for (const item of diagramData.filter(entry => entry.kind === "outcome")) {
+        make("ellipse", {
+          cx: sx(item.cx),
+          cy: sy(item.cy),
+          rx: sx(item.cx + item.rx) - sx(item.cx),
+          ry: sy(item.cy + item.ry) - sy(item.cy),
+          class: "outcome-dot"
+        });
+        drawText(item.label);
+      }
+
+      for (const item of diagramData.filter(entry => entry.kind === "label")) {
+        drawText(item);
+      }
+
+      fallback.hidden = true;
+      svg.removeAttribute("aria-hidden");
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      if (svg) {
+        svg.setAttribute("aria-hidden", "true");
+        svg.hidden = true;
+      }
+
+      if (fallback) {
+        fallback.hidden = false;
+      }
+    }
+  </script>
+</body>
+</html>

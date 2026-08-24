@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Решётка динамического программирования Витерби</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #64748b;
+    --grid: #cbd5e1;
+    --node: #94a3b8;
+    --candidate: #94a3b8;
+    --best: #2563eb;
+    --best-soft: #dbeafe;
+    --good: #087f5b;
+    --good-soft: #dff7ee;
+    --bad: #b42318;
+    --bad-soft: #fee4e2;
+    --border: #cbd5e1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10151f;
+      --panel: #171e2b;
+      --ink: #edf2f7;
+      --muted: #aab6c8;
+      --grid: #344155;
+      --node: #65738a;
+      --candidate: #718096;
+      --best: #62a0ff;
+      --best-soft: #203b63;
+      --good: #61d6ad;
+      --good-soft: #173c35;
+      --bad: #ff8e86;
+      --bad-soft: #482725;
+      --border: #344155;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+  }
+
+  .title {
+    padding: 12px;
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--bg);
+  }
+
+  .small { font-size: 12px; }
+  .label { font-size: 14px; }
+  .value { font-size: 25px; font-weight: bold; }
+  .card-title { font-size: 16px; font-weight: bold; }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <div class="title" id="diagram-title">Решётка Витерби: лучший путь без полного перебора</div>
+  <svg id="diagram" viewBox="0 0 1200 460" width="1200" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Решётка для двадцати слов и сорока тегов с лучшими входящими стрелками и сравнением числа вычислений"></svg>
+</figure>
+
+<script>
+const data = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  half: 0.5,
+  origin: { x: 20, y: 10 },
+  scale: { x: 10, y: 10 },
+  words: 20,
+  tags: 40,
+  grid: { x: 11, y: 8, dx: 3.45, dy: 0.72 },
+  gridTop: 7,
+  gridBottom: 36.8,
+  gridLeft: 9,
+  gridRight: 78.5,
+  wordLabelY: 4.6,
+  bracketY: 40,
+  bracketTick: 0.8,
+  tagBracketX: 6.4,
+  tagTick: 0.8,
+  tagLabelX: 2.6,
+  tagLabelY: 21.5,
+  nodeRadius: 0.11,
+  pathRadius: 0.27,
+  focusRadius: 0.52,
+  arrowSize: 0.55,
+  arrowAngle: 0.48,
+  arrowTrim: 0.32,
+  candidateRows: [8, 14, 20, 27, 34],
+  focusColumn: 10,
+  path: [22, 21, 22, 20, 19, 20, 18, 19, 17, 18, 16, 17, 15, 16, 14, 15, 13, 14, 12, 11],
+  card: { x: 83, w: 34, top: 7, h: 14.2, gap: 2.2 },
+  cardPadX: 2,
+  cardTitleY: 2.7,
+  cardValueY: 7.2,
+  cardLineY: 10.5,
+  legendY: 43.2,
+  legendX: 11,
+  legendGap: 23,
+  legendLine: 5.2,
+  labelPad: 8,
+  stroke: 1.2,
+  strongStroke: 2.4,
+  subtleStroke: 0.8,
+  dash: 4,
+  gap: 4,
+  mutedOpacity: 0.42,
+  candidateOpacity: 0.72,
+  fillOpacity: 0.82,
+  fullOpacity: 1,
+  minus: -1,
+  labels: {
+    words: "20 слов",
+    tagsCount: "40",
+    tagsWord: "тегов",
+    beginning: "начало фразы",
+    ending: "конец фразы",
+    cell: "ячейка: лучший накопленный log-score",
+    candidates: "проверяемые входы",
+    winner: "сохранённая лучшая стрелка",
+    fullTitle: "Полный перебор",
+    fullValue: "40²⁰",
+    fullLine: "полных цепочек",
+    vitTitle: "Витерби",
+    vitValue: "20 × 40 × 40",
+    vitLine: "= 32 000 переходов",
+    fallback: "Схема должна показывать решётку из 20 слов и 40 тегов, лучшие входящие стрелки и сравнение 40²⁰ цепочек с 32 000 переходов."
+  }
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const ns = "http://www.w3.org/2000/svg";
+
+function el(name, attrs, parent = svg) {
+  const node = document.createElementNS(ns, name);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+  parent.appendChild(node);
+  return node;
+}
+
+function line(xa, ya, xb, yb, attrs = {}, parent = svg) {
+  return el("line", {
+    x1: sx(xa),
+    y1: sy(ya),
+    x2: sx(xb),
+    y2: sy(yb),
+    ...attrs
+  }, parent);
+}
+
+function circle(x, y, radius, attrs = {}, parent = svg) {
+  return el("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(radius) - sx(data.zero),
+    ...attrs
+  }, parent);
+}
+
+function rect(x, y, width, height, attrs = {}, parent = svg) {
+  return el("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + width) - sx(x),
+    height: sy(y + height) - sy(y),
+    ...attrs
+  }, parent);
+}
+
+function label(value, x, y, anchor, dx, dy, className, fill, parent = svg) {
+  const node = el("text", {
+    x: sx(x) + dx * data.labelPad,
+    y: sy(y) + dy * data.labelPad,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle",
+    class: className,
+    fill
+  }, parent);
+  node.textContent = value;
+  return node;
+}
+
+function arrow(xa, ya, xb, yb, color, width, opacity, dashed, parent = svg) {
+  const vx = xb - xa;
+  const vy = yb - ya;
+  const length = Math.hypot(vx, vy);
+  const ux = vx / length;
+  const uy = vy / length;
+  const tx = xb - ux * data.arrowTrim;
+  const ty = yb - uy * data.arrowTrim;
+
+  const attrs = {
+    stroke: color,
+    "stroke-width": width,
+    "stroke-linecap": "round",
+    opacity
+  };
+
+  if (dashed) {
+    attrs["stroke-dasharray"] = data.dash + " " + data.gap;
+  }
+
+  line(xa, ya, tx, ty, attrs, parent);
+
+  const angle = Math.atan2(vy, vx);
+  const leftX = tx - data.arrowSize * Math.cos(angle - data.arrowAngle);
+  const leftY = ty - data.arrowSize * Math.sin(angle - data.arrowAngle);
+  const rightX = tx - data.arrowSize * Math.cos(angle + data.arrowAngle);
+  const rightY = ty - data.arrowSize * Math.sin(angle + data.arrowAngle);
+
+  el("polygon", {
+    points: [
+      sx(tx) + "," + sy(ty),
+      sx(leftX) + "," + sy(leftY),
+      sx(rightX) + "," + sy(rightY)
+    ].join(" "),
+    fill: color,
+    opacity
+  }, parent);
+}
+
+function columnX(column) {
+  return data.grid.x + column * data.grid.dx;
+}
+
+function rowY(row) {
+  return data.grid.y + row * data.grid.dy;
+}
+
+function addTwoLineLabel(first, second, x, y, fill, parent) {
+  label(first, x, y - data.half, "middle", data.zero, data.zero,
+        "card-title", fill, parent);
+  label(second, x, y + data.one, "middle", data.zero, data.zero,
+        "small", fill, parent);
+}
+
+try {
+  const background = el("g", { "aria-hidden": "true" });
+  rect(data.gridLeft, data.gridTop, data.gridRight - data.gridLeft,
+       data.gridBottom - data.gridTop, {
+         fill: "var(--panel)",
+         stroke: "var(--border)",
+         "stroke-width": data.stroke
+       }, background);
+
+  const gridLayer = el("g", { "aria-hidden": "true" });
+  for (let column = data.zero; column < data.words; column += data.one) {
+    const x = columnX(column);
+    line(x, data.gridTop, x, data.gridBottom, {
+      stroke: "var(--grid)",
+      "stroke-width": data.subtleStroke,
+      opacity: data.mutedOpacity
+    }, gridLayer);
+
+    for (let row = data.zero; row < data.tags; row += data.one) {
+      circle(x, rowY(row), data.nodeRadius, {
+        fill: "var(--node)",
+        opacity: data.fillOpacity
+      }, gridLayer);
+    }
+  }
+
+  for (let row = data.zero; row < data.tags; row += data.one) {
+    line(data.gridLeft, rowY(row), data.gridRight, rowY(row), {
+      stroke: "var(--grid)",
+      "stroke-width": data.subtleStroke,
+      opacity: data.mutedOpacity
+    }, gridLayer);
+  }
+
+  const focus = data.focusColumn;
+  const targetX = columnX(focus);
+  const targetY = rowY(data.path[focus]);
+  const previousX = columnX(focus - data.one);
+
+  const candidateLayer = el("g", { "aria-hidden": "true" });
+  data.candidateRows.forEach(row => {
+    arrow(previousX, rowY(row), targetX, targetY,
+          "var(--candidate)", data.stroke,
+          data.candidateOpacity, true, candidateLayer);
+  });
+
+  label(data.labels.candidates, previousX, rowY(data.candidateRows[data.zero]),
+        "end", data.minus, data.minus, "small",
+        "var(--muted)", candidateLayer);
+
+  const pathLayer = el("g", { "aria-hidden": "true" });
+  for (let column = data.one; column < data.words; column += data.one) {
+    arrow(columnX(column - data.one), rowY(data.path[column - data.one]),
+          columnX(column), rowY(data.path[column]),
+          "var(--best)", data.strongStroke,
+          data.fullOpacity, false, pathLayer);
+  }
+
+  for (let column = data.zero; column < data.words; column += data.one) {
+    circle(columnX(column), rowY(data.path[column]), data.pathRadius, {
+      fill: "var(--best)",
+      stroke: "var(--panel)",
+      "stroke-width": data.stroke
+    }, pathLayer);
+  }
+
+  circle(targetX, targetY, data.focusRadius, {
+    fill: "none",
+    stroke: "var(--best)",
+    "stroke-width": data.strongStroke
+  }, pathLayer);
+
+  label(data.labels.winner, targetX - data.grid.dx * data.half,
+        targetY + data.two, "start", data.one, data.one,
+        "small", "var(--best)", pathLayer);
+
+  label(data.labels.cell, columnX(data.two), rowY(data.path[data.two]),
+        "start", data.one, data.minus, "small",
+        "var(--best)", pathLayer);
+
+  const bracketLayer = el("g", { "aria-hidden": "true" });
+  line(columnX(data.zero), data.bracketY,
+       columnX(data.words - data.one), data.bracketY, {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  line(columnX(data.zero), data.bracketY - data.bracketTick,
+       columnX(data.zero), data.bracketY + data.bracketTick, {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  line(columnX(data.words - data.one), data.bracketY - data.bracketTick,
+       columnX(data.words - data.one), data.bracketY + data.bracketTick, {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  label(data.labels.words,
+        (columnX(data.zero) + columnX(data.words - data.one)) * data.half,
+        data.bracketY, "middle", data.zero, data.one,
+        "label", "var(--ink)", bracketLayer);
+
+  line(data.tagBracketX, rowY(data.zero),
+       data.tagBracketX, rowY(data.tags - data.one), {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  line(data.tagBracketX - data.tagTick, rowY(data.zero),
+       data.tagBracketX + data.tagTick, rowY(data.zero), {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  line(data.tagBracketX - data.tagTick, rowY(data.tags - data.one),
+       data.tagBracketX + data.tagTick, rowY(data.tags - data.one), {
+         stroke: "var(--ink)",
+         "stroke-width": data.stroke
+       }, bracketLayer);
+  addTwoLineLabel(data.labels.tagsCount, data.labels.tagsWord,
+                  data.tagLabelX, data.tagLabelY,
+                  "var(--ink)", bracketLayer);
+
+  label(data.labels.beginning, columnX(data.zero), data.wordLabelY,
+        "start", data.zero, data.zero, "small",
+        "var(--muted)", bracketLayer);
+  label(data.labels.ending, columnX(data.words - data.one), data.wordLabelY,
+        "end", data.zero, data.zero, "small",
+        "var(--muted)", bracketLayer);
+
+  const cards = el("g", { "aria-hidden": "true" });
+  const badY = data.card.top;
+  const goodY = data.card.top + data.card.h + data.card.gap;
+  const cardCenter = data.card.x + data.card.w * data.half;
+
+  rect(data.card.x, badY, data.card.w, data.card.h, {
+    fill: "var(--bad-soft)",
+    stroke: "var(--bad)",
+    "stroke-width": data.stroke
+  }, cards);
+  label(data.labels.fullTitle, data.card.x + data.cardPadX,
+        badY + data.cardTitleY, "start", data.zero, data.zero,
+        "card-title", "var(--bad)", cards);
+  label(data.labels.fullValue, cardCenter,
+        badY + data.cardValueY, "middle", data.zero, data.zero,
+        "value", "var(--bad)", cards);
+  label(data.labels.fullLine, cardCenter,
+        badY + data.cardLineY, "middle", data.zero, data.zero,
+        "label", "var(--ink)", cards);
+
+  rect(data.card.x, goodY, data.card.w, data.card.h, {
+    fill: "var(--good-soft)",
+    stroke: "var(--good)",
+    "stroke-width": data.strongStroke
+  }, cards);
+  label(data.labels.vitTitle, data.card.x + data.cardPadX,
+        goodY + data.cardTitleY, "start", data.zero, data.zero,
+        "card-title", "var(--good)", cards);
+  label(data.labels.vitValue, cardCenter,
+        goodY + data.cardValueY, "middle", data.zero, data.zero,
+        "value", "var(--good)", cards);
+  label(data.labels.vitLine, cardCenter,
+        goodY + data.cardLineY, "middle", data.zero, data.zero,
+        "label", "var(--ink)", cards);
+
+  const legend = el("g", { "aria-hidden": "true" });
+  line(data.legendX, data.legendY,
+       data.legendX + data.legendLine, data.legendY, {
+         stroke: "var(--candidate)",
+         "stroke-width": data.stroke,
+         "stroke-dasharray": data.dash + " " + data.gap
+       }, legend);
+  label(data.labels.candidates, data.legendX + data.legendLine,
+        data.legendY, "start", data.one, data.zero,
+        "small", "var(--muted)", legend);
+
+  line(data.legendX + data.legendGap, data.legendY,
+       data.legendX + data.legendGap + data.legendLine, data.legendY, {
+         stroke: "var(--best)",
+         "stroke-width": data.strongStroke
+       }, legend);
+  label(data.labels.winner,
+        data.legendX + data.legendGap + data.legendLine,
+        data.legendY, "start", data.one, data.zero,
+        "small", "var(--best)", legend);
+} catch (error) {
+  svg.replaceChildren();
+  rect(data.one, data.one, data.card.x + data.card.w - data.two,
+       data.legendY - data.two, {
+         fill: "var(--panel)",
+         stroke: "var(--bad)",
+         "stroke-width": data.stroke
+       });
+  const fallback = label(data.labels.fallback, data.two, data.tagLabelY,
+                         "start", data.zero, data.zero,
+                         "label", "var(--ink)");
+  fallback.setAttribute("lengthAdjust", "spacingAndGlyphs");
+  fallback.setAttribute("textLength",
+    sx(data.card.x + data.card.w - data.gridLeft) - sx(data.zero));
+}
+</script>
+</body>
+</html>

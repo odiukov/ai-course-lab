@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Один цикл constrained decoding</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #566176;
+      --line: #53627b;
+      --accent: #315bd6;
+      --accent-fill: #eaf0ff;
+      --guard: #087e6a;
+      --guard-fill: #e3f7f2;
+      --decision: #9a5700;
+      --decision-fill: #fff1d6;
+      --exit: #923c51;
+      --exit-fill: #fdebf0;
+      --shadow: #d9e0ec;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      padding: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 100%;
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 10px 14px;
+      border: 1px solid var(--shadow);
+      border-bottom: unset;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 470px;
+      max-height: 520px;
+      overflow: visible;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .branch {
+      stroke: var(--decision);
+    }
+
+    .arrow {
+      fill: var(--line);
+      stroke: none;
+    }
+
+    .arrow.branch {
+      fill: var(--decision);
+    }
+
+    .node {
+      fill: var(--accent-fill);
+      stroke: var(--accent);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node.guard {
+      fill: var(--guard-fill);
+      stroke: var(--guard);
+    }
+
+    .node.decision {
+      fill: var(--decision-fill);
+      stroke: var(--decision);
+    }
+
+    .node.exit {
+      fill: var(--exit-fill);
+      stroke: var(--exit);
+    }
+
+    .node.ready {
+      fill: var(--guard-fill);
+      stroke: var(--guard);
+    }
+
+    .title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .detail {
+      fill: var(--muted);
+      font-size: 13px;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .edge-label {
+      fill: var(--muted);
+      font-size: 13px;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+
+    .edge-label.branch-label {
+      fill: var(--decision);
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 14px;
+      color: var(--exit);
+      background: var(--exit-fill);
+      border: 1px solid var(--exit);
+      font-size: 15px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0d1119;
+        --panel: #151b26;
+        --ink: #eef3ff;
+        --muted: #b8c2d6;
+        --line: #9dabc4;
+        --accent: #8ba8ff;
+        --accent-fill: #202d50;
+        --guard: #68d9c2;
+        --guard-fill: #153d38;
+        --decision: #ffc46b;
+        --decision-fill: #493416;
+        --exit: #ff9eb3;
+        --exit-fill: #482630;
+        --shadow: #344056;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-heading">Один цикл constrained decoding</h1>
+
+    <svg id="diagram"
+         viewBox="0 0 1000 470"
+         width="1000"
+         height="470"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-heading diagram-description">
+      <desc id="diagram-description">
+        Цикл из логитов, допустимых токенов, маскирования, softmax и сэмплирования,
+        перехода автомата и проверки принимающего состояния. Отдельно показаны
+        выходы при пустом valid и достижении max_tokens, равного 256.
+      </desc>
+      <g id="edges"></g>
+      <g id="nodes"></g>
+      <g id="labels"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать цикл: logits → valid tokens → mask →
+      softmax и sample → transition → проверка accept, а также отдельные
+      выходы при max_tokens = 256 и пустом valid.
+    </p>
+  </main>
+
+  <script>
+    const DATA = [
+      ["config", 0.24, 0.15, 0.18, -1, -2, 2],
+
+      ["node", "logits", "node", 2.5, 2.2, 3, 1.55,
+        [["title", "logits", -0.25], ["detail", "A · 7 · − · }", 0.28]]],
+      ["node", "valid", "node guard", 7.1, 2.2, 3.2, 1.55,
+        [["title", "valid tokens", -0.25], ["detail", "что разрешено сейчас", 0.28]]],
+      ["node", "mask", "node", 11.7, 2.2, 3.2, 1.55,
+        [["title", "mask", -0.25], ["detail", "остальные → −∞", 0.28]]],
+      ["node", "sample", "node", 11.7, 6.3, 3.2, 1.55,
+        [["title", "softmax и sample", -0.25], ["detail", "выбор разрешённого", 0.28]]],
+      ["node", "transition", "node guard", 7.1, 6.3, 3.2, 1.55,
+        [["title", "transition", -0.25], ["detail", "сдвиг состояния", 0.28]]],
+      ["node", "accept", "node decision", 2.5, 6.3, 3, 1.55,
+        [["title", "проверка accept", -0.25], ["detail", "шаблон завершён?", 0.28]]],
+
+      ["node", "limit", "node exit", 2.2, 10.2, 3.4, 1.5,
+        [["title", "выход", -0.24], ["detail", "max_tokens = 256", 0.27]]],
+      ["node", "ready", "node ready", 6.8, 10.2, 2.8, 1.5,
+        [["title", "готово", -0.24], ["detail", "accept = да", 0.27]]],
+      ["node", "empty", "node exit", 11.5, 10.2, 4, 1.5,
+        [["title", "выход", -0.24], ["detail", "пустой valid", 0.27]]],
+
+      ["edge", "normal",
+        [[4, 2.2], [5.5, 2.2]],
+        ["кандидаты модели", [4.3, 2.2], "up"]],
+      ["edge", "normal",
+        [[8.7, 2.2], [10.1, 2.2]],
+        ["только допустимые", [8.9, 2.2], "up"]],
+      ["edge", "normal",
+        [[11.7, 2.975], [11.7, 5.525]],
+        ["нулевая вероятность остальным", [11.7, 4.1], "right"]],
+      ["edge", "normal",
+        [[10.1, 6.3], [8.7, 6.3]],
+        ["выбранный токен", [9.9, 6.3], "down"]],
+      ["edge", "normal",
+        [[5.5, 6.3], [4, 6.3]],
+        ["новое состояние", [5.3, 6.3], "down"]],
+      ["edge", "normal",
+        [[1, 6.3], [0.45, 6.3], [0.45, 2.2], [1, 2.2]],
+        ["нет: следующий цикл", [0.58, 1.48], "right"]],
+
+      ["edge", "branch",
+        [[2.5, 7.075], [2.5, 8.4], [6.8, 8.4], [6.8, 9.45]],
+        ["да: формат завершён", [3.05, 8.4], "up"]],
+      ["edge", "branch",
+        [[0.45, 5], [0.45, 8.7], [2.2, 8.7], [2.2, 9.45]],
+        ["достигнут предел", [0.45, 8.05], "right"]],
+      ["edge", "branch",
+        [[7.1, 2.975], [8.95, 3.7], [14.5, 3.7], [14.5, 8.7], [11.5, 9.45]],
+        ["valid пуст", [9.05, 3.7], "up"]]
+    ];
+
+    const origin = Object.freeze({ x: 30, y: 18 });
+    const scale = Object.freeze({ x: 61, y: 40 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const LABEL_PAD = 8;
+    const LINE_WIDTH = 2;
+    const TEXT_SIZE = 15;
+
+    try {
+      const svgNS = "http://www.w3.org/2000/svg";
+      const edgesLayer = document.getElementById("edges");
+      const nodesLayer = document.getElementById("nodes");
+      const labelsLayer = document.getElementById("labels");
+
+      const [
+        ,
+        headLength,
+        headWidth,
+        cornerRadius,
+        lastIndex,
+        previousIndex,
+        two
+      ] = DATA.find(([kind]) => kind === "config");
+
+      const make = (name, attrs, parent) => {
+        const element = document.createElementNS(svgNS, name);
+        Object.entries(attrs).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+        parent.appendChild(element);
+        return element;
+      };
+
+      const pathData = points => points
+        .map(([x, y], position) => {
+          const command = position === points.keys().next().value ? "M" : "L";
+          return `${command} ${sx(x)} ${sy(y)}`;
+        })
+        .join(" ");
+
+      const addArrow = (points, branchKind) => {
+        const end = points.at(lastIndex);
+        const before = points.at(previousIndex);
+        const dx = end[0] - before[0];
+        const dy = end[1] - before[1];
+        const length = Math.hypot(dx, dy);
+
+        if (!length) {
+          throw new Error("Нулевая длина последнего участка стрелки");
+        }
+
+        const ux = dx / length;
+        const uy = dy / length;
+        const px = -uy;
+        const py = ux;
+        const baseX = end[0] - ux * headLength;
+        const baseY = end[1] - uy * headLength;
+
+        const vertices = [
+          [end[0], end[1]],
+          [baseX + px * headWidth, baseY + py * headWidth],
+          [baseX - px * headWidth, baseY - py * headWidth]
+        ];
+
+        make("polygon", {
+          points: vertices.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: branchKind === "branch" ? "arrow branch" : "arrow"
+        }, edgesLayer);
+      };
+
+      const addEdgeLabel = (label, point, side, branchKind) => {
+        const settings = {
+          up: {
+            dx: "",
+            dy: -LABEL_PAD,
+            anchor: "middle"
+          },
+          down: {
+            dx: "",
+            dy: LABEL_PAD,
+            anchor: "middle"
+          },
+          left: {
+            dx: -LABEL_PAD,
+            dy: "",
+            anchor: "end"
+          },
+          right: {
+            dx: LABEL_PAD,
+            dy: "",
+            anchor: "start"
+          }
+        };
+
+        const chosen = settings[side];
+        const text = make("text", {
+          x: sx(point[0]),
+          y: sy(point[1]),
+          dx: chosen.dx,
+          dy: chosen.dy,
+          "text-anchor": chosen.anchor,
+          "dominant-baseline": "middle",
+          class: branchKind === "branch"
+            ? "edge-label branch-label"
+            : "edge-label"
+        }, labelsLayer);
+
+        text.textContent = label;
+      };
+
+      DATA
+        .filter(([kind]) => kind === "edge")
+        .forEach(([, branchKind, points, labelData]) => {
+          make("path", {
+            d: pathData(points),
+            class: branchKind === "branch" ? "flow branch" : "flow",
+            "stroke-width": LINE_WIDTH
+          }, edgesLayer);
+
+          addArrow(points, branchKind);
+
+          const [label, point, side] = labelData;
+          addEdgeLabel(label, point, side, branchKind);
+        });
+
+      DATA
+        .filter(([kind]) => kind === "node")
+        .forEach(([, id, className, x, y, width, height, lines]) => {
+          make("rect", {
+            id,
+            x: sx(x - width / two),
+            y: sy(y - height / two),
+            width: sx(width) - sx(0),
+            height: sy(height) - sy(0),
+            rx: sx(cornerRadius) - sx(0),
+            ry: sy(cornerRadius) - sy(0),
+            class: className,
+            "stroke-width": LINE_WIDTH
+          }, nodesLayer);
+
+          lines.forEach(([lineClass, content, offset]) => {
+            const text = make("text", {
+              x: sx(x),
+              y: sy(y + offset),
+              class: lineClass,
+              "font-size": lineClass === "title" ? TEXT_SIZE : ""
+            }, nodesLayer);
+
+            text.textContent = content;
+          });
+        });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

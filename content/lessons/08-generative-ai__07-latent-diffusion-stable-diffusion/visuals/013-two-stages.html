@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Два отдельно обучаемых этапа latent diffusion</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f8fafc;
+  --panel:#ffffff;
+  --stage-a:#eef6ff;
+  --stage-b:#f5f1ff;
+  --ink:#172033;
+  --muted:#536174;
+  --line:#536174;
+  --vae:#1677a8;
+  --vae-fill:#dff3fb;
+  --latent:#a35a00;
+  --latent-fill:#fff0c7;
+  --diff:#7047b7;
+  --diff-fill:#eee5ff;
+  --frozen:#64748b;
+  --frozen-fill:#e9eef4;
+  --train:#18865b;
+  --image-sky:#a9ddf3;
+  --image-ground:#63a66f;
+  --image-sun:#ffd45c;
+  --image-hill:#397e63;
+  --border:#cbd5e1;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#10151d;
+    --panel:#151c26;
+    --stage-a:#13283a;
+    --stage-b:#241d39;
+    --ink:#f2f6fb;
+    --muted:#b5c0cf;
+    --line:#a9b5c5;
+    --vae:#70c8ee;
+    --vae-fill:#173b4b;
+    --latent:#f0b34d;
+    --latent-fill:#443619;
+    --diff:#c2a1ff;
+    --diff-fill:#38295a;
+    --frozen:#b4c0cf;
+    --frozen-fill:#293443;
+    --train:#66d6a6;
+    --image-sky:#285b74;
+    --image-ground:#315f42;
+    --image-sun:#f2c94c;
+    --image-hill:#214b3a;
+    --border:#415064;
+  }
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+figure{margin:0;background:var(--panel);border:1px solid var(--border);overflow:hidden}
+figcaption{padding:12px 16px;border-bottom:1px solid var(--border);font-size:19px;font-weight:700}
+svg{display:block;width:100%;height:auto;max-height:450px;background:var(--panel)}
+.stage{stroke:var(--border);stroke-width:1px}
+.stage-a{fill:var(--stage-a)}
+.stage-b{fill:var(--stage-b)}
+.node{stroke-width:2px}
+.vae{fill:var(--vae-fill);stroke:var(--vae)}
+.latent{fill:var(--latent-fill);stroke:var(--latent)}
+.diffusion{fill:var(--diff-fill);stroke:var(--diff)}
+.frozen{fill:var(--frozen-fill);stroke:var(--frozen)}
+.arrow,.loss{fill:none;stroke:var(--line);stroke-width:2px}
+.loss{stroke:var(--train)}
+.arrow-head{fill:var(--line)}
+.loss-head{fill:var(--train)}
+.title{fill:var(--ink);font-size:18px;font-weight:700}
+.subtitle{fill:var(--muted);font-size:14px}
+.label{fill:var(--ink);font-size:15px;font-weight:650}
+.small{fill:var(--muted);font-size:13px}
+.tensor{fill:var(--latent);font-size:14px;font-weight:700}
+.badge{fill:var(--train);font-size:13px;font-weight:700}
+.frozen-text{fill:var(--frozen);font-size:13px;font-weight:700}
+.loss-text{fill:var(--train);font-size:13px;font-weight:700}
+.image-frame{fill:var(--panel);stroke:var(--line);stroke-width:2px}
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Два отдельно обучаемых этапа latent diffusion</figcaption>
+  <svg id="diagram" viewBox="0 0 1240 450" role="img" aria-label="Сначала обучается VAE, затем при замороженном VAE отдельно обучается диффузионная модель в пространстве латентов"></svg>
+</figure>
+<script>
+const diagramData={
+  zero:0,
+  origin:{x:0,y:0},
+  scale:{x:1,y:1},
+  round:12,
+  stages:[
+    {x:18,y:16,w:1204,h:190,kind:"stage stage-a"},
+    {x:18,y:220,w:1204,h:212,kind:"stage stage-b"}
+  ],
+  text:[
+    {x:42,y:43,value:"Этап 1 — обучение VAE",kind:"title",anchor:"start"},
+    {x:42,y:65,value:"Задача: сжать изображение в латент и восстановить его",kind:"subtitle",anchor:"start"},
+    {x:1010,y:50,value:"обучаются вместе",kind:"badge",anchor:"middle"},
+    {x:1010,y:69,value:"энкодер + декодер",kind:"small",anchor:"middle"},
+    {x:90,y:174,value:"изображение x",kind:"label",anchor:"middle"},
+    {x:90,y:193,value:"3 × 512 × 512",kind:"small",anchor:"middle"},
+    {x:275,y:122,value:"VAE-энкодер",kind:"label",anchor:"middle"},
+    {x:487,y:116,value:"латент z",kind:"label",anchor:"middle"},
+    {x:487,y:139,value:"4 × 64 × 64",kind:"tensor",anchor:"middle"},
+    {x:700,y:122,value:"VAE-декодер",kind:"label",anchor:"middle"},
+    {x:885,y:174,value:"восстановление x̂",kind:"label",anchor:"middle"},
+    {x:885,y:193,value:"3 × 512 × 512",kind:"small",anchor:"middle"},
+    {x:592,y:194,value:"потеря реконструкции обучает VAE",kind:"loss-text",anchor:"middle"},
+    {x:42,y:247,value:"Этап 2 — обучение диффузии в латентах",kind:"title",anchor:"start"},
+    {x:42,y:269,value:"VAE уже подготовлен и заморожен; обучается только расшумливатель",kind:"subtitle",anchor:"start"},
+    {x:83,y:373,value:"реальное x",kind:"label",anchor:"middle"},
+    {x:83,y:392,value:"3 × 512 × 512",kind:"small",anchor:"middle"},
+    {x:227,y:318,value:"VAE-энкодер",kind:"label",anchor:"middle"},
+    {x:227,y:340,value:"❄ заморожен",kind:"frozen-text",anchor:"middle"},
+    {x:378,y:316,value:"чистый z₀",kind:"label",anchor:"middle"},
+    {x:378,y:339,value:"4 × 64 × 64",kind:"tensor",anchor:"middle"},
+    {x:490,y:326,value:"+ шум",kind:"small",anchor:"middle"},
+    {x:582,y:316,value:"зашумлённый zₜ",kind:"label",anchor:"middle"},
+    {x:582,y:339,value:"4 × 64 × 64",kind:"tensor",anchor:"middle"},
+    {x:750,y:310,value:"диффузионная модель",kind:"label",anchor:"middle"},
+    {x:750,y:333,value:"учится расшумлять zₜ → z₀",kind:"badge",anchor:"middle"},
+    {x:917,y:316,value:"новый z₀",kind:"label",anchor:"middle"},
+    {x:917,y:339,value:"4 × 64 × 64",kind:"tensor",anchor:"middle"},
+    {x:1055,y:318,value:"VAE-декодер",kind:"label",anchor:"middle"},
+    {x:1055,y:340,value:"❄ заморожен",kind:"frozen-text",anchor:"middle"},
+    {x:1175,y:373,value:"результат",kind:"label",anchor:"middle"},
+    {x:1175,y:392,value:"3 × 512 × 512",kind:"small",anchor:"middle"},
+    {x:620,y:417,value:"Общий интерфейс двух систем — латент формата 4 × 64 × 64",kind:"subtitle",anchor:"middle"}
+  ],
+  boxes:[
+    {x:200,y:91,w:150,h:62,kind:"node vae"},
+    {x:420,y:91,w:135,h:62,kind:"node latent"},
+    {x:625,y:91,w:150,h:62,kind:"node vae"},
+    {x:170,y:292,w:115,h:62,kind:"node frozen"},
+    {x:325,y:292,w:106,h:62,kind:"node latent"},
+    {x:540,y:292,w:85,h:62,kind:"node latent"},
+    {x:665,y:286,w:170,h:74,kind:"node diffusion"},
+    {x:875,y:292,w:85,h:62,kind:"node latent"},
+    {x:1000,y:292,w:110,h:62,kind:"node frozen"}
+  ],
+  images:[
+    {x:50,y:91,w:80,h:62},
+    {x:845,y:91,w:80,h:62},
+    {x:42,y:292,w:82,h:62},
+    {x:1142,y:292,w:66,h:62}
+  ],
+  scene:{pad:5,sky:31,sunX:61,sunY:17,sunR:7,ground:26,hillY:40},
+  noise:{
+    circle:{x:490,y:323,r:20},
+    dots:[
+      {x:481,y:316,r:3},{x:496,y:312,r:2},{x:500,y:328,r:3},
+      {x:483,y:333,r:2},{x:491,y:323,r:2}
+    ]
+  },
+  arrows:[
+    {a:{x:140,y:122},b:{x:190,y:122},p:[{x:190,y:122},{x:179,y:116},{x:179,y:128}]},
+    {a:{x:360,y:122},b:{x:410,y:122},p:[{x:410,y:122},{x:399,y:116},{x:399,y:128}]},
+    {a:{x:565,y:122},b:{x:615,y:122},p:[{x:615,y:122},{x:604,y:116},{x:604,y:128}]},
+    {a:{x:785,y:122},b:{x:835,y:122},p:[{x:835,y:122},{x:824,y:116},{x:824,y:128}]},
+    {a:{x:134,y:323},b:{x:160,y:323},p:[{x:160,y:323},{x:149,y:317},{x:149,y:329}]},
+    {a:{x:295,y:323},b:{x:315,y:323},p:[{x:315,y:323},{x:304,y:317},{x:304,y:329}]},
+    {a:{x:441,y:323},b:{x:460,y:323},p:[{x:460,y:323},{x:449,y:317},{x:449,y:329}]},
+    {a:{x:520,y:323},b:{x:530,y:323},p:[{x:530,y:323},{x:519,y:317},{x:519,y:329}]},
+    {a:{x:635,y:323},b:{x:655,y:323},p:[{x:655,y:323},{x:644,y:317},{x:644,y:329}]},
+    {a:{x:845,y:323},b:{x:865,y:323},p:[{x:865,y:323},{x:854,y:317},{x:854,y:329}]},
+    {a:{x:970,y:323},b:{x:990,y:323},p:[{x:990,y:323},{x:979,y:317},{x:979,y:329}]},
+    {a:{x:1120,y:323},b:{x:1132,y:323},p:[{x:1132,y:323},{x:1121,y:317},{x:1121,y:329}]}
+  ],
+  loss:{
+    points:[{x:885,y:164},{x:885,y:181},{x:90,y:181},{x:90,y:164}],
+    head:[{x:90,y:164},{x:84,y:175},{x:96,y:175}]
+  },
+  fallback:{x:620,y:212}
+};
+const origin=Object.freeze(diagramData.origin);
+const scale=Object.freeze(diagramData.scale);
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const ns=svg.namespaceURI;
+  const make=(name,attrs,parent=svg)=>{
+    const el=document.createElementNS(ns,name);
+    for(const [key,value] of Object.entries(attrs)) el.setAttribute(key,value);
+    parent.appendChild(el);
+    return el;
+  };
+  const widthOf=value=>sx(value)-sx(diagramData.zero);
+  const heightOf=value=>sy(value)-sy(diagramData.zero);
+  const rect=item=>make("rect",{
+    x:sx(item.x),y:sy(item.y),width:widthOf(item.w),height:heightOf(item.h),
+    rx:widthOf(diagramData.round),class:item.kind
+  });
+  const label=item=>{
+    const el=make("text",{
+      x:sx(item.x),y:sy(item.y),class:item.kind,"text-anchor":item.anchor
+    });
+    el.textContent=item.value;
+  };
+  const polygon=(points,kind)=>make("polygon",{
+    points:points.map(point=>`${sx(point.x)},${sy(point.y)}`).join(" "),
+    class:kind
+  });
+  const arrow=item=>{
+    make("line",{
+      x1:sx(item.a.x),y1:sy(item.a.y),x2:sx(item.b.x),y2:sy(item.b.y),
+      class:"arrow"
+    });
+    polygon(item.p,"arrow-head");
+  };
+  const imageCard=item=>{
+    const q=diagramData.scene;
+    make("rect",{
+      x:sx(item.x),y:sy(item.y),width:widthOf(item.w),height:heightOf(item.h),
+      rx:widthOf(q.pad),class:"image-frame"
+    });
+    make("rect",{
+      x:sx(item.x+q.pad),y:sy(item.y+q.pad),
+      width:widthOf(item.w-q.pad-q.pad),height:heightOf(q.sky),
+      fill:"var(--image-sky)"
+    });
+    make("circle",{
+      cx:sx(item.x+item.w-q.sunX+q.pad),cy:sy(item.y+q.sunY),
+      r:widthOf(q.sunR),fill:"var(--image-sun)"
+    });
+    polygon([
+      {x:item.x+q.pad,y:item.y+q.hillY},
+      {x:item.x+item.w-q.sunX,y:item.y+q.sky-q.pad},
+      {x:item.x+item.w-q.pad,y:item.y+q.hillY}
+    ],"image-hill");
+    make("rect",{
+      x:sx(item.x+q.pad),y:sy(item.y+item.h-q.ground-q.pad),
+      width:widthOf(item.w-q.pad-q.pad),height:heightOf(q.ground),
+      fill:"var(--image-ground)"
+    });
+  };
+
+  for(const stage of diagramData.stages) rect(stage);
+  for(const box of diagramData.boxes) rect(box);
+  for(const image of diagramData.images) imageCard(image);
+
+  make("circle",{
+    cx:sx(diagramData.noise.circle.x),cy:sy(diagramData.noise.circle.y),
+    r:widthOf(diagramData.noise.circle.r),fill:"var(--panel)",
+    stroke:"var(--line)","stroke-width":"2px"
+  });
+  for(const dot of diagramData.noise.dots){
+    make("circle",{
+      cx:sx(dot.x),cy:sy(dot.y),r:widthOf(dot.r),fill:"var(--line)"
+    });
+  }
+
+  for(const item of diagramData.arrows) arrow(item);
+
+  const lossPoints=diagramData.loss.points;
+  make("polyline",{
+    points:lossPoints.map(point=>`${sx(point.x)},${sy(point.y)}`).join(" "),
+    class:"loss"
+  });
+  polygon(diagramData.loss.head,"loss-head");
+
+  for(const item of diagramData.text) label(item);
+}catch(error){
+  const svg=document.getElementById("diagram");
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const fallback=document.createElementNS(svg.namespaceURI,"text");
+  fallback.setAttribute("x",sx(diagramData.fallback.x));
+  fallback.setAttribute("y",sy(diagramData.fallback.y));
+  fallback.setAttribute("text-anchor","middle");
+  fallback.setAttribute("class","label");
+  fallback.textContent="Изображение x → замороженный VAE-энкодер → латент 4 × 64 × 64 → расшумливание → VAE-декодер → 3 × 512 × 512";
+  svg.appendChild(fallback);
+}
+</script>
+</body>
+</html>

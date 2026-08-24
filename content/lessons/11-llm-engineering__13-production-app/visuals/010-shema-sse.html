@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Токены идут по SSE</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d23; --muted:#5b6472;
+    --line:#3a4250; --accent:#0b6bcb; --done:#1d8348; --card:#f2f5f9;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e6eaf0; --muted:#9aa5b4;
+      --line:#8b97a8; --accent:#5aa9f0; --done:#54c48a; --card:#1b212a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 0;}
+  h2{font-size:15px;margin:0 0 6px;padding:0 10px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{padding:10px;color:var(--muted);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Токены идут по SSE: одно соединение, много сообщений</h2>
+  <svg id="svg" viewBox="0 0 640 380" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Схема обмена: клиент, сервер, LLM и поток SSE-событий"></svg>
+  <div id="fb" class="fallback" hidden></div>
+</div>
+<script>
+(function(){
+  var svg=document.getElementById("svg");
+  try{
+    // ---- данные схемы (единицы схемы, не пиксели) ----
+    var LANES=[{id:"c",x:0,t:"Client"},{id:"s",x:5,t:"Server"},{id:"l",x:10,t:"LLM"}];
+    var TOP=0, BOT=13;            // вертикаль дорожек
+    var MSGS=[
+      {y:1.6, from:0, to:5,  label:"POST /chat",              side:"up",   kind:"req"},
+      {y:2.9, from:5, to:10, label:"запрос к модели",         side:"up",   kind:"req"},
+      {y:4.4, from:10,to:5,  label:"Content-Type: text/event-stream", side:"up", kind:"open"},
+      {y:5.6, from:5, to:0,  label:'data: {"token": "The"}',  side:"down", kind:"sse"},
+      {y:7.0, from:5, to:0,  label:'data: {"token": "capital"}', side:"down", kind:"sse"},
+      {y:8.4, from:5, to:0,  label:'data: {"token": "of"}',   side:"down", kind:"sse"},
+      {y:9.8, from:5, to:0,  label:"…",                       side:"down", kind:"sse"},
+      {y:11.2,from:5, to:0,  label:"data: [DONE]",            side:"down", kind:"done"}
+    ];
+
+    // ---- один origin, один scale, одна пара sx/sy ----
+    var origin={x:96,y:52}, scale={x:44,y:24};
+    function sx(x){return origin.x + x*scale.x;}
+    function sy(y){return origin.y + y*scale.y;}
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,cls,anchor){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle",class:cls||""});
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+    var PAD=7, HEAD=4;   // пиксельные отступы подписи и наконечника
+
+    var st=el("style",{});
+    st.textContent=
+      ".ln{stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4}"+
+      ".ax{stroke:var(--line);stroke-width:1.5}"+
+      ".ar{stroke:var(--accent);stroke-width:1.8;fill:none}"+
+      ".ard{stroke:var(--done);stroke-width:1.8;fill:none}"+
+      ".hd{fill:var(--accent);stroke:none}.hdd{fill:var(--done);stroke:none}"+
+      "text{font:12px system-ui,sans-serif;fill:var(--fg)}"+
+      ".lane{font-weight:600;font-size:13px}"+
+      ".mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;fill:var(--muted)}"+
+      ".note{font-size:11.5px;fill:var(--muted)}";
+    svg.appendChild(st);
+
+    // рамка «соединение открыто» вдоль дорожки клиента
+    svg.appendChild(el("rect",{
+      x:sx(0), y:sy(4.4), width:sx(5)-sx(0), height:sy(11.2)-sy(4.4),
+      rx:6, fill:"var(--card)", stroke:"none"}));
+
+    // дорожки-жизненные линии
+    LANES.forEach(function(L){
+      svg.appendChild(el("line",{class:"ln",x1:sx(L.x),y1:sy(TOP),x2:sx(L.x),y2:sy(BOT)}));
+      var head=txt(sx(L.x),sy(TOP)-PAD,L.t,"lane","middle");
+      head.setAttribute("y",sy(TOP)-PAD);
+      svg.appendChild(el("line",{class:"ax",
+        x1:sx(L.x)-scale.x*0.7,y1:sy(TOP),x2:sx(L.x)+scale.x*0.7,y2:sy(TOP)}));
+    });
+
+    // стрелки сообщений
+    MSGS.forEach(function(m){
+      var x1=sx(m.from), x2=sx(m.to), y=sy(m.y);
+      var done=(m.kind==="done");
+      svg.appendChild(el("line",{class:done?"ard":"ar",x1:x1,y1:y,x2:x2,y2:y}));
+      var dir=(x2>x1)?1:-1;
+      svg.appendChild(el("path",{class:done?"hdd":"hd",
+        d:"M"+x2+","+y+" L"+(x2-dir*HEAD*2)+","+(y-HEAD)+" L"+(x2-dir*HEAD*2)+","+(y+HEAD)+" Z"}));
+      // подпись у хвоста, увод от наконечника
+      var tx=x1+dir*PAD, anchor=(dir>0)?"start":"end";
+      var ty=(m.side==="up")? y-PAD : y-PAD;
+      txt(tx,ty,m.label,(m.kind==="sse"||m.kind==="done"||m.kind==="open")?"mono":"",anchor);
+    });
+
+    // пояснения сбоку: пустая строка = разделитель
+    txt(sx(0)-PAD, sy(6.3), "пустая строка", "note", "end");
+    txt(sx(0)-PAD, sy(6.9), "= разделитель", "note", "end");
+    txt(sx(0)-PAD, sy(11.2)+PAD*2, "конец потока", "note", "end");
+
+    // подпись канала
+    txt(sx(2.5), sy(12.4), "одно соединение, труба односторонняя: сервер → клиент", "note", "middle");
+  }catch(e){
+    svg.setAttribute("hidden","hidden");
+    var fb=document.getElementById("fb");
+    fb.hidden=false;
+    fb.textContent="Схема: клиент шлёт POST /chat серверу, сервер — запрос к LLM. "+
+      "Ответ идёт с Content-Type: text/event-stream по одному открытому соединению: "+
+      'data: {"token": "The"}, data: {"token": "capital"}, data: {"token": "of"}, ... , '+
+      "в конце data: [DONE]. Каждое сообщение отделено пустой строкой; канал односторонний — только сервер клиенту.";
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Безопасный путь побочного эффекта через outbox</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5c667a;
+    --line: #7d8799;
+    --soft: #e8edf5;
+    --green: #16835b;
+    --green-fill: #e7f6ef;
+    --red: #c23b45;
+    --red-fill: #fdecee;
+    --blue: #3568b8;
+    --blue-fill: #eaf1fc;
+    --amber: #9a6815;
+    --amber-fill: #fff5d9;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111620;
+      --panel: #171e2b;
+      --ink: #edf2fb;
+      --muted: #aab4c6;
+      --line: #7f8ba0;
+      --soft: #273245;
+      --green: #61d6a5;
+      --green-fill: #173b31;
+      --red: #ff8189;
+      --red-fill: #47242b;
+      --blue: #8bb7ff;
+      --blue-fill: #213551;
+      --amber: #f0c56c;
+      --amber-fill: #40351f;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--panel);
+    border: 1px solid var(--soft);
+    overflow: hidden;
+  }
+
+  h2 {
+    margin: 12px 18px 6px;
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    font-size: 12px;
+    fill: var(--muted);
+  }
+
+  .box-label {
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .lane-label {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .green-text { fill: var(--green); }
+  .red-text { fill: var(--red); }
+  .muted-text { fill: var(--muted); }
+
+  .fallback {
+    margin: 14px 18px 18px;
+    padding: 14px;
+    border: 2px solid var(--red);
+    background: var(--red-fill);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <h2>Безопасный путь побочного эффекта через outbox</h2>
+  <svg id="scheme" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <title id="diagram-title">Безопасный путь платёжного эффекта через outbox</title>
+    <desc id="diagram-desc">Два опасных порядка действий сопоставлены с атомарной записью run и outbox, последующей обработкой платежа и безопасной повторной доставкой с тем же ключом дедупликации.</desc>
+  </svg>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать: run и outbox сохраняются одной транзакцией с общим dedup key; отдельный обработчик выполняет платёж и отмечает запись выполненной, а повторная доставка использует тот же ключ и не создаёт второй эффект.
+  </div>
+</figure>
+
+<script>
+const [data] = [{
+  origin: { x: 30, y: 14 },
+  scale: 10,
+  half: 2,
+  canvas: { x1: -3, y1: -1.4, x2: 117, y2: 42.6 },
+  arrow: { head: 1.15, wing: 0.62 },
+  badOne: {
+    tag: { x: 2, y: 2.2, text: "КРАСНЫЙ ПУТЬ: отправить до сохранения" },
+    boxes: [
+      { x1: 2, y1: 3.6, x2: 17, y2: 9.6, kind: "start" },
+      { x1: 23, y1: 3.6, x2: 35, y2: 9.6, kind: "danger" },
+      { x1: 44, y1: 3.6, x2: 58, y2: 9.6, kind: "danger" }
+    ],
+    arrows: [
+      { x1: 17, y1: 6.6, x2: 23, y2: 6.6, kind: "danger" },
+      { x1: 35, y1: 6.6, x2: 44, y2: 6.6, kind: "danger" }
+    ],
+    crash: { cx: 39.5, cy: 6.6, rx: 2.1, ry: 1.7 },
+    labels: [
+      { x: 9.5, y: 6.1, lines: ["Агент подготовил", "платный запрос"], anchor: "middle", cls: "box-label" },
+      { x: 29, y: 6.1, lines: ["Отправить", "платёж"], anchor: "middle", cls: "box-label red-text" },
+      { x: 51, y: 6.1, lines: ["Чекпоинта нет:", "эффект повторится"], anchor: "middle", cls: "box-label red-text" },
+      { x: 39.5, y: 10.7, lines: ["сбой до записи run"], anchor: "middle", cls: "small red-text" }
+    ]
+  },
+  badTwo: {
+    tag: { x: 64, y: 2.2, text: "КРАСНЫЙ ПУТЬ: сохранить до отправки" },
+    boxes: [
+      { x1: 64, y1: 3.6, x2: 76, y2: 9.6, kind: "danger" },
+      { x1: 85, y1: 3.6, x2: 97, y2: 9.6, kind: "danger" },
+      { x1: 103, y1: 3.6, x2: 115, y2: 9.6, kind: "danger" }
+    ],
+    arrows: [
+      { x1: 76, y1: 6.6, x2: 85, y2: 6.6, kind: "danger" },
+      { x1: 97, y1: 6.6, x2: 103, y2: 6.6, kind: "danger" }
+    ],
+    crash: { cx: 80.5, cy: 6.6, rx: 2.1, ry: 1.7 },
+    labels: [
+      { x: 70, y: 6.1, lines: ["Сохранить", "run"], anchor: "middle", cls: "box-label red-text" },
+      { x: 91, y: 6.1, lines: ["Отправка", "не началась"], anchor: "middle", cls: "box-label red-text" },
+      { x: 109, y: 6.1, lines: ["Чекпоинт есть:", "платёж пропущен"], anchor: "middle", cls: "box-label red-text" },
+      { x: 80.5, y: 10.7, lines: ["сбой до вызова"], anchor: "middle", cls: "small red-text" }
+    ]
+  },
+  divider: { x1: 2, y1: 13, x2: 115, y2: 13 },
+  good: {
+    tag: { x: 2, y: 15.4, text: "ЗЕЛЁНЫЙ ПУТЬ: намерение сохраняется, попытку можно повторить" },
+    transaction: { x1: 2, y1: 17.1, x2: 50, y2: 31.7 },
+    txTitle: { x: 4, y: 19.3, text: "ОДНА ТРАНЗАКЦИЯ: обе записи или ни одной" },
+    run: { x1: 5, y1: 23.1, x2: 20.5, y2: 29.6 },
+    outbox: { x1: 29, y1: 23.1, x2: 47, y2: 29.6 },
+    keyLine: { x1: 20.5, y1: 21.5, x2: 29, y2: 21.5 },
+    keyTicks: [
+      { x1: 20.5, y1: 21.5, x2: 20.5, y2: 23.1 },
+      { x1: 29, y1: 21.5, x2: 29, y2: 23.1 }
+    ],
+    keyLabel: { x: 24.75, y: 20.8, lines: ["один dedup key", "из шага 27"], anchor: "middle", cls: "small green-text" },
+    runLabel: { x: 12.75, y: 25.7, lines: ["run", "новое состояние"], anchor: "middle", cls: "box-label" },
+    outboxLabel: { x: 38, y: 25.7, lines: ["outbox", "выполнить платёж"], anchor: "middle", cls: "box-label" },
+    worker: { x1: 56, y1: 23.1, x2: 69, y2: 29.6 },
+    service: { x1: 76, y1: 23.1, x2: 92, y2: 29.6 },
+    done: { x1: 102, y1: 23.1, x2: 115, y2: 29.6 },
+    labels: [
+      { x: 62.5, y: 25.7, lines: ["Обработчик", "из шага 30"], anchor: "middle", cls: "box-label" },
+      { x: 84, y: 25.7, lines: ["Платёжный", "сервис"], anchor: "middle", cls: "box-label" },
+      { x: 108.5, y: 25.7, lines: ["outbox:", "выполнено"], anchor: "middle", cls: "box-label" }
+    ],
+    arrows: [
+      { x1: 50, y1: 26.35, x2: 56, y2: 26.35, kind: "good" },
+      { x1: 69, y1: 26.35, x2: 76, y2: 26.35, kind: "good" },
+      { x1: 92, y1: 26.35, x2: 102, y2: 26.35, kind: "good" }
+    ],
+    arrowLabels: [
+      { x: 51, y: 24.7, lines: ["забрать намерение"], anchor: "start", cls: "small green-text" },
+      { x: 70, y: 24.7, lines: ["вызов с ключом"], anchor: "start", cls: "small green-text" },
+      { x: 93, y: 24.7, lines: ["отметить"], anchor: "start", cls: "small green-text" }
+    ],
+    failure: {
+      branch: [
+        { x: 97, y: 26.35 },
+        { x: 97, y: 34.1 },
+        { x: 62.5, y: 34.1 },
+        { x: 62.5, y: 29.6 }
+      ],
+      diamond: { cx: 97, cy: 31.7, rx: 1.8, ry: 1.4 },
+      failLabel: { x: 94.2, y: 32.2, lines: ["сбой до отметки"], anchor: "end", cls: "small red-text" },
+      retryLabel: { x: 79.7, y: 36.3, lines: ["повторная доставка: тот же ключ"], anchor: "middle", cls: "small green-text" }
+    }
+  },
+  note: {
+    x1: 2, y1: 38.1, x2: 115, y2: 41.5,
+    label: {
+      x: 58.5, y: 39.7,
+      lines: ["Outbox сохраняет намерение; dedup key делает повторную попытку безопасной — второй платёж не создаётся."],
+      anchor: "middle", cls: "box-label green-text"
+    }
+  }
+}];
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("scheme");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const node = (name, attrs, parent = svg) => {
+    const el = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    parent.appendChild(el);
+    return el;
+  };
+
+  const palette = kind => ({
+    start: ["var(--blue-fill)", "var(--blue)"],
+    danger: ["var(--red-fill)", "var(--red)"],
+    good: ["var(--green-fill)", "var(--green)"],
+    neutral: ["var(--panel)", "var(--line)"],
+    note: ["var(--green-fill)", "var(--green)"]
+  }[kind]);
+
+  const box = (b, kind) => {
+    const [fill, stroke] = palette(kind);
+    return node("path", {
+      d: [
+        "M", sx(b.x1), sy(b.y1),
+        "L", sx(b.x2), sy(b.y1),
+        "L", sx(b.x2), sy(b.y2),
+        "L", sx(b.x1), sy(b.y2),
+        "Z"
+      ].join(" "),
+      fill,
+      stroke,
+      "stroke-width": "2"
+    });
+  };
+
+  const line = (a, kind, dashed = false) => {
+    const stroke = palette(kind)[1];
+    return node("line", {
+      x1: sx(a.x1), y1: sy(a.y1),
+      x2: sx(a.x2), y2: sy(a.y2),
+      stroke,
+      "stroke-width": "2",
+      "stroke-dasharray": dashed ? "7 5" : "none"
+    });
+  };
+
+  const label = spec => {
+    const text = node("text", {
+      "text-anchor": spec.anchor,
+      class: spec.cls
+    });
+    spec.lines.forEach((content, index) => {
+      const tspan = node("tspan", {
+        x: sx(spec.x),
+        y: sy(spec.y + index * 1.65)
+      }, text);
+      tspan.textContent = content;
+    });
+    return text;
+  };
+
+  const arrow = a => {
+    const stroke = palette(a.kind)[1];
+    const dx = a.x2 - a.x1;
+    const dy = a.y2 - a.y1;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const bx = a.x2 - ux * data.arrow.head;
+    const by = a.y2 - uy * data.arrow.head;
+    const px = -uy * data.arrow.wing;
+    const py = ux * data.arrow.wing;
+
+    node("line", {
+      x1: sx(a.x1), y1: sy(a.y1),
+      x2: sx(bx), y2: sy(by),
+      stroke,
+      "stroke-width": "2"
+    });
+
+    node("polygon", {
+      points: [
+        [sx(a.x2), sy(a.y2)],
+        [sx(bx + px), sy(by + py)],
+        [sx(bx - px), sy(by - py)]
+      ].map(point => point.join(",")).join(" "),
+      fill: stroke
+    });
+  };
+
+  const diamond = d => node("polygon", {
+    points: [
+      [sx(d.cx), sy(d.cy - d.ry)],
+      [sx(d.cx + d.rx), sy(d.cy)],
+      [sx(d.cx), sy(d.cy + d.ry)],
+      [sx(d.cx - d.rx), sy(d.cy)]
+    ].map(point => point.join(",")).join(" "),
+    fill: "var(--red-fill)",
+    stroke: "var(--red)",
+    "stroke-width": "2"
+  });
+
+  const polyArrow = points => {
+    node("polyline", {
+      points: points.map(p => [sx(p.x), sy(p.y)].join(",")).join(" "),
+      fill: "none",
+      stroke: "var(--green)",
+      "stroke-width": "2",
+      "stroke-dasharray": "7 5"
+    });
+    const tail = points[points.length - data.half];
+    const tip = points[points.length - data.half + data.half / data.half];
+    arrow({ x1: tail.x, y1: tail.y, x2: tip.x, y2: tip.y, kind: "good" });
+  };
+
+  node("rect", {
+    x: sx(data.canvas.x1),
+    y: sy(data.canvas.y1),
+    width: sx(data.canvas.x2) - sx(data.canvas.x1),
+    height: sy(data.canvas.y2) - sy(data.canvas.y1),
+    fill: "var(--panel)"
+  });
+
+  [data.badOne, data.badTwo].forEach(lane => {
+    const laneTag = node("text", {
+      x: sx(lane.tag.x),
+      y: sy(lane.tag.y),
+      class: "lane-label red-text",
+      "text-anchor": "start"
+    });
+    laneTag.textContent = lane.tag.text;
+    lane.boxes.forEach(item => box(item, item.kind));
+    lane.arrows.forEach(item => arrow(item));
+    diamond(lane.crash);
+    lane.labels.forEach(label);
+  });
+
+  line(data.divider, "neutral", true);
+
+  const goodTag = node("text", {
+    x: sx(data.good.tag.x),
+    y: sy(data.good.tag.y),
+    class: "lane-label green-text",
+    "text-anchor": "start"
+  });
+  goodTag.textContent = data.good.tag.text;
+
+  box(data.good.transaction, "good");
+  const txTitle = node("text", {
+    x: sx(data.good.txTitle.x),
+    y: sy(data.good.txTitle.y),
+    class: "lane-label green-text",
+    "text-anchor": "start"
+  });
+  txTitle.textContent = data.good.txTitle.text;
+
+  box(data.good.run, "neutral");
+  box(data.good.outbox, "neutral");
+  line(data.good.keyLine, "good");
+  data.good.keyTicks.forEach(item => line(item, "good"));
+  label(data.good.keyLabel);
+  label(data.good.runLabel);
+  label(data.good.outboxLabel);
+
+  box(data.good.worker, "good");
+  box(data.good.service, "good");
+  box(data.good.done, "good");
+  data.good.labels.forEach(label);
+  data.good.arrows.forEach(arrow);
+  data.good.arrowLabels.forEach(label);
+
+  polyArrow(data.good.failure.branch);
+  diamond(data.good.failure.diamond);
+  label(data.good.failure.failLabel);
+  label(data.good.failure.retryLabel);
+
+  box(data.note, "note");
+  label(data.note.label);
+} catch (error) {
+  document.getElementById("scheme").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

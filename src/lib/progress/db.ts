@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 
 CREATE TABLE IF NOT EXISTS test_runs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Для контрактов капстоуна lesson_slug хранит slug проекта, а step_id — id
+  -- milestone: история прогонов остаётся общей, хотя у проекта нет урока и шага.
   lesson_slug   TEXT NOT NULL,
   step_id       TEXT NOT NULL,
   -- Для многофайлового упражнения здесь лежит пара "файл::функция", а у
@@ -80,9 +82,28 @@ CREATE TABLE IF NOT EXISTS lesson_imports (
   imported_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS milestone_state (
+  project_slug   TEXT NOT NULL,
+  milestone_id   TEXT NOT NULL,
+  contract_state TEXT NOT NULL CHECK (contract_state IN ('unopened', 'failed', 'passed')),
+  verified_at    TEXT,
+  evidence       TEXT,
+  opened_at      TEXT,
+  PRIMARY KEY (project_slug, milestone_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_rubric (
+  project_slug TEXT NOT NULL,
+  criterion    TEXT NOT NULL,
+  score        INTEGER,
+  note         TEXT,
+  PRIMARY KEY (project_slug, criterion)
+);
+
 CREATE INDEX IF NOT EXISTS idx_step_state_lesson ON step_state (lesson_slug);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_step ON chat_sessions (lesson_slug, step_id, id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, id);
+CREATE INDEX IF NOT EXISTS idx_milestone_state_project ON milestone_state (project_slug);
 `;
 
 // Одно соединение на директорию данных: route handlers вызываются на каждый

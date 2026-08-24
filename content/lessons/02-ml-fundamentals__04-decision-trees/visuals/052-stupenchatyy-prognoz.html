@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Почему регрессионное дерево рисует лесенку</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --ink: #172033;
+      --muted: #536176;
+      --axis: #758297;
+      --grid: #d9e0e9;
+      --region-a: #eef3f8;
+      --region-b: #f8fafc;
+      --point: #4785b8;
+      --curve: #14906f;
+      --step: #d65c4a;
+      --threshold: #a56a24;
+      --fallback: #fff1ef;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151a22;
+        --ink: #edf2f8;
+        --muted: #aab6c7;
+        --axis: #8c99ac;
+        --grid: #303947;
+        --region-a: #1b222c;
+        --region-b: #151a22;
+        --point: #76afd9;
+        --curve: #55c6a3;
+        --step: #ff806d;
+        --threshold: #e8ae62;
+        --fallback: #3b2222;
+      }
+    }
+
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      margin: 0;
+      background: var(--bg);
+    }
+
+    h2 {
+      margin: 0;
+      padding: 12px 18px 4px;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 0;
+      padding: 0 18px 6px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--bg);
+    }
+
+    text {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      fill: none;
+    }
+
+    .grid {
+      stroke: var(--grid);
+      fill: none;
+    }
+
+    .region-a {
+      fill: var(--region-a);
+    }
+
+    .region-b {
+      fill: var(--region-b);
+    }
+
+    .point {
+      fill: var(--point);
+    }
+
+    .curve {
+      stroke: var(--curve);
+      fill: none;
+    }
+
+    .step {
+      stroke: var(--step);
+      fill: none;
+    }
+
+    .threshold {
+      stroke: var(--threshold);
+      fill: none;
+    }
+
+    .label {
+      fill: var(--ink);
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .threshold-label {
+      fill: var(--threshold);
+      font-weight: 700;
+    }
+
+    .legend-step {
+      fill: var(--step);
+      font-weight: 650;
+    }
+
+    #fallback {
+      margin: 12px 18px;
+      padding: 16px;
+      background: var(--fallback);
+      color: var(--ink);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title diagram-caption">
+    <h2 id="diagram-title">Почему регрессионное дерево рисует лесенку</h2>
+    <p class="subtitle" id="diagram-caption">
+      Точки меняются плавно, а каждый лист дерева возвращает одно среднее.
+    </p>
+    <svg id="chart"
+         xmlns="http://www.w3.org/2000/svg"
+         viewBox="0 0 960 450"
+         width="960"
+         height="450"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-label="Двести точек около синусоиды, гладкая синусоида и кусочно-постоянный прогноз регрессионного дерева">
+    </svg>
+    <div id="fallback" hidden>
+      Здесь должны быть показаны 200 точек вокруг гладкой синусоиды и
+      ступенчатый прогноз дерева: внутри каждого листа прогноз постоянен,
+      а на порогах 42 м² и 57 м² происходит скачок.
+    </div>
+  </figure>
+
+  <script>
+    const DATA = [
+      200, 960, 450,
+      96, 225, 120, 100,
+      0, 1, 2, -1,
+      -1.35, 1.35, -1.95,
+      30, 70, 42, 57,
+      34, 38, 47, 52, 62, 66,
+      0.13, 0.07, 2.7, 6.1, 0.41, 1.37,
+      0.018, 0.035, 0.10, 0.20, 0.30,
+      10, 2.2, 3.8, 1.4, 15, 13,
+      0.08, 0.16, 1.20,
+      2.10, 2.42, 4.18, 4.50
+    ];
+
+    const [
+      pointCount, canvasWidth, canvasHeight,
+      originX, originY, scaleX, scaleY,
+      zero, one, two, negativeOne,
+      plotMinY, plotMaxY, legendY,
+      areaMin, areaMax, threshold42, threshold57,
+      cut34, cut38, cut47, cut52, cut62, cut66,
+      noiseA, noiseB, noiseFreqA, noiseFreqB, noisePhaseA, noisePhaseB,
+      pointRadius, tickHalf, legendRadius, axisLabelDrop, legendLineY,
+      labelPad, curveWidth, stepWidth, guideWidth, labelFont, smallFont,
+      legendPointX, legendPointLabelX, thresholdLabelY,
+      legendCurveStartX, legendCurveEndX, legendStepStartX, legendStepEndX
+    ] = DATA;
+
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+      const tau = Math.PI * two;
+
+      const make = (name, attrs, parent = svg) => {
+        const node = document.createElementNS(NS, name);
+        Object.entries(attrs).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        parent.appendChild(node);
+        return node;
+      };
+
+      const addText = (value, x, y, className, anchor, size, parent = svg) => {
+        const node = make("text", {
+          x,
+          y,
+          class: className,
+          "text-anchor": anchor,
+          "font-size": size
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const areaToX = area =>
+        (area - areaMin) / (areaMax - areaMin) * tau;
+
+      const xToArea = x =>
+        areaMin + x / tau * (areaMax - areaMin);
+
+      const cuts = [
+        zero,
+        areaToX(cut34),
+        areaToX(cut38),
+        areaToX(threshold42),
+        areaToX(cut47),
+        areaToX(cut52),
+        areaToX(threshold57),
+        areaToX(cut62),
+        areaToX(cut66),
+        tau
+      ];
+
+      const points = Array.from({ length: pointCount }, (_, index) => {
+        const x = tau * index / (pointCount - one);
+        const noise =
+          noiseA * Math.sin(index * noiseFreqA + noisePhaseA) +
+          noiseB * Math.cos(index * noiseFreqB + noisePhaseB);
+        return {
+          x,
+          area: xToArea(x),
+          y: Math.sin(x) + noise
+        };
+      });
+
+      const defs = make("defs", {});
+      const clip = make("clipPath", { id: "plot-clip" }, defs);
+      make("rect", {
+        x: sx(zero),
+        y: sy(plotMaxY),
+        width: sx(tau) - sx(zero),
+        height: sy(plotMinY) - sy(plotMaxY)
+      }, clip);
+
+      const plot = make("g", { "clip-path": "url(#plot-clip)" });
+      const regions = make("g", {}, plot);
+
+      for (let index = zero; index < cuts.length - one; index += one) {
+        const left = cuts[index];
+        const right = cuts[index + one];
+        make("rect", {
+          x: sx(left),
+          y: sy(plotMaxY),
+          width: sx(right) - sx(left),
+          height: sy(plotMinY) - sy(plotMaxY),
+          class: index % two === zero ? "region-a" : "region-b"
+        }, regions);
+      }
+
+      const horizontalGrid = [negativeOne, zero, one];
+      horizontalGrid.forEach(value => {
+        make("line", {
+          x1: sx(zero),
+          y1: sy(value),
+          x2: sx(tau),
+          y2: sy(value),
+          class: "grid",
+          "stroke-width": guideWidth
+        }, plot);
+      });
+
+      make("line", {
+        x1: sx(zero),
+        y1: sy(zero),
+        x2: sx(tau),
+        y2: sy(zero),
+        class: "axis",
+        "stroke-width": curveWidth
+      });
+
+      make("line", {
+        x1: sx(zero),
+        y1: sy(plotMinY),
+        x2: sx(zero),
+        y2: sy(plotMaxY),
+        class: "axis",
+        "stroke-width": curveWidth
+      });
+
+      const thresholdItems = [
+        { area: threshold42, label: "порог 42 м²" },
+        { area: threshold57, label: "порог 57 м²" }
+      ];
+
+      thresholdItems.forEach(item => {
+        const x = areaToX(item.area);
+
+        make("line", {
+          x1: sx(x),
+          y1: sy(plotMinY),
+          x2: sx(x),
+          y2: sy(plotMaxY),
+          class: "threshold",
+          "stroke-width": guideWidth
+        }, plot);
+
+        make("line", {
+          x1: sx(x),
+          y1: sy(zero + tickHalf / scaleY),
+          x2: sx(x),
+          y2: sy(zero - tickHalf / scaleY),
+          class: "threshold",
+          "stroke-width": curveWidth
+        });
+
+        addText(
+          item.label,
+          sx(x),
+          sy(thresholdLabelY) - labelPad,
+          "threshold-label",
+          "middle",
+          smallFont
+        );
+      });
+
+      const pointLayer = make("g", {}, plot);
+      points.forEach(point => {
+        make("circle", {
+          cx: sx(point.x),
+          cy: sy(point.y),
+          r: sx(pointRadius) - sx(zero),
+          class: "point"
+        }, pointLayer);
+      });
+
+      const smoothSamples = Array.from({ length: pointCount }, (_, index) => {
+        const x = tau * index / (pointCount - one);
+        return { x, y: Math.sin(x) };
+      });
+
+      const smoothPath = smoothSamples.map((point, index) =>
+        `${index === zero ? "M" : "L"} ${sx(point.x)} ${sy(point.y)}`
+      ).join(" ");
+
+      make("path", {
+        d: smoothPath,
+        class: "curve",
+        "stroke-width": stepWidth,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      }, plot);
+
+      const levels = [];
+      for (let index = zero; index < cuts.length - one; index += one) {
+        const left = cuts[index];
+        const right = cuts[index + one];
+        const members = points.filter(point =>
+          point.x >= left &&
+          (index === cuts.length - two ? point.x <= right : point.x < right)
+        );
+        const total = members.reduce((sum, point) => sum + point.y, zero);
+        levels.push(members.length ? total / members.length : zero);
+      }
+
+      let stepPath = "";
+      for (let index = zero; index < levels.length; index += one) {
+        const left = cuts[index];
+        const right = cuts[index + one];
+        const level = levels[index];
+
+        if (index === zero) {
+          stepPath += `M ${sx(left)} ${sy(level)} `;
+        } else {
+          stepPath += `L ${sx(left)} ${sy(level)} `;
+        }
+
+        stepPath += `L ${sx(right)} ${sy(level)} `;
+      }
+
+      make("path", {
+        d: stepPath.trim(),
+        class: "step",
+        "stroke-width": stepWidth,
+        "stroke-linecap": "square",
+        "stroke-linejoin": "miter"
+      }, plot);
+
+      addText(
+        "целевая величина y",
+        sx(zero) + labelPad,
+        sy(plotMaxY) + labelFont + labelPad,
+        "muted",
+        "start",
+        smallFont
+      );
+
+      addText(
+        "x — площадь квартиры",
+        sx(tau),
+        sy(zero) + labelFont + axisLabelDrop,
+        "muted",
+        "end",
+        smallFont
+      );
+
+      make("circle", {
+        cx: sx(legendPointX),
+        cy: sy(legendY),
+        r: sx(legendRadius) - sx(zero),
+        class: "point"
+      });
+
+      addText(
+        "200 точек с шумом",
+        sx(legendPointLabelX),
+        sy(legendY) + smallFont / two,
+        "label",
+        "start",
+        smallFont
+      );
+
+      make("line", {
+        x1: sx(legendCurveStartX),
+        y1: sy(legendY),
+        x2: sx(legendCurveEndX),
+        y2: sy(legendY),
+        class: "curve",
+        "stroke-width": stepWidth,
+        "stroke-linecap": "round"
+      });
+
+      addText(
+        "гладкая y = sin(x)",
+        sx(legendCurveEndX) + labelPad,
+        sy(legendY) + smallFont / two,
+        "label",
+        "start",
+        smallFont
+      );
+
+      make("line", {
+        x1: sx(legendStepStartX),
+        y1: sy(legendY + legendLineY),
+        x2: sx(legendStepEndX),
+        y2: sy(legendY + legendLineY),
+        class: "step",
+        "stroke-width": stepWidth,
+        "stroke-linecap": "square"
+      });
+
+      addText(
+        "прогноз дерева: среднее в листе",
+        sx(legendStepEndX) + labelPad,
+        sy(legendY) + smallFont / two,
+        "legend-step",
+        "start",
+        smallFont
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("chart").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

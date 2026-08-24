@@ -1,0 +1,282 @@
+"""Byte-Pair Encoding tokenizer from scratch.
+
+Trains a byte-level BPE vocabulary on a small built-in corpus, encodes a
+held-out sentence, decodes it back, and prints both.
+
+Stdlib + nothing else. Run: python3 code/main.py
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Iterable
+
+
+BYTE_ALPHABET_SIZE = 256
+DEFAULT_SPECIALS = ("<|endoftext|>", "<|pad|>")
+WORD_SPLIT_RE = re.compile(r"\S+|\s+")
+
+
+@dataclass
+class BPETokenizer:
+    """Byte-level BPE tokenizer.
+
+    The first 256 ids map to raw bytes. Special tokens occupy a small block
+    above that. Learned merges fill the rest of the vocabulary.
+    """
+
+    vocab: dict[int, bytes] = field(default_factory=dict)
+    inv_vocab: dict[bytes, int] = field(default_factory=dict)
+    merges: dict[tuple[int, int], int] = field(default_factory=dict)
+    special_to_id: dict[str, int] = field(default_factory=dict)
+    id_to_special: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self.vocab)
+
+    def _add_token(self, token_bytes: bytes) -> int:
+        if token_bytes in self.inv_vocab:
+            return self.inv_vocab[token_bytes]
+        token_id = len(self.vocab)
+        self.vocab[token_id] = token_bytes
+        self.inv_vocab[token_bytes] = token_id
+        return token_id
+
+    def initialize(self, specials: Iterable[str] = DEFAULT_SPECIALS) -> None:
+        """Инициализируй словарь всеми 256 байтами и зарезервируй отдельные идентификаторы специальных токенов, предварительно очищая прежнее состояние."""
+        raise NotImplementedError
+
+
+def _pretokenize(text: str) -> list[str]:
+    """Split text on whitespace/non-whitespace runs.
+
+    Each chunk becomes one BPE training unit. Merges never cross chunk
+    boundaries. Whitespace runs are preserved as their own chunks so the
+    decoder can rebuild the original string by concatenation.
+    """
+    return WORD_SPLIT_RE.findall(text)
+
+
+def _word_to_byte_ids(word: str) -> list[int]:
+    return list(word.encode("utf-8"))
+
+
+def _count_pairs(corpus_units: dict[tuple[int, ...], int]) -> Counter:
+    pairs: Counter = Counter()
+    for symbols, count in corpus_units.items():
+        for i in range(len(symbols) - 1):
+            pairs[(symbols[i], symbols[i + 1])] += count
+    return pairs
+
+
+def _apply_merge(symbols: tuple[int, ...], pair: tuple[int, int], new_id: int) -> tuple[int, ...]:
+    if len(symbols) < 2:
+        return symbols
+    out: list[int] = []
+    i = 0
+    a, b = pair
+    while i < len(symbols):
+        if i < len(symbols) - 1 and symbols[i] == a and symbols[i + 1] == b:
+            out.append(new_id)
+            i += 2
+        else:
+            out.append(symbols[i])
+            i += 1
+    return tuple(out)
+
+
+def train(
+    tokenizer: BPETokenizer,
+    corpus: str,
+    target_vocab_size: int,
+    specials: Iterable[str] = DEFAULT_SPECIALS,
+) -> None:
+    """Реализуй детерминированный цикл обучения BPE: считай частоты соседних пар, выбирай частую пару с устойчивым разрешением ничьих, добавляй объединённый токен и обновляй корпус до достижения целевого размера."""
+    raise NotImplementedError
+
+
+def _build_initial_units(corpus: str) -> dict[tuple[int, ...], int]:
+    chunks = _pretokenize(corpus)
+    units: dict[tuple[int, ...], int] = {}
+    for chunk in chunks:
+        symbols = tuple(_word_to_byte_ids(chunk))
+        units[symbols] = units.get(symbols, 0) + 1
+    return units
+
+
+def _apply_merge_to_corpus(
+    units: dict[tuple[int, ...], int],
+    pair: tuple[int, int],
+    new_id: int,
+) -> dict[tuple[int, ...], int]:
+    new_units: dict[tuple[int, ...], int] = {}
+    for symbols, count in units.items():
+        merged = _apply_merge(symbols, pair, new_id)
+        new_units[merged] = new_units.get(merged, 0) + count
+    return new_units
+
+
+def _encode_chunk(tokenizer: BPETokenizer, chunk: str) -> list[int]:
+    symbols: list[int] = _word_to_byte_ids(chunk)
+    if len(symbols) < 2:
+        return symbols
+
+    ranked_merges = {pair: rank for rank, pair in enumerate(tokenizer.merges.keys())}
+
+    while True:
+        best_rank = None
+        best_index = -1
+        best_pair: tuple[int, int] | None = None
+        for i in range(len(symbols) - 1):
+            pair = (symbols[i], symbols[i + 1])
+            rank = ranked_merges.get(pair)
+            if rank is None:
+                continue
+            if best_rank is None or rank < best_rank:
+                best_rank = rank
+                best_index = i
+                best_pair = pair
+        if best_pair is None:
+            break
+        new_id = tokenizer.merges[best_pair]
+        symbols = symbols[:best_index] + [new_id] + symbols[best_index + 2:]
+    return symbols
+
+
+def encode(
+    tokenizer: BPETokenizer,
+    text: str,
+    allow_special: bool = False,
+) -> list[int]:
+    """Преобразуй текст в идентификаторы через существующий путь BPE и при включённом allow_special выделяй литералы зарезервированных токенов, не пропуская их через слияния."""
+    raise NotImplementedError
+
+
+def _encode_pretokenized(tokenizer: BPETokenizer, text: str) -> list[int]:
+    out: list[int] = []
+    for chunk in _pretokenize(text):
+        out.extend(_encode_chunk(tokenizer, chunk))
+    return out
+
+
+def decode(tokenizer: BPETokenizer, ids: list[int]) -> str:
+    """Восстанови строку конкатенацией байтовых представлений идентификаторов, корректно обработай специальные токены и неизвестные идентификаторы."""
+    raise NotImplementedError
+
+
+def save(tokenizer: BPETokenizer, path: str) -> None:
+    """Serialize the tokenizer to a JSON file."""
+    payload = {
+        "vocab": {
+            str(token_id): list(token_bytes)
+            for token_id, token_bytes in tokenizer.vocab.items()
+        },
+        "merges": [
+            [list(pair), new_id]
+            for pair, new_id in tokenizer.merges.items()
+        ],
+        "specials": tokenizer.special_to_id,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def load(path: str) -> BPETokenizer:
+    """Restore a tokenizer previously written with `save`."""
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    tokenizer = BPETokenizer()
+    for token_id_str, byte_list in payload["vocab"].items():
+        token_id = int(token_id_str)
+        token_bytes = bytes(byte_list)
+        tokenizer.vocab[token_id] = token_bytes
+        tokenizer.inv_vocab[token_bytes] = token_id
+    for pair, new_id in payload["merges"]:
+        tokenizer.merges[(pair[0], pair[1])] = new_id
+    for s, token_id in payload["specials"].items():
+        tokenizer.special_to_id[s] = token_id
+        tokenizer.id_to_special[token_id] = s
+    return tokenizer
+
+
+DEMO_CORPUS = """\
+the quick brown fox jumps over the lazy dog
+a journey of a thousand miles begins with a single step
+the only way to do great work is to love what you do
+the best time to plant a tree was twenty years ago
+the second best time is now
+practice is the bridge between intention and skill
+small daily actions compound into large outcomes
+read more than you write, write more than you talk
+the map is not the territory and the menu is not the meal
+what gets measured gets managed if the measurement is honest
+the quick brown fox runs across the meadow at dawn
+a small step today is better than a perfect plan tomorrow
+courage is not the absence of fear it is action despite fear
+the lazy dog sleeps under the old oak tree
+every expert was once a beginner who refused to quit
+focus is saying no to a hundred good ideas
+the river that you cannot cross today will be easier tomorrow
+practice the basics until the basics become invisible
+""" * 6
+
+
+def _print_section(title: str) -> None:
+    bar = "-" * len(title)
+    print(f"\n{title}\n{bar}")
+
+
+def _format_byte_token(token_bytes: bytes) -> str:
+    try:
+        return token_bytes.decode("utf-8").replace("\n", "\\n").replace(" ", "·")
+    except UnicodeDecodeError:
+        return token_bytes.hex()
+
+
+def main() -> int:
+    target = 320
+    tokenizer = BPETokenizer()
+    train(tokenizer, DEMO_CORPUS, target_vocab_size=target)
+
+    _print_section("Vocabulary summary")
+    print(f"target size       : {target}")
+    print(f"final vocab size  : {tokenizer.vocab_size}")
+    print(f"merges learned    : {len(tokenizer.merges)}")
+    print(f"special tokens    : {list(tokenizer.special_to_id)}")
+
+    held_out = "the fox is quick and the dog is lazy"
+    ids = encode(tokenizer, held_out)
+    roundtrip = decode(tokenizer, ids)
+
+    _print_section("Encoding a held-out sentence")
+    print(f"input             : {held_out!r}")
+    print(f"encoded ids       : {ids}")
+    print(f"id count          : {len(ids)} (vs {len(held_out.encode('utf-8'))} raw bytes)")
+    print(f"decoded back      : {roundtrip!r}")
+    assert roundtrip == held_out, "round trip must be lossless"
+
+    _print_section("Highest-rank learned merges")
+    for rank, (pair, new_id) in enumerate(list(tokenizer.merges.items())[:8]):
+        left = _format_byte_token(tokenizer.vocab[pair[0]])
+        right = _format_byte_token(tokenizer.vocab[pair[1]])
+        merged = _format_byte_token(tokenizer.vocab[new_id])
+        print(f"  rank {rank:>2}: ({left!s:>8}, {right!s:>8}) -> {merged}")
+
+    _print_section("Special-token handling")
+    with_specials = "doc one<|endoftext|>doc two"
+    ids_special = encode(tokenizer, with_specials, allow_special=True)
+    assert tokenizer.special_to_id["<|endoftext|>"] in ids_special
+    print(f"input             : {with_specials!r}")
+    print(f"encoded ids       : {ids_special}")
+    print(f"decoded back      : {decode(tokenizer, ids_special)!r}")
+
+    print("\nDemo OK.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

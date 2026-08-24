@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Куда встают новые блоки</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2026; --muted:#5d6472;
+    --frozen:#dfe3ea; --frozenLine:#9aa3b2;
+    --gate:#ffe1b0; --gateLine:#c9761a;
+    --lat:#d8ecdd; --latLine:#2f7d4b;
+    --arrow:#7d8798;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161b; --fg:#e9ecf2; --muted:#9aa3b2;
+      --frozen:#252a33; --frozenLine:#5b6474;
+      --gate:#4a3413; --gateLine:#e39a3e;
+      --lat:#1c3527; --latLine:#5fbe86;
+      --arrow:#6d7688;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{color:var(--muted);font-size:13px;}
+  text{fill:var(--fg);}
+  .lbl{font-size:11px;}
+  .mut{fill:var(--muted);font-size:10.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Блок gated cross-attention встаёт через каждые M=4 замороженных слоя</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    // Стек снизу вверх: группы по M=4 замороженных слоя, после каждой — гейт.
+    var M=4, GROUPS=3, LAT=64, TOTAL=80, INSERTS=20;
+    var rows=[];            // {kind, y}
+    var y=0;
+    for(var g=0;g<GROUPS;g++){
+      for(var i=0;i<M;i++){ rows.push({kind:'frozen',y:y}); y+=1; }
+      rows.push({kind:'gate',y:y}); y+=1.35;
+    }
+    var topY=y;             // многоточие "и так до верха"
+
+    // ---- одна система координат ----
+    var origin={x:250,y:470}, scale={x:26,y:30};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(v){ return origin.y - v*scale.y; }
+
+    // геометрия в единицах данных
+    var COL_L=0, COL_R=5.4, BOX_H=0.78;      // колонка стека
+    var LAT_L=-8.2, LAT_R=-4.2, LAT_Y=5.4, LAT_H=1.5; // блок латентов
+    var BUS_X=-3.1;                          // общая "труба"
+
+    // ---- отступы в пикселях (единственные пиксельные литералы) ----
+    var PAD=6, FS=11, LW=1.4;
+
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('viewBox','0 0 700 505');
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    var defs=document.createElementNS(ns,'defs');
+    defs.innerHTML='<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" '+
+      'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+      '<path d="M0 0 L10 5 L0 10 z" fill="var(--arrow)"/></marker>'+
+      '<marker id="au" viewBox="0 0 10 10" refX="9" refY="5" '+
+      'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'+
+      '<path d="M0 0 L10 5 L0 10 z" fill="var(--frozenLine)"/></marker>';
+    svg.appendChild(defs);
+
+    var bg=document.createElementNS(ns,'rect');
+    bg.setAttribute('x',0);bg.setAttribute('y',0);
+    bg.setAttribute('width',700);bg.setAttribute('height',505);
+    bg.setAttribute('fill','var(--bg)');svg.appendChild(bg);
+
+    function el(t,a){var e=document.createElementNS(ns,t);
+      for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+    function box(x1,x2,yc,h,fill,stroke){
+      return el('rect',{x:sx(x1),y:sy(yc+h/2),
+        width:sx(x2)-sx(x1),height:sy(yc-h/2)-sy(yc+h/2),
+        rx:PAD,fill:fill,stroke:stroke,'stroke-width':LW});
+    }
+    function txt(x,yv,s,anchor,dx,dy,cls){
+      var t=el('text',{x:sx(x)+dx,y:sy(yv)+dy,'text-anchor':anchor,
+        class:cls||'lbl','font-size':FS});
+      t.textContent=s;return t;
+    }
+    function line(x1,y1,x2,y2,a){
+      var o={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:a.stroke,'stroke-width':a.w||LW};
+      if(a.dash)o['stroke-dasharray']=a.dash;
+      if(a.head)o['marker-end']='url(#'+a.head+')';
+      return el('line',o);
+    }
+
+    // ---- поток снизу вверх: одна линия по центру колонки ----
+    var cx=(COL_L+COL_R)/2;
+    line(cx,-0.85,cx,topY+0.15,{stroke:'var(--frozenLine)',dash:'4 4'});
+    txt(cx,-0.85,'токен идёт снизу вверх','middle',0,PAD+FS,'mut');
+
+    // ---- блоки стека ----
+    var frozenN=0,gateN=0,gateYs=[];
+    rows.forEach(function(r){
+      if(r.kind==='frozen'){
+        frozenN++;
+        box(COL_L,COL_R,r.y,BOX_H,'var(--frozen)','var(--frozenLine)');
+        txt(cx,r.y,'замороженный слой LLM','middle',0,FS*0.36,'lbl');
+      }else{
+        gateN++; gateYs.push(r.y);
+        box(COL_L,COL_R,r.y,BOX_H*1.18,'var(--gate)','var(--gateLine)');
+        txt(cx,r.y,'gated cross-attention','middle',0,FS*0.36,'lbl');
+      }
+    });
+
+    // многоточие вверх + подпись про 80 слоёв / 20 вставок
+    line(cx,topY-0.25,cx,topY+0.55,{stroke:'var(--frozenLine)',dash:'2 5',head:'au'});
+    txt(COL_R,topY+0.55,'…всего ≈'+TOTAL+' слоёв, ≈'+INSERTS+' вставок','start',PAD,0,'mut');
+
+    // ---- блок латентов слева ----
+    box(LAT_L,LAT_R,LAT_Y,LAT_H,'var(--lat)','var(--latLine)');
+    txt((LAT_L+LAT_R)/2,LAT_Y+0.28,LAT+' tokens','middle',0,FS*0.36,'lbl');
+    txt((LAT_L+LAT_R)/2,LAT_Y-0.26,'от resampler','middle',0,FS*0.36,'lbl');
+    txt((LAT_L+LAT_R)/2,LAT_Y-LAT_H/2,'считаются один раз','middle',0,PAD+FS,'mut');
+
+    // ---- общая труба и стрелки в каждый гейт ----
+    var busTop=LAT_Y, busBot=gateYs[0];
+    line(LAT_R,LAT_Y,BUS_X,LAT_Y,{stroke:'var(--latLine)',w:LW});
+    line(BUS_X,busTop,BUS_X,busBot,{stroke:'var(--latLine)',w:LW});
+    gateYs.forEach(function(gy){
+      line(BUS_X,gy,COL_L,gy,{stroke:'var(--latLine)',w:LW,head:'ah'});
+    });
+    txt(BUS_X,(busTop+busBot)/2,'одни и те же латенты','end',-PAD,FS*0.36,'mut');
+
+    // ---- подпись гейта: справа от среднего блока ----
+    var gm=gateYs[1];
+    line(COL_R,gm,COL_R+1.1,gm,{stroke:'var(--gateLine)',w:LW});
+    txt(COL_R+1.1,gm,'гейт tanh(alpha)','start',PAD,-PAD*0.4,'lbl');
+    txt(COL_R+1.1,gm,'на старте alpha=0','start',PAD,PAD+FS*0.7,'mut');
+
+    // ---- шаг M=4 сбоку ----
+    var g0=rows[0].y, g3=rows[M-1].y, mx=COL_R+0.42;
+    line(mx,g0-BOX_H/2,mx,g3+BOX_H/2,{stroke:'var(--muted)',w:LW});
+    line(mx-0.16,g0-BOX_H/2,mx+0.16,g0-BOX_H/2,{stroke:'var(--muted)',w:LW});
+    line(mx-0.16,g3+BOX_H/2,mx+0.16,g3+BOX_H/2,{stroke:'var(--muted)',w:LW});
+    txt(mx,(g0+g3)/2,'M=4','start',PAD,FS*0.36,'lbl');
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема должна показать стек ≈80 замороженных '+
+      'слоёв LLM, где через каждые M=4 слоя вклинивается блок gated '+
+      'cross-attention (≈20 вставок). В каждый такой блок сбоку по общей '+
+      'шине входят одни и те же 64 tokens с выхода resampler; у блока — '+
+      'гейт tanh(alpha), на старте alpha=0.</p>';
+  }
+})();
+</script>
+</body>
+</html>

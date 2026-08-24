@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как малый KL-бюджет допускает катастрофический выбор</title>
+<style>
+  :root {
+    --page: #f7f8fb;
+    --surface: #ffffff;
+    --surface-soft: #eef2f8;
+    --ink: #172033;
+    --muted: #58657a;
+    --line: #7c899d;
+    --ordinary: #81a9e8;
+    --ordinary-soft: #dce8fb;
+    --rare: #df5264;
+    --rare-soft: #fde3e6;
+    --move: #f0a12d;
+    --move-soft: #fff0ce;
+    --proxy: #8b5fd3;
+    --proxy-soft: #eee5fb;
+    --gold: #26956f;
+    --gold-soft: #dff4eb;
+    --ok: #26745d;
+    --ok-soft: #daf0e7;
+    --focus: #9a4d16;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --surface: #182130;
+      --surface-soft: #222e40;
+      --ink: #edf3fb;
+      --muted: #b8c3d3;
+      --line: #8391a6;
+      --ordinary: #6294db;
+      --ordinary-soft: #263c5e;
+      --rare: #f06c7c;
+      --rare-soft: #512b34;
+      --move: #ffc05a;
+      --move-soft: #49391f;
+      --proxy: #b994f0;
+      --proxy-soft: #3c3056;
+      --gold: #65c7a5;
+      --gold-soft: #21483d;
+      --ok: #72d0af;
+      --ok-soft: #21473c;
+      --focus: #ffd18a;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .frame {
+    background: var(--surface);
+  }
+
+  .title {
+    margin: unset;
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 448px;
+    background: var(--surface);
+  }
+
+  .outline {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .ordinary { fill: var(--ordinary); }
+  .ordinary-soft { fill: var(--ordinary-soft); }
+  .rare { fill: var(--rare); }
+  .rare-soft { fill: var(--rare-soft); }
+  .move { fill: var(--move); }
+  .move-soft { fill: var(--move-soft); }
+  .proxy-soft { fill: var(--proxy-soft); }
+  .gold-soft { fill: var(--gold-soft); }
+  .ok-soft { fill: var(--ok-soft); }
+  .surface-soft { fill: var(--surface-soft); }
+
+  .leader {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .movement {
+    fill: none;
+    stroke: var(--move);
+    stroke-width: 3px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .section {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .proxy-number {
+    fill: var(--proxy);
+    font-size: 28px;
+    font-weight: bold;
+  }
+
+  .gold-number {
+    fill: var(--gold);
+    font-size: 28px;
+    font-weight: bold;
+  }
+
+  .move-label {
+    fill: var(--focus);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .ok-label {
+    fill: var(--ok);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .takeaway {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 17px;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1 class="title">Как малый KL-бюджет допускает катастрофический выбор</h1>
+  <svg id="diagram" role="img" aria-labelledby="svg-title svg-desc"></svg>
+</main>
+
+<script>
+const DATA = [{
+  canvas: { x: 0, y: 0, w: 1000, h: 448 },
+  origin: { x: 38, y: 18 },
+  scale: { x: 9, y: 8.45 },
+  radius: { x: 1.1, y: 1.1 },
+
+  bars: {
+    reference: {
+      outer: { x1: 3, y1: 6, x2: 70, y2: 11 },
+      ordinary: { x1: 3, y1: 6, x2: 69.5, y2: 11 },
+      rare: { x1: 69.5, y1: 6, x2: 70, y2: 11 },
+      budgetMark: { x1: 48, y1: 5.7, x2: 48.67, y2: 11.3 }
+    },
+    optimized: {
+      outer: { x1: 3, y1: 22, x2: 70, y2: 27 },
+      ordinary: { x1: 3, y1: 22, x2: 68.83, y2: 27 },
+      moved: { x1: 68.83, y1: 22, x2: 69.5, y2: 27 },
+      rare: { x1: 69.5, y1: 22, x2: 70, y2: 27 }
+    }
+  },
+
+  cards: [
+    { x1: 75, y1: 4, x2: 104, y2: 15, className: "proxy-soft" },
+    { x1: 75, y1: 18, x2: 104, y2: 29, className: "gold-soft" }
+  ],
+
+  strips: [
+    { x1: 3, y1: 33, x2: 104, y2: 38.5, className: "ok-soft" },
+    { x1: 3, y1: 41, x2: 104, y2: 49, className: "surface-soft" }
+  ],
+
+  rareLeader: {
+    points: [
+      { x1: 69.75, y1: 6, x2: 69.75, y2: 4.8 },
+      { x1: 69.75, y1: 4.8, x2: 66, y2: 4.8 }
+    ]
+  },
+
+  targetLeader: {
+    points: [
+      { x1: 69.16, y1: 27, x2: 69.16, y2: 29.2 },
+      { x1: 69.16, y1: 29.2, x2: 64, y2: 29.2 }
+    ]
+  },
+
+  arrow: {
+    start: { x: 48.34, y: 11.3 },
+    control1: { x: 49, y: 17.5 },
+    control2: { x: 63, y: 18.5 },
+    end: { x: 69.16, y: 21.7 },
+    headA: { x: 67.3, y: 20.2 },
+    headB: { x: 67.6, y: 22.5 }
+  },
+
+  labels: [
+    {
+      x: 3, y: 3.2, dx: 0, dy: 0,
+      anchor: "start", className: "section",
+      text: "Исходная политика"
+    },
+    {
+      x: 3, y: 8.5, dx: 12, dy: 0,
+      anchor: "start", className: "label",
+      text: "остальная вероятностная масса"
+    },
+    {
+      x: 48.34, y: 4.1, dx: 0, dy: -3,
+      anchor: "middle", className: "move-label",
+      text: "разрешённый 1%"
+    },
+    {
+      x: 66, y: 4.8, dx: -8, dy: -3,
+      anchor: "end", className: "small",
+      text: "редкий выход уже достижим: p_ref > 0"
+    },
+    {
+      x: 52, y: 15.1, dx: 0, dy: 12,
+      anchor: "middle", className: "move-label",
+      text: "перенести +1% массы"
+    },
+    {
+      x: 3, y: 19.4, dx: 0, dy: 0,
+      anchor: "start", className: "section",
+      text: "Политика после оптимизации"
+    },
+    {
+      x: 3, y: 24.5, dx: 12, dy: 0,
+      anchor: "start", className: "label",
+      text: "остальная масса остаётся у исходной политики"
+    },
+    {
+      x: 64, y: 29.2, dx: -8, dy: 12,
+      anchor: "end", className: "move-label",
+      text: "весь доступный 1% → в редкий выход"
+    },
+    {
+      x: 77, y: 6.1, dx: 0, dy: 0,
+      anchor: "start", className: "section",
+      text: "Прокси-награда"
+    },
+    {
+      x: 102, y: 9.2, dx: 0, dy: 3,
+      anchor: "end", className: "proxy-number",
+      text: "+1000"
+    },
+    {
+      x: 77, y: 13.1, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "1% × +1000 ≈ +10"
+    },
+    {
+      x: 77, y: 20.1, dx: 0, dy: 0,
+      anchor: "start", className: "section",
+      text: "Золотая награда"
+    },
+    {
+      x: 102, y: 23.2, dx: 0, dy: 3,
+      anchor: "end", className: "gold-number",
+      text: "0"
+    },
+    {
+      x: 77, y: 27.1, dx: 0, dy: 0,
+      anchor: "start", className: "label",
+      text: "1% × 0 = 0"
+    },
+    {
+      x: 5, y: 35.75, dx: 0, dy: 1,
+      anchor: "start", className: "ok-label",
+      text: "малый KL-бюджет соблюдён"
+    },
+    {
+      x: 102, y: 35.75, dx: 0, dy: 1,
+      anchor: "end", className: "label",
+      text: "сдвинута только 1% массы"
+    },
+    {
+      x: 5, y: 43.5, dx: 0, dy: 0,
+      anchor: "start", className: "takeaway",
+      text: "Перемещение мало: 1%."
+    },
+    {
+      x: 102, y: 43.5, dx: 0, dy: 0,
+      anchor: "end", className: "takeaway",
+      text: "Прокси: +10 · золото: 0"
+    },
+    {
+      x: 53.5, y: 47, dx: 0, dy: 3,
+      anchor: "middle", className: "label",
+      text: "Малый бюджет не мешает катастрофически выбрать цель."
+    }
+  ],
+
+  fallback: [
+    {
+      x: 4, y: 10, dx: 0, dy: 0,
+      anchor: "start",
+      text: "Схема должна была показать перенос 1% массы"
+    },
+    {
+      x: 4, y: 14, dx: 0, dy: 0,
+      anchor: "start",
+      text: "в редкий выход: прокси +1000, золото 0."
+    }
+  ]
+}];
+
+const [D] = DATA;
+const origin = D.origin;
+const scale = D.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const NS = "http://www.w3.org/2000/svg";
+
+function element(name, attributes, content) {
+  const item = document.createElementNS(NS, name);
+  Object.entries(attributes || {}).forEach(([key, value]) => {
+    item.setAttribute(key, String(value));
+  });
+  if (content !== undefined) item.textContent = content;
+  return item;
+}
+
+function addRect(spec, extraClass) {
+  const item = element("rect", {
+    x: sx(spec.x1),
+    y: sy(spec.y1),
+    width: Math.abs(sx(spec.x2) - sx(spec.x1)),
+    height: Math.abs(sy(spec.y2) - sy(spec.y1)),
+    rx: Math.abs(sx(D.radius.x) - sx(0)),
+    ry: Math.abs(sy(D.radius.y) - sy(0)),
+    class: extraClass || spec.className
+  });
+  svg.appendChild(item);
+}
+
+function addLine(spec, className) {
+  svg.appendChild(element("line", {
+    x1: sx(spec.x1),
+    y1: sy(spec.y1),
+    x2: sx(spec.x2),
+    y2: sy(spec.y2),
+    class: className
+  }));
+}
+
+function addText(spec, fallbackClass) {
+  svg.appendChild(element("text", {
+    x: sx(spec.x),
+    y: sy(spec.y),
+    dx: spec.dx,
+    dy: spec.dy,
+    "text-anchor": spec.anchor,
+    "dominant-baseline": "middle",
+    class: spec.className || fallbackClass
+  }, spec.text));
+}
+
+function addArrow(spec) {
+  const curve = [
+    "M", sx(spec.start.x), sy(spec.start.y),
+    "C", sx(spec.control1.x), sy(spec.control1.y),
+    sx(spec.control2.x), sy(spec.control2.y),
+    sx(spec.end.x), sy(spec.end.y)
+  ].join(" ");
+
+  svg.appendChild(element("path", {
+    d: curve,
+    class: "movement"
+  }));
+
+  addLine({
+    x1: spec.end.x, y1: spec.end.y,
+    x2: spec.headA.x, y2: spec.headA.y
+  }, "movement");
+
+  addLine({
+    x1: spec.end.x, y1: spec.end.y,
+    x2: spec.headB.x, y2: spec.headB.y
+  }, "movement");
+}
+
+try {
+  svg.setAttribute(
+    "viewBox",
+    [D.canvas.x, D.canvas.y, D.canvas.w, D.canvas.h].join(" ")
+  );
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  svg.appendChild(element(
+    "title",
+    { id: "svg-title" },
+    "Перенос 1% вероятностной массы в редкий ошибочный выход"
+  ));
+
+  svg.appendChild(element(
+    "desc",
+    { id: "svg-desc" },
+    "Политика сохраняет остальную массу, соблюдает малый KL-бюджет, но направляет весь разрешённый один процент в выход с прокси-наградой плюс тысяча и золотой наградой ноль."
+  ));
+
+  addRect(D.bars.reference.ordinary, "ordinary-soft");
+  addRect(D.bars.reference.rare, "rare");
+  addRect(D.bars.reference.outer, "outline");
+  addRect(D.bars.reference.budgetMark, "outline");
+
+  D.rareLeader.points.forEach(point => addLine(point, "leader"));
+
+  addRect(D.bars.optimized.ordinary, "ordinary");
+  addRect(D.bars.optimized.moved, "move");
+  addRect(D.bars.optimized.rare, "rare");
+  addRect(D.bars.optimized.outer, "outline");
+
+  D.targetLeader.points.forEach(point => addLine(point, "leader"));
+  addArrow(D.arrow);
+
+  D.cards.forEach(card => {
+    addRect(card, card.className);
+    addRect(card, "outline");
+  });
+
+  D.strips.forEach(strip => {
+    addRect(strip, strip.className);
+    addRect(strip, "outline");
+  });
+
+  D.labels.forEach(label => addText(label, "label"));
+} catch (error) {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  D.fallback.forEach(label => addText(label, "fallback"));
+}
+</script>
+</body>
+</html>

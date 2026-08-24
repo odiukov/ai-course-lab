@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Трёхкомпонентный цикл робота</title>
+<style>
+  :root{
+    color-scheme:light dark;
+    --page:#f6f3ec;
+    --panel:#fffdf8;
+    --ink:#172432;
+    --muted:#586675;
+    --line:#9aa6b2;
+    --blue:#286dcc;
+    --blue-soft:#e7f0ff;
+    --violet:#7655bf;
+    --violet-soft:#eee8ff;
+    --orange:#c86c20;
+    --orange-soft:#fff0df;
+    --green:#218166;
+    --green-soft:#e1f5ed;
+    --red:#d9483b;
+    --frame:#d6dce2;
+  }
+  html,body{background:var(--page);color:var(--ink)}
+  body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  h2{font-size:22px}
+  svg{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:460px;
+    background:var(--page);
+  }
+  .panel{fill:var(--panel);stroke:var(--frame);stroke-width:2}
+  .goal-card{fill:#fff1ee;stroke:var(--red);stroke-width:2}
+  .vlm-card{fill:var(--blue-soft);stroke:var(--blue);stroke-width:2}
+  .video-card{fill:var(--violet-soft);stroke:var(--violet);stroke-width:2}
+  .inverse-card{fill:var(--orange-soft);stroke:var(--orange);stroke-width:2}
+  .motor-card{fill:var(--orange-soft);stroke:var(--orange);stroke-width:2}
+  .observation-card{fill:var(--green-soft);stroke:var(--green);stroke-width:2}
+  .flow{fill:none;stroke:var(--line);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+  .plan-flow{stroke:var(--violet)}
+  .physical-flow{stroke:var(--orange)}
+  .feedback-flow{stroke:var(--green)}
+  .head{fill:var(--line)}
+  .plan-head{fill:var(--violet)}
+  .physical-head{fill:var(--orange)}
+  .feedback-head{fill:var(--green)}
+  .card-title{fill:var(--ink);font-size:18px;font-weight:bold}
+  .card-copy{fill:var(--ink);font-size:14px}
+  .small{fill:var(--muted);font-size:13px}
+  .micro{fill:var(--muted);font-size:13px;font-weight:bold}
+  .arrow-label{fill:var(--muted);font-size:13px;font-weight:bold}
+  .red-fill{fill:var(--red)}
+  .red-stroke{fill:none;stroke:var(--red);stroke-width:2}
+  .blue-fill{fill:var(--blue)}
+  .blue-stroke{fill:none;stroke:var(--blue);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .violet-stroke{fill:none;stroke:var(--violet);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .orange-fill{fill:var(--orange)}
+  .orange-stroke{fill:none;stroke:var(--orange);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+  .green-fill{fill:var(--green)}
+  .green-stroke{fill:none;stroke:var(--green);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .thumb{fill:var(--panel);stroke:var(--frame);stroke-width:2}
+  .joint{fill:var(--panel);stroke:var(--orange);stroke-width:2}
+  .camera-lens{fill:var(--panel);stroke:var(--green);stroke-width:2}
+  #fallback{font-size:16px;color:var(--ink)}
+  @media (prefers-color-scheme:dark){
+    :root{
+      --page:#111820;
+      --panel:#17212b;
+      --ink:#edf3f8;
+      --muted:#aebbc7;
+      --line:#778593;
+      --blue:#70a9ff;
+      --blue-soft:#172b45;
+      --violet:#b49aff;
+      --violet-soft:#292341;
+      --orange:#ffac68;
+      --orange-soft:#3b291d;
+      --green:#67d1ad;
+      --green-soft:#17352e;
+      --red:#ff7164;
+      --frame:#42505e;
+    }
+    .goal-card{fill:#3b211f}
+  }
+</style>
+</head>
+<body>
+<h2>Трёхкомпонентный цикл робота</h2>
+
+<svg id="diagram" viewBox="0 0 1200 460" width="1200" height="460"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-label="Цель проходит через VLM-план, rollout видеомодели, inverse dynamics и моторные команды; новое наблюдение возвращается к VLM">
+  <g id="drawing"></g>
+</svg>
+
+<p id="fallback">Схема показывает цикл: цель «возьми красную чашку» → VLM-план → rollout видеомодели на 30–60 кадров → inverse dynamics → моторные команды → новое наблюдение → возврат к VLM.</p>
+
+<script>
+const origin={x:60,y:26};
+const scale=4;
+const diagramData=[
+  {type:"rect",box:[3,4,267,106,5],className:"panel"},
+
+  {type:"polyline",points:[[48,32],[60,32]],className:"flow"},
+  {type:"polygon",points:[[60,32],[57,30],[57,34]],className:"head"},
+  {type:"polyline",points:[[108,32],[121,32]],className:"flow plan-flow"},
+  {type:"polygon",points:[[121,32],[118,30],[118,34]],className:"plan-head"},
+  {type:"polyline",points:[[184,32],[198,32]],className:"flow plan-flow"},
+  {type:"polygon",points:[[198,32],[195,30],[195,34]],className:"plan-head"},
+  {type:"polyline",points:[[230,54],[230,69]],className:"flow physical-flow"},
+  {type:"polygon",points:[[230,69],[228,66],[232,66]],className:"physical-head"},
+  {type:"polyline",points:[[196,81],[181,81]],className:"flow physical-flow"},
+  {type:"polygon",points:[[181,81],[184,79],[184,83]],className:"physical-head"},
+  {type:"polyline",points:[[112,81],[92,81],[92,59],[84,59],[84,54]],className:"flow feedback-flow"},
+  {type:"polygon",points:[[84,54],[82,57],[86,57]],className:"feedback-head"},
+
+  {type:"rect",box:[7,19,48,45,4],className:"goal-card"},
+  {type:"rect",box:[60,11,108,54,4],className:"vlm-card"},
+  {type:"rect",box:[121,11,184,54,4],className:"video-card"},
+  {type:"rect",box:[198,11,263,54,4],className:"inverse-card"},
+  {type:"rect",box:[196,69,263,94,3],className:"motor-card"},
+  {type:"rect",box:[112,68,181,94,3],className:"observation-card"},
+
+  {type:"circle",circle:[16,32,4],className:"red-stroke"},
+  {type:"rect",box:[10,27,16,38,1],className:"red-fill"},
+  {type:"polyline",points:[[10,39],[17,39]],className:"red-stroke"},
+
+  {type:"polyline",points:[[69,35],[84,35],[99,35]],className:"blue-stroke"},
+  {type:"polyline",points:[[84,35],[84,43],[99,43]],className:"blue-stroke"},
+  {type:"circle",circle:[69,35,2],className:"blue-fill"},
+  {type:"circle",circle:[84,35,2],className:"blue-fill"},
+  {type:"circle",circle:[99,35,2],className:"blue-fill"},
+  {type:"circle",circle:[99,43,2],className:"blue-fill"},
+
+  {type:"rect",box:[125,29,141,45,1],className:"thumb"},
+  {type:"rect",box:[146,29,162,45,1],className:"thumb"},
+  {type:"rect",box:[167,29,180,45,1],className:"thumb"},
+  {type:"rect",box:[134,38,138,43,1],className:"red-fill"},
+  {type:"circle",circle:[138,40,2],className:"red-stroke"},
+  {type:"polyline",points:[[127,33],[131,36],[131,39]],className:"violet-stroke"},
+  {type:"rect",box:[153,38,157,43,1],className:"red-fill"},
+  {type:"circle",circle:[157,40,2],className:"red-stroke"},
+  {type:"polyline",points:[[149,32],[153,35],[153,38]],className:"violet-stroke"},
+  {type:"rect",box:[172,33,176,38,1],className:"red-fill"},
+  {type:"circle",circle:[176,35,2],className:"red-stroke"},
+  {type:"polyline",points:[[169,31],[172,33],[172,37]],className:"violet-stroke"},
+
+  {type:"rect",box:[205,42,214,45,1],className:"orange-fill"},
+  {type:"polyline",points:[[210,42],[218,34],[228,38],[239,30]],className:"orange-stroke"},
+  {type:"circle",circle:[218,34,2],className:"joint"},
+  {type:"circle",circle:[228,38,2],className:"joint"},
+  {type:"polyline",points:[[244,35],[247,35],[249,31],[252,40],[255,35],[259,35]],className:"orange-stroke"},
+
+  {type:"rect",box:[117,76,127,85,1],className:"green-fill"},
+  {type:"circle",circle:[122,80,2],className:"camera-lens"},
+  {type:"polygon",points:[[127,78],[131,76],[131,84],[127,82]],className:"green-fill"},
+
+  {type:"text",at:[20,26],text:"СЛОВЕСНАЯ ЦЕЛЬ",anchor:"start",className:"micro"},
+  {type:"text",at:[20,34],text:"«возьми красную",anchor:"start",className:"card-copy"},
+  {type:"text",at:[20,40],text:"чашку»",anchor:"start",className:"card-copy"},
+
+  {type:"text",at:[84,18],text:"VLM-план",anchor:"middle",className:"card-title"},
+  {type:"text",at:[84,24],text:"цель + текущее наблюдение",anchor:"middle",className:"small"},
+  {type:"text",at:[84,49],text:"действие высокого уровня",anchor:"middle",className:"card-copy"},
+
+  {type:"text",at:[152,18],text:"Видеомодель",anchor:"middle",className:"card-title"},
+  {type:"text",at:[152,24],text:"rollout: 30–60 кадров",anchor:"middle",className:"small"},
+  {type:"text",at:[152,49],text:"желаемое изменение сцены",anchor:"middle",className:"card-copy"},
+
+  {type:"text",at:[230,18],text:"Inverse dynamics",anchor:"middle",className:"card-title"},
+  {type:"text",at:[230,24],text:"наблюдение → управление",anchor:"middle",className:"small"},
+  {type:"text",at:[230,49],text:"кадры → команды моторам",anchor:"middle",className:"card-copy"},
+
+  {type:"text",at:[114,27],text:"план",anchor:"middle",className:"arrow-label"},
+  {type:"text",at:[191,27],text:"кадры",anchor:"middle",className:"arrow-label"},
+  {type:"text",at:[234,62],text:"управление",anchor:"start",className:"arrow-label"},
+  {type:"text",at:[188,63],text:"исполнение → камера",anchor:"middle",className:"arrow-label"},
+  {type:"text",at:[89,63],text:"новое наблюдение",anchor:"end",className:"arrow-label"},
+
+  {type:"text",at:[229,76],text:"Моторные команды",anchor:"middle",className:"card-title"},
+  {type:"text",at:[229,83],text:"повернуть сустав • опустить захват",anchor:"middle",className:"card-copy"},
+  {type:"text",at:[229,89],text:"сжать пальцы",anchor:"middle",className:"card-copy"},
+
+  {type:"text",at:[133,76],text:"Новое реальное наблюдение",anchor:"start",className:"card-title"},
+  {type:"text",at:[133,84],text:"камера сверяет результат",anchor:"start",className:"card-copy"},
+  {type:"text",at:[133,90],text:"с желаемыми кадрами",anchor:"start",className:"small"},
+
+  {type:"text",at:[135,102],text:"Язык задаёт намерение • world model воображает • inverse dynamics приводит робота в движение",anchor:"middle",className:"small"}
+];
+
+const sx=x=>origin.x+x*scale;
+const sy=y=>origin.y+y*scale;
+
+try{
+  const svg=document.getElementById("diagram");
+  const root=document.getElementById("drawing");
+  const fallback=document.getElementById("fallback");
+  const ns="http://www.w3.org/2000/svg";
+
+  const make=(tag,attrs)=>{
+    const node=document.createElementNS(ns,tag);
+    Object.entries(attrs).forEach(([name,value])=>node.setAttribute(name,value));
+    return node;
+  };
+
+  diagramData.forEach(item=>{
+    let node;
+
+    if(item.type==="rect"){
+      const [x1,y1,x2,y2,r]=item.box;
+      node=make("rect",{
+        x:sx(x1),y:sy(y1),
+        width:sx(x2)-sx(x1),
+        height:sy(y2)-sy(y1),
+        rx:sx(r)-sx(0),
+        ry:sy(r)-sy(0),
+        class:item.className
+      });
+    }
+
+    if(item.type==="circle"){
+      const [x,y,r]=item.circle;
+      node=make("circle",{
+        cx:sx(x),cy:sy(y),
+        r:sx(r)-sx(0),
+        class:item.className
+      });
+    }
+
+    if(item.type==="polyline"||item.type==="polygon"){
+      node=make(item.type,{
+        points:item.points.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" "),
+        class:item.className
+      });
+    }
+
+    if(item.type==="text"){
+      const [x,y]=item.at;
+      node=make("text",{
+        x:sx(x),y:sy(y),
+        "text-anchor":item.anchor,
+        "dominant-baseline":"middle",
+        class:item.className
+      });
+      node.textContent=item.text;
+    }
+
+    if(!node)throw new Error("Неизвестный элемент схемы");
+    root.appendChild(node);
+  });
+
+  fallback.hidden=true;
+}catch(error){
+  document.getElementById("diagram").hidden=true;
+  document.getElementById("fallback").hidden=false;
+}
+</script>
+</body>
+</html>

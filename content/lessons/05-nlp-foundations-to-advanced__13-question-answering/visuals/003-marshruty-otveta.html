@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Как вопрос проходит через три QA-архитектуры</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #526077;
+      --border: #cbd5e1;
+      --separator: #dbe3ee;
+      --question: #e8eef7;
+      --extractive: #2563a6;
+      --extractive-soft: #e7f1fb;
+      --rag: #8a5a12;
+      --rag-soft: #fff2d6;
+      --generative: #7650a7;
+      --generative-soft: #f1eafb;
+      --answer: #19724b;
+      --answer-soft: #e4f6ed;
+      --white: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #182235;
+        --text: #eef4ff;
+        --muted: #b7c3d8;
+        --border: #46556d;
+        --separator: #334158;
+        --question: #26344a;
+        --extractive: #75b9f2;
+        --extractive-soft: #173554;
+        --rag: #f1bd63;
+        --rag-soft: #493718;
+        --generative: #c5a1f1;
+        --generative-soft: #36264e;
+        --answer: #67d7a3;
+        --answer-soft: #173e31;
+        --white: #111827;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+
+    .figure-title {
+      padding: 8px;
+      text-align: center;
+      font-size: 20px;
+      line-height: normal;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--bg);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 13px;
+      text-rendering: geometricPrecision;
+    }
+
+    .lane-title {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .card-copy {
+      font-size: 13px;
+    }
+
+    .card-small,
+    .route-note,
+    .legend-label {
+      font-size: 11px;
+    }
+
+    .answer-date {
+      font-size: 16px;
+      font-weight: bold;
+      fill: var(--answer);
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .box {
+      stroke: var(--border);
+      stroke-width: 1.5px;
+    }
+
+    .question-box {
+      fill: var(--question);
+    }
+
+    .extractive-box {
+      fill: var(--extractive-soft);
+      stroke: var(--extractive);
+    }
+
+    .rag-box {
+      fill: var(--rag-soft);
+      stroke: var(--rag);
+    }
+
+    .generative-box {
+      fill: var(--generative-soft);
+      stroke: var(--generative);
+    }
+
+    .answer-box {
+      fill: var(--answer-soft);
+      stroke: var(--answer);
+      stroke-width: 2px;
+    }
+
+    .extractive-line {
+      stroke: var(--extractive);
+      fill: var(--extractive);
+    }
+
+    .rag-line {
+      stroke: var(--rag);
+      fill: var(--rag);
+    }
+
+    .generative-line {
+      stroke: var(--generative);
+      fill: var(--generative);
+    }
+
+    .flow-line {
+      stroke-width: 2.5px;
+      stroke-linecap: round;
+    }
+
+    .separator {
+      stroke: var(--separator);
+      stroke-width: 1px;
+    }
+
+    .extractive-text {
+      fill: var(--extractive);
+    }
+
+    .rag-text {
+      fill: var(--rag);
+    }
+
+    .generative-text {
+      fill: var(--generative);
+    }
+
+    .answer-text {
+      fill: var(--answer);
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-title">
+    <div class="figure-title" id="diagram-title">
+      Как вопрос проходит через три QA-архитектуры
+    </div>
+    <svg
+      id="qa-diagram"
+      width="1200"
+      height="445"
+      viewBox="0 0 1200 445"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Три параллельных маршрута одного вопроса о первом iPhone:
+        через готовый пассаж и span, через поиск top-k документов и reader,
+        либо напрямую через LLM. Каждый маршрут заканчивается ответом June 29, 2007.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = [
+      {
+        origin: { x: 35, y: 14 },
+        scale: { x: 11.3, y: 9.1 },
+        radius: { x: 0.8, y: 0.8 },
+        arrow: { back: 1.15, wing: 0.58 },
+        fallback: { x: 50, y: 21 },
+        separators: [
+          { x1: 2, y1: 14.2, x2: 98, y2: 14.2 },
+          { x1: 2, y1: 27.2, x2: 98, y2: 27.2 },
+          { x1: 2, y1: 40.2, x2: 98, y2: 40.2 }
+        ],
+        legend: [
+          {
+            x: 2,
+            y: 44,
+            anchor: "start",
+            text: "Где вопрос впервые встречается с текстом:"
+          },
+          {
+            x: 35,
+            y: 44,
+            anchor: "middle",
+            text: "сразу — в данном пассаже",
+            className: "extractive-text"
+          },
+          {
+            x: 62,
+            y: 44,
+            anchor: "middle",
+            text: "после поиска — в top-k",
+            className: "rag-text"
+          },
+          {
+            x: 98,
+            y: 44,
+            anchor: "end",
+            text: "внешнего текста нет",
+            className: "generative-text"
+          }
+        ]
+      },
+      {
+        key: "extractive",
+        title: "ЭКСТРАКТИВНЫЙ QA · passage → span",
+        titleX: 2,
+        titleY: 1.8,
+        tone: "extractive",
+        centerY: 8.4,
+        boxes: [
+          {
+            x: 2,
+            y: 3.6,
+            w: 16,
+            h: 9.6,
+            kind: "question",
+            lines: [
+              { y: 2.1, text: "ОДИН ВОПРОС", className: "card-title" },
+              { y: 4.3, text: "Когда первый iPhone", className: "card-copy" },
+              { y: 6.1, text: "поступил в продажу?", className: "card-copy" }
+            ]
+          },
+          {
+            x: 23,
+            y: 3.6,
+            w: 27,
+            h: 9.6,
+            kind: "extractive",
+            lines: [
+              { y: 2.1, text: "ГОТОВЫЙ ПАССАЖ", className: "card-title extractive-text" },
+              { y: 4.2, text: "Первый iPhone поступил", className: "card-copy" },
+              { y: 5.9, text: "в продажу", className: "card-copy" },
+              { y: 7.7, text: "June 29, 2007", className: "card-copy answer-text" }
+            ]
+          },
+          {
+            x: 56,
+            y: 3.6,
+            w: 14,
+            h: 9.6,
+            kind: "extractive",
+            lines: [
+              { y: 2.4, text: "SPAN", className: "card-title extractive-text" },
+              { y: 4.8, text: "выбранный", className: "card-small" },
+              { y: 6.4, text: "фрагмент", className: "card-small" },
+              { y: 8, text: "June 29, 2007", className: "card-small answer-text" }
+            ]
+          },
+          {
+            x: 79,
+            y: 3.6,
+            w: 19,
+            h: 9.6,
+            kind: "answer",
+            lines: [
+              { y: 2.5, text: "ОТВЕТ", className: "card-title answer-text" },
+              { y: 6.3, text: "June 29, 2007", className: "answer-date" }
+            ]
+          }
+        ],
+        arrows: [
+          { x1: 18, x2: 23 },
+          { x1: 50, x2: 56 },
+          { x1: 70, x2: 79 }
+        ],
+        notes: [
+          { x: 20.5, y: 6.7, text: "текст уже дан", side: "above" },
+          { x: 53, y: 10.9, text: "извлечь", side: "below" },
+          { x: 74.5, y: 6.7, text: "вернуть", side: "above" }
+        ]
+      },
+      {
+        key: "rag",
+        title: "RAG · корпус → top-k документов → reader",
+        titleX: 2,
+        titleY: 14.8,
+        tone: "rag",
+        centerY: 21.4,
+        boxes: [
+          {
+            x: 2,
+            y: 16.6,
+            w: 16,
+            h: 9.6,
+            kind: "question",
+            lines: [
+              { y: 2.1, text: "ТОТ ЖЕ ВОПРОС", className: "card-title" },
+              { y: 4.3, text: "Когда первый iPhone", className: "card-copy" },
+              { y: 6.1, text: "поступил в продажу?", className: "card-copy" }
+            ]
+          },
+          {
+            x: 23,
+            y: 16.6,
+            w: 12,
+            h: 9.6,
+            kind: "rag",
+            lines: [
+              { y: 2.4, text: "КОРПУС", className: "card-title rag-text" },
+              { y: 4.7, text: "большая", className: "card-small" },
+              { y: 6.3, text: "коллекция", className: "card-small" },
+              { y: 7.9, text: "документов", className: "card-small" }
+            ]
+          },
+          {
+            x: 40,
+            y: 16.6,
+            w: 17,
+            h: 9.6,
+            kind: "rag",
+            lines: [
+              { y: 2.4, text: "TOP-K", className: "card-title rag-text" },
+              { y: 4.8, text: "самые подходящие", className: "card-small" },
+              { y: 6.7, text: "документы", className: "card-copy" }
+            ]
+          },
+          {
+            x: 62,
+            y: 16.6,
+            w: 12,
+            h: 9.6,
+            kind: "rag",
+            lines: [
+              { y: 2.4, text: "READER", className: "card-title rag-text" },
+              { y: 4.8, text: "читает", className: "card-copy" },
+              { y: 6.6, text: "найденное", className: "card-small" }
+            ]
+          },
+          {
+            x: 79,
+            y: 16.6,
+            w: 19,
+            h: 9.6,
+            kind: "answer",
+            lines: [
+              { y: 2.5, text: "ОТВЕТ", className: "card-title answer-text" },
+              { y: 6.3, text: "June 29, 2007", className: "answer-date" }
+            ]
+          }
+        ],
+        arrows: [
+          { x1: 18, x2: 23 },
+          { x1: 35, x2: 40 },
+          { x1: 57, x2: 62 },
+          { x1: 74, x2: 79 }
+        ],
+        notes: [
+          { x: 20.5, y: 19.7, text: "поиск", side: "above" },
+          { x: 37.5, y: 23.9, text: "отбор", side: "below" },
+          { x: 59.5, y: 19.7, text: "передача", side: "above" },
+          { x: 76.5, y: 23.9, text: "ответ", side: "below" }
+        ]
+      },
+      {
+        key: "generative",
+        title: "ГЕНЕРАТИВНЫЙ QA · вопрос → LLM",
+        titleX: 2,
+        titleY: 27.8,
+        tone: "generative",
+        centerY: 34.4,
+        boxes: [
+          {
+            x: 2,
+            y: 29.6,
+            w: 16,
+            h: 9.6,
+            kind: "question",
+            lines: [
+              { y: 2.1, text: "ТОТ ЖЕ ВОПРОС", className: "card-title" },
+              { y: 4.3, text: "Когда первый iPhone", className: "card-copy" },
+              { y: 6.1, text: "поступил в продажу?", className: "card-copy" }
+            ]
+          },
+          {
+            x: 38,
+            y: 29.6,
+            w: 30,
+            h: 9.6,
+            kind: "generative",
+            lines: [
+              { y: 2.1, text: "LLM", className: "card-title generative-text" },
+              { y: 4.4, text: "сразу продолжает вопрос ответом", className: "card-copy" },
+              { y: 6.5, text: "без внешнего текста · знания из весов", className: "card-small muted" }
+            ]
+          },
+          {
+            x: 79,
+            y: 29.6,
+            w: 19,
+            h: 9.6,
+            kind: "answer",
+            lines: [
+              { y: 2.5, text: "ОТВЕТ", className: "card-title answer-text" },
+              { y: 6.3, text: "June 29, 2007", className: "answer-date" }
+            ]
+          }
+        ],
+        arrows: [
+          { x1: 18, x2: 38 },
+          { x1: 68, x2: 79 }
+        ],
+        notes: [
+          { x: 28, y: 32.7, text: "напрямую, без поиска", side: "above" },
+          { x: 73.5, y: 36.9, text: "продолжение", side: "below" }
+        ]
+      }
+    ];
+
+    const [SETTINGS, ...LANES] = DATA;
+    const origin = Object.freeze(SETTINGS.origin);
+    const scale = Object.freeze(SETTINGS.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+
+      const make = (name, attributes, className) => {
+        const element = document.createElementNS(SVG_NS, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        if (className) element.setAttribute("class", className);
+        return element;
+      };
+
+      const drawText = (parent, item, className) => {
+        const element = make(
+          "text",
+          {
+            x: sx(item.x),
+            y: sy(item.y),
+            "text-anchor": item.anchor || "middle",
+            "dominant-baseline": "middle"
+          },
+          className || item.className
+        );
+        element.textContent = item.text;
+        parent.appendChild(element);
+        return element;
+      };
+
+      const drawBox = (parent, box) => {
+        const kindClass =
+          box.kind === "question"
+            ? "question-box"
+            : box.kind === "answer"
+              ? "answer-box"
+              : `${box.kind}-box`;
+
+        const rect = make(
+          "rect",
+          {
+            x: sx(box.x),
+            y: sy(box.y),
+            width: sx(box.x + box.w) - sx(box.x),
+            height: sy(box.y + box.h) - sy(box.y),
+            rx: sx(SETTINGS.radius.x) - sx(0),
+            ry: sy(SETTINGS.radius.y) - sy(0)
+          },
+          `box ${kindClass}`
+        );
+        parent.appendChild(rect);
+
+        box.lines.forEach(line => {
+          drawText(
+            parent,
+            {
+              x: box.x + box.w / SETTINGS.arrow.back / SETTINGS.arrow.back / SETTINGS.arrow.back / SETTINGS.arrow.back / SETTINGS.arrow.back / SETTINGS.arrow.back * SETTINGS.arrow.back * SETTINGS.arrow.back * SETTINGS.arrow.back * SETTINGS.arrow.back * SETTINGS.arrow.back * SETTINGS.arrow.back / (box.w + box.w) * box.w,
+              y: box.y + line.y,
+              anchor: "middle",
+              text: line.text
+            },
+            line.className
+          );
+        });
+      };
+
+      const drawArrow = (parent, arrow, centerY, tone) => {
+        const line = make(
+          "line",
+          {
+            x1: sx(arrow.x1),
+            y1: sy(centerY),
+            x2: sx(arrow.x2),
+            y2: sy(centerY)
+          },
+          `flow-line ${tone}-line`
+        );
+        parent.appendChild(line);
+
+        const head = make(
+          "polygon",
+          {
+            points: [
+              `${sx(arrow.x2)},${sy(centerY)}`,
+              `${sx(arrow.x2 - SETTINGS.arrow.back)},${sy(centerY - SETTINGS.arrow.wing)}`,
+              `${sx(arrow.x2 - SETTINGS.arrow.back)},${sy(centerY + SETTINGS.arrow.wing)}`
+            ].join(" ")
+          },
+          `${tone}-line`
+        );
+        parent.appendChild(head);
+      };
+
+      SETTINGS.separators.forEach(separator => {
+        drawing.appendChild(
+          make(
+            "line",
+            {
+              x1: sx(separator.x1),
+              y1: sy(separator.y1),
+              x2: sx(separator.x2),
+              y2: sy(separator.y2)
+            },
+            "separator"
+          )
+        );
+      });
+
+      LANES.forEach(lane => {
+        const group = make("g", { "data-route": lane.key });
+
+        drawText(
+          group,
+          {
+            x: lane.titleX,
+            y: lane.titleY,
+            anchor: "start",
+            text: lane.title
+          },
+          `lane-title ${lane.tone}-text`
+        );
+
+        lane.arrows.forEach(arrow => {
+          drawArrow(group, arrow, lane.centerY, lane.tone);
+        });
+
+        lane.boxes.forEach(box => {
+          drawBox(group, box);
+        });
+
+        lane.notes.forEach(note => {
+          drawText(
+            group,
+            {
+              x: note.x,
+              y: note.y,
+              anchor: "middle",
+              text: note.text
+            },
+            `route-note ${lane.tone}-text`
+          );
+        });
+
+        drawing.appendChild(group);
+      });
+
+      SETTINGS.legend.forEach(item => {
+        drawText(
+          drawing,
+          item,
+          `legend-label ${item.className || "muted"}`
+        );
+      });
+    } catch (error) {
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+      drawing.replaceChildren();
+      const fallback = document.createElementNS(SVG_NS, "text");
+      fallback.setAttribute("x", sx(SETTINGS.fallback.x));
+      fallback.setAttribute("y", sy(SETTINGS.fallback.y));
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("class", "card-copy");
+      fallback.textContent =
+        "Схема: passage → span; корпус → top-k документов → reader; вопрос → LLM. Ответ: June 29, 2007.";
+      drawing.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

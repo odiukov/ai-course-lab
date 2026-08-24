@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Наивный перезапуск и durable replay</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --page:#eef2f7;
+  --bg:#ffffff;
+  --text:#172033;
+  --muted:#5d687b;
+  --axis:#8792a5;
+  --guide:#c9d0da;
+  --naive:#d94841;
+  --naive-soft:#f2aaa6;
+  --durable:#168566;
+  --durable-soft:#8fd1bc;
+  --replay:#677b9a;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --page:#10141c;
+    --bg:#171d27;
+    --text:#edf2fa;
+    --muted:#aab4c4;
+    --axis:#7e899b;
+    --guide:#3a4555;
+    --naive:#ff7770;
+    --naive-soft:#9e4f4b;
+    --durable:#57d3a9;
+    --durable-soft:#357e69;
+    --replay:#99acd0;
+  }
+}
+*{box-sizing:border-box}
+body{
+  background:var(--page);
+  color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+main{background:var(--bg)}
+h2{
+  color:var(--text);
+  font-size:22px;
+  line-height:1.2;
+}
+svg{
+  display:block;
+  width:100%;
+  max-width:1200px;
+  height:auto;
+  max-height:440px;
+  background:var(--bg);
+  outline:1px solid var(--guide);
+}
+text{fill:var(--text);font-size:14px}
+.heading{font-size:17px;font-weight:bold;letter-spacing:.02em}
+.summary{font-size:15px;font-weight:bold}
+.label{font-size:13px}
+.small{font-size:12px;fill:var(--muted)}
+.fallback{font-size:16px}
+.attempt,.track,.arrow,.guide,.tick,.crash-mark{
+  fill:none;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.attempt{stroke:var(--axis);stroke-width:4px}
+.track{stroke-width:7px}
+.naive{stroke:var(--naive)}
+.durable{stroke:var(--durable)}
+.replay{stroke:var(--replay)}
+.guide{stroke:var(--guide);stroke-width:2px}
+.arrow{stroke-width:3px}
+.tick{stroke-width:2px}
+.crash-mark{stroke:var(--naive);stroke-width:4px}
+.naive-fill{fill:var(--naive);stroke:var(--naive)}
+.durable-fill{fill:var(--durable);stroke:var(--durable)}
+.replay-fill{fill:var(--bg);stroke:var(--replay)}
+.marker{stroke-width:2px}
+.question{font-size:11px;font-weight:bold}
+</style>
+</head>
+<body>
+<main>
+<h2 id="diagram-title">Наивный перезапуск и durable replay</h2>
+<svg id="canvas" viewBox="0 0 1200 440" width="1200" height="440"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="diagram-title">
+  <g id="diagram"></g>
+</svg>
+</main>
+<script>
+const DATA=[{
+  zero:0,one:1,two:2,half:.5,
+  origin:{x:70,y:20},scale:{x:25,y:20},
+  x:{label:0,start:5,fail:26,end:42,center:23.5},
+  y:{
+    summary:.4,
+    naiveTitle:2.4,naiveAttempt:4.5,naiveArrow:5.9,naiveRestart:7.4,
+    naiveTimes:8.35,naiveNote:9.35,
+    durableTitle:11.1,durableAttempt:13.2,durableArrow:14.6,
+    durableRestart:16.1,durableTimes:17.05,durableNote:18.05,
+    legend:20.05,fallback:9
+  },
+  curve:{
+    firstDrop:.8,secondDrop:1.1,
+    headX:.45,headY:.28
+  },
+  mark:{
+    crash:.28,tick:.28,modelR:.095,modelOffset:.34,
+    toolX:.24,toolY:.34,humanR:.27
+  },
+  dash:{guide:.22,gap:.18,replay:.34},
+  pad:{none:0,up:-8,down:10,left:-10,right:10},
+  model:{count:40},
+  tools:[12,25,37],
+  humans:[18,33],
+  legend:[
+    {kind:"model",x:7.5,textX:8.2,text:"вызов модели"},
+    {kind:"tool",x:20.5,textX:21.3,text:"инструмент"},
+    {kind:"human",x:32.8,textX:33.6,text:"вопрос человеку"}
+  ]
+}];
+const [D]=DATA;
+const origin=Object.freeze(D.origin);
+const scale=Object.freeze(D.scale);
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+const svg=document.getElementById("canvas");
+const root=document.getElementById("diagram");
+const NS=svg.namespaceURI;
+
+function node(name,attrs,textValue){
+  const n=document.createElementNS(NS,name);
+  Object.entries(attrs).forEach(([key,value])=>n.setAttribute(key,String(value)));
+  if(textValue!==undefined)n.textContent=textValue;
+  return n;
+}
+function add(name,attrs,textValue){
+  const n=node(name,attrs,textValue);
+  root.appendChild(n);
+  return n;
+}
+function line(x1,y1,x2,y2,cls,extra={}){
+  return add("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls,...extra});
+}
+function textAt(x,y,value,cls,anchor="middle",dx=D.pad.none,dy=D.pad.none){
+  return add("text",{
+    x:sx(x),y:sy(y),class:cls,"text-anchor":anchor,
+    dx:dx,dy:dy,"dominant-baseline":"middle"
+  },value);
+}
+function circle(x,y,r,cls){
+  return add("circle",{
+    cx:sx(x),cy:sy(y),r:sx(r)-sx(D.zero),class:cls
+  });
+}
+function diamond(x,y,cls){
+  const hx=D.mark.toolX,hy=D.mark.toolY;
+  return add("polygon",{
+    points:[
+      `${sx(x)},${sy(y-hy)}`,
+      `${sx(x+hx)},${sy(y)}`,
+      `${sx(x)},${sy(y+hy)}`,
+      `${sx(x-hx)},${sy(y)}`
+    ].join(" "),
+    class:cls
+  });
+}
+function crash(x,y){
+  const d=D.mark.crash;
+  line(x-d,y-d,x+d,y+d,"crash-mark");
+  line(x-d,y+d,x+d,y-d,"crash-mark");
+}
+function curvedRestart(yFrom,yTo,cls){
+  const x0=D.x.start,xf=D.x.fail;
+  const d=[
+    `M ${sx(xf)} ${sy(yFrom)}`,
+    `C ${sx(xf)} ${sy(yFrom+D.curve.firstDrop)}`,
+    `${sx(x0)} ${sy(yTo-D.curve.secondDrop)}`,
+    `${sx(x0)} ${sy(yTo)}`
+  ].join(" ");
+  add("path",{d:d,class:`arrow ${cls}`});
+  add("polygon",{
+    points:[
+      `${sx(x0)},${sy(yTo)}`,
+      `${sx(x0+D.curve.headX)},${sy(yTo-D.curve.headY)}`,
+      `${sx(x0+D.curve.headX)},${sy(yTo+D.curve.headY)}`
+    ].join(" "),
+    class:cls==="naive"?"naive-fill":"durable-fill"
+  });
+}
+function timelineTicks(y,withBoundary){
+  const t=D.mark.tick;
+  line(D.x.start,y-t,D.x.start,y+t,"tick");
+  line(D.x.end,y-t,D.x.end,y+t,"tick");
+  if(withBoundary)line(D.x.fail,y-t,D.x.fail,y+t,"tick");
+}
+function modelX(index){
+  return D.x.start+
+    (D.x.end-D.x.start)*(index+D.half)/D.model.count;
+}
+function eventClass(x,mode){
+  if(mode==="naive")return "marker naive-fill";
+  return x<=D.x.fail?"marker replay-fill":"marker durable-fill";
+}
+function drawEvents(y,mode){
+  for(let i=D.zero;i<D.model.count;i+=D.one){
+    const x=modelX(i);
+    const offset=i%D.two===D.zero?D.mark.modelOffset:-D.mark.modelOffset;
+    circle(x,y+offset,D.mark.modelR,eventClass(x,mode));
+  }
+  D.tools.forEach(x=>diamond(x,y-D.mark.modelOffset,eventClass(x,mode)));
+  D.humans.forEach(x=>{
+    circle(x,y-D.mark.modelOffset,D.mark.humanR,eventClass(x,mode));
+    textAt(x,y-D.mark.modelOffset,"?","question","middle");
+  });
+}
+function guideAtFailure(y1,y2){
+  line(D.x.fail,y1,y2===undefined?y1:y2,D.x.fail,"guide");
+}
+function drawLegend(){
+  D.legend.forEach(item=>{
+    if(item.kind==="model"){
+      circle(item.x,D.y.legend,D.mark.modelR,"marker durable-fill");
+    }else if(item.kind==="tool"){
+      diamond(item.x,D.y.legend,"marker durable-fill");
+    }else{
+      circle(item.x,D.y.legend,D.mark.humanR,"marker durable-fill");
+      textAt(item.x,D.y.legend,"?","question","middle");
+    }
+    textAt(item.textX,D.y.legend,item.text,"small","start");
+  });
+}
+
+try{
+  textAt(
+    D.x.center,D.y.summary,
+    "Прогон: 4 часа · 3 инструмента · 2 вопроса человеку · 40 вызовов модели",
+    "summary"
+  );
+
+  textAt(D.x.label,D.y.naiveTitle,"НАИВНЫЙ ПЕРЕЗАПУСК","heading","start");
+  line(D.x.start,D.y.naiveAttempt,D.x.fail,D.y.naiveAttempt,"attempt");
+  line(
+    D.x.fail,D.y.naiveAttempt+D.mark.crash,
+    D.x.fail,D.y.naiveRestart-D.mark.tick,
+    "guide",
+    {"stroke-dasharray":
+      `${sx(D.dash.guide)-sx(D.zero)} ${sx(D.dash.gap)-sx(D.zero)}`}
+  );
+  crash(D.x.fail,D.y.naiveAttempt);
+  textAt(D.x.start,D.y.naiveAttempt,"0:00","small","start",D.pad.none,D.pad.up);
+  textAt(
+    D.x.fail,D.y.naiveAttempt,
+    "2:17 — сбой","label","middle",D.pad.none,D.pad.up
+  );
+  textAt(
+    (D.x.start+D.x.fail)/D.two,D.y.naiveArrow,
+    "перезапуск: индикатор снова 0:00",
+    "label","middle",D.pad.none,D.pad.up
+  );
+  curvedRestart(D.y.naiveAttempt,D.y.naiveRestart,"naive");
+  line(D.x.start,D.y.naiveRestart,D.x.end,D.y.naiveRestart,"track naive");
+  timelineTicks(D.y.naiveRestart,true);
+  drawEvents(D.y.naiveRestart,"naive");
+  textAt(D.x.start,D.y.naiveTimes,"0:00","small","start");
+  textAt(D.x.end,D.y.naiveTimes,"4:00","small","end");
+  textAt(
+    D.x.center,D.y.naiveNote,
+    "полный повтор: 3 инструмента · 2 вопроса · 40 вызовов модели — снова",
+    "label"
+  );
+
+  textAt(D.x.label,D.y.durableTitle,"DURABLE REPLAY","heading","start");
+  line(D.x.start,D.y.durableAttempt,D.x.fail,D.y.durableAttempt,"attempt");
+  line(
+    D.x.fail,D.y.durableAttempt+D.mark.crash,
+    D.x.fail,D.y.durableRestart+D.mark.tick,
+    "guide",
+    {"stroke-dasharray":
+      `${sx(D.dash.guide)-sx(D.zero)} ${sx(D.dash.gap)-sx(D.zero)}`}
+  );
+  crash(D.x.fail,D.y.durableAttempt);
+  textAt(D.x.start,D.y.durableAttempt,"0:00","small","start",D.pad.none,D.pad.up);
+  textAt(
+    D.x.fail,D.y.durableAttempt,
+    "2:17 — сбой","label","middle",D.pad.none,D.pad.up
+  );
+  textAt(
+    (D.x.start+D.x.fail)/D.two,D.y.durableArrow,
+    "логика запускается сначала",
+    "label","middle",D.pad.none,D.pad.up
+  );
+  curvedRestart(D.y.durableAttempt,D.y.durableRestart,"durable");
+  line(
+    D.x.start,D.y.durableRestart,D.x.fail,D.y.durableRestart,
+    "track replay",
+    {"stroke-dasharray":
+      `${sx(D.dash.replay)-sx(D.zero)} ${sx(D.dash.gap)-sx(D.zero)}`}
+  );
+  line(D.x.fail,D.y.durableRestart,D.x.end,D.y.durableRestart,"track durable");
+  timelineTicks(D.y.durableRestart,true);
+  drawEvents(D.y.durableRestart,"durable");
+  textAt(D.x.start,D.y.durableTimes,"0:00","small","start");
+  textAt(D.x.fail,D.y.durableTimes,"2:17","small","middle");
+  textAt(D.x.end,D.y.durableTimes,"4:00","small","end");
+  textAt(
+    (D.x.start+D.x.fail)/D.two,D.y.durableRestart,
+    "из журнала — без внешних действий",
+    "label","middle",D.pad.none,D.pad.up
+  );
+  textAt(
+    (D.x.fail+D.x.end)/D.two,D.y.durableRestart,
+    "выполняется только остаток",
+    "label","middle",D.pad.none,D.pad.up
+  );
+  textAt(
+    D.x.center,D.y.durableNote,
+    "до 2:17 состояние восстанавливается · после 2:17 работа продолжается",
+    "label"
+  );
+  drawLegend();
+}catch(error){
+  while(root.firstChild)root.removeChild(root.firstChild);
+  const first=node("text",{
+    x:sx(D.x.start),y:sy(D.y.fallback),
+    class:"fallback","text-anchor":"start"
+  },"После сбоя наивный запуск повторяет четырёхчасовой прогон с 0:00.");
+  const second=node("text",{
+    x:sx(D.x.start),y:sy(D.y.fallback+D.one),
+    class:"fallback","text-anchor":"start"
+  },"Durable replay восстанавливает историю до 2:17 и продолжает оставшуюся работу.");
+  root.appendChild(first);
+  root.appendChild(second);
+}
+</script>
+</body>
+</html>

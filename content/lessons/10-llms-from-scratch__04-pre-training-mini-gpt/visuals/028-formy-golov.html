@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Танец reshape и transpose</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f7f9fc;
+  --panel: #ffffff;
+  --panel-strong: #eef3fa;
+  --text: #172033;
+  --muted: #596579;
+  --line: #52627a;
+  --arrow: #375fc7;
+  --accent: #244ba8;
+  --a: #d7e7ff;
+  --b: #dff4e8;
+  --c: #fff0c7;
+  --d: #f2ddff;
+  --fallback: #fff4db;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101522;
+    --panel: #171e2e;
+    --panel-strong: #202a3d;
+    --text: #edf2ff;
+    --muted: #b5c0d4;
+    --line: #8493ad;
+    --arrow: #83a7ff;
+    --accent: #a9c0ff;
+    --a: #29456c;
+    --b: #285342;
+    --c: #66552b;
+    --d: #533968;
+    --fallback: #45391f;
+  }
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { margin: 0; }
+.figure {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.title {
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+  font-size: 20px;
+  font-weight: bold;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 470px;
+  background: var(--bg);
+}
+.frame {
+  fill: var(--bg);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.tensor {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.tensor-focus {
+  fill: var(--panel-strong);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.cell {
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+.tone-a { fill: var(--a); }
+.tone-b { fill: var(--b); }
+.tone-c { fill: var(--c); }
+.tone-d { fill: var(--d); }
+.flow {
+  fill: none;
+  stroke: var(--arrow);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.arrowhead { fill: var(--arrow); }
+.guide {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.label {
+  fill: var(--text);
+  font-size: 16px;
+  font-weight: bold;
+}
+.shape {
+  fill: var(--accent);
+  font-size: 17px;
+  font-weight: bold;
+}
+.note {
+  fill: var(--muted);
+  font-size: 14px;
+}
+.action {
+  fill: var(--accent);
+  font-size: 14px;
+  font-weight: bold;
+}
+.fallback {
+  display: none;
+  background: var(--fallback);
+  color: var(--text);
+  text-align: center;
+  font-size: 16px;
+}
+</style>
+</head>
+<body>
+<main class="figure">
+  <div class="title">Танец reshape и transpose</div>
+  <svg id="diagram" width="1200" height="440" viewBox="0 0 1200 440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Переход тензора из формы batch, seq, 768 в batch, seq, 12, 64, затем в batch, 12, seq, 64 и обратная сборка">
+  </svg>
+  <div id="fallback" class="fallback">
+    Схема должна была показать: (batch, seq, 768) → (batch, seq, 12, 64) →
+    (batch, 12, seq, 64), затем обратные transpose и reshape.
+  </div>
+</main>
+<script>
+const data = Object.freeze({
+  zero: 0,
+  one: 1,
+  canvasW: 1200,
+  canvasH: 440,
+  edge: 18,
+  radius: 10,
+  topTitleY: 28,
+  shapeY: 53,
+  topY: 76,
+  topH: 122,
+  bottomY: 300,
+  bottomH: 92,
+  bottomShapeY: 419,
+  leftX: 45,
+  leftW: 260,
+  middleX: 455,
+  middleW: 290,
+  rightX: 890,
+  rightW: 265,
+  inner: 12,
+  rowGap: 7,
+  packedRows: 3,
+  heads: 12,
+  tokens: 3,
+  arrowTopY: 137,
+  arrowBottomY: 346,
+  arrowHead: 9,
+  arrowWing: 6,
+  topArrowA: 315,
+  topArrowB: 445,
+  topArrowC: 755,
+  topArrowD: 880,
+  downX: 1022,
+  downA: 208,
+  downB: 286,
+  lowerArrowA: 880,
+  lowerArrowB: 755,
+  lowerArrowC: 445,
+  lowerArrowD: 315,
+  actionTopY: 112,
+  actionBottomY: 321,
+  downLabelX: 1042,
+  downLabelY: 244,
+  packedCellH: 25,
+  splitCellH: 25,
+  headCellH: 7,
+  lowerPackedH: 18,
+  lowerSplitH: 18,
+  lowerHeadH: 5,
+  captionY: 220,
+  equalY: 275,
+  equalX: 600,
+  labelPad: 8,
+  stroke: 2,
+  font: 16,
+  tones: ["tone-a", "tone-b", "tone-c", "tone-d"]
+});
+const origin = Object.freeze({ x: data.zero, y: data.zero });
+const scale = Object.freeze({ x: data.one, y: data.one });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = svg.namespaceURI;
+
+  function node(name, attrs, text) {
+    const item = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, String(value)));
+    if (text !== undefined) item.textContent = text;
+    svg.appendChild(item);
+    return item;
+  }
+
+  function rect(x, y, w, h, className, radius) {
+    return node("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + w) - sx(x),
+      height: sy(y + h) - sy(y),
+      rx: sx(radius) - sx(data.zero),
+      ry: sy(radius) - sy(data.zero),
+      class: className
+    });
+  }
+
+  function line(x1, y1, x2, y2, className) {
+    return node("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    });
+  }
+
+  function text(x, y, value, className, anchor) {
+    return node("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, value);
+  }
+
+  function arrow(x1, y1, x2, y2) {
+    line(x1, y1, x2, y2, "flow");
+    const horizontal = y1 === y2;
+    const direction = horizontal
+      ? (x2 > x1 ? data.one : -data.one)
+      : (y2 > y1 ? data.one : -data.one);
+    let points;
+    if (horizontal) {
+      points = [
+        [x2, y2],
+        [x2 - direction * data.arrowHead, y2 - data.arrowWing],
+        [x2 - direction * data.arrowHead, y2 + data.arrowWing]
+      ];
+    } else {
+      points = [
+        [x2, y2],
+        [x2 - data.arrowWing, y2 - direction * data.arrowHead],
+        [x2 + data.arrowWing, y2 - direction * data.arrowHead]
+      ];
+    }
+    node("polygon", {
+      points: points.map(point => `${sx(point.at(data.zero))},${sy(point.at(data.one))}`).join(" "),
+      class: "arrowhead"
+    });
+  }
+
+  function tone(index) {
+    return data.tones.at(index % data.tones.length);
+  }
+
+  function packedTensor(x, y, w, h, compact) {
+    rect(x, y, w, h, "tensor", data.radius);
+    const gap = compact ? data.rowGap : data.rowGap;
+    const cellH = compact ? data.lowerPackedH : data.packedCellH;
+    const usableW = w - data.inner - data.inner;
+    const startY = y + data.inner;
+    const cellW = usableW / data.heads;
+    let row = data.zero;
+    while (row < data.packedRows) {
+      let head = data.zero;
+      while (head < data.heads) {
+        const cellX = x + data.inner + head * cellW;
+        const cellY = startY + row * (cellH + gap);
+        rect(cellX, cellY, cellW, cellH, `cell ${tone(head)}`, data.zero);
+        head += data.one;
+      }
+      row += data.one;
+    }
+  }
+
+  function splitTensor(x, y, w, h, compact) {
+    rect(x, y, w, h, "tensor", data.radius);
+    const cellH = compact ? data.lowerSplitH : data.splitCellH;
+    const startY = y + data.inner;
+    const usableW = w - data.inner - data.inner;
+    const lane = usableW / data.heads;
+    const cellW = lane - data.rowGap / data.tokens;
+    let row = data.zero;
+    while (row < data.packedRows) {
+      let head = data.zero;
+      while (head < data.heads) {
+        const cellX = x + data.inner + head * lane;
+        const cellY = startY + row * (cellH + data.rowGap);
+        rect(cellX, cellY, cellW, cellH, `cell ${tone(head)}`, data.one);
+        head += data.one;
+      }
+      row += data.one;
+    }
+  }
+
+  function headFirstTensor(x, y, w, h, compact) {
+    rect(x, y, w, h, "tensor-focus", data.radius);
+    const cellH = compact ? data.lowerHeadH : data.headCellH;
+    const verticalGap = compact ? data.one : data.one;
+    const startY = y + data.inner;
+    const usableW = w - data.inner - data.inner;
+    const tokenGap = data.rowGap;
+    const tokenW = (usableW - tokenGap - tokenGap) / data.tokens;
+    let head = data.zero;
+    while (head < data.heads) {
+      let token = data.zero;
+      while (token < data.tokens) {
+        const cellX = x + data.inner + token * (tokenW + tokenGap);
+        const cellY = startY + head * (cellH + verticalGap);
+        rect(cellX, cellY, tokenW, cellH, `cell ${tone(head)}`, data.one);
+        token += data.one;
+      }
+      head += data.one;
+    }
+  }
+
+  rect(data.edge, data.zero, data.canvasW - data.edge - data.edge, data.canvasH - data.edge, "frame", data.radius);
+
+  text(data.leftX + data.leftW / data.tokens, data.topTitleY, "упаковано по токенам", "label", "middle");
+  text(data.middleX + data.middleW / data.tokens, data.topTitleY, "головы выделены", "label", "middle");
+  text(data.rightX + data.rightW / data.tokens, data.topTitleY, "головы вынесены вперёд", "label", "middle");
+
+  text(data.leftX + data.leftW / data.tokens, data.shapeY, "(batch, seq, 768)", "shape", "middle");
+  text(data.middleX + data.middleW / data.tokens, data.shapeY, "(batch, seq, 12, 64)", "shape", "middle");
+  text(data.rightX + data.rightW / data.tokens, data.shapeY, "(batch, 12, seq, 64)", "shape", "middle");
+
+  packedTensor(data.leftX, data.topY, data.leftW, data.topH, false);
+  splitTensor(data.middleX, data.topY, data.middleW, data.topH, false);
+  headFirstTensor(data.rightX, data.topY, data.rightW, data.topH, false);
+
+  arrow(data.topArrowA, data.arrowTopY, data.topArrowB, data.arrowTopY);
+  arrow(data.topArrowC, data.arrowTopY, data.topArrowD, data.arrowTopY);
+  text((data.topArrowA + data.topArrowB) / data.tokens, data.actionTopY,
+       "reshape: 768 = 12 × 64", "action", "middle");
+  text((data.topArrowC + data.topArrowD) / data.tokens, data.actionTopY,
+       "transpose(0, 2, 1, 3)", "action", "middle");
+
+  text(data.leftX + data.leftW / data.tokens, data.captionY,
+       "та же длинная строка", "note", "middle");
+  text(data.middleX + data.middleW / data.tokens, data.captionY,
+       "12 кусочков по 64", "note", "middle");
+  text(data.rightX + data.rightW / data.tokens, data.captionY,
+       "для головы: (seq, 64)", "note", "middle");
+
+  arrow(data.downX, data.downA, data.downX, data.downB);
+  text(data.downLabelX, data.downLabelY, "attention отдельно", "action", "start");
+  text(data.downLabelX, data.downLabelY + data.labelPad + data.labelPad,
+       "для 12 голов", "action", "start");
+
+  text(data.equalX, data.equalY,
+       "Количество чисел не меняется — меняется соседство осей",
+       "note", "middle");
+
+  packedTensor(data.leftX, data.bottomY, data.leftW, data.bottomH, true);
+  splitTensor(data.middleX, data.bottomY, data.middleW, data.bottomH, true);
+  headFirstTensor(data.rightX, data.bottomY, data.rightW, data.bottomH, true);
+
+  arrow(data.lowerArrowA, data.arrowBottomY, data.lowerArrowB, data.arrowBottomY);
+  arrow(data.lowerArrowC, data.arrowBottomY, data.lowerArrowD, data.arrowBottomY);
+  text((data.lowerArrowA + data.lowerArrowB) / data.tokens, data.actionBottomY,
+       "transpose(0, 2, 1, 3)", "action", "middle");
+  text((data.lowerArrowC + data.lowerArrowD) / data.tokens, data.actionBottomY,
+       "reshape: 12 × 64 = 768", "action", "middle");
+
+  text(data.leftX + data.leftW / data.tokens, data.bottomShapeY,
+       "(batch, seq, 768)", "shape", "middle");
+  text(data.middleX + data.middleW / data.tokens, data.bottomShapeY,
+       "(batch, seq, 12, 64)", "shape", "middle");
+  text(data.rightX + data.rightW / data.tokens, data.bottomShapeY,
+       "(batch, 12, seq, 64)", "shape", "middle");
+} catch (error) {
+  document.getElementById("diagram").style.display = "none";
+  document.getElementById("fallback").style.display = "block";
+}
+</script>
+</body>
+</html>

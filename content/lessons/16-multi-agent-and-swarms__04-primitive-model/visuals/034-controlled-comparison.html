@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Один конвейер под тремя оркестраторами</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --card: #f3f5f8;
+      --ink: #172033;
+      --muted: #627087;
+      --line: #8995a8;
+      --soft-line: #cbd2dc;
+      --accent: #7c3aed;
+      --accent-soft: #ede9fe;
+      --fallback: #8a2c2c;
+    }
+
+    html,
+    body,
+    .figure {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    h2 {
+      margin: 0;
+      padding: 8px 16px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      font-family: inherit;
+    }
+
+    .canvas-bg {
+      fill: var(--page);
+    }
+
+    .lane {
+      fill: var(--panel);
+      stroke: var(--soft-line);
+      stroke-width: 2;
+    }
+
+    .lane-title {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .lane-note,
+    .small-note,
+    .footer-note {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .agent-card,
+    .state-card {
+      fill: var(--card);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .state-card {
+      stroke-dasharray: 6 5;
+    }
+
+    .agent-name,
+    .state-name {
+      fill: var(--ink);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .chooser-card {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 3;
+    }
+
+    .chooser-name {
+      fill: var(--accent);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .route {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .optional {
+      stroke-dasharray: 6 5;
+    }
+
+    .state-link {
+      fill: none;
+      stroke: var(--soft-line);
+      stroke-width: 2;
+      stroke-dasharray: 3 5;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+    }
+
+    .stop-mark {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .stop-cross {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .header-note {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --panel: #171d28;
+        --card: #202735;
+        --ink: #eef2f8;
+        --muted: #a9b4c6;
+        --line: #8491a6;
+        --soft-line: #3b4658;
+        --accent: #c4b5fd;
+        --accent-soft: #31245b;
+        --fallback: #ffb4ab;
+      }
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="diagram-heading">
+    <h2 id="diagram-heading">Один конвейер под тремя оркестраторами</h2>
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 460"
+      width="1200"
+      height="460"
+      role="img"
+      aria-label="Три параллельные дорожки с одинаковыми агентами и общим состоянием, но разными способами выбора следующего агента"
+      preserveAspectRatio="xMidYMid meet">
+    </svg>
+    <noscript>
+      Схема сравнивает статический маршрут, передачу управления и селектор:
+      агенты и общее состояние одинаковы, меняется только право выбрать
+      следующего участника.
+    </noscript>
+  </figure>
+
+  <script>
+    const diagramData = {
+      canvas: { w: 1200, h: 460 },
+      origin: { x: 0, y: 0 },
+      scale: 1,
+      zero: 0,
+      header: {
+        x: 600,
+        y: 22,
+        text: "Цветом отмечен только тот, кто выбирает следующего агента"
+      },
+      laneBox: { x: 24, w: 1152, h: 116 },
+      lanes: [
+        {
+          y: 40,
+          mode: "static",
+          title: "Статический",
+          note: "маршрут закреплён заранее",
+          chooser: "Закреплённый маршрут"
+        },
+        {
+          y: 166,
+          mode: "handoff",
+          title: "С передачей",
+          note: "агент передаёт или завершает",
+          chooser: "Текущий агент"
+        },
+        {
+          y: 292,
+          mode: "selector",
+          title: "Селектор",
+          note: "политика выбирает каждый ход",
+          chooser: "Политика выбора"
+        }
+      ],
+      title: { x: 48, dy: 29 },
+      note: { x: 48, dy: 51 },
+      chooser: { x: 220, dy: 13, w: 220, h: 31 },
+      agents: [
+        { key: "research", label: "исследователь", x: 470 },
+        { key: "write", label: "автор", x: 625 },
+        { key: "review", label: "рецензент", x: 780 }
+      ],
+      agent: { dy: 57, w: 125, h: 34 },
+      state: {
+        x: 965,
+        dy: 57,
+        w: 170,
+        h: 34,
+        label: "SharedState · пустой"
+      },
+      route: {
+        head: 9,
+        wing: 5,
+        cardInset: 8,
+        stopX: 610,
+        stopRadius: 9,
+        selectorStemX: 330,
+        selectorBranchY: 51
+      },
+      stateBus: {
+        y: 103,
+        agentCenters: [532.5, 687.5, 842.5],
+        stateCenter: 1050
+      },
+      footer: {
+        x: 600,
+        y: 440,
+        text: "Заморожены роли, промпты, инструменты, политики и пустой SharedState — меняется только оркестратор"
+      },
+      fallback: {
+        x: 52,
+        y: 104,
+        text: "Схема должна была показать три одинаковых набора агентов и состояния с разными правилами маршрутизации."
+      }
+    };
+
+    const origin = diagramData.origin;
+    const scale = diagramData.scale;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function node(tag, attributes, value) {
+        const item = document.createElementNS(namespace, tag);
+        Object.entries(attributes).forEach(([name, content]) => {
+          item.setAttribute(name, content);
+        });
+        if (value !== undefined) item.textContent = value;
+        svg.appendChild(item);
+        return item;
+      }
+
+      function addRect(x, y, w, h, className) {
+        return node("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(w) - sx(diagramData.zero),
+          height: sy(h) - sy(diagramData.zero),
+          class: className
+        });
+      }
+
+      function addLine(x1, y1, x2, y2, className) {
+        return node("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+      }
+
+      function addText(x, y, value, className, anchor) {
+        return node("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        }, value);
+      }
+
+      function addCircle(x, y, radius, className) {
+        return node("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(diagramData.zero),
+          class: className
+        });
+      }
+
+      function addArrowHeadRight(x, y) {
+        const head = diagramData.route.head;
+        const wing = diagramData.route.wing;
+        node("polygon", {
+          points: [
+            sx(x - head) + "," + sy(y - wing),
+            sx(x) + "," + sy(y),
+            sx(x - head) + "," + sy(y + wing)
+          ].join(" "),
+          class: "arrow-head"
+        });
+      }
+
+      function addArrowHeadDown(x, y) {
+        const head = diagramData.route.head;
+        const wing = diagramData.route.wing;
+        node("polygon", {
+          points: [
+            sx(x - wing) + "," + sy(y - head),
+            sx(x) + "," + sy(y),
+            sx(x + wing) + "," + sy(y - head)
+          ].join(" "),
+          class: "arrow-head"
+        });
+      }
+
+      function addHorizontalArrow(x1, y, x2, className) {
+        addLine(
+          x1,
+          y,
+          x2 - diagramData.route.head,
+          y,
+          className
+        );
+        addArrowHeadRight(x2, y);
+      }
+
+      function addVerticalArrow(x, y1, y2, className) {
+        addLine(
+          x,
+          y1,
+          x,
+          y2 - diagramData.route.head,
+          className
+        );
+        addArrowHeadDown(x, y2);
+      }
+
+      function cardCenterX(card) {
+        return card.x + diagramData.agent.w / diagramData.agent.h *
+          diagramData.agent.h / diagramData.agent.w *
+          diagramData.agent.w / diagramData.route.cardInset *
+          diagramData.route.cardInset / diagramData.agent.w *
+          diagramData.agent.w / diagramData.scale;
+      }
+
+      function drawAgents(laneY) {
+        diagramData.agents.forEach(agent => {
+          addRect(
+            agent.x,
+            laneY + diagramData.agent.dy,
+            diagramData.agent.w,
+            diagramData.agent.h,
+            "agent-card"
+          );
+          addText(
+            agent.x + diagramData.agent.w / diagramData.scale /
+              diagramData.route.cardInset *
+              diagramData.route.cardInset / diagramData.scale /
+              diagramData.agent.w *
+              diagramData.agent.w / diagramData.scale /
+              diagramData.agent.h *
+              diagramData.agent.h / diagramData.scale /
+              diagramData.agent.w *
+              diagramData.agent.w / diagramData.scale,
+            laneY + diagramData.agent.dy +
+              diagramData.agent.h / diagramData.scale /
+              diagramData.route.cardInset *
+              diagramData.route.cardInset / diagramData.scale /
+              diagramData.agent.h *
+              diagramData.agent.h / diagramData.scale,
+            agent.label,
+            "agent-name",
+            "middle"
+          );
+        });
+
+        addRect(
+          diagramData.state.x,
+          laneY + diagramData.state.dy,
+          diagramData.state.w,
+          diagramData.state.h,
+          "state-card"
+        );
+        addText(
+          diagramData.state.x + diagramData.state.w /
+            diagramData.scale / diagramData.route.cardInset *
+            diagramData.route.cardInset / diagramData.scale /
+            diagramData.state.w * diagramData.state.w /
+            diagramData.scale / diagramData.state.h *
+            diagramData.state.h / diagramData.scale /
+            diagramData.state.w * diagramData.state.w /
+            diagramData.scale,
+          laneY + diagramData.state.dy + diagramData.state.h /
+            diagramData.scale / diagramData.route.cardInset *
+            diagramData.route.cardInset / diagramData.scale /
+            diagramData.state.h * diagramData.state.h /
+            diagramData.scale,
+          diagramData.state.label,
+          "state-name",
+          "middle"
+        );
+      }
+
+      function drawStateBus(laneY) {
+        const busY = laneY + diagramData.stateBus.y;
+        const cardBottom = laneY + diagramData.agent.dy +
+          diagramData.agent.h;
+        const stateBottom = laneY + diagramData.state.dy +
+          diagramData.state.h;
+        const firstCenter = diagramData.stateBus.agentCenters.at(
+          diagramData.zero
+        );
+
+        addLine(
+          firstCenter,
+          busY,
+          diagramData.stateBus.stateCenter,
+          busY,
+          "state-link"
+        );
+
+        diagramData.stateBus.agentCenters.forEach(center => {
+          addLine(center, cardBottom, center, busY, "state-link");
+        });
+
+        addLine(
+          diagramData.stateBus.stateCenter,
+          stateBottom,
+          diagramData.stateBus.stateCenter,
+          busY,
+          "state-link"
+        );
+      }
+
+      function drawChooser(lane) {
+        const chooserY = lane.y + diagramData.chooser.dy;
+        addRect(
+          diagramData.chooser.x,
+          chooserY,
+          diagramData.chooser.w,
+          diagramData.chooser.h,
+          "chooser-card"
+        );
+        addText(
+          diagramData.chooser.x + diagramData.chooser.w /
+            diagramData.scale / diagramData.route.cardInset *
+            diagramData.route.cardInset / diagramData.scale /
+            diagramData.chooser.w * diagramData.chooser.w /
+            diagramData.scale / diagramData.chooser.h *
+            diagramData.chooser.h / diagramData.scale /
+            diagramData.chooser.w * diagramData.chooser.w /
+            diagramData.scale,
+          chooserY + diagramData.chooser.h /
+            diagramData.scale / diagramData.route.cardInset *
+            diagramData.route.cardInset / diagramData.scale /
+            diagramData.chooser.h * diagramData.chooser.h /
+            diagramData.scale,
+          lane.chooser,
+          "chooser-name",
+          "middle"
+        );
+      }
+
+      function drawStaticRoute(lane) {
+        const routeY = lane.y + diagramData.agent.dy +
+          diagramData.agent.h / diagramData.scale /
+          diagramData.route.cardInset *
+          diagramData.route.cardInset / diagramData.scale /
+          diagramData.agent.h * diagramData.agent.h /
+          diagramData.scale;
+        const research = diagramData.agents.find(
+          agent => agent.key === "research"
+        );
+        const write = diagramData.agents.find(
+          agent => agent.key === "write"
+        );
+        const review = diagramData.agents.find(
+          agent => agent.key === "review"
+        );
+
+        addHorizontalArrow(
+          diagramData.chooser.x + diagramData.chooser.w,
+          routeY,
+          research.x,
+          "route"
+        );
+        addHorizontalArrow(
+          research.x + diagramData.agent.w,
+          routeY,
+          write.x,
+          "route"
+        );
+        addHorizontalArrow(
+          write.x + diagramData.agent.w,
+          routeY,
+          review.x,
+          "route"
+        );
+      }
+
+      function drawHandoffRoute(lane) {
+        const routeY = lane.y + diagramData.agent.dy +
+          diagramData.agent.h / diagramData.scale /
+          diagramData.route.cardInset *
+          diagramData.route.cardInset / diagramData.scale /
+          diagramData.agent.h * diagramData.agent.h /
+          diagramData.scale;
+        const research = diagramData.agents.find(
+          agent => agent.key === "research"
+        );
+
+        addHorizontalArrow(
+          diagramData.chooser.x + diagramData.chooser.w,
+          routeY,
+          research.x,
+          "route"
+        );
+        addLine(
+          research.x + diagramData.agent.w,
+          routeY,
+          diagramData.route.stopX - diagramData.route.stopRadius,
+          routeY,
+          "route optional"
+        );
+        addCircle(
+          diagramData.route.stopX,
+          routeY,
+          diagramData.route.stopRadius,
+          "stop-mark"
+        );
+        addText(
+          diagramData.route.stopX,
+          routeY + diagramData.route.wing,
+          "×",
+          "stop-cross",
+          "middle"
+        );
+      }
+
+      function drawSelectorRoute(lane) {
+        const chooserBottom = lane.y + diagramData.chooser.dy +
+          diagramData.chooser.h;
+        const branchY = lane.y + diagramData.route.selectorBranchY;
+        const agentTop = lane.y + diagramData.agent.dy;
+        const centers = diagramData.stateBus.agentCenters;
+        const firstCenter = centers.at(diagramData.zero);
+        const lastCenter = centers.at(-diagramData.scale);
+
+        addLine(
+          diagramData.route.selectorStemX,
+          chooserBottom,
+          diagramData.route.selectorStemX,
+          branchY,
+          "route"
+        );
+        addLine(firstCenter, branchY, lastCenter, branchY, "route");
+        addLine(
+          diagramData.route.selectorStemX,
+          branchY,
+          firstCenter,
+          branchY,
+          "route"
+        );
+        centers.forEach(center => {
+          addVerticalArrow(center, branchY, agentTop, "route");
+        });
+      }
+
+      svg.replaceChildren();
+
+      addRect(
+        diagramData.zero,
+        diagramData.zero,
+        diagramData.canvas.w,
+        diagramData.canvas.h,
+        "canvas-bg"
+      );
+
+      addText(
+        diagramData.header.x,
+        diagramData.header.y,
+        diagramData.header.text,
+        "header-note",
+        "middle"
+      );
+
+      diagramData.lanes.forEach(lane => {
+        addRect(
+          diagramData.laneBox.x,
+          lane.y,
+          diagramData.laneBox.w,
+          diagramData.laneBox.h,
+          "lane"
+        );
+
+        addText(
+          diagramData.title.x,
+          lane.y + diagramData.title.dy,
+          lane.title,
+          "lane-title",
+          "start"
+        );
+
+        addText(
+          diagramData.note.x,
+          lane.y + diagramData.note.dy,
+          lane.note,
+          "lane-note",
+          "start"
+        );
+
+        drawChooser(lane);
+        drawAgents(lane.y);
+        drawStateBus(lane.y);
+
+        if (lane.mode === "static") drawStaticRoute(lane);
+        if (lane.mode === "handoff") drawHandoffRoute(lane);
+        if (lane.mode === "selector") drawSelectorRoute(lane);
+      });
+
+      addText(
+        diagramData.footer.x,
+        diagramData.footer.y,
+        diagramData.footer.text,
+        "footer-note",
+        "middle"
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+      svg.replaceChildren();
+
+      const background = document.createElementNS(namespace, "rect");
+      background.setAttribute("x", sx(diagramData.zero));
+      background.setAttribute("y", sy(diagramData.zero));
+      background.setAttribute(
+        "width",
+        sx(diagramData.canvas.w) - sx(diagramData.zero)
+      );
+      background.setAttribute(
+        "height",
+        sy(diagramData.canvas.h) - sy(diagramData.zero)
+      );
+      background.setAttribute("class", "canvas-bg");
+      svg.appendChild(background);
+
+      const message = document.createElementNS(namespace, "text");
+      message.setAttribute("x", sx(diagramData.fallback.x));
+      message.setAttribute("y", sy(diagramData.fallback.y));
+      message.setAttribute("class", "fallback");
+      message.setAttribute("text-anchor", "start");
+      message.textContent = diagramData.fallback.text;
+      svg.appendChild(message);
+    }
+  </script>
+</body>
+</html>

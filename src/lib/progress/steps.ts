@@ -156,13 +156,36 @@ export function markStepFailed(
   );
 }
 
-export function readLessonReadCounts(db: DatabaseSync): Map<string, number> {
-  const rows = queryAll<{ lesson_slug: string; n: number }>(
+export function readStepIdsInPlan(
+  readStepIds: readonly string[],
+  steps: readonly Pick<StepMeta, "id">[],
+): string[] {
+  const currentIds = new Set(steps.map((step) => step.id));
+  return readStepIds.filter((stepId) => currentIds.has(stepId));
+}
+
+export function readLessonReadCounts(
+  db: DatabaseSync,
+  stepsByLesson: ReadonlyMap<string, readonly Pick<StepMeta, "id">[]>,
+): Map<string, number> {
+  const rows = queryAll<{ lesson_slug: string; step_id: string }>(
     db,
-    `SELECT lesson_slug, COUNT(*) AS n FROM step_state
-     WHERE state IN ('read', 'passed') GROUP BY lesson_slug`,
+    `SELECT lesson_slug, step_id FROM step_state
+     WHERE state IN ('read', 'passed')`,
   );
-  return new Map(rows.map((row) => [row.lesson_slug, row.n]));
+
+  const currentIdsByLesson = new Map(
+    [...stepsByLesson].map(([slug, steps]) => [
+      slug,
+      new Set(steps.map((step) => step.id)),
+    ]),
+  );
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!currentIdsByLesson.get(row.lesson_slug)?.has(row.step_id)) continue;
+    counts.set(row.lesson_slug, (counts.get(row.lesson_slug) ?? 0) + 1);
+  }
+  return counts;
 }
 
 // Внутри плана всегда найдётся индекс — кроме случая, когда шага нет вовсе

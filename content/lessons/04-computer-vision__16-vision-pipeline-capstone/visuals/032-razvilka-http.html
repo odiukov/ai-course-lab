@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Успешный и ошибочные пути запроса</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #718096;
+      --blue-fill: #e9f2ff;
+      --blue-line: #3975c6;
+      --green-fill: #e8f7ef;
+      --green-line: #24865a;
+      --red-fill: #fff0f0;
+      --red-line: #c74a4a;
+      --amber-fill: #fff7dc;
+      --amber-line: #aa7916;
+      --divider: #d4dbe6;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111827;
+        --panel: #182132;
+        --ink: #f1f5f9;
+        --muted: #b2bdd0;
+        --line: #8794a9;
+        --blue-fill: #18345a;
+        --blue-line: #79aef2;
+        --green-fill: #173d31;
+        --green-line: #62cea0;
+        --red-fill: #4b2429;
+        --red-line: #ff8c92;
+        --amber-fill: #46391b;
+        --amber-line: #e9bd55;
+        --divider: #364256;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--divider);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 12px 18px 4px;
+      font-size: 20px;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    .shape {
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+      stroke-linejoin: round;
+    }
+
+    .neutral {
+      fill: var(--panel);
+      stroke: var(--line);
+    }
+
+    .process {
+      fill: var(--blue-fill);
+      stroke: var(--blue-line);
+    }
+
+    .decision {
+      fill: var(--amber-fill);
+      stroke: var(--amber-line);
+    }
+
+    .success {
+      fill: var(--green-fill);
+      stroke: var(--green-line);
+    }
+
+    .failure {
+      fill: var(--red-fill);
+      stroke: var(--red-line);
+    }
+
+    .route {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .route.ok { stroke: var(--green-line); }
+    .route.bad { stroke: var(--red-line); }
+    .route.gate { stroke: var(--blue-line); }
+
+    .arrowhead { stroke: none; }
+    .arrowhead.ok { fill: var(--green-line); }
+    .arrowhead.bad { fill: var(--red-line); }
+    .arrowhead.gate { fill: var(--blue-line); }
+    .arrowhead.base { fill: var(--line); }
+
+    .divider {
+      stroke: var(--divider);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+      dominant-baseline: middle;
+    }
+
+    .node-text {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .code-text {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .lane {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 1px;
+    }
+
+    .edge-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .error-text {
+      fill: var(--red-line);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 18px;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <section class="figure" aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Успешный и ошибочные пути запроса</h1>
+    <svg id="diagram" viewBox="0 0 1200 430" width="1200" height="430"
+      preserveAspectRatio="xMidYMid meet" role="img"
+      aria-label="Дерево обработки POST /detect: проверки MIME и декодирования, запуск pipe.run, возврат JSON и отдельные пути ошибок">
+    </svg>
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать загрузку модели при старте и дерево POST
+      /detect: допустимый MIME ведёт к декодированию и pipe.run, а
+      неподдерживаемый тип и ошибка декодирования — к двум разным ответам 400.
+    </p>
+  </section>
+
+  <script>
+    const diagramData = [{
+      origin: {x: 30, y: 0},
+      scale: 1,
+      zero: 0,
+      one: 1,
+      head: 10,
+      wing: 6,
+      dash: 7,
+      gap: 5,
+
+      startupLane: {x: 12, y: 18, text: "СТАРТ СЕРВИСА"},
+      requestLane: {x: 12, y: 190, text: "ОБРАБОТКА POST /detect"},
+      divider: [{x: 0, y: 170}, {x: 1140, y: 170}],
+
+      lifespan: {
+        x: 5, y: 32, w: 125, h: 48,
+        lines: [{text: "lifespan", dy: 0, className: "code-text"}]
+      },
+      load: {
+        cx: 270, cy: 56, rx: 95, ry: 38,
+        lines: [
+          {text: "Загрузка", dy: -9},
+          {text: "моделей", dy: 9}
+        ]
+      },
+      ready: {
+        x: 435, y: 32, w: 180, h: 48,
+        lines: [{text: "Сервис запущен", dy: 0}]
+      },
+      stopped: {
+        x: 740, y: 98, w: 350, h: 52,
+        lines: [
+          {text: "Ошибка загрузки модели", dy: -9},
+          {text: "запуск остановлен", dy: 10}
+        ]
+      },
+
+      client: {
+        x: 5, y: 210, w: 110, h: 56,
+        lines: [
+          {text: "Клиент", dy: -9},
+          {text: "файл", dy: 10}
+        ]
+      },
+      endpoint: {
+        x: 145, y: 210, w: 120, h: 56,
+        lines: [{text: "POST /detect", dy: 0, className: "code-text"}]
+      },
+      mime: {
+        cx: 370, cy: 238, rx: 85, ry: 50,
+        lines: [
+          {text: "MIME входит", dy: -9},
+          {text: "в список?", dy: 10}
+        ]
+      },
+      decode: {
+        cx: 590, cy: 238, rx: 85, ry: 50,
+        lines: [
+          {text: "Байты", dy: -9},
+          {text: "декодируются?", dy: 10}
+        ]
+      },
+      pipeline: {
+        x: 730, y: 210, w: 130, h: 56,
+        lines: [{text: "pipe.run", dy: 0, className: "code-text"}]
+      },
+      json: {
+        x: 940, y: 202, w: 170, h: 72,
+        lines: [
+          {text: "JSON", dy: -12, className: "code-text"},
+          {text: "пустой список —", dy: 8, className: "note"},
+          {text: "тоже успех", dy: 23, className: "note"}
+        ]
+      },
+
+      mimeError: {
+        x: 255, y: 335, w: 230, h: 58,
+        lines: [
+          {text: "400", dy: -10, className: "error-text"},
+          {text: "unsupported image type", dy: 11, className: "code-text"}
+        ]
+      },
+      decodeError: {
+        x: 495, y: 335, w: 220, h: 58,
+        lines: [
+          {text: "400", dy: -10, className: "error-text"},
+          {text: "cannot decode image", dy: 11, className: "code-text"}
+        ]
+      },
+      serverError: {
+        x: 730, y: 335, w: 210, h: 58,
+        lines: [
+          {text: "Сбой pipe.run", dy: -10},
+          {text: "серверная ошибка", dy: 11, className: "error-text"}
+        ]
+      },
+
+      arrows: [
+        {
+          points: [{x: 130, y: 56}, {x: 175, y: 56}],
+          dir: "right", tone: "base"
+        },
+        {
+          points: [{x: 365, y: 56}, {x: 435, y: 56}],
+          dir: "right", tone: "ok",
+          label: {x: 382, y: 43, text: "успех", anchor: "start"}
+        },
+        {
+          points: [
+            {x: 270, y: 94}, {x: 270, y: 124}, {x: 740, y: 124}
+          ],
+          dir: "right", tone: "bad",
+          label: {x: 295, y: 113, text: "ошибка", anchor: "start"}
+        },
+        {
+          points: [
+            {x: 525, y: 80}, {x: 525, y: 164},
+            {x: 205, y: 164}, {x: 205, y: 210}
+          ],
+          dir: "down", tone: "gate", dashed: true,
+          label: {
+            x: 540, y: 146, text: "после успешного старта", anchor: "start"
+          }
+        },
+        {
+          points: [{x: 115, y: 238}, {x: 145, y: 238}],
+          dir: "right", tone: "base",
+          label: {x: 121, y: 201, text: "файл", anchor: "start"}
+        },
+        {
+          points: [{x: 265, y: 238}, {x: 285, y: 238}],
+          dir: "right", tone: "base"
+        },
+        {
+          points: [{x: 455, y: 238}, {x: 505, y: 238}],
+          dir: "right", tone: "ok",
+          label: {
+            x: 462, y: 178, text: "JPEG / PNG / WebP", anchor: "start"
+          }
+        },
+        {
+          points: [{x: 370, y: 288}, {x: 370, y: 335}],
+          dir: "down", tone: "bad",
+          label: {x: 360, y: 310, text: "неподдерживаемый", anchor: "end"}
+        },
+        {
+          points: [{x: 675, y: 238}, {x: 730, y: 238}],
+          dir: "right", tone: "ok",
+          label: {x: 682, y: 178, text: "декодировано", anchor: "start"}
+        },
+        {
+          points: [{x: 590, y: 288}, {x: 590, y: 335}],
+          dir: "down", tone: "bad",
+          label: {x: 580, y: 310, text: "ошибка данных", anchor: "end"}
+        },
+        {
+          points: [{x: 860, y: 238}, {x: 940, y: 238}],
+          dir: "right", tone: "ok",
+          label: {
+            x: 872, y: 178, text: "успешный инференс", anchor: "start"
+          }
+        },
+        {
+          points: [{x: 795, y: 266}, {x: 795, y: 335}],
+          dir: "down", tone: "bad",
+          label: {x: 805, y: 307, text: "сбой модели", anchor: "start"}
+        }
+      ]
+    }];
+
+    const [cfg] = diagramData;
+    const origin = cfg.origin;
+    const scale = cfg.scale;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      function make(name, attrs, className) {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attrs).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (className) node.setAttribute("class", className);
+        svg.appendChild(node);
+        return node;
+      }
+
+      function drawText(x, y, value, anchor, className) {
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor
+        }, className);
+        node.textContent = value;
+        return node;
+      }
+
+      function drawLines(cx, cy, lines) {
+        lines.forEach(line => {
+          drawText(
+            cx,
+            cy + line.dy,
+            line.text,
+            "middle",
+            line.className || "node-text"
+          );
+        });
+      }
+
+      function drawRect(item, className) {
+        make("rect", {
+          x: sx(item.x),
+          y: sy(item.y),
+          width: sx(item.w) - sx(cfg.zero),
+          height: sy(item.h) - sy(cfg.zero),
+          rx: sx(cfg.gap) - sx(cfg.zero),
+          ry: sy(cfg.gap) - sy(cfg.zero)
+        }, "shape " + className);
+        drawLines(
+          item.x + item.w * cfg.scale / (cfg.scale + cfg.scale),
+          item.y + item.h * cfg.scale / (cfg.scale + cfg.scale),
+          item.lines
+        );
+      }
+
+      function drawDiamond(item) {
+        const points = [
+          [item.cx, item.cy - item.ry],
+          [item.cx + item.rx, item.cy],
+          [item.cx, item.cy + item.ry],
+          [item.cx - item.rx, item.cy]
+        ].map(point => sx(point[cfg.zero]) + "," + sy(point[cfg.one])).join(" ");
+        make("polygon", {points}, "shape decision");
+        drawLines(item.cx, item.cy, item.lines);
+      }
+
+      function drawArrow(item) {
+        const d = item.points.map((point, index) => {
+          return (index === cfg.zero ? "M " : "L ") +
+            sx(point.x) + " " + sy(point.y);
+        }).join(" ");
+
+        const route = make("path", {d}, "route " + item.tone);
+        if (item.dashed) {
+          route.setAttribute(
+            "stroke-dasharray",
+            (sx(cfg.dash) - sx(cfg.zero)) + " " +
+            (sx(cfg.gap) - sx(cfg.zero))
+          );
+        }
+
+        const end = item.points[item.points.length - cfg.one];
+        let headPoints;
+
+        if (item.dir === "right") {
+          headPoints = [
+            {x: end.x, y: end.y},
+            {x: end.x - cfg.head, y: end.y - cfg.wing},
+            {x: end.x - cfg.head, y: end.y + cfg.wing}
+          ];
+        } else {
+          headPoints = [
+            {x: end.x, y: end.y},
+            {x: end.x - cfg.wing, y: end.y - cfg.head},
+            {x: end.x + cfg.wing, y: end.y - cfg.head}
+          ];
+        }
+
+        make("polygon", {
+          points: headPoints
+            .map(point => sx(point.x) + "," + sy(point.y))
+            .join(" ")
+        }, "arrowhead " + item.tone);
+
+        if (item.label) {
+          drawText(
+            item.label.x,
+            item.label.y,
+            item.label.text,
+            item.label.anchor,
+            "edge-label"
+          );
+        }
+      }
+
+      drawText(
+        cfg.startupLane.x,
+        cfg.startupLane.y,
+        cfg.startupLane.text,
+        "start",
+        "lane"
+      );
+
+      make("line", {
+        x1: sx(cfg.divider[cfg.zero].x),
+        y1: sy(cfg.divider[cfg.zero].y),
+        x2: sx(cfg.divider[cfg.one].x),
+        y2: sy(cfg.divider[cfg.one].y)
+      }, "divider");
+
+      drawText(
+        cfg.requestLane.x,
+        cfg.requestLane.y,
+        cfg.requestLane.text,
+        "start",
+        "lane"
+      );
+
+      drawRect(cfg.lifespan, "neutral");
+      drawDiamond(cfg.load);
+      drawRect(cfg.ready, "success");
+      drawRect(cfg.stopped, "failure");
+
+      drawRect(cfg.client, "neutral");
+      drawRect(cfg.endpoint, "process");
+      drawDiamond(cfg.mime);
+      drawDiamond(cfg.decode);
+      drawRect(cfg.pipeline, "process");
+      drawRect(cfg.json, "success");
+
+      drawRect(cfg.mimeError, "failure");
+      drawRect(cfg.decodeError, "failure");
+      drawRect(cfg.serverError, "failure");
+
+      cfg.arrows.forEach(drawArrow);
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

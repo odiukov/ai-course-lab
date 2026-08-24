@@ -239,9 +239,13 @@ describe("ensureSteps", () => {
     await ensureSteps({ contentDir, source: SOURCE, plan: PLAN, fromIndex: 1, count: 1, deps: { run } });
 
     const prompt = run.mock.calls[0][0] as string;
-    expect(prompt).toContain("1. Зачем");
+    expect(prompt).toContain("[шаг 1](#step-1): Зачем");
     expect(prompt).toContain("|v| = \\sqrt{x^2 + y^2}");
     expect(prompt).toContain("парк");
+    expect(prompt).toContain("маленькая внутренняя дуга");
+    expect(prompt).toContain("Не начинай механически");
+    expect(prompt).toContain("Ученик — участник объяснения");
+    expect(prompt).toContain("[шаги 8](#step-8)–[11](#step-11)");
   });
 
   it("сохраняет visual и baseline из плана шага в файле", async () => {

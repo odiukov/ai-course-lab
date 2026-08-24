@@ -5,6 +5,7 @@ import {
   markStepOpened,
   markStepRead,
   readLessonProgress,
+  readStepIdsInPlan,
   resumeIndex,
 } from "@/lib/progress/steps";
 
@@ -22,6 +23,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 
   return Response.json({
     ...progress,
+    readStepIds: readStepIdsInPlan(progress.readStepIds, plan?.steps ?? []),
     resumeIndex: plan ? resumeIndex(progress, plan.steps) : 0,
   });
 }

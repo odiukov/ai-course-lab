@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Три провайдера, три механики</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6672; --grid:#d7dde5;
+    --a:#c2410c; --o:#1d4ed8; --g:#047857; --band:#f1f4f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e8edf3; --muted:#9aa7b4; --grid:#2c343d;
+      --a:#fb923c; --o:#7ea8ff; --g:#4ade9f; --band:#1a2027;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font:600 15px/1.3 system-ui,sans-serif;margin:0 0 6px;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .fail{font:13px/1.5 system-ui,sans-serif;color:var(--fg);
+        border:1px solid var(--grid);padding:10px;border-radius:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Три провайдера: скидка, минимум префикса, срок жизни кэша</h2>
+  <div id="host">
+    <svg id="chart" viewBox="0 0 960 470" preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Сравнение кэша Anthropic, OpenAI и Gemini"></svg>
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---- данные схемы ---- */
+    var ROWS = [
+      {key:'A', name:'Anthropic', disc:90, min:1024,  life:'5 минут',
+       work:'маркеры руками в коде', color:'var(--a)'},
+      {key:'O', name:'OpenAI',    disc:50, min:1024,  life:'до часа',
+       work:'ничего делать не надо', color:'var(--o)'},
+      {key:'G', name:'Gemini',    disc:75, min:4096,  life:'TTL задаёшь сам',
+       work:'отдельный API + плата за хранение', color:'var(--g)'}
+    ];
+    var PROMPT = 2000;           // системный промпт из текста шага
+    var MAXMIN = 4096;           // правый предел шкалы минимума
+
+    /* ---- одна система координат ---- */
+    var origin = {x:300, y:392};   // sx(0), sy(0)
+    var scale  = {x:0.5, y:3.2};   // px на единицу данных
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y - y*scale.y; }
+
+    /* ---- литералы вида/отступов ---- */
+    var PAD = 8, LW = 1.4, FS = 13, FSS = 11.5;
+
+    var svg = document.getElementById('chart');
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(t,a){ var n=document.createElementNS(NS,t);
+      for(var k in a) n.setAttribute(k,a[k]); svg.appendChild(n); return n; }
+    function txt(x,y,s,a,cls,sz,w){
+      var n=el('text',{x:x,y:y,'text-anchor':a,'font-size':sz||FS,
+        'font-weight':w||400,fill:cls||'var(--fg)'});
+      n.appendChild(document.createTextNode(s)); return n;
+    }
+
+    /* строки в единицах данных: y = 100 / 60 / 20, шкала минимума 0..4096 по x */
+    var ROWY = [100, 60, 20];
+
+    /* фон-полоса каждой строки */
+    ROWS.forEach(function(r,i){
+      var yc = ROWY[i];
+      el('rect',{x:sx(-560), y:sy(yc+13), width:sx(MAXMIN+260)-sx(-560),
+        height:sy(yc-13)-sy(yc+13), rx:6, fill:'var(--band)'});
+    });
+
+    /* ось минимума префикса: линия по низу */
+    el('line',{x1:sx(0), y1:sy(0), x2:sx(MAXMIN), y2:sy(0),
+      stroke:'var(--grid)','stroke-width':LW});
+    [0,1024,2048,3072,4096].forEach(function(t){
+      el('line',{x1:sx(t), y1:sy(0), x2:sx(t), y2:sy(-7),
+        stroke:'var(--grid)','stroke-width':LW});
+      txt(sx(t), sy(-7)+PAD+FSS, String(t), 'middle', 'var(--muted)', FSS);
+    });
+    txt(sx(MAXMIN/2), sy(-7)+PAD+FSS*2+PAD, 'минимум префикса, токенов',
+        'middle', 'var(--muted)', FSS);
+
+    /* вертикаль «твои 2000 токенов» */
+    el('line',{x1:sx(PROMPT), y1:sy(ROWY[0]+16), x2:sx(PROMPT), y2:sy(0),
+      stroke:'var(--muted)','stroke-width':LW,'stroke-dasharray':'5 4'});
+    txt(sx(PROMPT), sy(ROWY[0]+16)-PAD, 'твой промпт: 2000 токенов',
+        'middle', 'var(--muted)', FSS);
+
+    /* сетка процентов слева: шкала скидки 0..90 % влево от sx(-80) */
+    function dx(p){ return sx(-80 - p*4.2); }   // 90 % -> sx(-458)
+
+    ROWS.forEach(function(r,i){
+      var yc = ROWY[i];
+
+      /* имя провайдера */
+      txt(sx(-560)+PAD, sy(yc)+4, r.name, 'start', r.color, FS, 600);
+
+      /* полоса скидки: растёт вправо к оси, подпись у хвоста слева */
+      el('line',{x1:dx(r.disc), y1:sy(yc), x2:dx(0), y2:sy(yc),
+        stroke:r.color,'stroke-width':7,'stroke-linecap':'round'});
+      txt(dx(r.disc)-PAD, sy(yc)+4, r.disc+' %', 'end', r.color, FS, 600);
+
+      /* минимум префикса: точка на шкале + отрезок к нулю */
+      el('line',{x1:sx(0), y1:sy(yc), x2:sx(r.min), y2:sy(yc),
+        stroke:r.color,'stroke-width':LW,'stroke-dasharray':'3 3'});
+      el('circle',{cx:sx(r.min), cy:sy(yc), r:5.5, fill:r.color});
+      txt(sx(r.min), sy(yc)-PAD-4, r.min+' токенов', 'middle', r.color, FSS, 600);
+
+      /* срок жизни справа от шкалы */
+      txt(sx(MAXMIN)+PAD*3, sy(yc)+4, r.life, 'start', 'var(--fg)', FSS);
+
+      /* работа с твоей стороны — ниже линии, чтобы не сойтись с минимумом */
+      txt(sx(-80)-PAD, sy(yc)-4+FSS+PAD, r.work, 'end', 'var(--muted)', FSS);
+    });
+
+    /* заголовки колонок */
+    txt(dx(45), sy(ROWY[0]+26), 'скидка при попадании', 'middle', 'var(--muted)', FSS);
+    txt(sx(MAXMIN)+PAD*3, sy(ROWY[0]+26), 'срок жизни', 'start', 'var(--muted)', FSS);
+
+    /* вывод: Gemini не дотягивает */
+    var gy = ROWY[2];
+    el('line',{x1:sx(PROMPT), y1:sy(gy), x2:sx(ROWS[2].min), y2:sy(gy),
+      stroke:'var(--g)','stroke-width':LW*2});
+    txt(sx((PROMPT+ROWS[2].min)/2), sy(gy)+PAD+FSS,
+        '2000 < 4096 — кэша нет', 'middle', 'var(--g)', FSS, 600);
+
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать три строки: ' +
+      'Anthropic — скидка 90 %, минимум префикса 1024 токена, жизнь 5 минут, маркеры руками; ' +
+      'OpenAI — 50 %, 1024 токена, до часа, автоматически; ' +
+      'Gemini — 75 %, 4096 токенов, TTL задаёшь сам, отдельный API и плата за хранение. ' +
+      'Промпт на 2000 токенов проходит порог у первых двух и не дотягивает до 4096 у Gemini.</p>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>От тысячешагового DDPM к schnell</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef3f8;
+      --panel: #ffffff;
+      --panel-soft: #f7f9fc;
+      --ink: #172033;
+      --muted: #59657a;
+      --grid: #a9b5c7;
+      --edge: #c9d2df;
+      --accent: #1769e0;
+      --accent-soft: #dceaff;
+      --ddpm: #d9e2ef;
+      --ddim: #bdd5ef;
+      --flow: #8fc5e8;
+      --fast: #54b9c2;
+      --fast-ink: #063f49;
+      --shadow: #17203322;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #182130;
+        --panel-soft: #202b3d;
+        --ink: #edf4ff;
+        --muted: #b3bfd1;
+        --grid: #68758a;
+        --edge: #354258;
+        --accent: #78afff;
+        --accent-soft: #203d68;
+        --ddpm: #334158;
+        --ddim: #31516f;
+        --flow: #286a82;
+        --fast: #298f98;
+        --fast-ink: #e5ffff;
+        --shadow: #00000055;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: 8px;
+    }
+
+    .figure {
+      background: var(--panel);
+      border: 1px solid var(--edge);
+      box-shadow: 0 4px 18px var(--shadow);
+      overflow: hidden;
+    }
+
+    .figure-title {
+      background: var(--panel-soft);
+      border-bottom: 1px solid var(--edge);
+      color: var(--ink);
+      font-size: 24px;
+      font-weight: bold;
+      padding: 14px 18px;
+    }
+
+    svg {
+      background: var(--panel);
+      display: block;
+      height: auto;
+      max-height: 430px;
+      width: 100%;
+    }
+
+    .step-fill {
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .ddpm-fill {
+      fill: var(--ddpm);
+    }
+
+    .ddim-fill {
+      fill: var(--ddim);
+    }
+
+    .flow-fill {
+      fill: var(--flow);
+    }
+
+    .fast-fill {
+      fill: var(--fast);
+    }
+
+    .stair-line {
+      fill: none;
+      stroke: var(--ink);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 5px;
+    }
+
+    .guide-line {
+      fill: none;
+      stroke: var(--grid);
+      stroke-dasharray: 7px 8px;
+      stroke-width: 2px;
+    }
+
+    .direction-line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 4px;
+    }
+
+    .mode-dot {
+      fill: var(--panel);
+      stroke: var(--ink);
+      stroke-width: 4px;
+    }
+
+    .fast-dot {
+      fill: var(--fast-ink);
+      stroke: var(--panel);
+      stroke-width: 4px;
+    }
+
+    .mode-name {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .mode-count {
+      fill: var(--ink);
+      font-size: 18px;
+    }
+
+    .fast-label {
+      fill: var(--fast-ink);
+    }
+
+    .direction-label {
+      fill: var(--accent);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .badge {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 2px;
+    }
+
+    .badge-text {
+      fill: var(--ink);
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <section class="figure" aria-labelledby="figure-heading">
+    <div class="figure-title" id="figure-heading">
+      От тысячешагового DDPM к schnell
+    </div>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 430"
+      width="1200"
+      height="430"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <title id="svg-title">Лестница режимов генерации</title>
+      <desc id="svg-description">
+        DDPM требует около 1000 шагов, старый DDIM — 50 и более,
+        rectified flow — 20–30, а schnell или turbo — 1–4 шага.
+        Переход от 1000 к 4 означает в 250 раз меньше вызовов модели.
+      </desc>
+      <noscript>
+        Схема должна была показать сокращение числа проходов модели:
+        от DDPM до schnell или turbo.
+      </noscript>
+    </svg>
+  </section>
+
+  <script>
+    const SCHEME = Object.freeze({
+      canvas: [1200, 430],
+      mapping: [[70, 390], [1, 1]],
+      background: [-70, 390, 1130, -40],
+      baseline: [[50, 45], [1050, 45]],
+      levels: [
+        {
+          area: [50, 80, 275, 45],
+          anchor: [162, 80],
+          radius: [7, 0],
+          fill: "step-fill ddpm-fill",
+          dot: "mode-dot",
+          labels: [
+            ["DDPM", 0, -36, "mode-name"],
+            ["около 1000 шагов", 0, -12, "mode-count"]
+          ]
+        },
+        {
+          area: [275, 140, 510, 45],
+          anchor: [392, 140],
+          radius: [7, 0],
+          fill: "step-fill ddim-fill",
+          dot: "mode-dot",
+          labels: [
+            ["старый DDIM", 0, -36, "mode-name"],
+            ["50 и более шагов", 0, -12, "mode-count"]
+          ]
+        },
+        {
+          area: [510, 200, 745, 45],
+          anchor: [627, 200],
+          radius: [7, 0],
+          fill: "step-fill flow-fill",
+          dot: "mode-dot",
+          labels: [
+            ["rectified flow", 0, -36, "mode-name"],
+            ["20–30 шагов", 0, -12, "mode-count"]
+          ]
+        },
+        {
+          area: [745, 260, 1050, 45],
+          anchor: [897, 260],
+          radius: [7, 0],
+          fill: "step-fill fast-fill",
+          dot: "fast-dot",
+          labels: [
+            ["schnell / turbo", 0, -36, "mode-name fast-label"],
+            ["1–4 шага", 0, -12, "mode-count fast-label"]
+          ]
+        }
+      ],
+      stairs: [
+        [50, 80],
+        [275, 80],
+        [275, 140],
+        [510, 140],
+        [510, 200],
+        [745, 200],
+        [745, 260],
+        [1050, 260]
+      ],
+      guides: [
+        [[275, 45], [275, 80]],
+        [[510, 45], [510, 140]],
+        [[745, 45], [745, 200]],
+        [[1050, 45], [1050, 260]]
+      ],
+      topArrow: {
+        shaft: [[90, 365], [1050, 365]],
+        head: [[1028, 376], [1050, 365], [1028, 354]],
+        label: [
+          [90, 365],
+          [0, 19],
+          "Крупнее переход за один вызов",
+          "start"
+        ]
+      },
+      badge: {
+        bounds: [350, 338, 850, 300],
+        text: [
+          [600, 319],
+          [0, 0],
+          "1000 → 4 прохода: 250× меньше вызовов модели",
+          "middle"
+        ]
+      },
+      bottomArrow: {
+        shaft: [[50, 20], [1050, 20]],
+        head: [[1028, 30], [1050, 20], [1028, 10]],
+        labels: [
+          [[50, 20], [0, 28], "медленно: больше уточнений", "start"],
+          [[1050, 20], [0, 28], "быстро: интерактивная генерация", "end"]
+        ]
+      },
+      fallback: [
+        [600, 205],
+        [0, 0],
+        "Схема: DDPM — много малых шагов, schnell — несколько крупных.",
+        "middle"
+      ]
+    });
+
+    const [origin, scale] = SCHEME.mapping;
+    Object.freeze(origin);
+    Object.freeze(scale);
+
+    const [originX, originY] = origin;
+    const [scaleX, scaleY] = scale;
+
+    const sx = x => originX + x * scaleX;
+    const sy = y => originY - y * scaleY;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      if (!svg) {
+        throw new Error("Контейнер SVG не найден");
+      }
+
+      const make = (name, className) => {
+        const node = document.createElementNS(namespace, name);
+        if (className) {
+          node.setAttribute("class", className);
+        }
+        return node;
+      };
+
+      const setPoint = (node, point, xName, yName, offset) => {
+        const [x, y] = point;
+        const [dx, dy] = offset;
+        node.setAttribute(xName, sx(x) + dx);
+        node.setAttribute(yName, sy(y) + dy);
+      };
+
+      const addLine = (parent, points, className) => {
+        const [start, end] = points;
+        const line = make("line", className);
+        setPoint(line, start, "x1", "y1", [0, 0]);
+        setPoint(line, end, "x2", "y2", [0, 0]);
+        parent.appendChild(line);
+        return line;
+      };
+
+      const addPolyline = (parent, points, className) => {
+        const line = make("polyline", className);
+        line.setAttribute(
+          "points",
+          points
+            .map(point => {
+              const [x, y] = point;
+              return `${sx(x)},${sy(y)}`;
+            })
+            .join(" ")
+        );
+        parent.appendChild(line);
+        return line;
+      };
+
+      const addRect = (parent, bounds, className) => {
+        const [left, top, right, bottom] = bounds;
+        const rect = make("rect", className);
+        rect.setAttribute("x", sx(left));
+        rect.setAttribute("y", sy(top));
+        rect.setAttribute("width", sx(right) - sx(left));
+        rect.setAttribute("height", sy(bottom) - sy(top));
+        parent.appendChild(rect);
+        return rect;
+      };
+
+      const addCircle = (parent, anchor, radiusPair, className) => {
+        const [x, y] = anchor;
+        const [radius, zero] = radiusPair;
+        const circle = make("circle", className);
+        circle.setAttribute("cx", sx(x));
+        circle.setAttribute("cy", sy(y));
+        circle.setAttribute("r", sx(radius) - sx(zero));
+        parent.appendChild(circle);
+        return circle;
+      };
+
+      const addText = (parent, specification, className) => {
+        const [anchor, offset, content, alignment] = specification;
+        const text = make("text", className);
+        setPoint(text, anchor, "x", "y", offset);
+        text.setAttribute("text-anchor", alignment);
+        text.textContent = content;
+        parent.appendChild(text);
+        return text;
+      };
+
+      const layer = make("g", "runtime-layer");
+      svg.appendChild(layer);
+
+      addRect(layer, SCHEME.background, "diagram-background");
+
+      for (const level of SCHEME.levels) {
+        addRect(layer, level.area, level.fill);
+      }
+
+      for (const guide of SCHEME.guides) {
+        addLine(layer, guide, "guide-line");
+      }
+
+      addLine(layer, SCHEME.baseline, "guide-line");
+      addPolyline(layer, SCHEME.stairs, "stair-line");
+
+      for (const level of SCHEME.levels) {
+        addCircle(layer, level.anchor, level.radius, level.dot);
+
+        for (const label of level.labels) {
+          const [content, dx, dy, className] = label;
+          addText(
+            layer,
+            [level.anchor, [dx, dy], content, "middle"],
+            className
+          );
+        }
+      }
+
+      addLine(layer, SCHEME.topArrow.shaft, "direction-line");
+      addPolyline(layer, SCHEME.topArrow.head, "direction-line");
+      addText(
+        layer,
+        SCHEME.topArrow.label,
+        "direction-label"
+      );
+
+      addRect(layer, SCHEME.badge.bounds, "badge");
+      addText(layer, SCHEME.badge.text, "badge-text");
+
+      addLine(layer, SCHEME.bottomArrow.shaft, "direction-line");
+      addPolyline(layer, SCHEME.bottomArrow.head, "direction-line");
+
+      for (const label of SCHEME.bottomArrow.labels) {
+        addText(layer, label, "axis-label");
+      }
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+
+      if (svg) {
+        const namespace = "http://www.w3.org/2000/svg";
+        const text = document.createElementNS(namespace, "text");
+        const [anchor, offset, content, alignment] = SCHEME.fallback;
+        const [x, y] = anchor;
+        const [dx, dy] = offset;
+
+        while (svg.firstChild) {
+          svg.removeChild(svg.firstChild);
+        }
+
+        text.setAttribute("class", "fallback");
+        text.setAttribute("x", sx(x) + dx);
+        text.setAttribute("y", sy(y) + dy);
+        text.setAttribute("text-anchor", alignment);
+        text.textContent = content;
+        svg.appendChild(text);
+      }
+    }
+  </script>
+</body>
+</html>

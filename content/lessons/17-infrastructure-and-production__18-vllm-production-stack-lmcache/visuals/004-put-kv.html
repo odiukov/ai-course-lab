@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как KV покидает GPU и возвращается к запросу</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --page: #ffffff;
+  --ink: #172033;
+  --muted: #526176;
+  --line: #8a9ab0;
+  --gpu: #f8fafc;
+  --cpu: #f1f5f9;
+  --disk: #e7edf5;
+  --cell: #d7e0eb;
+  --blue: #2563eb;
+  --blue-soft: #dbeafe;
+  --green: #07875f;
+  --green-soft: #d8f3e8;
+  --tag: #fff7d6;
+  --tag-line: #b58a10;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #101622;
+    --ink: #edf3fc;
+    --muted: #aab8ca;
+    --line: #718198;
+    --gpu: #182131;
+    --cpu: #1d293a;
+    --disk: #243247;
+    --cell: #34445a;
+    --blue: #60a5fa;
+    --blue-soft: #183b67;
+    --green: #4fd1a1;
+    --green-soft: #123f35;
+    --tag: #403817;
+    --tag-line: #d6ae38;
+  }
+}
+html, body {
+  background: var(--page);
+  color: var(--ink);
+}
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+h1 {
+  font-size: 20px;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 1200px;
+  max-height: 455px;
+  background: var(--page);
+}
+.tier {
+  stroke: var(--line);
+  stroke-width: 2px;
+}
+.gpu { fill: var(--gpu); }
+.cpu { fill: var(--cpu); }
+.disk { fill: var(--disk); }
+.tier-title {
+  fill: var(--ink);
+  font-size: 20px;
+  font-weight: bold;
+}
+.tier-subtitle {
+  fill: var(--muted);
+  font-size: 14px;
+}
+.cell {
+  fill: var(--cell);
+  stroke: var(--line);
+  stroke-width: 1.5px;
+}
+.old-cell {
+  fill: var(--page);
+  stroke: var(--muted);
+  stroke-width: 2px;
+}
+.new-cell {
+  fill: var(--green-soft);
+  stroke: var(--green);
+  stroke-width: 2px;
+}
+.kv {
+  fill: var(--blue);
+  stroke: var(--blue);
+  stroke-width: 2px;
+}
+.kv-text {
+  fill: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+}
+.small-label {
+  fill: var(--muted);
+  font-size: 12px;
+}
+.note {
+  fill: var(--ink);
+  font-size: 14px;
+}
+.note-strong {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: bold;
+}
+.address {
+  fill: var(--tag);
+  stroke: var(--tag-line);
+  stroke-width: 1.5px;
+}
+.address-text {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: bold;
+}
+.unload {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.restore {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.unload-head { fill: var(--blue); }
+.restore-head { fill: var(--green); }
+.unload-label {
+  fill: var(--blue);
+  font-size: 14px;
+  font-weight: bold;
+}
+.restore-label {
+  fill: var(--green);
+  font-size: 14px;
+  font-weight: bold;
+}
+.cross {
+  stroke: var(--muted);
+  stroke-width: 2px;
+  stroke-linecap: round;
+}
+.fallback {
+  fill: var(--ink);
+  font-size: 16px;
+}
+</style>
+</head>
+<body>
+<h1>Как KV покидает GPU и возвращается к запросу</h1>
+<svg viewBox="0 0 1200 455" width="1200" height="455"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Иерархия хранения KV-кэша</title>
+  <desc id="svg-desc">Синий блок KV выгружается из HBM ускорителя H100 в CPU DRAM, при необходимости — в Ceph или на диск, а затем восстанавливается в новой ячейке HBM по сохранённому адресу.</desc>
+  <g id="plot"></g>
+</svg>
+<script>
+const diagram = [
+  {
+    fallback: {
+      text: "Схема должна показать путь KV: HBM → DRAM → Ceph или диск и обратно.",
+      x: 600, y: 228, dx: 0, dy: 0, a: "middle"
+    }
+  },
+  [
+    {
+      x: 245, y: 18, w: 710, h: 117, c: "gpu",
+      title: { text: "H100 · HBM 80 ГБ", x: 270, y: 44, dx: 0, dy: 0, a: "start", c: "tier-title" },
+      subtitle: { text: "быстрая память для активных запросов", x: 270, y: 68, dx: 0, dy: 0, a: "start", c: "tier-subtitle" }
+    },
+    {
+      x: 150, y: 200, w: 900, h: 120, c: "cpu",
+      title: { text: "CPU · DRAM 512 ГБ", x: 175, y: 228, dx: 0, dy: 0, a: "start", c: "tier-title" },
+      subtitle: { text: "адресованные фрагменты многих запросов", x: 175, y: 253, dx: 0, dy: 0, a: "start", c: "tier-subtitle" }
+    },
+    {
+      x: 70, y: 385, w: 1060, h: 60, c: "disk",
+      title: { text: "Ceph или диск", x: 95, y: 421, dx: 0, dy: 0, a: "start", c: "tier-title" },
+      subtitle: { text: "дальний уровень хранения KV", x: 300, y: 420, dx: 0, dy: 0, a: "start", c: "tier-subtitle" }
+    }
+  ],
+  [
+    {
+      x: 450, y: 82, w: 45, h: 28, c: "old-cell",
+      label: { text: "старая ячейка свободна", x: 472.5, y: 126, dx: 0, dy: 0, a: "middle", c: "small-label" },
+      cross: [
+        [{ x: 458, y: 88 }, { x: 487, y: 104 }],
+        [{ x: 487, y: 88 }, { x: 458, y: 104 }]
+      ]
+    },
+    { x: 516, y: 82, w: 45, h: 28, c: "cell" },
+    { x: 572, y: 82, w: 45, h: 28, c: "cell" },
+    { x: 628, y: 82, w: 45, h: 28, c: "cell" },
+    {
+      x: 705, y: 82, w: 45, h: 28, c: "new-cell",
+      label: { text: "новая ячейка HBM", x: 727.5, y: 126, dx: 0, dy: 0, a: "middle", c: "small-label" }
+    },
+    { x: 875, y: 272, w: 34, h: 25, c: "cell" },
+    { x: 918, y: 272, w: 34, h: 25, c: "cell" },
+    { x: 965, y: 272, w: 34, h: 25, c: "cell" },
+    { x: 830, y: 400, w: 48, h: 28, c: "cell" },
+    { x: 889, y: 400, w: 48, h: 28, c: "cell" },
+    { x: 948, y: 400, w: 48, h: 28, c: "cell" },
+    { x: 1007, y: 400, w: 48, h: 28, c: "cell" }
+  ],
+  [
+    {
+      c: "unload", hc: "unload-head",
+      p: [{ x: 472.5, y: 110 }, { x: 472.5, y: 166 }, { x: 590, y: 166 }, { x: 590, y: 225 }],
+      h: [{ x: 590, y: 225 }, { x: 580, y: 209 }, { x: 600, y: 209 }],
+      label: { text: "выгрузка KV", x: 472.5, y: 145, dx: -18, dy: 0, a: "end", c: "unload-label" }
+    },
+    {
+      c: "restore", hc: "restore-head",
+      p: [{ x: 620, y: 247 }, { x: 727.5, y: 247 }, { x: 727.5, y: 110 }],
+      h: [{ x: 727.5, y: 110 }, { x: 717.5, y: 126 }, { x: 737.5, y: 126 }],
+      label: { text: "восстановление", x: 727.5, y: 178, dx: 18, dy: 0, a: "start", c: "restore-label" }
+    },
+    {
+      c: "unload", hc: "unload-head",
+      p: [{ x: 450, y: 320 }, { x: 450, y: 385 }],
+      h: [{ x: 450, y: 385 }, { x: 440, y: 369 }, { x: 460, y: 369 }],
+      label: { text: "дальняя выгрузка", x: 450, y: 346, dx: -18, dy: 0, a: "end", c: "unload-label" }
+    },
+    {
+      c: "restore", hc: "restore-head",
+      p: [{ x: 750, y: 385 }, { x: 750, y: 320 }],
+      h: [{ x: 750, y: 320 }, { x: 740, y: 336 }, { x: 760, y: 336 }],
+      label: { text: "возврат по адресу", x: 750, y: 374, dx: 18, dy: 0, a: "start", c: "restore-label" }
+    }
+  ],
+  {
+    block: { x: 560, y: 225, w: 60, h: 44, c: "kv" },
+    text: { text: "KV", x: 590, y: 252, dx: 0, dy: 0, a: "middle", c: "kv-text" },
+    address: { x: 500, y: 280, w: 350, h: 27, c: "address" },
+    addressText: {
+      text: "адрес: префикс + участок последовательности",
+      x: 675, y: 299, dx: 0, dy: 0, a: "middle", c: "address-text"
+    }
+  },
+  [
+    { text: "запрос временно остановлен", x: 780, y: 48, dx: 0, dy: 0, a: "start", c: "note-strong" },
+    { text: "ячейки HBM нужны другой работе", x: 780, y: 70, dx: 0, dy: 0, a: "start", c: "note" },
+    { text: "после восстановления:", x: 875, y: 226, dx: 0, dy: 0, a: "start", c: "note-strong" },
+    { text: "без повторного prefill 2K токенов", x: 875, y: 250, dx: 0, dy: 0, a: "start", c: "note" }
+  ]
+];
+
+const origin = { x: 0, y: 0 };
+const scale = 1;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const [meta, tiers, cells, arrows, kv, notes] = diagram;
+const svgNS = "http://www.w3.org/2000/svg";
+const plot = document.getElementById("plot");
+
+function make(tag, attrs, text) {
+  const item = document.createElementNS(svgNS, tag);
+  Object.entries(attrs).forEach(([name, value]) => item.setAttribute(name, value));
+  if (text !== undefined) item.textContent = text;
+  return item;
+}
+
+function rect(r, extraClass) {
+  return make("rect", {
+    x: sx(r.x),
+    y: sy(r.y),
+    width: sx(r.x + r.w) - sx(r.x),
+    height: sy(r.y + r.h) - sy(r.y),
+    class: extraClass ? extraClass + " " + r.c : r.c
+  });
+}
+
+function text(t) {
+  return make("text", {
+    x: sx(t.x + t.dx),
+    y: sy(t.y + t.dy),
+    "text-anchor": t.a,
+    class: t.c
+  }, t.text);
+}
+
+function points(list) {
+  return list.map(point => sx(point.x) + "," + sy(point.y)).join(" ");
+}
+
+try {
+  tiers.forEach(tier => {
+    plot.append(rect(tier, "tier"));
+    plot.append(text(tier.title));
+    plot.append(text(tier.subtitle));
+  });
+
+  arrows.forEach(arrow => {
+    plot.append(make("polyline", {
+      points: points(arrow.p),
+      class: arrow.c
+    }));
+    plot.append(make("polygon", {
+      points: points(arrow.h),
+      class: arrow.hc
+    }));
+    plot.append(text(arrow.label));
+  });
+
+  cells.forEach(cell => {
+    plot.append(rect(cell));
+    if (cell.cross) {
+      cell.cross.forEach(segment => {
+        const [from, to] = segment;
+        plot.append(make("line", {
+          x1: sx(from.x), y1: sy(from.y),
+          x2: sx(to.x), y2: sy(to.y),
+          class: "cross"
+        }));
+      });
+    }
+    if (cell.label) plot.append(text(cell.label));
+  });
+
+  plot.append(rect(kv.block));
+  plot.append(text(kv.text));
+  plot.append(rect(kv.address));
+  plot.append(text(kv.addressText));
+  notes.forEach(note => plot.append(text(note)));
+} catch (error) {
+  plot.replaceChildren(text({
+    text: meta.fallback.text,
+    x: meta.fallback.x,
+    y: meta.fallback.y,
+    dx: meta.fallback.dx,
+    dy: meta.fallback.dy,
+    a: meta.fallback.a,
+    c: "fallback"
+  }));
+}
+</script>
+</body>
+</html>

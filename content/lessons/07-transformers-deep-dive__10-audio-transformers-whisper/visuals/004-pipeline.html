@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Конвейер Whisper целиком</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1d2330; --muted:#5b6577;
+    --box:#eef2f8; --box-line:#4a6fa5;
+    --enc:#e6f1ea; --enc-line:#3f7d5c;
+    --dec:#f3ecf7; --dec-line:#7a5296;
+    --arrow:#3a4658; --seam:#c0642a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e7ecf3; --muted:#a3adbd;
+      --box:#1f2530; --box-line:#7aa2d8;
+      --enc:#1b2a22; --enc-line:#6cbb92;
+      --dec:#261f2e; --dec-line:#c0a0dc;
+      --arrow:#9aa6b8; --seam:#e8934f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{padding:10px 12px 12px}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:470px;background:var(--bg)}
+  .fallback{color:var(--muted);font-size:13px;white-space:pre-wrap}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .t-title{font-size:16px;font-weight:600;fill:var(--fg)}
+  .t-sub{font-size:12.5px;fill:var(--muted)}
+  .t-edge{font-size:12.5px;font-weight:600;fill:var(--arrow)}
+  .t-seam{font-size:12.5px;font-weight:600;fill:var(--seam)}
+  .box{fill:var(--box);stroke:var(--box-line)}
+  .box.enc{fill:var(--enc);stroke:var(--enc-line)}
+  .box.dec{fill:var(--dec);stroke:var(--dec-line)}
+  .edge{stroke:var(--arrow);fill:none}
+  .head{fill:var(--arrow)}
+  .seam{stroke:var(--seam);fill:none;stroke-dasharray:5 4}
+</style>
+<div class="wrap">
+<h2>Конвейер Whisper: аудио на входе, текст на выходе</h2>
+<div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---------- данные схемы ---------- */
+    var NODES = [
+      {cx:14, cy:8,  w:24, h:12, cls:'',    lines:['Аудио','волна 16 кГц','обрезка до 30 с']},
+      {cx:50, cy:8,  w:24, h:12, cls:'',    lines:['log-mel','80 мел-бинов','3000 кадров']},
+      {cx:86, cy:8,  w:24, h:12, cls:'',    lines:['Conv-стем','2 × Conv1D, ядро 3','шаги 1 и 2']},
+      {cx:86, cy:31, w:24, h:12, cls:'enc', lines:['Энкодер','32 слоя · d_model 1280','один проход на запись']},
+      {cx:46, cy:31, w:24, h:12, cls:'dec', lines:['Декодер','32 слоя · авторегрессия','префикс: <|en|> <|transcribe|>']},
+      {cx:12, cy:31, w:20, h:12, cls:'',    lines:['Текст','beam search, ширина 5']}
+    ];
+    var EDGES = [
+      {x1:26, y1:8,  x2:38, y2:8,  label:'окно, шаг 10 мс',        lx:32,   ly:5.6,  anc:'middle'},
+      {x1:62, y1:8,  x2:74, y2:8,  label:'3000 × 80',              lx:68,   ly:5.6,  anc:'middle'},
+      {x1:86, y1:14, x2:86, y2:25, label:'1500 кадров',            lx:84.6, ly:19.8, anc:'end'},
+      {x1:74, y1:31, x2:58, y2:31, label:'1500 × 1280 · один раз', lx:66,   ly:23.2, anc:'middle'},
+      {x1:34, y1:31, x2:22, y2:31, label:'токены по одному',       lx:28,   ly:23.2, anc:'middle'}
+    ];
+    var SEAM = {x:66, y1:25, y2:37, lx:66, ly:39.4, label:'граница: звук │ слова'};
+
+    /* ---------- единственный перевод координат ---------- */
+    var ORIGIN = {x:10, y:6};
+    var SCALE  = 9.2;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    var LINE_GAP = 3.5;   /* данные, не пиксели */
+    var HEAD_LEN = 1.8, HEAD_HALF = 0.95;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a, t){
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      if (t != null) e.textContent = t;
+      return e;
+    }
+
+    var svg = el('svg', {viewBox:'0 0 940 384', role:'img',
+      'aria-label':'Конвейер Whisper от аудио 16 кГц до текста'});
+    svg.appendChild(el('rect', {x:0, y:0, width:940, height:384, fill:'var(--bg)'}));
+
+    /* блоки */
+    NODES.forEach(function(n){
+      var x0 = n.cx - n.w/2, y0 = n.cy - n.h/2;
+      svg.appendChild(el('rect', {
+        class:'box ' + n.cls,
+        x: sx(x0), y: sy(y0),
+        width:  sx(x0 + n.w) - sx(x0),
+        height: sy(y0 + n.h) - sy(y0),
+        rx: sx(1) - sx(0),
+        'stroke-width': 1.6
+      }));
+      var k = n.lines.length;
+      n.lines.forEach(function(txt, i){
+        var y = n.cy + (i - (k - 1) / 2) * LINE_GAP;
+        svg.appendChild(el('text', {
+          class: i === 0 ? 't-title' : 't-sub',
+          x: sx(n.cx), y: sy(y), 'text-anchor':'middle', 'dominant-baseline':'middle'
+        }, txt));
+      });
+    });
+
+    /* стрелки */
+    EDGES.forEach(function(e){
+      var dx = e.x2 - e.x1, dy = e.y2 - e.y1;
+      var len = Math.sqrt(dx*dx + dy*dy), ux = dx/len, uy = dy/len;
+      var bx = e.x2 - ux*HEAD_LEN, by = e.y2 - uy*HEAD_LEN;
+      var px = -uy, py = ux;
+      svg.appendChild(el('line', {
+        class:'edge', 'stroke-width':1.8,
+        x1: sx(e.x1), y1: sy(e.y1), x2: sx(bx), y2: sy(by)
+      }));
+      svg.appendChild(el('polygon', {
+        class:'head',
+        points: [
+          sx(e.x2) + ',' + sy(e.y2),
+          sx(bx + px*HEAD_HALF) + ',' + sy(by + py*HEAD_HALF),
+          sx(bx - px*HEAD_HALF) + ',' + sy(by - py*HEAD_HALF)
+        ].join(' ')
+      }));
+      svg.appendChild(el('text', {
+        class:'t-edge', x: sx(e.lx), y: sy(e.ly),
+        'text-anchor': e.anc, 'dominant-baseline':'middle'
+      }, e.label));
+    });
+
+    /* шов между энкодером и декодером */
+    svg.appendChild(el('line', {
+      class:'seam', 'stroke-width':1.8,
+      x1: sx(SEAM.x), y1: sy(SEAM.y1), x2: sx(SEAM.x), y2: sy(SEAM.y2)
+    }));
+    svg.appendChild(el('text', {
+      class:'t-seam', x: sx(SEAM.lx), y: sy(SEAM.ly),
+      'text-anchor':'middle', 'dominant-baseline':'middle'
+    }, SEAM.label));
+
+    host.appendChild(svg);
+  } catch (err) {
+    var p = document.createElement('p');
+    p.className = 'fallback';
+    p.textContent =
+      'Схема не построилась (' + err.message + '). Она должна показывать одну линию:\n' +
+      'Аудио 16 кГц, 30 с → (окно, шаг 10 мс) → log-mel, 80 мел-бинов, 3000 кадров → ' +
+      '(3000 × 80) → Conv-стем, 2 × Conv1D, шаги 1 и 2 → (1500 кадров) → ' +
+      'Энкодер, 32 слоя, d_model 1280, один проход → (1500 × 1280, один раз) → ' +
+      'Декодер, 32 слоя, префикс <|en|> <|transcribe|>, проход на каждый токен → ' +
+      '(токены по одному) → Текст, beam search шириной 5. ' +
+      'Между энкодером и декодером — граница: слева звук, справа слова.';
+    host.appendChild(p);
+  }
+})();
+</script>
+</html>

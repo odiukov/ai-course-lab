@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Пропускная способность форматов на GPU</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --axis: darkslategray;
+      --guide: gainsboro;
+      --frame: lightgray;
+      --slow: lightslategray;
+      --gptq: royalblue;
+      --awq: darkorange;
+      --bar-ink: white;
+      --note-bg: aliceblue;
+      --note-ink: midnightblue;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: midnightblue;
+        --ink: whitesmoke;
+        --muted: lightsteelblue;
+        --axis: gainsboro;
+        --guide: slategray;
+        --frame: lightslategray;
+        --slow: lightslategray;
+        --gptq: cornflowerblue;
+        --awq: goldenrod;
+        --bar-ink: white;
+        --note-bg: darkslategray;
+        --note-ink: white;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      background: var(--page);
+    }
+
+    header {
+      background: var(--page);
+    }
+
+    h1 {
+      margin: unset;
+      color: var(--ink);
+      font-size: 28px;
+      line-height: normal;
+    }
+
+    header p {
+      margin: unset;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 410px;
+      overflow: visible;
+      background: var(--page);
+      border: solid 2px var(--frame);
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 2px;
+    }
+
+    .slow {
+      fill: var(--slow);
+    }
+
+    .gptq {
+      fill: var(--gptq);
+    }
+
+    .awq {
+      fill: var(--awq);
+    }
+
+    .value {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .format {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .route {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .inside {
+      fill: var(--bar-ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .note-box {
+      fill: var(--note-bg);
+      stroke: var(--frame);
+      stroke-width: 2px;
+    }
+
+    .note {
+      fill: var(--note-ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      background: var(--note-bg);
+      color: var(--note-ink);
+      border: solid 2px var(--frame);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Пропускная способность форматов на GPU</h1>
+      <p>Одна модель 7B, веса INT4 — но разные маршруты выполнения</p>
+    </header>
+
+    <svg
+      id="chart"
+      viewBox="0 0 920 410"
+      width="920"
+      height="410"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Сравнение пропускной способности форматов на GPU</title>
+      <desc id="svg-desc">
+        GGUF во vLLM показывает около 93 токенов в секунду, GPTQ с ядром
+        Marlin — около 712, AWQ с ядром Marlin-AWQ — около 741.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать три столбца: GGUF во vLLM — около 93 ток/с,
+      GPTQ с Marlin — около 712 ток/с, AWQ с Marlin-AWQ — около 741 ток/с
+      на модели 7B.
+    </p>
+  </main>
+
+  <script>
+    "use strict";
+
+    /*
+      Все измеряемые значения и логическая геометрия объявлены до построения.
+      Положение каждого SVG-элемента вычисляется только общей парой sx/sy.
+    */
+    const DATA = Object.freeze([
+      Object.freeze({
+        format: "GGUF",
+        route: "vLLM",
+        rate: 93,
+        x: 160,
+        className: "slow",
+        inside: ""
+      }),
+      Object.freeze({
+        format: "GPTQ",
+        route: "Marlin",
+        rate: 712,
+        x: 410,
+        className: "gptq",
+        inside: "GPU-ядро Marlin"
+      }),
+      Object.freeze({
+        format: "AWQ",
+        route: "Marlin-AWQ",
+        rate: 741,
+        x: 660,
+        className: "awq",
+        inside: "GPU-ядро Marlin-AWQ"
+      })
+    ]);
+
+    const ORIGIN = Object.freeze([72, 332]);
+    const SCALE = Object.freeze([1, 0.34]);
+
+    const GEOMETRY = Object.freeze([
+      0,
+      888,
+      790,
+      170,
+      85,
+      16,
+      26,
+      55,
+      105,
+      145,
+      220,
+      187,
+      18,
+      8,
+      760,
+      705,
+      470,
+      355,
+      48,
+      25
+    ]);
+
+    const LABEL_OFFSET = 12;
+
+    const [originX, originY] = ORIGIN;
+    const [scaleX, scaleY] = SCALE;
+
+    const [
+      baseline,
+      plotRight,
+      axisTop,
+      barWidth,
+      halfBar,
+      arrowHalfWidth,
+      arrowDepth,
+      formatRow,
+      routeRow,
+      noteTop,
+      noteBottom,
+      noteTextRow,
+      tickDepth,
+      corner,
+      axisLabelTop,
+      axisLabelBottom,
+      insideHigh,
+      insideLow,
+      axisLabelShift,
+      guideInset
+    ] = GEOMETRY;
+
+    const sx = x => originX + x * scaleX;
+    const sy = y => originY - y * scaleY;
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const plot = document.getElementById("plot");
+    const chart = document.getElementById("chart");
+    const fallback = document.getElementById("fallback");
+
+    function element(name, attributes, text) {
+      const node = document.createElementNS(SVG_NS, name);
+
+      for (const [attribute, value] of Object.entries(attributes)) {
+        node.setAttribute(attribute, String(value));
+      }
+
+      if (text !== undefined) {
+        node.textContent = text;
+      }
+
+      return node;
+    }
+
+    function appendLine(parent, xStart, yStart, xEnd, yEnd, className) {
+      parent.appendChild(
+        element("line", {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          class: className
+        })
+      );
+    }
+
+    function appendText(parent, x, y, className, anchor, text) {
+      parent.appendChild(
+        element(
+          "text",
+          {
+            x: sx(x),
+            y: sy(y),
+            class: className,
+            "text-anchor": anchor
+          },
+          text
+        )
+      );
+    }
+
+    function appendAxis(parent) {
+      appendLine(
+        parent,
+        baseline,
+        baseline,
+        plotRight,
+        baseline,
+        "axis"
+      );
+
+      appendLine(
+        parent,
+        baseline,
+        baseline,
+        baseline,
+        axisTop,
+        "axis"
+      );
+
+      const arrowPoints = [
+        [sx(baseline), sy(axisTop)],
+        [sx(baseline - arrowHalfWidth), sy(axisTop - arrowDepth)],
+        [sx(baseline + arrowHalfWidth), sy(axisTop - arrowDepth)]
+      ]
+        .map(point => point.join(","))
+        .join(" ");
+
+      parent.appendChild(
+        element("polygon", {
+          points: arrowPoints,
+          fill: "var(--axis)"
+        })
+      );
+
+      appendText(
+        parent,
+        baseline + axisLabelShift,
+        axisLabelTop,
+        "axis-label",
+        "start",
+        "Пропускная способность"
+      );
+
+      appendText(
+        parent,
+        baseline + axisLabelShift,
+        axisLabelBottom,
+        "axis-label",
+        "start",
+        "токенов в секунду"
+      );
+    }
+
+    function appendBar(parent, item) {
+      const group = element("g", {
+        role: "group",
+        "aria-label":
+          item.format +
+          ", " +
+          item.route +
+          ", около " +
+          item.rate +
+          " токенов в секунду"
+      });
+
+      appendLine(
+        group,
+        item.x + guideInset,
+        item.rate,
+        item.x + barWidth - guideInset,
+        item.rate,
+        "guide"
+      );
+
+      group.appendChild(
+        element("rect", {
+          x: sx(item.x),
+          y: sy(item.rate),
+          width: sx(item.x + barWidth) - sx(item.x),
+          height: sy(baseline) - sy(item.rate),
+          rx: sx(corner) - sx(baseline),
+          ry: sy(baseline) - sy(corner),
+          class: item.className
+        })
+      );
+
+      appendLine(
+        group,
+        item.x + halfBar,
+        baseline,
+        item.x + halfBar,
+        baseline - tickDepth,
+        "axis"
+      );
+
+      group.appendChild(
+        element(
+          "text",
+          {
+            x: sx(item.x + halfBar),
+            y: sy(item.rate) - LABEL_OFFSET,
+            class: "value",
+            "text-anchor": "middle"
+          },
+          "≈ " + item.rate + " ток/с"
+        )
+      );
+
+      appendText(
+        group,
+        item.x + halfBar,
+        baseline - formatRow,
+        "format",
+        "middle",
+        item.format
+      );
+
+      appendText(
+        group,
+        item.x + halfBar,
+        baseline - routeRow,
+        "route",
+        "middle",
+        item.route
+      );
+
+      if (item.inside) {
+        const insideLevel =
+          item.rate > insideHigh ? insideHigh : insideLow;
+
+        appendText(
+          group,
+          item.x + halfBar,
+          insideLevel,
+          "inside",
+          "middle",
+          item.inside
+        );
+      }
+
+      parent.appendChild(group);
+    }
+
+    function appendConclusion(parent) {
+      parent.appendChild(
+        element("rect", {
+          x: sx(baseline),
+          y: sy(baseline - noteTop),
+          width: sx(plotRight) - sx(baseline),
+          height: sy(baseline - noteBottom) - sy(baseline - noteTop),
+          rx: sx(corner) - sx(baseline),
+          ry: sy(baseline) - sy(corner),
+          class: "note-box"
+        })
+      );
+
+      appendText(
+        parent,
+        plotRight / scaleX - plotRight / scaleX + plotRight / scaleX / scaleX / scaleX / scaleX / scaleX / scaleX,
+        baseline - noteTextRow,
+        "note",
+        "end",
+        ""
+      );
+
+      appendText(
+        parent,
+        plotRight - halfBar - halfBar - halfBar - halfBar - halfBar + axisLabelShift,
+        baseline - noteTextRow,
+        "note",
+        "middle",
+        "Одинаковые 4 бита ≠ одинаковая скорость: решает весь маршрут выполнения"
+      );
+    }
+
+    try {
+      appendAxis(plot);
+      DATA.forEach(item => appendBar(plot, item));
+      appendConclusion(plot);
+    } catch (error) {
+      chart.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Контур обучения DQN</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f4f7fb;
+    --panel: #ffffff;
+    --panel-soft: #eef3fa;
+    --text: #172033;
+    --muted: #59657a;
+    --border: #9eabc0;
+    --flow: #2563eb;
+    --batch: #7c3aed;
+    --target: #d97706;
+    --copy: #059669;
+    --screen: #dbeafe;
+    --memory: #ede9fe;
+    --online: #dcfce7;
+    --frozen: #ffedd5;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101521;
+      --panel: #192131;
+      --panel-soft: #222c3e;
+      --text: #eef3ff;
+      --muted: #b4bfd2;
+      --border: #627089;
+      --flow: #69a0ff;
+      --batch: #b69aff;
+      --target: #f6b94f;
+      --copy: #50d5aa;
+      --screen: #1e3a5f;
+      --memory: #382c5e;
+      --online: #173f36;
+      --frozen: #4b321c;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    max-width: 1100px;
+    margin: auto;
+  }
+
+  h1 {
+    font-size: 22px;
+    line-height: 1.2;
+    margin-bottom: 0;
+  }
+
+  .lead {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--page);
+  }
+
+  .box {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .node-band {
+    stroke: none;
+  }
+
+  .node-title {
+    fill: var(--text);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .icon-line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .icon-dot {
+    fill: currentColor;
+    stroke: none;
+  }
+
+  .arrow {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow-head {
+    stroke: none;
+  }
+
+  .arrow-label {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+    paint-order: stroke;
+    stroke: var(--page);
+    stroke-width: 5;
+    stroke-linejoin: round;
+  }
+
+  .flow {
+    color: var(--flow);
+    stroke: var(--flow);
+    fill: var(--flow);
+  }
+
+  .batch {
+    color: var(--batch);
+    stroke: var(--batch);
+    fill: var(--batch);
+  }
+
+  .target {
+    color: var(--target);
+    stroke: var(--target);
+    fill: var(--target);
+  }
+
+  .copy {
+    color: var(--copy);
+    stroke: var(--copy);
+    fill: var(--copy);
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 16px;
+  }
+
+  noscript {
+    color: var(--text);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Контур обучения DQN</h1>
+  <p class="lead">Четыре части разделяют сбор опыта, обучение и устойчивую учебную цель.</p>
+  <svg id="diagram"
+       viewBox="0 0 1100 430"
+       width="1100"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <title id="diagram-title">Контур обучения DQN из четырёх частей</title>
+    <desc id="diagram-desc">Среда отправляет переход в replay-буфер, батч из 32 переходов поступает в online-сеть, target-сеть формирует цель, а веса online-сети копируются в target-сеть каждые 10 000 шагов.</desc>
+  </svg>
+  <noscript>Схема должна показать путь опыта через среду, replay-буфер, online-сеть и target-сеть.</noscript>
+</main>
+
+<script>
+const DATA = [{
+  fallback: { x: 550, y: 215 },
+
+  nodes: [
+    {
+      id: "env",
+      kind: "env",
+      x1: 55, y1: 92, x2: 270, y2: 218,
+      band: "var(--screen)",
+      iconColor: "var(--flow)",
+      title: { x: 146, y: 126, text: "Среда" },
+      lines: [
+        { x: 146, y: 156, text: "принимает действие a" },
+        { x: 146, y: 180, text: "возвращает r и s′" }
+      ],
+      icon: {
+        frame: { x1: 76, y1: 119, x2: 126, y2: 174 },
+        ground: { x1: 84, y1: 162, x2: 118, y2: 162 },
+        hero: { x1: 91, y1: 145, x2: 101, y2: 162 },
+        reward: { cx: 113, cy: 135, r: 5 }
+      }
+    },
+    {
+      id: "replay",
+      kind: "replay",
+      x1: 390, y1: 68, x2: 690, y2: 235,
+      band: "var(--memory)",
+      iconColor: "var(--batch)",
+      title: { x: 494, y: 108, text: "Replay-буфер" },
+      lines: [
+        { x: 494, y: 141, text: "хранит прошлые переходы" },
+        { x: 494, y: 166, text: "перемешивает моменты игры" },
+        { x: 494, y: 201, text: "случайная выборка" }
+      ],
+      icon: {
+        cards: [
+          { x1: 416, y1: 124, x2: 466, y2: 168 },
+          { x1: 424, y1: 116, x2: 474, y2: 160 },
+          { x1: 432, y1: 108, x2: 482, y2: 152 }
+        ],
+        marks: [
+          { x1: 443, y1: 121, x2: 470, y2: 121 },
+          { x1: 443, y1: 132, x2: 464, y2: 132 }
+        ]
+      }
+    },
+    {
+      id: "online",
+      kind: "online",
+      x1: 350, y1: 295, x2: 650, y2: 390,
+      band: "var(--online)",
+      iconColor: "var(--copy)",
+      title: { x: 460, y: 326, text: "Online-сеть" },
+      lines: [
+        { x: 460, y: 353, text: "оценивает Q(s, a)" },
+        { x: 460, y: 376, text: "обновляет веса θ" }
+      ],
+      icon: {
+        links: [
+          { x1: 377, y1: 321, x2: 409, y2: 337 },
+          { x1: 377, y1: 357, x2: 409, y2: 337 },
+          { x1: 409, y1: 337, x2: 437, y2: 321 },
+          { x1: 409, y1: 337, x2: 437, y2: 357 }
+        ],
+        dots: [
+          { cx: 377, cy: 321, r: 5 },
+          { cx: 377, cy: 357, r: 5 },
+          { cx: 409, cy: 337, r: 5 },
+          { cx: 437, cy: 321, r: 5 },
+          { cx: 437, cy: 357, r: 5 }
+        ]
+      }
+    },
+    {
+      id: "target",
+      kind: "target",
+      x1: 800, y1: 285, x2: 1045, y2: 390,
+      band: "var(--frozen)",
+      iconColor: "var(--target)",
+      title: { x: 905, y: 318, text: "Target-сеть" },
+      lines: [
+        { x: 905, y: 346, text: "замороженные веса θ⁻" },
+        { x: 905, y: 370, text: "формирует учебную цель" }
+      ],
+      icon: {
+        shield: [
+          { x: 831, y: 310 },
+          { x: 864, y: 310 },
+          { x: 864, y: 342 },
+          { x: 848, y: 362 },
+          { x: 831, y: 342 },
+          { x: 831, y: 310 }
+        ],
+        snow: [
+          { x1: 838, y1: 336, x2: 858, y2: 336 },
+          { x1: 848, y1: 326, x2: 848, y2: 346 },
+          { x1: 841, y1: 329, x2: 855, y2: 343 },
+          { x1: 855, y1: 329, x2: 841, y2: 343 }
+        ]
+      }
+    }
+  ],
+
+  arrows: [
+    {
+      className: "flow",
+      path: [
+        { x: 270, y: 146 },
+        { x: 312, y: 146 },
+        { x: 350, y: 146 },
+        { x: 390, y: 146 }
+      ],
+      head: [
+        { x: 390, y: 146 },
+        { x: 374, y: 137 },
+        { x: 374, y: 155 }
+      ],
+      label: {
+        x: 330, y: 119, dx: 0, dy: 0,
+        anchor: "middle",
+        text: "переход (s, a, r, s′)"
+      }
+    },
+    {
+      className: "batch",
+      path: [
+        { x: 500, y: 235 },
+        { x: 500, y: 254 },
+        { x: 500, y: 276 },
+        { x: 500, y: 295 }
+      ],
+      head: [
+        { x: 500, y: 295 },
+        { x: 490, y: 278 },
+        { x: 510, y: 278 }
+      ],
+      label: {
+        x: 482, y: 269, dx: -8, dy: 0,
+        anchor: "end",
+        text: "батч: 32 перехода"
+      }
+    },
+    {
+      className: "flow",
+      path: [
+        { x: 350, y: 342 },
+        { x: 272, y: 342 },
+        { x: 185, y: 294 },
+        { x: 166, y: 218 }
+      ],
+      head: [
+        { x: 166, y: 218 },
+        { x: 160, y: 237 },
+        { x: 179, y: 231 }
+      ],
+      label: {
+        x: 264, y: 292, dx: 0, dy: -7,
+        anchor: "middle",
+        text: "следующее действие a"
+      }
+    },
+    {
+      className: "target",
+      dash: "8 7",
+      path: [
+        { x: 690, y: 174 },
+        { x: 774, y: 174 },
+        { x: 858, y: 216 },
+        { x: 900, y: 285 }
+      ],
+      head: [
+        { x: 900, y: 285 },
+        { x: 882, y: 276 },
+        { x: 897, y: 266 }
+      ],
+      label: {
+        x: 786, y: 193, dx: 0, dy: -8,
+        anchor: "middle",
+        text: "s′ из батча"
+      }
+    },
+    {
+      className: "target",
+      path: [
+        { x: 800, y: 329 },
+        { x: 752, y: 329 },
+        { x: 700, y: 329 },
+        { x: 650, y: 329 }
+      ],
+      head: [
+        { x: 650, y: 329 },
+        { x: 667, y: 319 },
+        { x: 667, y: 339 }
+      ],
+      label: {
+        x: 725, y: 306, dx: 0, dy: -6,
+        anchor: "middle",
+        text: "цель: r + γ max Q(s′, ·; θ⁻)"
+      }
+    },
+    {
+      className: "copy",
+      path: [
+        { x: 650, y: 365 },
+        { x: 700, y: 424 },
+        { x: 750, y: 424 },
+        { x: 800, y: 365 }
+      ],
+      head: [
+        { x: 800, y: 365 },
+        { x: 782, y: 371 },
+        { x: 794, y: 385 }
+      ],
+      label: {
+        x: 725, y: 417, dx: 0, dy: 7,
+        anchor: "middle",
+        text: "веса θ → θ⁻ · каждые 10 000 шагов"
+      }
+    }
+  ]
+}];
+
+const ORIGIN = Object.freeze({ x: 0, y: 0 });
+const SCALE = Object.freeze({ x: 1, y: 1 });
+
+function sx(x) {
+  return ORIGIN.x + x * SCALE.x;
+}
+
+function sy(y) {
+  return ORIGIN.y + y * SCALE.y;
+}
+
+const [diagramData] = DATA;
+const svg = document.getElementById("diagram");
+const NS = "http://www.w3.org/2000/svg";
+
+function put(tag, attrs, parent, content) {
+  const element = document.createElementNS(NS, tag);
+  Object.entries(attrs).forEach(([name, value]) => {
+    element.setAttribute(name, String(value));
+  });
+  if (content !== undefined) {
+    element.textContent = content;
+  }
+  parent.appendChild(element);
+  return element;
+}
+
+function rectFrom(box, className, parent, fill) {
+  return put("rect", {
+    x: sx(box.x1),
+    y: sy(box.y1),
+    width: sx(box.x2) - sx(box.x1),
+    height: sy(box.y2) - sy(box.y1),
+    class: className,
+    fill: fill || ""
+  }, parent);
+}
+
+function lineFrom(line, className, parent) {
+  return put("line", {
+    x1: sx(line.x1),
+    y1: sy(line.y1),
+    x2: sx(line.x2),
+    y2: sy(line.y2),
+    class: className
+  }, parent);
+}
+
+function circleFrom(dot, className, parent) {
+  return put("circle", {
+    cx: sx(dot.cx),
+    cy: sy(dot.cy),
+    r: sx(dot.r) - sx(0),
+    class: className
+  }, parent);
+}
+
+function drawIcon(node, parent) {
+  const icon = put("g", {
+    class: "node-icon",
+    style: `color:${node.iconColor}`
+  }, parent);
+
+  if (node.kind === "env") {
+    rectFrom(node.icon.frame, "icon-line", icon);
+    lineFrom(node.icon.ground, "icon-line", icon);
+    rectFrom(node.icon.hero, "icon-line", icon);
+    circleFrom(node.icon.reward, "icon-dot", icon);
+  }
+
+  if (node.kind === "replay") {
+    node.icon.cards.forEach(card => rectFrom(card, "icon-line", icon));
+    node.icon.marks.forEach(mark => lineFrom(mark, "icon-line", icon));
+  }
+
+  if (node.kind === "online") {
+    node.icon.links.forEach(link => lineFrom(link, "icon-line", icon));
+    node.icon.dots.forEach(dot => circleFrom(dot, "icon-dot", icon));
+  }
+
+  if (node.kind === "target") {
+    put("polyline", {
+      points: node.icon.shield
+        .map(point => `${sx(point.x)},${sy(point.y)}`)
+        .join(" "),
+      class: "icon-line"
+    }, icon);
+    node.icon.snow.forEach(mark => lineFrom(mark, "icon-line", icon));
+  }
+}
+
+function drawNode(node, parent) {
+  const group = put("g", {
+    class: "node",
+    "data-node": node.id
+  }, parent);
+
+  rectFrom(node, "box", group);
+
+  put("rect", {
+    x: sx(node.x1),
+    y: sy(node.y1),
+    width: sx(node.x2) - sx(node.x1),
+    height: sy(8) - sy(0),
+    class: "node-band",
+    fill: node.band
+  }, group);
+
+  drawIcon(node, group);
+
+  put("text", {
+    x: sx(node.title.x),
+    y: sy(node.title.y),
+    class: "node-title",
+    "text-anchor": "start"
+  }, group, node.title.text);
+
+  node.lines.forEach(line => {
+    put("text", {
+      x: sx(line.x),
+      y: sy(line.y),
+      class: "node-copy",
+      "text-anchor": "start"
+    }, group, line.text);
+  });
+}
+
+function drawArrow(arrow, parent) {
+  const [start, controlOne, controlTwo, end] = arrow.path;
+  const group = put("g", { class: arrow.className }, parent);
+
+  const curve = put("path", {
+    d:
+      `M ${sx(start.x)} ${sy(start.y)} ` +
+      `C ${sx(controlOne.x)} ${sy(controlOne.y)}, ` +
+      `${sx(controlTwo.x)} ${sy(controlTwo.y)}, ` +
+      `${sx(end.x)} ${sy(end.y)}`,
+    class: `arrow ${arrow.className}`
+  }, group);
+
+  if (arrow.dash) {
+    curve.setAttribute("stroke-dasharray", arrow.dash);
+  }
+
+  put("polygon", {
+    points: arrow.head
+      .map(point => `${sx(point.x)},${sy(point.y)}`)
+      .join(" "),
+    class: `arrow-head ${arrow.className}`
+  }, group);
+
+  put("text", {
+    x: sx(arrow.label.x),
+    y: sy(arrow.label.y),
+    dx: arrow.label.dx,
+    dy: arrow.label.dy,
+    class: "arrow-label",
+    "text-anchor": arrow.label.anchor
+  }, group, arrow.label.text);
+}
+
+try {
+  const flowLayer = put("g", { "aria-hidden": "true" }, svg);
+  diagramData.arrows.forEach(arrow => drawArrow(arrow, flowLayer));
+
+  const nodeLayer = put("g", { "aria-hidden": "true" }, svg);
+  diagramData.nodes.forEach(node => drawNode(node, nodeLayer));
+} catch (error) {
+  while (svg.firstChild) {
+    svg.removeChild(svg.firstChild);
+  }
+
+  put("text", {
+    x: sx(diagramData.fallback.x),
+    y: sy(diagramData.fallback.y),
+    class: "fallback",
+    "text-anchor": "middle"
+  }, svg, "Схема должна была показать контур: среда → replay-буфер → online-сеть ↔ target-сеть.");
+}
+</script>
+</body>
+</html>

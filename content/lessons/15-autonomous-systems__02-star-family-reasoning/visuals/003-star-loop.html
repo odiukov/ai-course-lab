@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Цикл генерации, проверки и дообучения</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f3f9;
+    --text: #172033;
+    --muted: #647087;
+    --border: #ccd3e1;
+    --flow: #59677f;
+    --sample: #7658d6;
+    --verify: #3974cf;
+    --keep: #218563;
+    --train: #c56b2d;
+    --reject: #b24e59;
+    --center: #e9edf6;
+    --shadow: #1b29401a;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111622;
+      --panel: #1a2130;
+      --panel-soft: #20293a;
+      --text: #edf2ff;
+      --muted: #a9b4c9;
+      --border: #39455b;
+      --flow: #aab6ca;
+      --sample: #a58af1;
+      --verify: #70a6f0;
+      --keep: #55be94;
+      --train: #e49a60;
+      --reject: #e27b86;
+      --center: #252f42;
+      --shadow: #00000040;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--text);
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 960px;
+    margin: auto;
+    padding: 12px;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    overflow: visible;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px var(--shadow);
+  }
+
+  .card {
+    fill: var(--panel-soft);
+    stroke: var(--border);
+  }
+
+  .card.sample {
+    stroke: var(--sample);
+  }
+
+  .card.verify {
+    stroke: var(--verify);
+  }
+
+  .card.keep {
+    stroke: var(--keep);
+  }
+
+  .card.train {
+    stroke: var(--train);
+  }
+
+  .band.sample {
+    fill: var(--sample);
+  }
+
+  .band.verify {
+    fill: var(--verify);
+  }
+
+  .band.keep {
+    fill: var(--keep);
+  }
+
+  .band.train {
+    fill: var(--train);
+  }
+
+  .node-title {
+    fill: var(--text);
+    font-weight: bold;
+    letter-spacing: 0.04em;
+  }
+
+  .node-copy {
+    fill: var(--muted);
+  }
+
+  .good {
+    fill: var(--keep);
+    font-weight: bold;
+  }
+
+  .bad {
+    fill: var(--reject);
+    font-weight: bold;
+  }
+
+  .sample-number {
+    fill: var(--sample);
+    font-weight: bold;
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--flow);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-line.good-flow,
+  .arrow-head.good-flow {
+    stroke: var(--keep);
+    fill: var(--keep);
+  }
+
+  .flow-line.train-flow,
+  .arrow-head.train-flow {
+    stroke: var(--train);
+    fill: var(--train);
+  }
+
+  .arrow-head {
+    fill: var(--flow);
+    stroke: var(--flow);
+    stroke-linejoin: round;
+  }
+
+  .flow-label {
+    fill: var(--muted);
+    font-weight: bold;
+  }
+
+  .center-card {
+    fill: var(--center);
+    stroke: var(--border);
+  }
+
+  .center-main {
+    fill: var(--text);
+    font-weight: bold;
+    letter-spacing: 0.03em;
+  }
+
+  .center-sub,
+  .footnote {
+    fill: var(--muted);
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1 id="diagram-title">Цикл генерации, проверки и дообучения</h1>
+  <svg id="diagram"
+       viewBox="0 0 960 430"
+       width="960"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Замкнутый цикл: модель решает 100 задач, проверка сохраняет 18 верных
+      трасс и отбрасывает 82 неверные, затем модель дообучается на сохранённой
+      пачке и запускает новую итерацию, где пример результата — 27 трасс.
+    </desc>
+  </svg>
+</main>
+
+<script>
+const diagramData = [{
+  z: 0,
+  corner: 1.5,
+  bandWidth: 1.2,
+  canvas: { width: 960, height: 430 },
+  cards: [
+    {
+      kind: "sample",
+      box: { x1: 8, y1: 5, x2: 45, y2: 20 },
+      lines: [
+        { text: "СЭМПЛИРОВАНИЕ ОБОСНОВАНИЯ", x: 11, y: 9.2, role: "title" },
+        { text: "модель решает 100 задач", x: 11, y: 13.2, role: "sample-number" },
+        { text: "обоснование + финальный ответ", x: 11, y: 16.8, role: "copy" }
+      ]
+    },
+    {
+      kind: "verify",
+      box: { x1: 58, y1: 5, x2: 95, y2: 20 },
+      lines: [
+        { text: "ПРОВЕРКА ФИНАЛЬНОГО ОТВЕТА", x: 61, y: 9.2, role: "title" },
+        { text: "18 верных → оставить", x: 61, y: 13.2, role: "good" },
+        { text: "82 неверных → не допускать", x: 61, y: 16.8, role: "bad" }
+      ]
+    },
+    {
+      kind: "keep",
+      box: { x1: 58, y1: 36, x2: 95, y2: 51 },
+      lines: [
+        { text: "СОХРАНЕНИЕ УСПЕШНЫХ ТРАСС", x: 61, y: 40.2, role: "title" },
+        { text: "учебная пачка: 18 следов", x: 61, y: 44.2, role: "good" },
+        { text: "только решения с верным ответом", x: 61, y: 47.8, role: "copy" }
+      ]
+    },
+    {
+      kind: "train",
+      box: { x1: 8, y1: 36, x2: 45, y2: 51 },
+      lines: [
+        { text: "ДООБУЧЕНИЕ", x: 11, y: 40.2, role: "title" },
+        { text: "на собственных удачных следах", x: 11, y: 44.2, role: "copy" },
+        { text: "получается обновлённая модель", x: 11, y: 47.8, role: "copy" }
+      ]
+    }
+  ],
+  arrows: [
+    {
+      kind: "plain-flow",
+      from: { x: 45, y: 12.5 },
+      to: { x: 58, y: 12.5 },
+      head: [
+        { x: 56.2, y: 11.3 },
+        { x: 58, y: 12.5 },
+        { x: 56.2, y: 13.7 }
+      ],
+      labels: [
+        { text: "ответ на проверку", x: 51.5, y: 10.2, anchor: "middle" }
+      ]
+    },
+    {
+      kind: "good-flow",
+      from: { x: 76.5, y: 20 },
+      to: { x: 76.5, y: 36 },
+      head: [
+        { x: 75.3, y: 34.2 },
+        { x: 76.5, y: 36 },
+        { x: 77.7, y: 34.2 }
+      ],
+      labels: [
+        { text: "18 верных", x: 79.2, y: 27.2, anchor: "start" },
+        { text: "в пачку", x: 79.2, y: 30.2, anchor: "start" }
+      ]
+    },
+    {
+      kind: "train-flow",
+      from: { x: 58, y: 43.5 },
+      to: { x: 45, y: 43.5 },
+      head: [
+        { x: 46.8, y: 42.3 },
+        { x: 45, y: 43.5 },
+        { x: 46.8, y: 44.7 }
+      ],
+      labels: [
+        { text: "учебная пачка", x: 51.5, y: 41.2, anchor: "middle" }
+      ]
+    },
+    {
+      kind: "plain-flow",
+      from: { x: 26.5, y: 36 },
+      to: { x: 26.5, y: 20 },
+      head: [
+        { x: 25.3, y: 21.8 },
+        { x: 26.5, y: 20 },
+        { x: 27.7, y: 21.8 }
+      ],
+      labels: [
+        { text: "новая итерация", x: 24, y: 27.2, anchor: "end" },
+        { text: "пример: 27 следов", x: 24, y: 30.2, anchor: "end" }
+      ]
+    }
+  ],
+  center: {
+    box: { x1: 42.5, y1: 24, x2: 60.5, y2: 32 },
+    lines: [
+      { text: "МОДЕЛЬ → ДАННЫЕ", x: 51.5, y: 27.4, role: "main" },
+      { text: "ДАННЫЕ → МОДЕЛЬ", x: 51.5, y: 30.1, role: "sub" }
+    ]
+  },
+  footnote: {
+    text: "Рост не гарантирован на каждом круге: цикл усиливает способы решения, которые чаще проходят проверку.",
+    x: 51.5,
+    y: 53.2
+  },
+  fallback: {
+    x: 50,
+    y: 27,
+    text: "Схема должна была показать замкнутый цикл генерации, проверки, сохранения трасс и дообучения."
+  }
+}];
+
+const origin = Object.freeze({ x: 44, y: 18 });
+const scale = Object.freeze({ x: 8.72, y: 7.5 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const labelPadding = 8;
+const lineWidth = 2;
+const cardLineWidth = 1.5;
+const titleFontSize = 13;
+const copyFontSize = 14;
+const flowFontSize = 12;
+const centerFontSize = 12;
+const footnoteFontSize = 12;
+const fallbackFontSize = 15;
+
+const svg = document.getElementById("diagram");
+const data = diagramData[diagramData.length - diagramData.length];
+
+function element(tag, attributes, className) {
+  const item = document.createElementNS(svg.namespaceURI, tag);
+  Object.entries(attributes).forEach(([name, value]) => {
+    item.setAttribute(name, String(value));
+  });
+  if (className) item.setAttribute("class", className);
+  return item;
+}
+
+function addText(spec, className, fontSize) {
+  const item = element("text", {
+    x: sx(spec.x),
+    y: sy(spec.y),
+    "text-anchor": spec.anchor || "start",
+    "font-size": fontSize
+  }, className);
+  item.textContent = spec.text;
+  svg.appendChild(item);
+}
+
+try {
+  data.cards.forEach(card => {
+    const box = card.box;
+    const cardRect = element("rect", {
+      x: sx(box.x1),
+      y: sy(box.y1),
+      width: sx(box.x2) - sx(box.x1),
+      height: sy(box.y2) - sy(box.y1),
+      rx: sx(data.corner) - sx(data.z),
+      ry: sy(data.corner) - sy(data.z),
+      "stroke-width": cardLineWidth
+    }, `card ${card.kind}`);
+    svg.appendChild(cardRect);
+
+    const bandRect = element("rect", {
+      x: sx(box.x1),
+      y: sy(box.y1),
+      width: sx(data.bandWidth) - sx(data.z),
+      height: sy(box.y2) - sy(box.y1),
+      rx: sx(data.corner) - sx(data.z),
+      ry: sy(data.corner) - sy(data.z)
+    }, `band ${card.kind}`);
+    svg.appendChild(bandRect);
+
+    card.lines.forEach(line => {
+      const roleClass = line.role === "title"
+        ? "node-title"
+        : line.role === "copy"
+          ? "node-copy"
+          : line.role;
+      const size = line.role === "title" ? titleFontSize : copyFontSize;
+      addText(line, roleClass, size);
+    });
+  });
+
+  data.arrows.forEach(arrow => {
+    const path = element("path", {
+      d: `M ${sx(arrow.from.x)} ${sy(arrow.from.y)} L ${sx(arrow.to.x)} ${sy(arrow.to.y)}`,
+      "stroke-width": lineWidth
+    }, `flow-line ${arrow.kind}`);
+    svg.appendChild(path);
+
+    const points = arrow.head
+      .map(point => `${sx(point.x)},${sy(point.y)}`)
+      .join(" ");
+    const head = element("polygon", {
+      points,
+      "stroke-width": lineWidth
+    }, `arrow-head ${arrow.kind}`);
+    svg.appendChild(head);
+
+    arrow.labels.forEach(label => {
+      addText(label, "flow-label", flowFontSize);
+    });
+  });
+
+  const center = data.center;
+  const centerRect = element("rect", {
+    x: sx(center.box.x1),
+    y: sy(center.box.y1),
+    width: sx(center.box.x2) - sx(center.box.x1),
+    height: sy(center.box.y2) - sy(center.box.y1),
+    rx: sx(data.corner) - sx(data.z),
+    ry: sy(data.corner) - sy(data.z),
+    "stroke-width": cardLineWidth
+  }, "center-card");
+  svg.appendChild(centerRect);
+
+  center.lines.forEach(line => {
+    addText(
+      { ...line, anchor: "middle" },
+      line.role === "main" ? "center-main" : "center-sub",
+      centerFontSize
+    );
+  });
+
+  addText(
+    { ...data.footnote, anchor: "middle" },
+    "footnote",
+    footnoteFontSize
+  );
+
+  svg.setAttribute("data-label-padding", String(labelPadding));
+} catch (error) {
+  while (svg.lastChild && svg.lastChild.nodeName !== "desc") {
+    svg.removeChild(svg.lastChild);
+  }
+  addText(
+    { ...data.fallback, anchor: "middle" },
+    "fallback",
+    fallbackFontSize
+  );
+}
+</script>
+</body>
+</html>

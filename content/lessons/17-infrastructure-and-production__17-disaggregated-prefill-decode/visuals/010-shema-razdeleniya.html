@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Путь запроса через раздельные пулы</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: ghostwhite;
+    --panel: white;
+    --ink: midnightblue;
+    --muted: slategray;
+    --border: lightsteelblue;
+    --flow: royalblue;
+    --return: teal;
+    --accent: darkorange;
+    --prefill: aliceblue;
+    --decode: honeydew;
+    --transport: oldlace;
+    --timeline: lavender;
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    overflow: hidden;
+    background: var(--panel);
+    border-style: solid;
+    border-width: 1px;
+    border-color: var(--border);
+  }
+
+  figcaption {
+    text-align: center;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .caption-note {
+    display: block;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  .node {
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .client-node,
+  .router-node {
+    fill: var(--panel);
+  }
+
+  .prefill-node {
+    fill: var(--prefill);
+    stroke: var(--flow);
+  }
+
+  .decode-node {
+    fill: var(--decode);
+    stroke: var(--return);
+  }
+
+  .transport-node {
+    fill: var(--transport);
+    stroke: var(--accent);
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: var(--flow);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-head {
+    fill: var(--flow);
+  }
+
+  .return-line {
+    fill: none;
+    stroke: var(--return);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .return-head {
+    fill: var(--return);
+  }
+
+  .node-tag {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .node-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .transport-title {
+    fill: var(--accent);
+    font-size: 19px;
+    font-weight: bold;
+  }
+
+  .arrow-label {
+    fill: var(--flow);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .return-label {
+    fill: var(--return);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .timeline-shell {
+    fill: var(--timeline);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .timeline-segment {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+  }
+
+  .timeline-transfer {
+    fill: var(--transport);
+    stroke: var(--accent);
+  }
+
+  .timeline-title {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .timeline-copy {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .timeline-time {
+    fill: var(--accent);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .footnote {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .failure {
+    color: var(--ink);
+    background: var(--panel);
+    text-align: center;
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --panel: darkslategray;
+      --ink: white;
+      --muted: lightsteelblue;
+      --border: slategray;
+      --flow: deepskyblue;
+      --return: aquamarine;
+      --accent: orange;
+      --prefill: darkslateblue;
+      --decode: darkgreen;
+      --transport: saddlebrown;
+      --timeline: darkslategray;
+    }
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="visible-title">
+  <figcaption id="visible-title">
+    Путь запроса через раздельные пулы
+    <span class="caption-note">Промпт вычисляется в одном пуле, а ответ продолжается в другом</span>
+  </figcaption>
+
+  <svg id="diagram" viewBox="0 0 960 386" width="960" height="386"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Путь запроса через prefill-пул, NIXL и decode-пул</title>
+    <desc id="svg-description">
+      Клиент отправляет промпт роутеру. Роутер направляет только промпт
+      в вычислительно нагруженный prefill-пул. Полученный KV-кэш передаётся
+      через NIXL в ограниченный памятью decode-пул, откуда токены постепенно
+      возвращаются клиенту.
+    </desc>
+  </svg>
+
+  <div id="failure" class="failure" hidden>
+    Схема должна показать путь: клиент и роутер → compute-bound prefill →
+    передача KV-кэша через NIXL → memory-bound decode → токены клиенту.
+  </div>
+</figure>
+
+<script>
+const data = Object.freeze([{
+  canvas: { x: 0, y: 0, w: 960, h: 386 },
+  radius: 14,
+  nodes: [
+    {
+      x: 20, y: 70, w: 115, h: 90, rx: 14, className: "client-node",
+      lines: [
+        { x: 77.5, y: 91, text: "КЛИЕНТ", className: "node-tag", anchor: "middle" },
+        { x: 77.5, y: 119, text: "отправляет", className: "node-title", anchor: "middle" },
+        { x: 77.5, y: 143, text: "промпт", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 175, y: 70, w: 130, h: 90, rx: 14, className: "router-node",
+      lines: [
+        { x: 240, y: 91, text: "РОУТЕР", className: "node-tag", anchor: "middle" },
+        { x: 240, y: 119, text: "принимает", className: "node-title", anchor: "middle" },
+        { x: 240, y: 143, text: "весь промпт", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 355, y: 57, w: 175, h: 116, rx: 14, className: "prefill-node",
+      lines: [
+        { x: 442.5, y: 78, text: "PREFILL-ПУЛ", className: "node-tag", anchor: "middle" },
+        { x: 442.5, y: 105, text: "Prefill", className: "node-title", anchor: "middle" },
+        { x: 442.5, y: 131, text: "compute-bound", className: "node-copy", anchor: "middle" },
+        { x: 442.5, y: 153, text: "создаёт KV-кэш", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 570, y: 57, w: 120, h: 116, rx: 14, className: "transport-node",
+      lines: [
+        { x: 630, y: 78, text: "KV-КЭШ", className: "node-tag", anchor: "middle" },
+        { x: 630, y: 105, text: "NIXL", className: "transport-title", anchor: "middle" },
+        { x: 630, y: 131, text: "RDMA / InfiniBand", className: "node-copy", anchor: "middle" },
+        { x: 630, y: 153, text: "иначе TCP", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 730, y: 57, w: 205, h: 116, rx: 14, className: "decode-node",
+      lines: [
+        { x: 832.5, y: 78, text: "DECODE-ПУЛ", className: "node-tag", anchor: "middle" },
+        { x: 832.5, y: 105, text: "Decode", className: "node-title", anchor: "middle" },
+        { x: 832.5, y: 131, text: "memory-bound", className: "node-copy", anchor: "middle" },
+        { x: 832.5, y: 153, text: "выпускает токены", className: "node-copy", anchor: "middle" }
+      ]
+    }
+  ],
+  arrows: [
+    {
+      className: "flow",
+      points: [{ x: 135, y: 115 }, { x: 175, y: 115 }],
+      head: [{ x: 175, y: 115 }, { x: 163, y: 109 }, { x: 163, y: 121 }]
+    },
+    {
+      className: "flow",
+      points: [
+        { x: 305, y: 115 }, { x: 325, y: 115 }, { x: 325, y: 34 },
+        { x: 442.5, y: 34 }, { x: 442.5, y: 57 }
+      ],
+      head: [{ x: 442.5, y: 57 }, { x: 436.5, y: 45 }, { x: 448.5, y: 45 }]
+    },
+    {
+      className: "flow",
+      points: [{ x: 530, y: 115 }, { x: 570, y: 115 }],
+      head: [{ x: 570, y: 115 }, { x: 558, y: 109 }, { x: 558, y: 121 }]
+    },
+    {
+      className: "flow",
+      points: [{ x: 690, y: 115 }, { x: 730, y: 115 }],
+      head: [{ x: 730, y: 115 }, { x: 718, y: 109 }, { x: 718, y: 121 }]
+    },
+    {
+      className: "return",
+      points: [
+        { x: 832.5, y: 173 }, { x: 832.5, y: 245 },
+        { x: 77.5, y: 245 }, { x: 77.5, y: 160 }
+      ],
+      head: [{ x: 77.5, y: 160 }, { x: 71.5, y: 172 }, { x: 83.5, y: 172 }]
+    }
+  ],
+  labels: [
+    {
+      x: 442.5, y: 18, text: "в prefill отправляется только промпт",
+      className: "arrow-label", anchor: "middle"
+    },
+    {
+      x: 650, y: 229, text: "токены возвращаются клиенту по мере генерации",
+      className: "return-label", anchor: "middle"
+    }
+  ],
+  timeline: {
+    shell: { x: 20, y: 276, w: 920, h: 82, rx: 14 },
+    title: {
+      x: 480, y: 295,
+      text: "До первого токена — три обязательных участка",
+      className: "timeline-title", anchor: "middle"
+    },
+    segments: [
+      {
+        x: 36, y: 310, w: 270, h: 34, rx: 10,
+        className: "timeline-segment",
+        label: {
+          x: 171, y: 327, text: "Prefill · compute-bound",
+          className: "timeline-copy", anchor: "middle"
+        }
+      },
+      {
+        x: 345, y: 310, w: 270, h: 34, rx: 10,
+        className: "timeline-segment timeline-transfer",
+        label: {
+          x: 480, y: 327, text: "KV по NIXL · 20–80 мс",
+          className: "timeline-time", anchor: "middle"
+        }
+      },
+      {
+        x: 654, y: 310, w: 270, h: 34, rx: 10,
+        className: "timeline-segment",
+        label: {
+          x: 789, y: 327, text: "Начало decode · memory-bound",
+          className: "timeline-copy", anchor: "middle"
+        }
+      }
+    ]
+  },
+  footnote: {
+    x: 480, y: 374,
+    text: "KV для 4K · 70B · FP8: передача 20–80 мс; короткий prefill может занять 30 мс",
+    className: "footnote", anchor: "middle"
+  }
+}]);
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const [d] = data;
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const element = (name, attributes, parent = svg) => {
+    const item = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      item.setAttribute(key, value);
+    }
+    parent.appendChild(item);
+    return item;
+  };
+
+  const rectangle = (item, className, parent = svg) =>
+    element("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x + item.w) - sx(item.x),
+      height: sy(item.y + item.h) - sy(item.y),
+      rx: sx(item.rx) - sx(origin.x),
+      class: className
+    }, parent);
+
+  const label = (item, parent = svg) => {
+    const text = element("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle",
+      class: item.className
+    }, parent);
+    text.textContent = item.text;
+    return text;
+  };
+
+  const pointList = points =>
+    points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+  rectangle(d.canvas, "canvas-background");
+
+  const arrowsLayer = element("g", { "aria-hidden": "true" });
+  for (const arrow of d.arrows) {
+    element("polyline", {
+      points: pointList(arrow.points),
+      class: `${arrow.className}-line`
+    }, arrowsLayer);
+    element("polygon", {
+      points: pointList(arrow.head),
+      class: `${arrow.className}-head`
+    }, arrowsLayer);
+  }
+
+  const nodesLayer = element("g", { "aria-hidden": "true" });
+  for (const node of d.nodes) {
+    rectangle(node, `node ${node.className}`, nodesLayer);
+    for (const line of node.lines) {
+      label(line, nodesLayer);
+    }
+  }
+
+  const labelsLayer = element("g", { "aria-hidden": "true" });
+  for (const item of d.labels) {
+    label(item, labelsLayer);
+  }
+
+  const timelineLayer = element("g", { "aria-hidden": "true" });
+  rectangle(d.timeline.shell, "timeline-shell", timelineLayer);
+  label(d.timeline.title, timelineLayer);
+
+  for (const segment of d.timeline.segments) {
+    rectangle(segment, segment.className, timelineLayer);
+    label(segment.label, timelineLayer);
+  }
+
+  label(d.footnote);
+} catch (error) {
+  document.getElementById("diagram").setAttribute("hidden", "");
+  document.getElementById("failure").removeAttribute("hidden");
+}
+</script>
+</body>
+</html>

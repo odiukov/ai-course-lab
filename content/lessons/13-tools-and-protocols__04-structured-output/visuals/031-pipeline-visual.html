@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ветвление конвейера структурированного вывода</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #58657a;
+    --line: #64748b;
+    --ok: #087f5b;
+    --ok-fill: #e8f8f1;
+    --warn: #b45309;
+    --warn-fill: #fff4dc;
+    --bad: #c2413b;
+    --bad-fill: #fff0ee;
+    --refusal: #7048a8;
+    --refusal-fill: #f4eeff;
+    --strict: #1769aa;
+    --strict-fill: #eaf4ff;
+    --closed: #7b8798;
+    --closed-fill: #eef1f5;
+    --border: #cbd5e1;
+    --pad: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --panel: #182131;
+      --text: #f1f5f9;
+      --muted: #b6c0cf;
+      --line: #94a3b8;
+      --ok: #62d7ad;
+      --ok-fill: #173b34;
+      --warn: #f7bd65;
+      --warn-fill: #49351b;
+      --bad: #ff9188;
+      --bad-fill: #4a2828;
+      --refusal: #c5a3ff;
+      --refusal-fill: #35294b;
+      --strict: #83c8ff;
+      --strict-fill: #203b53;
+      --closed: #aab4c3;
+      --closed-fill: #2a3443;
+      --border: #435065;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: unset;
+    padding: var(--pad);
+    border-bottom: 1px solid var(--border);
+    font-size: 18px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  #fallback {
+    margin: unset;
+    padding: var(--pad);
+    min-height: 180px;
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .node {
+    stroke-width: 2px;
+  }
+
+  .node.process {
+    fill: var(--panel);
+    stroke: var(--line);
+  }
+
+  .node.success {
+    fill: var(--ok-fill);
+    stroke: var(--ok);
+  }
+
+  .node.error {
+    fill: var(--bad-fill);
+    stroke: var(--bad);
+  }
+
+  .node.warning {
+    fill: var(--warn-fill);
+    stroke: var(--warn);
+  }
+
+  .node.refusal {
+    fill: var(--refusal-fill);
+    stroke: var(--refusal);
+  }
+
+  .node.retry {
+    fill: var(--warn-fill);
+    stroke: var(--warn);
+  }
+
+  .node.strict {
+    fill: var(--strict-fill);
+    stroke: var(--strict);
+  }
+
+  .node.closed {
+    fill: var(--closed-fill);
+    stroke: var(--closed);
+    stroke-dasharray: 6px 5px;
+  }
+
+  .edge {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 3px;
+  }
+
+  .edge.main { stroke: var(--line); }
+  .edge.success { stroke: var(--ok); }
+  .edge.error { stroke: var(--bad); }
+  .edge.warning { stroke: var(--warn); }
+  .edge.refusal { stroke: var(--refusal); }
+  .edge.strict { stroke: var(--strict); }
+
+  .head.main { fill: var(--line); }
+  .head.success { fill: var(--ok); }
+  .head.error { fill: var(--bad); }
+  .head.warning { fill: var(--warn); }
+  .head.refusal { fill: var(--refusal); }
+  .head.strict { fill: var(--strict); }
+
+  text {
+    fill: var(--text);
+    font-size: 16px;
+    pointer-events: none;
+  }
+
+  .node-label {
+    font-weight: 680;
+    dominant-baseline: middle;
+  }
+
+  .lane-label {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: .06em;
+  }
+
+  .caption {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .retry-label {
+    fill: var(--warn);
+    font-size: 14px;
+    font-weight: 720;
+  }
+
+  .strict-label {
+    fill: var(--strict);
+    font-size: 14px;
+    font-weight: 720;
+  }
+
+  .closed-label {
+    fill: var(--closed);
+    font-size: 14px;
+    font-weight: 680;
+  }
+
+  .separator {
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .cross {
+    stroke: var(--closed);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Ветвление конвейера структурированного вывода</h1>
+  <p id="fallback">
+    Без строгого режима поток «генерация → разбор → проверка схемы» может
+    завершиться ошибкой разбора, нарушением схемы или отказом. Первые два
+    исхода ведут к повтору — максимум к 3 попыткам. В строгом режиме эти
+    аварийные ветки закрыты: остаются готовый объект и типизированный отказ.
+  </p>
+  <svg id="diagram" hidden viewBox="0 0 1200 500"
+       width="1200" height="500" preserveAspectRatio="xMidYMid meet"
+       role="img" aria-label="Сравнение ветвей конвейера без strict mode и в strict mode">
+  </svg>
+</figure>
+
+<script>
+const data = {
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  style: { radius: 12, arrowBack: 13, arrowWing: 7 },
+  separator: [{ x: 28, y: 302 }, { x: 1172, y: 302 }],
+
+  nodes: [
+    { x: 60, y: 82, w: 170, h: 62, label: "Генерация · 47,30 €", tone: "process" },
+    { x: 300, y: 82, w: 140, h: 62, label: "Разбор", tone: "process" },
+    { x: 510, y: 82, w: 170, h: 62, label: "Проверка схемы", tone: "process" },
+    { x: 770, y: 82, w: 200, h: 62, label: "Готовый объект", tone: "success" },
+
+    { x: 60, y: 190, w: 170, h: 56, label: "Отказ", tone: "refusal" },
+    { x: 300, y: 190, w: 200, h: 56, label: "Ошибка разбора", tone: "error" },
+    { x: 570, y: 190, w: 230, h: 56, label: "Нарушение схемы", tone: "warning" },
+    { x: 930, y: 190, w: 240, h: 56, label: "Повтор / ремонт", tone: "retry" },
+
+    { x: 60, y: 350, w: 170, h: 58, label: "Генерация · 47,30 €", tone: "strict" },
+    { x: 300, y: 350, w: 140, h: 58, label: "Разбор", tone: "strict" },
+    { x: 510, y: 350, w: 170, h: 58, label: "Проверка схемы", tone: "strict" },
+    { x: 770, y: 350, w: 200, h: 58, label: "Готовый объект", tone: "success" },
+
+    { x: 60, y: 435, w: 170, h: 54, label: "Отказ", tone: "refusal" },
+    { x: 280, y: 435, w: 180, h: 54, label: "Ветки нет", tone: "closed" },
+    { x: 505, y: 435, w: 180, h: 54, label: "Ветки нет", tone: "closed" }
+  ],
+
+  arrows: [
+    {
+      tone: "main",
+      points: [{ x: 230, y: 113 }, { x: 300, y: 113 }],
+      head: [{ x: 300, y: 113 }, { x: 287, y: 106 }, { x: 287, y: 120 }]
+    },
+    {
+      tone: "main",
+      points: [{ x: 440, y: 113 }, { x: 510, y: 113 }],
+      head: [{ x: 510, y: 113 }, { x: 497, y: 106 }, { x: 497, y: 120 }]
+    },
+    {
+      tone: "success",
+      points: [{ x: 680, y: 113 }, { x: 770, y: 113 }],
+      head: [{ x: 770, y: 113 }, { x: 757, y: 106 }, { x: 757, y: 120 }]
+    },
+    {
+      tone: "refusal",
+      points: [{ x: 145, y: 144 }, { x: 145, y: 190 }],
+      head: [{ x: 145, y: 190 }, { x: 138, y: 177 }, { x: 152, y: 177 }]
+    },
+    {
+      tone: "error",
+      points: [{ x: 370, y: 144 }, { x: 370, y: 190 }],
+      head: [{ x: 370, y: 190 }, { x: 363, y: 177 }, { x: 377, y: 177 }]
+    },
+    {
+      tone: "warning",
+      points: [{ x: 595, y: 144 }, { x: 595, y: 190 }],
+      head: [{ x: 595, y: 190 }, { x: 588, y: 177 }, { x: 602, y: 177 }]
+    },
+    {
+      tone: "warning",
+      points: [{ x: 800, y: 218 }, { x: 930, y: 218 }],
+      head: [{ x: 930, y: 218 }, { x: 917, y: 211 }, { x: 917, y: 225 }]
+    },
+    {
+      tone: "warning",
+      points: [
+        { x: 400, y: 246 }, { x: 400, y: 278 },
+        { x: 1050, y: 278 }, { x: 1050, y: 246 }
+      ],
+      head: [{ x: 1050, y: 246 }, { x: 1043, y: 259 }, { x: 1057, y: 259 }]
+    },
+    {
+      tone: "warning",
+      points: [
+        { x: 1050, y: 190 }, { x: 1050, y: 56 },
+        { x: 145, y: 56 }, { x: 145, y: 82 }
+      ],
+      head: [{ x: 145, y: 82 }, { x: 138, y: 69 }, { x: 152, y: 69 }]
+    },
+
+    {
+      tone: "strict",
+      points: [{ x: 230, y: 379 }, { x: 300, y: 379 }],
+      head: [{ x: 300, y: 379 }, { x: 287, y: 372 }, { x: 287, y: 386 }]
+    },
+    {
+      tone: "strict",
+      points: [{ x: 440, y: 379 }, { x: 510, y: 379 }],
+      head: [{ x: 510, y: 379 }, { x: 497, y: 372 }, { x: 497, y: 386 }]
+    },
+    {
+      tone: "success",
+      points: [{ x: 680, y: 379 }, { x: 770, y: 379 }],
+      head: [{ x: 770, y: 379 }, { x: 757, y: 372 }, { x: 757, y: 386 }]
+    },
+    {
+      tone: "refusal",
+      points: [{ x: 145, y: 408 }, { x: 145, y: 435 }],
+      head: [{ x: 145, y: 435 }, { x: 138, y: 422 }, { x: 152, y: 422 }]
+    }
+  ],
+
+  labels: [
+    { x: 28, y: 30, text: "БЕЗ СТРОГОГО РЕЖИМА", className: "lane-label", anchor: "start" },
+    { x: 600, y: 42, text: "максимум 3 попытки", className: "retry-label", anchor: "middle" },
+    { x: 145, y: 265, text: "типизированный исход · без повтора", className: "caption", anchor: "middle" },
+    { x: 400, y: 263, text: "ремонт текста или новая попытка", className: "caption", anchor: "middle" },
+    { x: 685, y: 263, text: "точная ошибка валидатора", className: "caption", anchor: "middle" },
+
+    { x: 28, y: 329, text: "СТРОГИЙ РЕЖИМ", className: "lane-label", anchor: "start" },
+    { x: 300, y: 329, text: "ограниченное декодирование", className: "strict-label", anchor: "start" },
+    { x: 370, y: 424, text: "ошибка разбора закрыта", className: "closed-label", anchor: "middle" },
+    { x: 595, y: 424, text: "нарушение схемы закрыто", className: "closed-label", anchor: "middle" },
+    { x: 1045, y: 379, text: "невалидная форма невозможна", className: "strict-label", anchor: "middle" }
+  ],
+
+  crosses: [
+    [{ x: 293, y: 449 }, { x: 307, y: 463 }],
+    [{ x: 307, y: 449 }, { x: 293, y: 463 }],
+    [{ x: 518, y: 449 }, { x: 532, y: 463 }],
+    [{ x: 532, y: 449 }, { x: 518, y: 463 }]
+  ]
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs, className) => {
+    const element = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    if (className) element.setAttribute("class", className);
+    return element;
+  };
+
+  const separator = make("line", {
+    x1: sx(data.separator[0].x),
+    y1: sy(data.separator[0].y),
+    x2: sx(data.separator[1].x),
+    y2: sy(data.separator[1].y)
+  }, "separator");
+  svg.appendChild(separator);
+
+  data.arrows.forEach(arrow => {
+    const line = make("polyline", {
+      points: arrow.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+    }, `edge ${arrow.tone}`);
+    const head = make("polygon", {
+      points: arrow.head.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+    }, `head ${arrow.tone}`);
+    svg.append(line, head);
+  });
+
+  data.nodes.forEach(node => {
+    const rect = make("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: sx(node.x + node.w) - sx(node.x),
+      height: sy(node.y + node.h) - sy(node.y),
+      rx: sx(data.style.radius) - sx(0),
+      ry: sy(data.style.radius) - sy(0)
+    }, `node ${node.tone}`);
+
+    const text = make("text", {
+      x: sx(node.x + node.w / 2),
+      y: sy(node.y + node.h / 2),
+      "text-anchor": "middle"
+    }, "node-label");
+    text.textContent = node.label;
+    svg.append(rect, text);
+  });
+
+  data.crosses.forEach(segment => {
+    svg.appendChild(make("line", {
+      x1: sx(segment[0].x),
+      y1: sy(segment[0].y),
+      x2: sx(segment[1].x),
+      y2: sy(segment[1].y)
+    }, "cross"));
+  });
+
+  data.labels.forEach(label => {
+    const text = make("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      "text-anchor": label.anchor
+    }, label.className);
+    text.textContent = label.text;
+    svg.appendChild(text);
+  });
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

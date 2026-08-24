@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как ветки Inception соединяются по каналам</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f8fafc;
+      --surface: #ffffff;
+      --text: #172033;
+      --muted: #526174;
+      --line: #64748b;
+      --input-fill: #dbeafe;
+      --input-stroke: #2563eb;
+      --branch-a: #e0f2fe;
+      --branch-b: #dcfce7;
+      --branch-c: #f3e8ff;
+      --branch-d: #ffedd5;
+      --branch-stroke: #64748b;
+      --concat-fill: #fef3c7;
+      --concat-stroke: #d97706;
+      --output-fill: #ccfbf1;
+      --output-stroke: #0f766e;
+      --fallback: #fff7ed;
+      --fallback-stroke: #c2410c;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0b1220;
+        --surface: #111a2b;
+        --text: #eef4ff;
+        --muted: #b8c4d6;
+        --line: #9aa9bd;
+        --input-fill: #172b4d;
+        --input-stroke: #60a5fa;
+        --branch-a: #123348;
+        --branch-b: #153b2c;
+        --branch-c: #35234b;
+        --branch-d: #442b1d;
+        --branch-stroke: #94a3b8;
+        --concat-fill: #483817;
+        --concat-stroke: #fbbf24;
+        --output-fill: #123c39;
+        --output-stroke: #2dd4bf;
+        --fallback: #431f16;
+        --fallback-stroke: #fb923c;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      background: var(--surface);
+    }
+
+    h1 {
+      font-size: 24px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 460px;
+      background: var(--surface);
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrowhead {
+      fill: var(--line);
+    }
+
+    .box {
+      stroke-width: 3px;
+    }
+
+    .input-box {
+      fill: var(--input-fill);
+      stroke: var(--input-stroke);
+    }
+
+    .branch-box {
+      stroke: var(--branch-stroke);
+    }
+
+    .concat-frame {
+      fill: none;
+      stroke: var(--concat-stroke);
+      stroke-width: 4px;
+    }
+
+    .concat-segment {
+      stroke: var(--concat-stroke);
+      stroke-width: 2px;
+    }
+
+    .output-box {
+      fill: var(--output-fill);
+      stroke: var(--output-stroke);
+    }
+
+    .primary {
+      fill: var(--text);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .secondary {
+      fill: var(--muted);
+      font-size: 16px;
+    }
+
+    .segment-label {
+      fill: var(--text);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .caption {
+      fill: var(--text);
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .formula {
+      fill: var(--text);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      background: var(--fallback);
+      border: 3px solid var(--fallback-stroke);
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Как ветки Inception соединяются по каналам</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 420"
+      width="1200"
+      height="420"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <title id="diagram-title">Конкатенация четырёх веток Inception</title>
+      <desc id="diagram-description">
+        Один вход расходится в ветки 1 на 1, 3 на 3, 5 на 5 и max pool.
+        Каждая ветка выдаёт 32 канала размером 28 на 28. Результаты
+        соединяются по оси каналов в выход из 128 каналов.
+      </desc>
+    </svg>
+
+    <div id="fallback" hidden>
+      Схема должна показать, как вход расходится в четыре ветки: 1 × 1,
+      3 × 3, 5 × 5 и max pool. Четыре выхода 28 × 28 × 32 соединяются
+      по каналам в один выход 28 × 28 × 128.
+    </div>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      canvas: { width: 1200, height: 420 },
+      mapping: {
+        origin: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 }
+      },
+      arrow: { back: 12, half: 7 },
+      input: {
+        x: 30, y: 158, width: 150, height: 100,
+        center: { x: 105, y: 208 },
+        exit: { x: 180, y: 208 },
+        lines: [
+          { text: "Вход", y: 197, className: "primary" },
+          { text: "28 × 28", y: 225, className: "secondary" }
+        ]
+      },
+      split: {
+        x: 240,
+        stemStart: { x: 180, y: 208 },
+        stemEnd: { x: 240, y: 208 },
+        top: { x: 240, y: 76 },
+        bottom: { x: 240, y: 319 }
+      },
+      branches: [
+        {
+          x: 290, y: 45, width: 230, height: 62, centerY: 76,
+          fillClass: "branch-a",
+          title: "1 × 1 свёртка",
+          detail: "выход 28 × 28 × 32"
+        },
+        {
+          x: 290, y: 126, width: 230, height: 62, centerY: 157,
+          fillClass: "branch-b",
+          title: "3 × 3 свёртка",
+          detail: "выход 28 × 28 × 32"
+        },
+        {
+          x: 290, y: 207, width: 230, height: 62, centerY: 238,
+          fillClass: "branch-c",
+          title: "5 × 5 свёртка",
+          detail: "выход 28 × 28 × 32"
+        },
+        {
+          x: 290, y: 288, width: 230, height: 62, centerY: 319,
+          fillClass: "branch-d",
+          title: "max pool",
+          detail: "выход 28 × 28 × 32"
+        }
+      ],
+      concat: {
+        x: 690, y: 45, width: 190, height: 305,
+        title: { x: 785, y: 25, text: "Конкатенация по каналам" },
+        segments: [
+          { y: 45, height: 62, centerY: 76, fillClass: "branch-a" },
+          { y: 126, height: 62, centerY: 157, fillClass: "branch-b" },
+          { y: 207, height: 62, centerY: 238, fillClass: "branch-c" },
+          { y: 288, height: 62, centerY: 319, fillClass: "branch-d" }
+        ],
+        segmentText: "32 канала"
+      },
+      output: {
+        x: 990, y: 158, width: 180, height: 100,
+        entry: { x: 990, y: 208 },
+        lines: [
+          { text: "Общий выход", y: 197, className: "primary" },
+          { text: "28 × 28 × 128", y: 225, className: "secondary" }
+        ]
+      },
+      mergeArrow: {
+        start: { x: 880, y: 208 },
+        end: { x: 990, y: 208 }
+      },
+      formula: {
+        x: 785, y: 395,
+        text: "32 + 32 + 32 + 32 = 128 каналов"
+      },
+      textOffset: {
+        branchTitle: -7,
+        branchDetail: 17
+      }
+    });
+
+    const origin = Object.freeze({
+      x: DATA.mapping.origin.x,
+      y: DATA.mapping.origin.y
+    });
+
+    const scale = Object.freeze({
+      x: DATA.mapping.scale.x,
+      y: DATA.mapping.scale.y
+    });
+
+    const toPx = (point) => ({
+      x: origin.x + point.x * scale.x,
+      y: origin.y + point.y * scale.y
+    });
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = svg.namespaceURI;
+
+      const make = (name, attributes, parent = svg) => {
+        const element = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, value);
+        }
+        parent.appendChild(element);
+        return element;
+      };
+
+      const position = (element, point) => {
+        const mapped = toPx(point);
+        element.setAttribute("x", mapped.x);
+        element.setAttribute("y", mapped.y);
+      };
+
+      const rectangle = (item, className, parent = svg) => {
+        const start = toPx({ x: item.x, y: item.y });
+        const end = toPx({
+          x: item.x + item.width,
+          y: item.y + item.height
+        });
+        return make("rect", {
+          x: start.x,
+          y: start.y,
+          width: end.x - start.x,
+          height: end.y - start.y,
+          class: className
+        }, parent);
+      };
+
+      const line = (startPoint, endPoint, className = "connector") => {
+        const start = toPx(startPoint);
+        const end = toPx(endPoint);
+        return make("line", {
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          class: className
+        });
+      };
+
+      const text = (value, point, className, anchor = "middle") => {
+        const label = make("text", {
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        });
+        position(label, point);
+        label.textContent = value;
+        return label;
+      };
+
+      const arrowhead = (tipPoint) => {
+        const vertices = [
+          toPx(tipPoint),
+          toPx({
+            x: tipPoint.x - DATA.arrow.back,
+            y: tipPoint.y - DATA.arrow.half
+          }),
+          toPx({
+            x: tipPoint.x - DATA.arrow.back,
+            y: tipPoint.y + DATA.arrow.half
+          })
+        ];
+        make("polygon", {
+          points: vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(" "),
+          class: "arrowhead"
+        });
+      };
+
+      const arrow = (startPoint, endPoint) => {
+        line(startPoint, endPoint);
+        arrowhead(endPoint);
+      };
+
+      rectangle(DATA.input, "box input-box");
+
+      for (const label of DATA.input.lines) {
+        text(
+          label.text,
+          { x: DATA.input.center.x, y: label.y },
+          label.className
+        );
+      }
+
+      line(DATA.split.stemStart, DATA.split.stemEnd);
+      line(DATA.split.top, DATA.split.bottom);
+
+      for (const branch of DATA.branches) {
+        const branchEntry = { x: branch.x, y: branch.centerY };
+        const branchExit = {
+          x: branch.x + branch.width,
+          y: branch.centerY
+        };
+        const concatEntry = {
+          x: DATA.concat.x,
+          y: branch.centerY
+        };
+
+        arrow({ x: DATA.split.x, y: branch.centerY }, branchEntry);
+        rectangle(branch, `box branch-box ${branch.fillClass}`);
+
+        text(
+          branch.title,
+          {
+            x: branch.x + branch.width / DATA.mapping.scale.x / DATA.mapping.scale.x,
+            y: branch.centerY + DATA.textOffset.branchTitle
+          },
+          "primary"
+        ).setAttribute(
+          "x",
+          toPx({ x: branch.x + branch.width / 2, y: branch.centerY }).x
+        );
+
+        text(
+          branch.detail,
+          {
+            x: branch.x + branch.width / 2,
+            y: branch.centerY + DATA.textOffset.branchDetail
+          },
+          "secondary"
+        );
+
+        arrow(branchExit, concatEntry);
+      }
+
+      text(
+        DATA.concat.title.text,
+        { x: DATA.concat.title.x, y: DATA.concat.title.y },
+        "caption"
+      );
+
+      for (const segment of DATA.concat.segments) {
+        rectangle(
+          {
+            x: DATA.concat.x,
+            y: segment.y,
+            width: DATA.concat.width,
+            height: segment.height
+          },
+          `concat-segment ${segment.fillClass}`
+        );
+
+        text(
+          DATA.concat.segmentText,
+          {
+            x: DATA.concat.x + DATA.concat.width / 2,
+            y: segment.centerY
+          },
+          "segment-label"
+        );
+      }
+
+      rectangle(DATA.concat, "concat-frame");
+      arrow(DATA.mergeArrow.start, DATA.mergeArrow.end);
+      rectangle(DATA.output, "box output-box");
+
+      for (const label of DATA.output.lines) {
+        text(
+          label.text,
+          {
+            x: DATA.output.x + DATA.output.width / 2,
+            y: label.y
+          },
+          label.className
+        );
+      }
+
+      text(
+        DATA.formula.text,
+        { x: DATA.formula.x, y: DATA.formula.y },
+        "formula"
+      );
+    } catch (error) {
+      const diagram = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      diagram.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

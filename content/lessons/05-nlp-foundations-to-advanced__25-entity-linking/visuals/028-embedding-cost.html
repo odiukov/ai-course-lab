@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Что индексируется заранее, а что вычисляется на запросе</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59647a;
+    --line: #7b879d;
+    --band-a: #eef3ff;
+    --band-b: #fff5e8;
+    --blue-fill: #e4edff;
+    --blue-line: #3d6ec9;
+    --violet-fill: #eee8ff;
+    --violet-line: #7354c7;
+    --orange-fill: #fff0dc;
+    --orange-line: #c97820;
+    --green-fill: #e6f6ec;
+    --green-line: #278251;
+    --arrow: #45536c;
+    --grid: #7293cf;
+    --fallback: #a33838;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2c;
+      --ink: #edf2ff;
+      --muted: #b7c0d2;
+      --line: #8390a7;
+      --band-a: #18243a;
+      --band-b: #2b241a;
+      --blue-fill: #1d3153;
+      --blue-line: #79a4f2;
+      --violet-fill: #302750;
+      --violet-line: #ae96f2;
+      --orange-fill: #402d1b;
+      --orange-line: #efad64;
+      --green-fill: #173727;
+      --green-line: #62c68b;
+      --arrow: #aebbd0;
+      --grid: #87a9e8;
+      --fallback: #ff9a9a;
+    }
+  }
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .figure {
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: bold;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 458px;
+    background: var(--panel);
+  }
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+  .section-label {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+  .box-title {
+    font-size: 17px;
+    font-weight: bold;
+  }
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+  .result {
+    font-size: 21px;
+    font-weight: bold;
+  }
+  .band-index { fill: var(--band-a); }
+  .band-query { fill: var(--band-b); }
+  .neutral-box {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+  .model-box {
+    fill: var(--violet-fill);
+    stroke: var(--violet-line);
+    stroke-width: 2px;
+  }
+  .index-box {
+    fill: var(--blue-fill);
+    stroke: var(--blue-line);
+    stroke-width: 2px;
+  }
+  .mention-box {
+    fill: var(--orange-fill);
+    stroke: var(--orange-line);
+    stroke-width: 2px;
+  }
+  .vector-box {
+    fill: var(--blue-fill);
+    stroke: var(--blue-line);
+    stroke-width: 2px;
+  }
+  .score-box {
+    fill: var(--green-fill);
+    stroke: var(--green-line);
+    stroke-width: 2px;
+  }
+  .arrow {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .vector-row {
+    fill: none;
+    stroke: var(--grid);
+    stroke-width: 1px;
+    stroke-linecap: round;
+  }
+  .separator {
+    stroke: var(--green-line);
+    stroke-width: 1px;
+  }
+  .fallback {
+    fill: var(--fallback);
+    font-size: 17px;
+  }
+</style>
+</head>
+<body>
+<section class="figure" aria-labelledby="figure-title">
+  <header id="figure-title">Что индексируется заранее, а что вычисляется на запросе</header>
+  <svg id="diagram" viewBox="0 0 1200 458" width="1200" height="458"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="figure-title figure-desc">
+    <desc id="figure-desc">384-мерный вектор упоминания сравнивается с 30 заранее сохранёнными векторами кандидатов. Выполняются 30 скалярных произведений, около 11 500 умножений.</desc>
+    <g id="scene"></g>
+  </svg>
+  <noscript>Схема должна показать сравнение 384-мерного вектора упоминания с 30 сохранёнными векторами: 30 скалярных произведений, около 11 500 умножений.</noscript>
+</section>
+
+<script>
+const diagramData = [
+  {
+    kind: "config",
+    zero: 0, unit: 1, two: 2, originX: 0, originY: 0,
+    scaleX: 1, scaleY: 1, radius: 12, head: 12, headRatio: 0.55,
+    fallbackX: 600, fallbackY: 190, fallbackGap: 32
+  },
+
+  { kind: "rect", x: 15, y: 14, w: 1170, h: 190, className: "band-index", radius: 12 },
+  { kind: "rect", x: 15, y: 218, w: 1170, h: 222, className: "band-query", radius: 12 },
+
+  { kind: "arrow", ax: 280, ay: 125, bx: 330, by: 125 },
+  { kind: "arrow", ax: 555, ay: 125, bx: 625, by: 125 },
+  { kind: "arrow", ax: 350, ay: 340, bx: 390, by: 340 },
+  { kind: "arrow", ax: 610, ay: 340, bx: 640, by: 340 },
+  { kind: "arrow", ax: 790, ay: 340, bx: 815, by: 340 },
+  { kind: "arrow", ax: 1005, ay: 190, bx: 1005, by: 255 },
+
+  { kind: "rect", x: 40, y: 85, w: 220, h: 80, className: "neutral-box", radius: 12 },
+  { kind: "rect", x: 350, y: 85, w: 205, h: 80, className: "model-box", radius: 12 },
+  {
+    kind: "stack", x: 645, y: 55, w: 505, h: 135, className: "index-box",
+    radius: 12, rows: 30, gridX: 675, gridEndX: 1120, gridY: 112,
+    gap: 1.85, dotX: 665, dotRadius: 1.4
+  },
+
+  { kind: "rect", x: 40, y: 290, w: 290, h: 100, className: "mention-box", radius: 12 },
+  { kind: "rect", x: 410, y: 290, w: 200, h: 100, className: "model-box", radius: 12 },
+  { kind: "rect", x: 660, y: 285, w: 130, h: 110, className: "vector-box", radius: 12 },
+  { kind: "rect", x: 835, y: 270, w: 310, h: 135, className: "score-box", radius: 12 },
+  { kind: "line", ax: 855, ay: 327, bx: 1125, by: 327, className: "separator" },
+
+  {
+    kind: "text", x: 35, y: 42, anchor: "start", className: "section-label",
+    value: "ЗАРАНЕЕ · ИНДЕКСАЦИЯ"
+  },
+  {
+    kind: "text", x: 35, y: 247, anchor: "start", className: "section-label",
+    value: "НА ЗАПРОСЕ"
+  },
+
+  { kind: "text", x: 150, y: 116, anchor: "middle", className: "box-title", value: "Записи knowledge base" },
+  { kind: "text", x: 150, y: 143, anchor: "middle", className: "small", value: "ID + описание сущности" },
+
+  { kind: "text", x: 452, y: 116, anchor: "middle", className: "box-title", value: "Модель" },
+  { kind: "text", x: 452, y: 143, anchor: "middle", className: "small", value: "all-MiniLM-L6-v2" },
+
+  { kind: "text", x: 305, y: 103, anchor: "middle", className: "small", value: "один раз" },
+  { kind: "text", x: 590, y: 103, anchor: "middle", className: "small", value: "сохранить" },
+
+  { kind: "text", x: 670, y: 79, anchor: "start", className: "box-title", value: "Индекс кандидатов" },
+  { kind: "text", x: 1120, y: 79, anchor: "end", className: "box-title", value: "× 30" },
+  { kind: "text", x: 670, y: 101, anchor: "start", className: "small", value: "30 сохранённых векторов · каждый содержит 384 числа" },
+
+  { kind: "text", x: 190, y: 316, anchor: "middle", className: "box-title", value: "Статья и контекст" },
+  { kind: "text", x: 190, y: 344, anchor: "middle", value: "… [MENTION] Jordan [/MENTION] …" },
+  { kind: "text", x: 190, y: 373, anchor: "middle", className: "small", value: "меняются на каждом запросе" },
+
+  { kind: "text", x: 510, y: 320, anchor: "middle", className: "box-title", value: "Модель" },
+  { kind: "text", x: 510, y: 348, anchor: "middle", value: "одно кодирование" },
+  { kind: "text", x: 510, y: 374, anchor: "middle", className: "small", value: "контекста упоминания" },
+
+  { kind: "text", x: 725, y: 316, anchor: "middle", className: "box-title", value: "Вектор u" },
+  { kind: "text", x: 725, y: 346, anchor: "middle", value: "[ · · · ]" },
+  { kind: "text", x: 725, y: 375, anchor: "middle", className: "small", value: "384 числа" },
+
+  { kind: "text", x: 990, y: 215, anchor: "end", className: "small", dx: -8, value: "готовы до запроса" },
+
+  { kind: "text", x: 990, y: 297, anchor: "middle", className: "box-title", value: "Сравнить u с индексом" },
+  { kind: "text", x: 990, y: 352, anchor: "middle", value: "30 × 384" },
+  { kind: "text", x: 990, y: 380, anchor: "middle", className: "result", value: "≈ 11 500 умножений" },
+  { kind: "text", x: 990, y: 425, anchor: "middle", className: "section-label", value: "30 СКАЛЯРНЫХ ПРОИЗВЕДЕНИЙ" },
+
+  {
+    kind: "fallback", x: 600, y: 180, anchor: "middle",
+    lines: [
+      "384-мерный вектор упоминания сравнивается",
+      "с 30 сохранёнными векторами кандидатов:",
+      "30 скалярных произведений, около 11 500 умножений."
+    ]
+  }
+];
+
+const [config, ...items] = diagramData;
+const origin = Object.freeze({ x: config.originX, y: config.originY });
+const scale = Object.freeze({ x: config.scaleX, y: config.scaleY });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const scene = document.getElementById("scene");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes, parent = scene) => {
+    const node = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    parent.appendChild(node);
+    return node;
+  };
+
+  const drawRect = item => make("rect", {
+    x: sx(item.x),
+    y: sy(item.y),
+    width: sx(item.x + item.w) - sx(item.x),
+    height: sy(item.y + item.h) - sy(item.y),
+    rx: sx(item.radius) - sx(config.zero),
+    ry: sy(item.radius) - sy(config.zero),
+    class: item.className
+  });
+
+  const drawText = item => {
+    const attributes = {
+      x: sx(item.x),
+      y: sy(item.y),
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle",
+      class: item.className || ""
+    };
+    if (item.dx !== undefined) attributes.dx = item.dx;
+    if (item.dy !== undefined) attributes.dy = item.dy;
+    const node = make("text", attributes);
+    node.textContent = item.value;
+  };
+
+  const drawArrow = item => {
+    make("line", {
+      x1: sx(item.ax), y1: sy(item.ay),
+      x2: sx(item.bx), y2: sy(item.by),
+      class: "arrow"
+    });
+    const deltaX = item.bx - item.ax;
+    const deltaY = item.by - item.ay;
+    const length = Math.hypot(deltaX, deltaY);
+    const unitX = deltaX / length;
+    const unitY = deltaY / length;
+    const sideX = -unitY;
+    const sideY = unitX;
+    const leftX = item.bx - unitX * config.head + sideX * config.head * config.headRatio;
+    const leftY = item.by - unitY * config.head + sideY * config.head * config.headRatio;
+    const rightX = item.bx - unitX * config.head - sideX * config.head * config.headRatio;
+    const rightY = item.by - unitY * config.head - sideY * config.head * config.headRatio;
+    make("polyline", {
+      points: [
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(item.bx)},${sy(item.by)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      class: "arrow"
+    });
+  };
+
+  items.forEach(item => {
+    if (item.kind === "rect") drawRect(item);
+
+    if (item.kind === "line") {
+      make("line", {
+        x1: sx(item.ax), y1: sy(item.ay),
+        x2: sx(item.bx), y2: sy(item.by),
+        class: item.className
+      });
+    }
+
+    if (item.kind === "arrow") drawArrow(item);
+    if (item.kind === "text") drawText(item);
+
+    if (item.kind === "stack") {
+      drawRect(item);
+      Array.from({ length: item.rows }).forEach((unused, row) => {
+        const rowY = item.gridY + row * item.gap;
+        make("circle", {
+          cx: sx(item.dotX),
+          cy: sy(rowY),
+          r: sx(item.dotRadius) - sx(config.zero),
+          class: "vector-row"
+        });
+        make("line", {
+          x1: sx(item.gridX), y1: sy(rowY),
+          x2: sx(item.gridEndX), y2: sy(rowY),
+          class: "vector-row"
+        });
+      });
+    }
+  });
+} catch (error) {
+  const scene = document.getElementById("scene");
+  const fallback = items.find(item => item.kind === "fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+  scene.replaceChildren();
+  fallback.lines.forEach((line, index) => {
+    const node = document.createElementNS(namespace, "text");
+    node.setAttribute("x", sx(fallback.x));
+    node.setAttribute("y", sy(fallback.y + index * config.fallbackGap));
+    node.setAttribute("text-anchor", fallback.anchor);
+    node.setAttribute("dominant-baseline", "middle");
+    node.setAttribute("class", "fallback");
+    node.textContent = line;
+    scene.appendChild(node);
+  });
+}
+</script>
+</body>
+</html>

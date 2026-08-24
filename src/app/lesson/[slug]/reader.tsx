@@ -92,20 +92,23 @@ export function Reader({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ text: string; at: number } | null>(null);
+  const [referenceJump, setReferenceJump] = useState<{ from: number; to: number } | null>(null);
   // Меняется после вставки прошлого кода на recall-шаге, чтобы ExercisePanel
   // ниже досохранил набранное и перечитал файл с диска — вставленный код
   // пришёл не из редактора. Именно проп, а не `key`: перемонтирование панели
   // теряло несохранённый черновик и сообщение о расхождении вместе с ним.
   const [reloadEditor, setReloadEditor] = useState(0);
 
-  // Moves to `next`, clamped to the plan's bounds, and mirrors the result in
-  // the URL. `replace` (not `push`) so the back button leaves the lesson
-  // instead of walking back through every step.
+  // Sequential reading replaces the URL so browser history does not contain
+  // every step. A cross-reference pushes instead: Back must return to the
+  // exact paragraph from which the learner jumped away.
   const goTo = useCallback(
-    (next: number, total: number) => {
+    (next: number, total: number, history: "replace" | "push" = "replace") => {
       const clamped = total > 0 ? Math.min(Math.max(next, 0), total - 1) : 0;
       setIndex(clamped);
-      router.replace(`/lesson/${slug}?step=${clamped}`, { scroll: false });
+      const href = `/lesson/${slug}?step=${clamped}`;
+      if (history === "push") router.push(href, { scroll: true });
+      else router.replace(href, { scroll: false });
     },
     [router, slug],
   );
@@ -169,6 +172,18 @@ export function Reader({
   useEffect(() => {
     if (rawStep === null) router.replace(`/lesson/${slug}?step=${index}`, { scroll: false });
   }, [index, rawStep, router, slug]);
+
+  // Query changes caused by browser Back/Forward do not remount this client
+  // component, so mirror them back into the reader's local position.
+  const plannedStepCount = data?.plan?.steps.length ?? 0;
+  useEffect(() => {
+    if (rawStep === null) return;
+    const requested = parseStepParam(rawStep, initialIndex);
+    const clamped =
+      plannedStepCount > 0 ? Math.min(requested, plannedStepCount - 1) : requested;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL history is external navigation state
+    setIndex((current) => (current === clamped ? current : clamped));
+  }, [initialIndex, plannedStepCount, rawStep]);
 
   // `opened` пишется на показ шага и нужен только для «где я остановился»:
   // состояние `read` из него не следует, его ставит уход вперёд.
@@ -303,7 +318,24 @@ export function Reader({
         )}
 
         <h1 className="text-2xl font-semibold">{step.title}</h1>
-        <StepBody body={step.body} />
+        {referenceJump?.to === index && (
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="w-fit rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:border-emerald-300 hover:text-emerald-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-emerald-700 dark:hover:text-emerald-300"
+          >
+            ← Вернуться к шагу {referenceJump.from + 1}
+          </button>
+        )}
+        <StepBody
+          body={step.body}
+          currentStepNumber={index + 1}
+          onStepLink={(stepNumber) => {
+            const target = stepNumber - 1;
+            setReferenceJump({ from: index, to: target });
+            goTo(target, total, "push");
+          }}
+        />
         {step.visual && (
           <VisualFrame src={`/api/visual?path=${encodeURIComponent(step.visual)}`} title={step.visual} />
         )}

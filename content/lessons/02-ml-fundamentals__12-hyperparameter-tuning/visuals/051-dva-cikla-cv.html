@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вложенная кросс-валидация</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --row: #f8fafc;
+    --ink: #172033;
+    --muted: #5f6b7a;
+    --rule: #cbd5e1;
+    --train: #dcecff;
+    --train-stroke: #4d86c6;
+    --inner: #e5e7eb;
+    --inner-stroke: #94a3b8;
+    --val: #7657c8;
+    --test: #d66b2c;
+    --choice: #eee8ff;
+    --choice-stroke: #7657c8;
+    --evaluation: #fff0e5;
+    --evaluation-stroke: #d66b2c;
+    --white: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --panel: #182131;
+      --row: #1d2939;
+      --ink: #f3f6fb;
+      --muted: #b7c1ce;
+      --rule: #42526a;
+      --train: #203d61;
+      --train-stroke: #72a9e7;
+      --inner: #334155;
+      --inner-stroke: #8fa0b5;
+      --val: #967de0;
+      --test: #e78a4f;
+      --choice: #30294b;
+      --choice-stroke: #a38bea;
+      --evaluation: #402b21;
+      --evaluation-stroke: #ed955d;
+      --white: #ffffff;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .frame {
+    background: var(--panel);
+    outline: 1px solid var(--rule);
+  }
+
+  .static-title {
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--panel);
+  }
+
+  text {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    fill: var(--ink);
+  }
+
+  .column-title {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .column-subtitle {
+    font-size: 11px;
+    fill: var(--muted);
+  }
+
+  .row-label {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .cell-label {
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .arrow-label {
+    font-size: 10px;
+    fill: var(--muted);
+  }
+
+  .box-label {
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .legend-label {
+    font-size: 12px;
+  }
+
+  .conclusion {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    font-size: 16px;
+  }
+
+  .row-backdrop {
+    fill: var(--row);
+    stroke: var(--rule);
+    stroke-width: 1px;
+  }
+
+  .outer-train {
+    fill: var(--train);
+    stroke: var(--train-stroke);
+    stroke-width: 1.5px;
+  }
+
+  .inner-train {
+    fill: var(--inner);
+    stroke: var(--inner-stroke);
+    stroke-width: 1px;
+  }
+
+  .inner-val {
+    fill: var(--val);
+    stroke: var(--val);
+    stroke-width: 1px;
+  }
+
+  .outer-test {
+    fill: var(--test);
+    stroke: var(--test);
+    stroke-width: 1.5px;
+  }
+
+  .test-label,
+  .val-label {
+    fill: var(--white);
+  }
+
+  .choice-box {
+    fill: var(--choice);
+    stroke: var(--choice-stroke);
+    stroke-width: 1.5px;
+  }
+
+  .evaluation-box {
+    fill: var(--evaluation);
+    stroke: var(--evaluation-stroke);
+    stroke-width: 1.5px;
+  }
+
+  .separator {
+    stroke: var(--rule);
+    stroke-width: 1px;
+  }
+
+  .flow-data {
+    stroke: var(--train-stroke);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .flow-select {
+    stroke: var(--choice-stroke);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .flow-test {
+    stroke: var(--evaluation-stroke);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .arrow-head.flow-data {
+    fill: var(--train-stroke);
+    stroke: none;
+  }
+
+  .arrow-head.flow-select {
+    fill: var(--choice-stroke);
+    stroke: none;
+  }
+
+  .arrow-head.flow-test {
+    fill: var(--evaluation-stroke);
+    stroke: none;
+  }
+
+  .fallback-box {
+    fill: var(--row);
+    stroke: var(--rule);
+    stroke-width: 2px;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <div class="static-title">Внешний цикл оценивает, внутренний подбирает</div>
+  <svg id="diagram"
+       width="1120"
+       height="460"
+       viewBox="0 0 1120 460"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Схема вложенной кросс-валидации</title>
+    <desc id="svg-desc">Пять внешних фолдов. В каждом один test-фолд откладывается, а оставшиеся данные проходят независимую внутреннюю кросс-валидацию на пяти фолдах. Выбранные настройки лишь затем проверяются на внешнем test-фолде.</desc>
+    <g id="plot"></g>
+  </svg>
+</main>
+
+<script>
+const data = [
+  ["numbers", 0, 1, 2, 3, 4, 5],
+  ["canvas", 1120, 460],
+  ["outer", 125, 48, 2],
+  ["inner", 440, 46, 2, 7],
+  ["rows", 70, 62, 48, 32, 8],
+  ["boxes", 735, 130, 925, 160, 4, 40],
+  ["labels", 110, 22, 43, 405, 438],
+  ["arrows", 8, 4, 10],
+  ["legend", 125, 12, 21, 360, 550, 780],
+  ["bounds", 34, 1060, 40, 1085, 388],
+  ["fallback", 80, 165, 960, 110, 560, 205, 235],
+  ["lineGap", 14]
+];
+const origin = [0, 0];
+const scale = [1, 1];
+const [originX, originY] = origin;
+const [scaleX, scaleY] = scale;
+const sx = x => originX + x * scaleX;
+const sy = y => originY + y * scaleY;
+
+const [
+  [, ZERO, ONE, TWO, THREE, FOUR, FIVE],
+  [, CANVAS_W, CANVAS_H],
+  [, OUTER_X, OUTER_CELL_W, OUTER_GAP],
+  [, INNER_X, INNER_CELL_W, INNER_GAP, INNER_CELL_H],
+  [, ROW_Y, ROW_STEP, ROW_BLOCK_H, OUTER_H, OUTER_Y_OFFSET],
+  [, CHOICE_X, CHOICE_W, RESULT_X, RESULT_W, BOX_Y_OFFSET, BOX_H],
+  [, ROW_LABEL_X, HEADER_Y, SUBHEADER_Y, LEGEND_Y, CONCLUSION_Y],
+  [, ARROW_SIZE, ARROW_HALF, LABEL_OFFSET],
+  [, LEGEND_X, LEGEND_SIZE, LEGEND_TEXT_GAP, LEGEND_VAL_X, LEGEND_TEST_X, LEGEND_FLOW_X],
+  [, ROW_BG_X, ROW_BG_W, CONTENT_LEFT, CONTENT_RIGHT, SEPARATOR_Y],
+  [, FALLBACK_X, FALLBACK_Y, FALLBACK_W, FALLBACK_H, FALLBACK_CX, FALLBACK_LINE_ONE, FALLBACK_LINE_TWO],
+  [, LINE_GAP]
+] = data;
+
+const svg = document.getElementById("diagram");
+const plot = document.getElementById("plot");
+const NS = "http://www.w3.org/2000/svg";
+const ROUND = FOUR;
+const outerWidth = FIVE * OUTER_CELL_W + FOUR * OUTER_GAP;
+const innerWidth = FIVE * INNER_CELL_W + FOUR * INNER_GAP;
+const matrixHeight = FIVE * INNER_CELL_H + FOUR * INNER_GAP;
+
+function node(name, attributes, content) {
+  const item = document.createElementNS(NS, name);
+  for (const [key, value] of Object.entries(attributes)) {
+    item.setAttribute(key, value);
+  }
+  if (content !== undefined) item.textContent = content;
+  return item;
+}
+
+function add(item) {
+  plot.appendChild(item);
+  return item;
+}
+
+function rect(x, y, width, height, className, radius = ROUND) {
+  return node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + width) - sx(x),
+    height: sy(y + height) - sy(y),
+    rx: sx(x + radius) - sx(x),
+    ry: sy(y + radius) - sy(y),
+    class: className,
+    "vector-effect": "non-scaling-stroke"
+  });
+}
+
+function line(x1, y1, x2, y2, className) {
+  return node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className,
+    "vector-effect": "non-scaling-stroke"
+  });
+}
+
+function label(x, y, content, className, anchor = "middle") {
+  return node("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, content);
+}
+
+function multiline(x, y, lines, className) {
+  const text = node("text", {
+    class: className,
+    "text-anchor": "middle",
+    "dominant-baseline": "middle"
+  });
+  for (let index = ZERO; index < lines.length; index += ONE) {
+    const span = node("tspan", {
+      x: sx(x),
+      y: sy(y + index * LINE_GAP)
+    }, lines[index]);
+    text.appendChild(span);
+  }
+  return text;
+}
+
+function arrow(x1, y, x2, className) {
+  add(line(x1, y, x2, y, className));
+  add(node("polygon", {
+    points: [
+      `${sx(x2)},${sy(y)}`,
+      `${sx(x2 - ARROW_SIZE)},${sy(y - ARROW_HALF)}`,
+      `${sx(x2 - ARROW_SIZE)},${sy(y + ARROW_HALF)}`
+    ].join(" "),
+    class: `arrow-head ${className}`
+  }));
+}
+
+try {
+  add(label(OUTER_X + outerWidth / TWO, HEADER_Y, "Внешние 5 фолдов", "column-title"));
+  add(label(OUTER_X + outerWidth / TWO, SUBHEADER_Y, "оранжевый test сразу отложен", "column-subtitle"));
+
+  add(label(INNER_X + innerWidth / TWO, HEADER_Y, "Внутри каждого: 5 фолдов", "column-title"));
+  add(label(INNER_X + innerWidth / TWO, SUBHEADER_Y, "подбор начинается заново", "column-subtitle"));
+
+  add(label(CHOICE_X + CHOICE_W / TWO, HEADER_Y, "Выбор", "column-title"));
+  add(label(CHOICE_X + CHOICE_W / TWO, SUBHEADER_Y, "для этого фолда", "column-subtitle"));
+
+  add(label(RESULT_X + RESULT_W / TWO, HEADER_Y, "Внешняя проверка", "column-title"));
+  add(label(RESULT_X + RESULT_W / TWO, SUBHEADER_Y, "только после выбора", "column-subtitle"));
+
+  for (let outer = ZERO; outer < FIVE; outer += ONE) {
+    const rowTop = ROW_Y + outer * ROW_STEP;
+    const centerY = rowTop + ROW_BLOCK_H / TWO;
+    const outerTop = rowTop + OUTER_Y_OFFSET;
+
+    add(rect(ROW_BG_X, rowTop - FOUR, ROW_BG_W, ROW_BLOCK_H + TWO, "row-backdrop", FOUR));
+    add(label(ROW_LABEL_X, centerY, `Фолд ${outer + ONE}`, "row-label", "end"));
+
+    for (let fold = ZERO; fold < FIVE; fold += ONE) {
+      const cellX = OUTER_X + fold * (OUTER_CELL_W + OUTER_GAP);
+      const isTest = fold === outer;
+      add(rect(
+        cellX,
+        outerTop,
+        OUTER_CELL_W,
+        OUTER_H,
+        isTest ? "outer-test" : "outer-train",
+        THREE
+      ));
+      add(label(
+        cellX + OUTER_CELL_W / TWO,
+        outerTop + OUTER_H / TWO,
+        isTest ? `test ${fold + ONE}` : String(fold + ONE),
+        isTest ? "cell-label test-label" : "cell-label"
+      ));
+    }
+
+    const dataArrowStart = OUTER_X + outerWidth + LABEL_OFFSET;
+    const dataArrowEnd = INNER_X - LABEL_OFFSET;
+    arrow(dataArrowStart, centerY, dataArrowEnd, "flow-data");
+    add(label(
+      (dataArrowStart + dataArrowEnd) / TWO,
+      centerY - LABEL_OFFSET,
+      "без test",
+      "arrow-label"
+    ));
+
+    for (let innerSplit = ZERO; innerSplit < FIVE; innerSplit += ONE) {
+      const innerY = rowTop + TWO + innerSplit * (INNER_CELL_H + INNER_GAP);
+      for (let innerFold = ZERO; innerFold < FIVE; innerFold += ONE) {
+        const innerX = INNER_X + innerFold * (INNER_CELL_W + INNER_GAP);
+        add(rect(
+          innerX,
+          innerY,
+          INNER_CELL_W,
+          INNER_CELL_H,
+          innerFold === innerSplit ? "inner-val" : "inner-train",
+          ONE
+        ));
+      }
+    }
+
+    const selectArrowStart = INNER_X + innerWidth + LABEL_OFFSET;
+    const selectArrowEnd = CHOICE_X - LABEL_OFFSET;
+    arrow(selectArrowStart, centerY, selectArrowEnd, "flow-select");
+
+    add(rect(
+      CHOICE_X,
+      rowTop + BOX_Y_OFFSET,
+      CHOICE_W,
+      BOX_H,
+      "choice-box",
+      FOUR
+    ));
+    add(multiline(
+      CHOICE_X + CHOICE_W / TWO,
+      rowTop + LABEL_OFFSET + FOUR,
+      ["лучшие настройки", `для фолда ${outer + ONE}`],
+      "box-label"
+    ));
+
+    const testArrowStart = CHOICE_X + CHOICE_W + LABEL_OFFSET;
+    const testArrowEnd = RESULT_X - LABEL_OFFSET;
+    arrow(testArrowStart, centerY, testArrowEnd, "flow-test");
+
+    add(rect(
+      RESULT_X,
+      rowTop + BOX_Y_OFFSET,
+      RESULT_W,
+      BOX_H,
+      "evaluation-box",
+      FOUR
+    ));
+    add(multiline(
+      RESULT_X + RESULT_W / TWO,
+      rowTop + LABEL_OFFSET + FOUR,
+      ["внешняя оценка", `на test ${outer + ONE}`],
+      "box-label"
+    ));
+  }
+
+  add(line(CONTENT_LEFT, SEPARATOR_Y, CONTENT_RIGHT, SEPARATOR_Y, "separator"));
+
+  add(rect(LEGEND_X, LEGEND_Y - LEGEND_SIZE / TWO, LEGEND_SIZE, LEGEND_SIZE, "outer-train", TWO));
+  add(label(
+    LEGEND_X + LEGEND_SIZE + LEGEND_TEXT_GAP,
+    LEGEND_Y,
+    "данные для подбора",
+    "legend-label",
+    "start"
+  ));
+
+  add(rect(LEGEND_VAL_X, LEGEND_Y - LEGEND_SIZE / TWO, LEGEND_SIZE, LEGEND_SIZE, "inner-val", TWO));
+  add(label(
+    LEGEND_VAL_X + LEGEND_SIZE + LEGEND_TEXT_GAP,
+    LEGEND_Y,
+    "внутренний val",
+    "legend-label",
+    "start"
+  ));
+
+  add(rect(LEGEND_TEST_X, LEGEND_Y - LEGEND_SIZE / TWO, LEGEND_SIZE, LEGEND_SIZE, "outer-test", TWO));
+  add(label(
+    LEGEND_TEST_X + LEGEND_SIZE + LEGEND_TEXT_GAP,
+    LEGEND_Y,
+    "внешний test: закрыт до выбора",
+    "legend-label",
+    "start"
+  ));
+
+  add(label(
+    LEGEND_FLOW_X,
+    CONCLUSION_Y,
+    "Внутренний цикл выбирает заново → внешний цикл проверяет сам выбор",
+    "conclusion",
+    "middle"
+  ));
+} catch (error) {
+  plot.replaceChildren();
+  add(rect(
+    FALLBACK_X,
+    FALLBACK_Y,
+    FALLBACK_W,
+    FALLBACK_H,
+    "fallback-box",
+    FOUR
+  ));
+  add(label(
+    FALLBACK_CX,
+    FALLBACK_LINE_ONE,
+    "Схема должна была показать 5 внешних фолдов:",
+    "fallback"
+  ));
+  add(label(
+    FALLBACK_CX,
+    FALLBACK_LINE_TWO,
+    "в каждом внутренние 5 фолдов заново выбирают настройки, затем внешний test проверяет результат.",
+    "fallback"
+  ));
+}
+</script>
+</body>
+</html>

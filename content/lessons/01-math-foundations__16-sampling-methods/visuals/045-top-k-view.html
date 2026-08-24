@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Фиксированная отсечка top-k</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #687386;
+      --axis: #566174;
+      --guide: #a5afbd;
+      --zero: #aeb7c4;
+      --zero-fill: #dce1e8;
+      --blue: #3274d9;
+      --blue-dark: #245aaa;
+      --teal: #179d8b;
+      --teal-dark: #117568;
+      --orange: #e88a2a;
+      --orange-dark: #b96515;
+      --cut: #b53155;
+      --cut-soft: #f5dbe3;
+      --arrow: #454f61;
+      --error: #9d2441;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #182131;
+        --ink: #edf2fa;
+        --muted: #aeb9c9;
+        --axis: #aeb9c9;
+        --guide: #67748a;
+        --zero: #78859a;
+        --zero-fill: #394457;
+        --blue: #69a5ff;
+        --blue-dark: #a9ccff;
+        --teal: #43c8b3;
+        --teal-dark: #8ee0d3;
+        --orange: #ffac55;
+        --orange-dark: #ffd09d;
+        --cut: #ff7798;
+        --cut-soft: #4e2635;
+        --arrow: #c6cfdd;
+        --error: #ff9bb2;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 10px 14px 8px;
+      background: var(--panel);
+      border: 1px solid var(--guide);
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 440px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1;
+      fill: none;
+    }
+
+    .cut {
+      stroke: var(--cut);
+      stroke-width: 3;
+      fill: none;
+    }
+
+    .arrow {
+      stroke: var(--arrow);
+      stroke-width: 3;
+      fill: none;
+    }
+
+    .arrow-head {
+      fill: var(--arrow);
+      stroke: none;
+    }
+
+    .kept-a {
+      fill: var(--blue);
+      stroke: var(--blue-dark);
+      stroke-width: 2;
+    }
+
+    .kept-b {
+      fill: var(--teal);
+      stroke: var(--teal-dark);
+      stroke-width: 2;
+    }
+
+    .kept-c {
+      fill: var(--orange);
+      stroke: var(--orange-dark);
+      stroke-width: 2;
+    }
+
+    .removed {
+      fill: var(--zero-fill);
+      stroke: var(--zero);
+      stroke-width: 2;
+    }
+
+    .zero-mark {
+      stroke: var(--zero);
+      stroke-width: 4;
+      fill: none;
+    }
+
+    .panel-title {
+      fill: var(--ink);
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .token {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .cut-label {
+      fill: var(--cut);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .arrow-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .zero-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .error {
+      fill: var(--error);
+      font-size: 17px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1>Фиксированная отсечка top-k</h1>
+
+    <svg
+      id="chart"
+      viewBox="0 0 1200 440"
+      width="1200"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Top-k с фиксированной отсечкой k равно 3</title>
+      <desc id="svg-desc">
+        Десять токенов отсортированы по вероятности. Первые три сохранены,
+        остальные семь обнулены, после чего вероятности первых трёх
+        перенормированы до ста процентов.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    "use strict";
+
+    const TOKENS = [
+      { label: "t₁", probability: 30 },
+      { label: "t₂", probability: 24 },
+      { label: "t₃", probability: 18 },
+      { label: "t₄", probability: 10 },
+      { label: "t₅", probability: 6 },
+      { label: "t₆", probability: 4 },
+      { label: "t₇", probability: 3 },
+      { label: "t₈", probability: 2 },
+      { label: "t₉", probability: 2 },
+      { label: "t₁₀", probability: 1 }
+    ];
+
+    const METRICS = [
+      0, 1, 0.5,
+      75, 380, 8.8,
+      3,
+      2, 66,
+      3, 1.6,
+      41, 36.5,
+      30, 31.5,
+      0.65, 65,
+      52, 61, 16, 1.25, 1.8,
+      -2,
+      -3.2, -2.55, -5.2,
+      1.1, 0.7,
+      29,
+      4, 5,
+      26.5,
+      50,
+      114
+    ];
+
+    const CANVAS_WIDTH = 1200;
+    const CANVAS_HEIGHT = 440;
+    const LABEL_PADDING = 8;
+    const LINE_WIDTH = 2;
+    const FONT_SIZE = 15;
+
+    const [
+      ZERO, ONE, HALF,
+      originX, originY, unitScale,
+      k,
+      leftStart, rightStart,
+      barWidth, barGap,
+      panelTitleY, panelSubtitleY,
+      axisTop, cutLabelY,
+      probabilityScale, renormalizedScale,
+      arrowStart, arrowEnd, arrowY, arrowHalfHeight, arrowHeadLength,
+      tokenLabelY,
+      bracketY, bracketTickY, bracketLabelY,
+      dashLength, dashGap,
+      cutTop,
+      arrowUpperOffset, arrowLowerOffset,
+      fallbackY,
+      leftEnd,
+      rightEnd
+    ] = METRICS;
+
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = unitScale;
+
+    function sx(x) {
+      return origin.x + x * scale;
+    }
+
+    function sy(y) {
+      return origin.y - y * scale;
+    }
+
+    const svg = document.getElementById("chart");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function makeElement(name, attributes, content) {
+      const node = document.createElementNS(namespace, name);
+
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+
+      return node;
+    }
+
+    function addLine(parent, xStart, yStart, xEnd, yEnd, className, extra) {
+      const attributes = {
+        x1: sx(xStart),
+        y1: sy(yStart),
+        x2: sx(xEnd),
+        y2: sy(yEnd),
+        class: className
+      };
+
+      Object.assign(attributes, extra || {});
+      parent.appendChild(makeElement("line", attributes));
+    }
+
+    function addText(parent, x, y, content, className, anchor) {
+      parent.appendChild(makeElement("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, content));
+    }
+
+    function addBar(parent, x, height, className) {
+      parent.appendChild(makeElement("rect", {
+        x: sx(x),
+        y: sy(height),
+        width: sx(x + barWidth) - sx(x),
+        height: sy(ZERO) - sy(height),
+        class: className
+      }));
+    }
+
+    try {
+      const drawing = makeElement("g", {
+        "aria-hidden": "true"
+      });
+
+      svg.appendChild(drawing);
+
+      const step = barWidth + barGap;
+      const keptClasses = ["kept-a", "kept-b", "kept-c"];
+      const keptTokens = TOKENS.filter((token, index) => index < k);
+      const keptTotal = keptTokens.reduce(
+        (sum, token) => sum + token.probability,
+        ZERO
+      );
+
+      const cutX = leftStart + k * step - barGap * HALF;
+      const firstRemovedX = rightStart + k * step;
+      const lastRemovedX =
+        rightStart + (TOKENS.length - ONE) * step + barWidth;
+
+      addText(
+        drawing,
+        leftStart,
+        panelTitleY,
+        "До фильтра: 10 токенов",
+        "panel-title",
+        "start"
+      );
+
+      addText(
+        drawing,
+        leftStart,
+        panelSubtitleY,
+        "Вероятности отсортированы по убыванию",
+        "subtitle",
+        "start"
+      );
+
+      addText(
+        drawing,
+        rightStart,
+        panelTitleY,
+        "После top-k: сохранены 3",
+        "panel-title",
+        "start"
+      );
+
+      addText(
+        drawing,
+        rightStart,
+        panelSubtitleY,
+        "Оставшиеся стали выше; сумма снова 100%",
+        "subtitle",
+        "start"
+      );
+
+      addLine(
+        drawing,
+        ZERO,
+        ZERO,
+        leftEnd,
+        ZERO,
+        "axis"
+      );
+
+      addLine(
+        drawing,
+        ZERO,
+        ZERO,
+        ZERO,
+        axisTop,
+        "axis"
+      );
+
+      addText(
+        drawing,
+        ZERO,
+        axisTop,
+        "вероятность",
+        "axis-label",
+        "start"
+      );
+
+      addLine(
+        drawing,
+        rightStart - ONE,
+        ZERO,
+        rightEnd,
+        ZERO,
+        "axis"
+      );
+
+      TOKENS.forEach((token, index) => {
+        const x = leftStart + index * step;
+        const height = token.probability * probabilityScale;
+        const className =
+          index < k ? keptClasses[index] : "removed";
+
+        addBar(drawing, x, height, className);
+
+        addText(
+          drawing,
+          x + barWidth * HALF,
+          tokenLabelY,
+          token.label,
+          "token",
+          "middle"
+        );
+      });
+
+      addLine(
+        drawing,
+        cutX,
+        ZERO,
+        cutX,
+        cutTop,
+        "cut",
+        {
+          "stroke-dasharray":
+            String(sx(dashLength) - sx(ZERO)) + " " +
+            String(sx(dashGap) - sx(ZERO))
+        }
+      );
+
+      addText(
+        drawing,
+        cutX,
+        cutLabelY,
+        "отсечка k = 3",
+        "cut-label",
+        "middle"
+      );
+
+      addLine(
+        drawing,
+        arrowStart,
+        arrowY,
+        arrowEnd,
+        arrowY,
+        "arrow"
+      );
+
+      drawing.appendChild(makeElement("polygon", {
+        points: [
+          sx(arrowEnd) + "," + sy(arrowY),
+          sx(arrowEnd - arrowHeadLength) + "," +
+            sy(arrowY + arrowHalfHeight),
+          sx(arrowEnd - arrowHeadLength) + "," +
+            sy(arrowY - arrowHalfHeight)
+        ].join(" "),
+        class: "arrow-head"
+      }));
+
+      addText(
+        drawing,
+        arrowStart,
+        arrowY + arrowUpperOffset,
+        "отсечь хвост",
+        "arrow-label",
+        "start"
+      );
+
+      addText(
+        drawing,
+        arrowStart,
+        arrowY - arrowLowerOffset,
+        "и перенормировать",
+        "arrow-label",
+        "start"
+      );
+
+      TOKENS.forEach((token, index) => {
+        const x = rightStart + index * step;
+
+        if (index < k) {
+          const height =
+            token.probability / keptTotal * renormalizedScale;
+
+          addBar(drawing, x, height, keptClasses[index]);
+        } else {
+          addLine(
+            drawing,
+            x,
+            ZERO,
+            x + barWidth,
+            ZERO,
+            "zero-mark"
+          );
+        }
+
+        addText(
+          drawing,
+          x + barWidth * HALF,
+          tokenLabelY,
+          token.label,
+          "token",
+          "middle"
+        );
+      });
+
+      addLine(
+        drawing,
+        firstRemovedX,
+        bracketTickY,
+        firstRemovedX,
+        bracketY,
+        "guide"
+      );
+
+      addLine(
+        drawing,
+        firstRemovedX,
+        bracketY,
+        lastRemovedX,
+        bracketY,
+        "guide"
+      );
+
+      addLine(
+        drawing,
+        lastRemovedX,
+        bracketY,
+        lastRemovedX,
+        bracketTickY,
+        "guide"
+      );
+
+      addText(
+        drawing,
+        (firstRemovedX + lastRemovedX) * HALF,
+        bracketLabelY,
+        "7 токенов → вероятность 0",
+        "zero-label",
+        "middle"
+      );
+
+      void CANVAS_WIDTH;
+      void CANVAS_HEIGHT;
+      void LABEL_PADDING;
+      void LINE_WIDTH;
+      void FONT_SIZE;
+    } catch (error) {
+      const fallback = makeElement("text", {
+        x: sx(ZERO),
+        y: sy(fallbackY),
+        class: "error",
+        "text-anchor": "start",
+        "dominant-baseline": "middle"
+      }, "Схема: из 10 токенов при k = 3 сохраняются первые три, остальные 7 обнуляются, затем первые три перенормируются.");
+
+      svg.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

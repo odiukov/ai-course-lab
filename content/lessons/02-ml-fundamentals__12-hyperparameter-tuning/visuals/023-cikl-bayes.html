@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Цикл байесовской оптимизации</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #526078;
+    --line: #71809b;
+    --guide: #c8d1df;
+    --blue: #2563a9;
+    --blue-fill: #e8f2ff;
+    --violet: #7250a8;
+    --violet-fill: #f2ebff;
+    --orange: #b65d18;
+    --orange-fill: #fff0df;
+    --green: #287453;
+    --green-fill: #e7f7ef;
+    --best: #0b7450;
+    --decision: #fff7d8;
+    --decision-line: #9b7820;
+    --frame: #d3dbe7;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #182130;
+      --text: #edf3fc;
+      --muted: #b2bfd1;
+      --line: #92a1b8;
+      --guide: #3b495e;
+      --blue: #79b8ff;
+      --blue-fill: #17365a;
+      --violet: #c4a6ff;
+      --violet-fill: #342650;
+      --orange: #ffad68;
+      --orange-fill: #50301c;
+      --green: #72d2a5;
+      --green-fill: #183d31;
+      --best: #75d9ad;
+      --decision: #493e1d;
+      --decision-line: #dfc365;
+      --frame: #344157;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-height: 520px;
+    overflow: hidden;
+    background: var(--bg);
+    border: 1px solid var(--frame);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 14px 18px 10px;
+    font-size: 20px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+
+  .fallback {
+    padding: 28px;
+    font-size: 16px;
+    color: var(--muted);
+    background: var(--bg);
+  }
+
+  .fallback[hidden], svg[hidden] { display: none; }
+
+  .stage {
+    stroke-width: 2px;
+    fill: var(--panel);
+  }
+
+  .start {
+    stroke: var(--blue);
+    fill: var(--blue-fill);
+  }
+
+  .surrogate {
+    stroke: var(--violet);
+    fill: var(--violet-fill);
+  }
+
+  .candidate {
+    stroke: var(--blue);
+    fill: var(--blue-fill);
+  }
+
+  .expensive {
+    stroke: var(--orange);
+    fill: var(--orange-fill);
+  }
+
+  .result {
+    stroke: var(--green);
+    fill: var(--green-fill);
+  }
+
+  .decision {
+    stroke: var(--decision-line);
+    stroke-width: 2px;
+    fill: var(--decision);
+  }
+
+  .finish {
+    stroke: var(--green);
+    stroke-width: 2px;
+    fill: var(--green-fill);
+  }
+
+  .flow {
+    stroke: var(--line);
+    stroke-width: 2px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .loop {
+    stroke: var(--violet);
+    stroke-width: 3px;
+  }
+
+  .guide {
+    stroke: var(--guide);
+    stroke-width: 1px;
+  }
+
+  .node-title {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .metric {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .group-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .loop-label {
+    fill: var(--violet);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .branch-label {
+    fill: var(--decision-line);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .best-text {
+    fill: var(--best);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .icon-line {
+    stroke: currentColor;
+    stroke-width: 2px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .point {
+    stroke: var(--blue);
+    stroke-width: 2px;
+    fill: var(--panel);
+  }
+
+  .point-best {
+    stroke: var(--best);
+    stroke-width: 2px;
+    fill: var(--best);
+  }
+</style>
+</head>
+<body>
+<main class="figure" aria-labelledby="diagram-heading">
+  <h1 id="diagram-heading">Цикл байесовской оптимизации</h1>
+  <div id="fallback" class="fallback">
+    Схема должна была показать путь от случайных стартовых замеров через
+    суррогат и acquisition-функцию к дорогому замеру, добавлению результата
+    и повторению цикла до исчерпания бюджета.
+  </div>
+  <svg id="diagram" hidden viewBox="0 0 1200 430"
+       width="1200" height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Пять стадий байесовской оптимизации</title>
+    <desc id="svg-description">
+      Три случайных результата используются для обучения суррогата.
+      Acquisition-функция выбирает кандидата, выполняется дорогой замер,
+      результат добавляется, после чего суррогат перестраивается, пока
+      бюджет не исчерпан.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+</main>
+
+<script>
+const data = [{
+  origin: { x: 50, y: 26 },
+  scale: { x: 10, y: 10 },
+  bounds: { x: -5, y: -2.6, w: 120, h: 43 },
+  half: 0.5,
+  last: -1,
+  previous: -2,
+  arrowHead: 0.9,
+  arrowWing: 0.52,
+  fraction: 2,
+  groupY: 5.7,
+  guideY: 7.25,
+  stages: [
+    {
+      x: 1, y: 9, w: 20, h: 13.5, className: "stage start",
+      title: "Случайные точки",
+      titleY: 12.2,
+      copy: "первые реальные замеры",
+      copyY: 14.6
+    },
+    {
+      x: 25, y: 9, w: 18, h: 13.5, className: "stage surrogate",
+      title: "Обучить суррогат",
+      titleY: 12.2,
+      copy: "модель-подсказка",
+      copyY: 14.7
+    },
+    {
+      x: 47, y: 9, w: 21, h: 13.5, className: "stage candidate",
+      title: "Acquisition-функция",
+      titleY: 12.2,
+      copy: "выбирает кандидата",
+      copyY: 14.7
+    },
+    {
+      x: 72, y: 9, w: 18, h: 13.5, className: "stage expensive",
+      title: "Дорогой замер",
+      titleY: 12.2,
+      copy: "обучить реальную модель",
+      copyY: 14.7,
+      copySecond: "и получить метрику",
+      copySecondY: 17
+    },
+    {
+      x: 94, y: 9, w: 15, h: 13.5, className: "stage result",
+      title: "Добавить",
+      titleSecond: "результат",
+      titleY: 12.1,
+      titleSecondY: 14.3,
+      copy: "к прошлым",
+      copyY: 17
+    }
+  ],
+  metrics: [
+    { x: 4.2, y: 17.7, textY: 19.8, value: 0.31, best: false },
+    { x: 10.9, y: 17.7, textY: 19.8, value: 0.24, best: true },
+    { x: 17.6, y: 17.7, textY: 19.8, value: 0.29, best: false }
+  ],
+  budget: { x: 11, y: 21.6, runs: 4 },
+  forwardArrows: [
+    { points: [[21, 15.7], [25, 15.7]], className: "flow" },
+    { points: [[43, 15.7], [47, 15.7]], className: "flow" },
+    { points: [[68, 15.7], [72, 15.7]], className: "flow" },
+    { points: [[90, 15.7], [94, 15.7]], className: "flow" },
+    { points: [[101.5, 22.5], [101.5, 24.2]], className: "flow" }
+  ],
+  surrogateCurve: [
+    [27.2, 19.7], [29.1, 18.9], [30.8, 19.2],
+    [32.6, 17.8], [34.4, 18.2], [36.3, 16.8],
+    [38.2, 17.5], [40.6, 16.6]
+  ],
+  acquisitionIcon: {
+    center: [57.5, 18.6],
+    rings: [0.7, 1.55],
+    crossH: [[54.8, 18.6], [60.2, 18.6]],
+    crossV: [[57.5, 16.1], [57.5, 21.1]]
+  },
+  expensiveIcon: {
+    points: [[78.3, 18.5], [82.2, 18.5], [80.7, 20.8]],
+    base: [[77.5, 21], [83, 21]]
+  },
+  addIcon: {
+    horizontal: [[99.7, 19.8], [103.3, 19.8]],
+    vertical: [[101.5, 18], [101.5, 21.6]]
+  },
+  decision: {
+    center: [101.5, 28.5],
+    points: [[101.5, 24.2], [109, 28.5], [101.5, 32.8], [94, 28.5]],
+    text: [
+      { value: "Бюджет", x: 101.5, y: 27.9 },
+      { value: "исчерпан?", x: 101.5, y: 29.7 }
+    ]
+  },
+  loop: {
+    points: [[94, 28.5], [34, 28.5], [34, 22.5]],
+    label: "нет: перестроить суррогат",
+    labelX: 84.5,
+    labelY: 27
+  },
+  finishArrow: {
+    points: [[101.5, 32.8], [101.5, 35]],
+    className: "flow"
+  },
+  finish: {
+    x: 84, y: 35, w: 31, h: 4.2,
+    text: "Вернуть лучшую реально проверенную комбинацию",
+    textX: 99.5,
+    textY: 37.7
+  },
+  yes: { text: "да", x: 103.2, y: 34.2 },
+  groupLabels: [
+    { text: "НАЧАЛЬНЫЕ НАБЛЮДЕНИЯ", x: 11, x1: 1, x2: 21 },
+    { text: "ПОВТОРЯЮЩИЙСЯ ЦИКЛ", x: 67, x1: 25, x2: 109 }
+  ]
+}];
+
+const [diagramData] = data;
+const origin = Object.freeze(diagramData.origin);
+const scale = Object.freeze(diagramData.scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const element = (name, attributes = {}) => {
+    const node = document.createElementNS(ns, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      node.setAttribute(key, String(value));
+    });
+    return node;
+  };
+
+  const append = node => {
+    drawing.appendChild(node);
+    return node;
+  };
+
+  const text = (value, x, y, className, anchor = "middle") => {
+    const node = element("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    });
+    node.textContent = value;
+    return append(node);
+  };
+
+  const line = (points, className) => append(element("line", {
+    x1: sx(points[diagramData.previous][diagramData.previous]),
+    y1: sy(points[diagramData.previous][diagramData.last]),
+    x2: sx(points[diagramData.last][diagramData.previous]),
+    y2: sy(points[diagramData.last][diagramData.last]),
+    class: className
+  }));
+
+  const pointString = points => points
+    .map(([x, y]) => `${sx(x)},${sy(y)}`)
+    .join(" ");
+
+  const polyline = (points, className) => append(element("polyline", {
+    points: pointString(points),
+    class: className
+  }));
+
+  const arrow = item => {
+    polyline(item.points, item.className);
+    const tip = item.points.at(diagramData.last);
+    const tail = item.points.at(diagramData.previous);
+    const vx = tip[diagramData.previous] - tail[diagramData.previous];
+    const vy = tip[diagramData.last] - tail[diagramData.last];
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = tip[diagramData.previous] - ux * diagramData.arrowHead;
+    const by = tip[diagramData.last] - uy * diagramData.arrowHead;
+    const px = -uy * diagramData.arrowWing;
+    const py = ux * diagramData.arrowWing;
+    append(element("polygon", {
+      points: pointString([
+        tip,
+        [bx + px, by + py],
+        [bx - px, by - py]
+      ]),
+      class: item.className
+    }));
+  };
+
+  diagramData.groupLabels.forEach(group => {
+    line([[group.x1, diagramData.guideY], [group.x2, diagramData.guideY]], "guide");
+    text(group.text, group.x, diagramData.groupY, "group-label");
+  });
+
+  diagramData.forwardArrows.forEach(arrow);
+
+  diagramData.stages.forEach(stage => {
+    append(element("rect", {
+      x: sx(stage.x),
+      y: sy(stage.y),
+      width: sx(stage.x + stage.w) - sx(stage.x),
+      height: sy(stage.y + stage.h) - sy(stage.y),
+      class: stage.className
+    }));
+    const centerX = stage.x + stage.w * diagramData.half;
+    text(stage.title, centerX, stage.titleY, "node-title");
+    if (stage.titleSecond) {
+      text(stage.titleSecond, centerX, stage.titleSecondY, "node-title");
+    }
+    text(stage.copy, centerX, stage.copyY, "node-copy");
+    if (stage.copySecond) {
+      text(stage.copySecond, centerX, stage.copySecondY, "node-copy");
+    }
+  });
+
+  const formatter = new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: diagramData.fraction,
+    maximumFractionDigits: diagramData.fraction
+  });
+
+  diagramData.metrics.forEach(metric => {
+    append(element("circle", {
+      cx: sx(metric.x),
+      cy: sy(metric.y),
+      r: sx(metric.x + diagramData.half) - sx(metric.x),
+      class: metric.best ? "point-best" : "point"
+    }));
+    text(formatter.format(metric.value), metric.x, metric.textY, "metric");
+  });
+
+  text(
+    `ещё ${diagramData.budget.runs} дорогих запуска`,
+    diagramData.budget.x,
+    diagramData.budget.y,
+    "small"
+  );
+
+  polyline(diagramData.surrogateCurve, "icon-line surrogate");
+  diagramData.acquisitionIcon.rings.forEach(radius => {
+    append(element("circle", {
+      cx: sx(diagramData.acquisitionIcon.center[diagramData.previous]),
+      cy: sy(diagramData.acquisitionIcon.center[diagramData.last]),
+      r: sx(diagramData.acquisitionIcon.center[diagramData.previous] + radius) -
+         sx(diagramData.acquisitionIcon.center[diagramData.previous]),
+      class: "icon-line candidate"
+    }));
+  });
+  line(diagramData.acquisitionIcon.crossH, "icon-line candidate");
+  line(diagramData.acquisitionIcon.crossV, "icon-line candidate");
+  polyline(diagramData.expensiveIcon.points, "icon-line expensive");
+  line(diagramData.expensiveIcon.base, "icon-line expensive");
+  line(diagramData.addIcon.horizontal, "icon-line result");
+  line(diagramData.addIcon.vertical, "icon-line result");
+
+  append(element("polygon", {
+    points: pointString(diagramData.decision.points),
+    class: "decision"
+  }));
+  diagramData.decision.text.forEach(label => {
+    text(label.value, label.x, label.y, "node-copy");
+  });
+
+  arrow({ points: diagramData.loop.points, className: "flow loop" });
+  text(
+    diagramData.loop.label,
+    diagramData.loop.labelX,
+    diagramData.loop.labelY,
+    "loop-label"
+  );
+
+  arrow(diagramData.finishArrow);
+  text(diagramData.yes.text, diagramData.yes.x, diagramData.yes.y, "branch-label", "start");
+
+  append(element("rect", {
+    x: sx(diagramData.finish.x),
+    y: sy(diagramData.finish.y),
+    width: sx(diagramData.finish.x + diagramData.finish.w) - sx(diagramData.finish.x),
+    height: sy(diagramData.finish.y + diagramData.finish.h) - sy(diagramData.finish.y),
+    class: "finish"
+  }));
+  text(
+    diagramData.finish.text,
+    diagramData.finish.textX,
+    diagramData.finish.textY,
+    "best-text"
+  );
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

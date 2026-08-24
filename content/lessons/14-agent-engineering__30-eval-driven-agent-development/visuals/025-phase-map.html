@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта Phase 14: от механизма агента к eval-случаю</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f5f7fb;
+    --canvas: #ffffff;
+    --head: #e8eef8;
+    --cell: #f8fafc;
+    --ink: #172033;
+    --muted: #596579;
+    --line: #c9d3e2;
+    --arrow: #74839a;
+    --control: #3b82f6;
+    --quality: #8b5cf6;
+    --memory: #0f9f8f;
+    --safety: #e05652;
+    --ops: #d48619;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10151f;
+      --canvas: #151c28;
+      --head: #202b3d;
+      --cell: #192230;
+      --ink: #edf3fc;
+      --muted: #aab6c8;
+      --line: #344258;
+      --arrow: #8191aa;
+      --control: #65a6ff;
+      --quality: #ad8aff;
+      --memory: #41c7b6;
+      --safety: #ff7c76;
+      --ops: #f1aa43;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  }
+
+  .frame {
+    max-width: 1400px;
+    margin: auto;
+    background: var(--canvas);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+
+  .title {
+    padding: 12px 18px 10px;
+    background: var(--head);
+    border-bottom: 1px solid var(--line);
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .title p {
+    margin: unset;
+    padding-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--canvas);
+  }
+
+  .column-head {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: .04em;
+  }
+
+  .cell-text {
+    fill: var(--ink);
+    font-size: 11px;
+  }
+
+  .lesson-text {
+    fill: var(--ink);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .row-cell { fill: var(--cell); }
+  .row-outline { fill: none; stroke: var(--line); stroke-width: 1px; }
+  .arrow { fill: none; stroke: var(--arrow); stroke-width: 1.5px; }
+  .control { fill: var(--control); }
+  .quality { fill: var(--quality); }
+  .memory { fill: var(--memory); }
+  .safety { fill: var(--safety); }
+  .ops { fill: var(--ops); }
+  .fallback { fill: var(--ink); font-size: 14px; }
+</style>
+</head>
+<body>
+<main class="frame">
+  <header class="title">
+    <h1>Карта Phase 14: от механизма агента к eval-случаю</h1>
+    <p>18 строк · механизм → характерный сбой → ожидаемая реакция → наблюдаемый сигнал</p>
+  </header>
+
+  <svg id="map" width="1400" height="438" viewBox="0 0 1400 438"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Матрица уроков Phase 14 и порождённых ими eval-проверок">
+  </svg>
+</main>
+
+<script>
+const rows = [
+  {l:"01 · Цикл агента", f:"Бюджет цикла исчерпан", r:"Остановить бесконечный цикл", s:"Завершение: «бюджет исчерпан»", c:"control"},
+  {l:"02 · ReWOO", f:"Инструмент упал", r:"Корректно перепланировать", s:"Новый план приводит к результату", c:"control"},
+  {l:"03 · Reflexion", f:"Повтор прежней ошибки", r:"Применить выученную рефлексию", s:"Рефлексия видна в новом ходе", c:"quality"},
+  {l:"05 · Self-Refine / CRITIC", f:"Судья отклонил черновик", r:"Доработать и пропустить результат", s:"Принят улучшенный выход", c:"quality"},
+  {l:"06 · Использование tools", f:"Плохие аргументы / неизвестный tool", r:"Привести аргументы / отклонить tool", s:"Типизированный вызов или ошибка", c:"control"},
+  {l:"07–10 · Память", f:"Ссылка не та / факт устарел", r:"Сверить источник / аннулировать факт", s:"Источник совпал; актуальность отмечена", c:"memory"},
+  {l:"12 · Паттерны workflow", f:"Ветка нарушила сборку результата", r:"Выдать верный итог для каждого паттерна", s:"Ожидаемый результат каждого прогона", c:"control"},
+  {l:"13 · LangGraph", f:"Остановка посередине", r:"Точно восстановить состояние без повторов", s:"Состояние и журнал действий совпали", c:"memory"},
+  {l:"14 · Акторы AutoGen", f:"Обработчик упал", r:"Передать сообщение в DLQ", s:"Запись об отказе появилась в DLQ", c:"ops"},
+  {l:"16 · OpenAI Agents SDK", f:"Опасный вход", r:"Guardrail блокирует выполнение", s:"Решение «заблокировано» и причина", c:"safety"},
+  {l:"17 · Claude Agent SDK", f:"Субагент завершил работу", r:"Вернуть результат оркестратору", s:"Оркестратор получил полный результат", c:"control"},
+  {l:"19–20 · Бенчмарки", f:"Фиксированные задачи среды", r:"Измерить качество и эффективность", s:"SWE-bench, WebArena, OSWorld", c:"quality"},
+  {l:"21 · Computer Use", f:"В DOM внедрена инструкция", r:"Проверка шага останавливает действие", s:"Опасный шаг заблокирован до клика", c:"safety"},
+  {l:"23 · OTel", f:"В спане нет обязательных полей", r:"Отдать все обязательные атрибуты", s:"Нужные атрибуты есть в каждом спане", c:"ops"},
+  {l:"26 · Режимы отказа", f:"Возник известный отказ", r:"Детектор помечает его тип", s:"Метка отказа присутствует в отчёте", c:"quality"},
+  {l:"27 · Prompt Injection", f:"Поисковая выдача отравлена", r:"PVE отказывается использовать выдачу", s:"Отказ зафиксирован до выполнения", c:"safety"},
+  {l:"28 · Оркестрация", f:"Запрос требует специалиста", r:"Супервизор выбирает верный маршрут", s:"Запрос пришёл нужному специалисту", c:"control"},
+  {l:"29 · Формы runtime", f:"N% обработчиков отказали", r:"DLQ выдерживает поток отказов", s:"Нет потерь; доля DLQ соответствует N%", c:"ops"}
+];
+
+const layout = [{
+  zero:0,
+  canvasRight:1400,
+  canvasBottom:438,
+  headerY:20,
+  rowsTop:32,
+  rowStep:22,
+  rowHeight:20,
+  rowMid:10,
+  accentWidth:5,
+  pad:9,
+  arrowWing:4,
+  columns:[
+    {x:18, right:270, tx:18, title:"УРОК / МЕХАНИЗМ", key:"l", lesson:true},
+    {x:288, right:554, tx:288, title:"ХАРАКТЕРНЫЙ СБОЙ", key:"f"},
+    {x:572, right:974, tx:572, title:"ОЖИДАЕМАЯ РЕАКЦИЯ", key:"r"},
+    {x:992, right:1382, tx:992, title:"НАБЛЮДАЕМЫЙ СИГНАЛ", key:"s"}
+  ],
+  arrows:[
+    {tail:275, tip:283},
+    {tail:559, tip:567},
+    {tail:979, tip:987}
+  ],
+  fallbackX:28,
+  fallbackY:62,
+  line:1,
+  font:11
+}];
+
+const origin = Object.freeze({x:0, y:0});
+const scale = Object.freeze({x:1, y:1});
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const cfg = layout.values().next().value;
+  const svg = document.getElementById("map");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attrs, content) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      node.setAttribute(name, String(value));
+    }
+    if (content !== undefined) node.textContent = content;
+    return node;
+  };
+
+  svg.appendChild(make("rect", {
+    x:sx(cfg.zero),
+    y:sy(cfg.zero),
+    width:sx(cfg.canvasRight) - sx(cfg.zero),
+    height:sy(cfg.canvasBottom) - sy(cfg.zero),
+    fill:"var(--canvas)"
+  }));
+
+  for (const column of cfg.columns) {
+    svg.appendChild(make("text", {
+      x:sx(column.tx) + cfg.pad,
+      y:sy(cfg.headerY),
+      class:"column-head",
+      "text-anchor":"start"
+    }, column.title));
+  }
+
+  for (const [index, row] of rows.entries()) {
+    const top = cfg.rowsTop + index * cfg.rowStep;
+    const middle = top + cfg.rowMid;
+
+    for (const column of cfg.columns) {
+      svg.appendChild(make("rect", {
+        x:sx(column.x),
+        y:sy(top),
+        width:sx(column.right) - sx(column.x),
+        height:sy(top + cfg.rowHeight) - sy(top),
+        class:"row-cell"
+      }));
+
+      svg.appendChild(make("rect", {
+        x:sx(column.x),
+        y:sy(top),
+        width:sx(column.right) - sx(column.x),
+        height:sy(top + cfg.rowHeight) - sy(top),
+        class:"row-outline"
+      }));
+
+      svg.appendChild(make("text", {
+        x:sx(column.tx) + cfg.pad,
+        y:sy(middle),
+        class:column.lesson ? "lesson-text" : "cell-text",
+        "text-anchor":"start",
+        "dominant-baseline":"middle"
+      }, row[column.key]));
+    }
+
+    const first = cfg.columns.values().next().value;
+    svg.appendChild(make("rect", {
+      x:sx(first.x),
+      y:sy(top),
+      width:sx(first.x + cfg.accentWidth) - sx(first.x),
+      height:sy(top + cfg.rowHeight) - sy(top),
+      class:row.c
+    }));
+
+    for (const arrow of cfg.arrows) {
+      svg.appendChild(make("polyline", {
+        points:[
+          `${sx(arrow.tail)},${sy(middle - cfg.arrowWing)}`,
+          `${sx(arrow.tip)},${sy(middle)}`,
+          `${sx(arrow.tail)},${sy(middle + cfg.arrowWing)}`
+        ].join(" "),
+        class:"arrow"
+      }));
+    }
+  }
+} catch (error) {
+  const cfg = layout.values().next().value;
+  const svg = document.getElementById("map");
+  const ns = "http://www.w3.org/2000/svg";
+  const message = document.createElementNS(ns, "text");
+  message.setAttribute("x", String(sx(cfg.fallbackX)));
+  message.setAttribute("y", String(sy(cfg.fallbackY)));
+  message.setAttribute("class", "fallback");
+  message.textContent = "Схема должна была показать 18 связей: механизм → сбой → реакция → наблюдаемый сигнал.";
+  svg.replaceChildren(message);
+}
+</script>
+</body>
+</html>

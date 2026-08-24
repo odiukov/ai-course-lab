@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конвейер переноса политики на четвероногого робота</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --panel: #ffffff;
+    --panel-alt: #eef2f7;
+    --ink: #172033;
+    --muted: #526079;
+    --line: #8390a7;
+    --blue: #2d6cdf;
+    --blue-soft: #e8f0ff;
+    --violet: #7657d5;
+    --violet-soft: #eee9ff;
+    --green: #16836b;
+    --green-soft: #e2f6ef;
+    --orange: #b76418;
+    --orange-soft: #fff0dc;
+    --red: #b33d4d;
+    --red-soft: #ffe8eb;
+    --shadow: #d7dce6;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141c;
+      --panel: #181e29;
+      --panel-alt: #202838;
+      --ink: #eef3ff;
+      --muted: #b4bfd3;
+      --line: #7c89a2;
+      --blue: #78a7ff;
+      --blue-soft: #1d3154;
+      --violet: #b39aff;
+      --violet-soft: #302850;
+      --green: #61d4b6;
+      --green-soft: #183c35;
+      --orange: #ffb86b;
+      --orange-soft: #49321e;
+      --red: #ff8998;
+      --red-soft: #48232b;
+      --shadow: #0b0e14;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--page);
+    padding: 8px 10px 10px;
+  }
+
+  h1 {
+    margin: 0 0 5px;
+    font-size: 20px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--page);
+  }
+
+  #fallback {
+    padding: 18px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+
+  #fallback.hidden { display: none; }
+
+  .track { stroke: var(--line); stroke-width: 2; fill: none; }
+  .flow { stroke: var(--blue); stroke-width: 3; fill: none; }
+  .feedback { stroke: var(--red); stroke-width: 2; fill: none; }
+  .node { fill: var(--panel); stroke: var(--line); stroke-width: 2; }
+  .node.si { stroke: var(--blue); }
+  .node.random { stroke: var(--violet); }
+  .node.teacher { stroke: var(--orange); }
+  .node.student { stroke: var(--green); }
+  .node.test { stroke: var(--red); }
+  .node.robot { stroke: var(--blue); }
+  .stage-dot { fill: var(--page); stroke: var(--blue); stroke-width: 3; }
+  .title { fill: var(--ink); font-size: 16px; font-weight: bold; }
+  .body { fill: var(--muted); font-size: 13px; }
+  .small { fill: var(--muted); font-size: 12px; }
+  .eyebrow { fill: var(--ink); font-size: 14px; font-weight: bold; }
+  .feedback-label { fill: var(--red); font-size: 13px; font-weight: bold; }
+  .chip-blue { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 1; }
+  .chip-violet { fill: var(--violet-soft); stroke: var(--violet); stroke-width: 1; }
+  .chip-orange { fill: var(--orange-soft); stroke: var(--orange); stroke-width: 1; }
+  .chip-green { fill: var(--green-soft); stroke: var(--green); stroke-width: 1; }
+  .chip-red { fill: var(--red-soft); stroke: var(--red); stroke-width: 1; }
+  .chip-text { fill: var(--ink); font-size: 11px; font-weight: bold; }
+  .terrain { fill: none; stroke: var(--orange); stroke-width: 2; }
+  .sensor { fill: none; stroke: var(--green); stroke-width: 2; }
+  .robot-line { fill: none; stroke: var(--blue); stroke-width: 3; }
+  .shield { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 2; }
+  .check { fill: none; stroke: var(--green); stroke-width: 3; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Конвейер переноса политики на четвероногого робота</h1>
+  <div id="fallback">Схема: SI → 4096 рандомизированных сред → учитель с картой рельефа → ученик с энкодерами суставов → zero-shot тест → реальный робот со страховочным контроллером.</div>
+  <svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Конвейер sim-to-real с обратной связью"></svg>
+</main>
+
+<script>
+const DATA = [
+  {
+    origin: { x: 24, y: 12 },
+    scale: { x: 1, y: 1 },
+    canvas: { left: -24, top: -12, right: 1176, bottom: 428 },
+    card: { y: 78, w: 164, h: 174, titleY: 104, lineY: 137, lineGap: 22 },
+    track: { titleY: 22, y: 50 },
+    arrow: { y: 165, head: 9, wing: 6 },
+    chip: { y: 218, h: 22, inset: 10 },
+    feedback: { startY: 270, railY: 338, labelY: 374, endY: 253, head: 8, wing: 5 },
+    adaptation: { x: 577, y: 272, w: 354, h: 30 },
+    icon: { y: 187, size: 12 },
+    fallback: "Не удалось построить схему. Она должна показывать путь от SI через 4096 рандомизированных сред, учителя и ученика к zero-shot тесту и реальному роботу со страховочным контроллером."
+  },
+  {
+    x: 20, kind: "si", title: "SI",
+    lines: ["измерения робота", "приближают динамику", "к реальному железу"],
+    chip: "трение: оценка"
+  },
+  {
+    x: 210, kind: "random", title: "4096 СРЕД",
+    lines: ["разные полы и массы", "разные моторы", "DR покрывает остаток"],
+    chip: "рандомизация"
+  },
+  {
+    x: 400, kind: "teacher", title: "УЧИТЕЛЬ",
+    lines: ["истинное трение", "скорость корпуса", "карта рельефа"],
+    chip: "привилегии симуляции"
+  },
+  {
+    x: 590, kind: "student", title: "УЧЕНИК",
+    lines: ["история датчиков", "энкодеры суставов", "повторяет действия"],
+    chip: "только доступные данные"
+  },
+  {
+    x: 780, kind: "test", title: "ZERO-SHOT ТЕСТ",
+    lines: ["10+ разных условий", "без дообучения", "проверка разрыва"],
+    chip: "успех или диагноз"
+  },
+  {
+    x: 970, kind: "robot", title: "РЕАЛЬНЫЙ РОБОТ",
+    lines: ["неизвестный пол", "реальные масса и моторы", "без карты рельефа"],
+    chip: "страховочный контроллер"
+  }
+];
+
+const [metrics, ...cards] = DATA;
+const origin = Object.freeze(metrics.origin);
+const scale = Object.freeze(metrics.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const NS = "http://www.w3.org/2000/svg";
+
+  const el = (name, attrs = {}, text = "") => {
+    const node = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    if (text) node.textContent = text;
+    return node;
+  };
+
+  const add = node => svg.appendChild(node);
+
+  const line = (x1, y1, x2, y2, className) => add(el("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: className
+  }));
+
+  const path = (points, className) => {
+    const [first, ...rest] = points;
+    const d = [`M ${sx(first.x)} ${sy(first.y)}`];
+    for (const point of rest) d.push(`L ${sx(point.x)} ${sy(point.y)}`);
+    add(el("path", { d: d.join(" "), class: className }));
+  };
+
+  const polygon = (points, className) => add(el("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: className
+  }));
+
+  const text = (x, y, value, className, anchor = "middle") => add(el("text", {
+    x: sx(x), y: sy(y), class: className, "text-anchor": anchor
+  }, value));
+
+  const rect = (x, y, w, h, className) => add(el("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + w) - sx(x),
+    height: sy(y + h) - sy(y),
+    class: className
+  }));
+
+  const circle = (x, y, r, className) => add(el("circle", {
+    cx: sx(x), cy: sy(y), r: sx(x + r) - sx(x), class: className
+  }));
+
+  const arrow = (x1, y1, x2, y2, className, head, wing) => {
+    line(x1, y1, x2, y2, className);
+    polygon([
+      { x: x2, y: y2 },
+      { x: x2 - head, y: y2 - wing },
+      { x: x2 - head, y: y2 + wing }
+    ], className);
+  };
+
+  const upwardArrow = (points, className, head, wing) => {
+    path(points, className);
+    const tip = points[points.length - 1];
+    polygon([
+      { x: tip.x, y: tip.y },
+      { x: tip.x - wing, y: tip.y + head },
+      { x: tip.x + wing, y: tip.y + head }
+    ], className);
+  };
+
+  const first = cards.at(0);
+  const last = cards.at(-1);
+  const card = metrics.card;
+  const track = metrics.track;
+  const flow = metrics.arrow;
+  const chip = metrics.chip;
+  const feedback = metrics.feedback;
+  const icon = metrics.icon;
+
+  text(first.x, track.titleY, "Судьба одного параметра: трение под лапами", "eyebrow", "start");
+  text(last.x + card.w, track.titleY, "неизвестно точно → устойчивое поведение", "small", "end");
+  line(first.x + card.w / scale.x, track.y, last.x, track.y, "track");
+
+  for (const item of cards) {
+    const center = item.x + card.w / scale.x;
+    circle(center, track.y, icon.size / scale.x, "stage-dot");
+    line(center, track.y + icon.size / scale.y, center, card.y, "track");
+  }
+
+  for (const [index, item] of cards.entries()) {
+    rect(item.x, card.y, card.w, card.h, `node ${item.kind}`);
+    text(item.x + card.w / scale.x, card.titleY, item.title, "title");
+
+    for (const [lineIndex, value] of item.lines.entries()) {
+      text(
+        item.x + card.w / scale.x,
+        card.lineY + lineIndex * card.lineGap,
+        value,
+        "body"
+      );
+    }
+
+    const chipClass = {
+      si: "chip-blue",
+      random: "chip-violet",
+      teacher: "chip-orange",
+      student: "chip-green",
+      test: "chip-red",
+      robot: "chip-blue"
+    }[item.kind];
+
+    rect(
+      item.x + chip.inset,
+      chip.y,
+      card.w - chip.inset - chip.inset,
+      chip.h,
+      chipClass
+    );
+    text(item.x + card.w / scale.x, chip.y + chip.h / scale.y - chip.inset / scale.y, item.chip, "chip-text");
+
+    const next = cards.at(index + scale.x);
+    if (next) {
+      arrow(
+        item.x + card.w,
+        flow.y,
+        next.x,
+        flow.y,
+        "flow",
+        flow.head,
+        flow.wing
+      );
+    }
+  }
+
+  const teacher = cards.find(item => item.kind === "teacher");
+  const teacherCenter = teacher.x + card.w / scale.x;
+  path([
+    { x: teacherCenter - icon.size, y: icon.y + icon.size },
+    { x: teacherCenter - icon.size / scale.x, y: icon.y },
+    { x: teacherCenter, y: icon.y + icon.size / scale.y },
+    { x: teacherCenter + icon.size / scale.x, y: icon.y - icon.size / scale.y },
+    { x: teacherCenter + icon.size, y: icon.y + icon.size }
+  ], "terrain");
+
+  const student = cards.find(item => item.kind === "student");
+  const studentCenter = student.x + card.w / scale.x;
+  circle(studentCenter, icon.y, icon.size / scale.x, "sensor");
+  path([
+    { x: studentCenter - icon.size, y: icon.y },
+    { x: studentCenter - icon.size / scale.x, y: icon.y - icon.size / scale.y },
+    { x: studentCenter, y: icon.y + icon.size / scale.y },
+    { x: studentCenter + icon.size / scale.x, y: icon.y - icon.size / scale.y },
+    { x: studentCenter + icon.size, y: icon.y }
+  ], "sensor");
+
+  const robot = cards.find(item => item.kind === "robot");
+  const robotCenter = robot.x + card.w / scale.x;
+  const robotY = icon.y;
+  path([
+    { x: robotCenter - icon.size, y: robotY - icon.size / scale.y },
+    { x: robotCenter + icon.size, y: robotY - icon.size / scale.y },
+    { x: robotCenter + icon.size, y: robotY + icon.size / scale.y },
+    { x: robotCenter - icon.size, y: robotY + icon.size / scale.y },
+    { x: robotCenter - icon.size, y: robotY - icon.size / scale.y }
+  ], "robot-line");
+  line(robotCenter - icon.size, robotY + icon.size, robotCenter - icon.size, robotY + icon.size + icon.size, "robot-line");
+  line(robotCenter + icon.size, robotY + icon.size, robotCenter + icon.size, robotY + icon.size + icon.size, "robot-line");
+
+  const adapt = metrics.adaptation;
+  rect(adapt.x, adapt.y, adapt.w, adapt.h, "chip-green");
+  text(
+    adapt.x + adapt.w / scale.x,
+    adapt.y + adapt.h / scale.y - chip.inset / scale.y,
+    "опционально перед деплоем: адаптация реального IMU",
+    "chip-text"
+  );
+
+  const test = cards.find(item => item.kind === "test");
+  const testCenter = test.x + card.w / scale.x;
+  const siCenter = first.x + card.w / scale.x;
+  const randomCenter = cards.find(item => item.kind === "random").x + card.w / scale.x;
+  const observationCenter = studentCenter;
+
+  path([
+    { x: testCenter, y: feedback.startY },
+    { x: testCenter, y: feedback.railY },
+    { x: siCenter, y: feedback.railY }
+  ], "feedback");
+
+  upwardArrow([
+    { x: siCenter, y: feedback.railY },
+    { x: siCenter, y: feedback.endY }
+  ], "feedback", feedback.head, feedback.wing);
+
+  upwardArrow([
+    { x: randomCenter, y: feedback.railY },
+    { x: randomCenter, y: feedback.endY }
+  ], "feedback", feedback.head, feedback.wing);
+
+  upwardArrow([
+    { x: observationCenter, y: feedback.railY },
+    { x: observationCenter, y: feedback.endY }
+  ], "feedback", feedback.head, feedback.wing);
+
+  text(testCenter, feedback.railY - feedback.head, "если zero-shot не пройден", "feedback-label");
+  text(siCenter, feedback.labelY, "неверная динамика → SI", "feedback-label");
+  text(randomCenter, feedback.labelY + card.lineGap, "остаточная модель", "small");
+  text(randomCenter, feedback.labelY, "незнакомые условия → DR", "feedback-label");
+  text(observationCenter, feedback.labelY, "искажённые показания → IMU", "feedback-label");
+
+  const shieldX = robotCenter + card.w / scale.x - chip.inset - icon.size;
+  const shieldY = feedback.labelY;
+  polygon([
+    { x: shieldX, y: shieldY - icon.size },
+    { x: shieldX + icon.size, y: shieldY - icon.size / scale.y },
+    { x: shieldX + icon.size / scale.x, y: shieldY + icon.size },
+    { x: shieldX, y: shieldY + icon.size + icon.size / scale.y },
+    { x: shieldX - icon.size / scale.x, y: shieldY + icon.size },
+    { x: shieldX - icon.size, y: shieldY - icon.size / scale.y }
+  ], "shield");
+  path([
+    { x: shieldX - icon.size / scale.x, y: shieldY + icon.size / scale.y },
+    { x: shieldX, y: shieldY + icon.size },
+    { x: shieldX + icon.size / scale.x, y: shieldY - icon.size / scale.y }
+  ], "check");
+  text(shieldX - icon.size - chip.inset, feedback.labelY, "страховка на железе", "eyebrow", "end");
+  text(shieldX - icon.size - chip.inset, feedback.labelY + card.lineGap, "ограничивает опасные действия", "small", "end");
+
+  fallback.classList.add("hidden");
+} catch (error) {
+  const fallback = document.getElementById("fallback");
+  const diagram = document.getElementById("diagram");
+  fallback.textContent = metrics.fallback;
+  fallback.classList.remove("hidden");
+  diagram.setAttribute("hidden", "");
+}
+</script>
+</body>
+</html>

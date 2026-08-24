@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Куда уходит память при обучении 7B</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --text: #172033;
+      --muted: #536174;
+      --frame: #334155;
+      --guide: #94a3b8;
+      --weights: #67c2f1;
+      --adam: #aa8cf2;
+      --gradients: #fb9b53;
+      --activations: #46c991;
+      --free: #e1e8f0;
+      --segment-text: #102030;
+      --danger: #dc3d4b;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101827;
+        --text: #f1f5f9;
+        --muted: #aebbc9;
+        --frame: #d7e0ea;
+        --guide: #718096;
+        --weights: #55b9ea;
+        --adam: #9f83ec;
+        --gradients: #ed8c47;
+        --activations: #38bd82;
+        --free: #334155;
+        --segment-text: #0b1724;
+        --danger: #ff6875;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .heading {
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--bg);
+      overflow: visible;
+      text-rendering: geometricPrecision;
+    }
+
+    text {
+      fill: var(--text);
+    }
+
+    .gpu-name {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .gpu-capacity {
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .segment-title {
+      font-size: 15px;
+      font-weight: bold;
+      fill: var(--segment-text);
+    }
+
+    .segment-value {
+      font-size: 18px;
+      font-weight: bold;
+      fill: var(--segment-text);
+    }
+
+    .free-label {
+      font-size: 14px;
+      font-weight: bold;
+      fill: var(--text);
+    }
+
+    .bracket-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .section-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .row-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .row-value {
+      font-size: 15px;
+      font-weight: bold;
+      fill: var(--segment-text);
+    }
+
+    .row-free {
+      font-size: 14px;
+      fill: var(--text);
+    }
+
+    .oom {
+      font-size: 15px;
+      font-weight: bold;
+      fill: var(--danger);
+    }
+
+    .note {
+      font-size: 14px;
+      font-weight: bold;
+      fill: var(--danger);
+    }
+
+    .frame {
+      fill: none;
+      stroke: var(--frame);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .bracket {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .boundary {
+      stroke: var(--danger);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fallback {
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="heading" id="diagram-heading">Куда уходит память при обучении 7B</div>
+
+  <svg
+    id="diagram"
+    viewBox="0 0 1120 420"
+    width="1120"
+    height="420"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-heading diagram-description"
+  >
+    <title>Распределение 80 ГБ памяти A100 при обучении модели 7B</title>
+    <desc id="diagram-description">
+      Веса занимают 14 ГБ, состояния Adam — 28 ГБ, градиенты — 14 ГБ.
+      Из 80 ГБ остаётся 24 ГБ для активаций. Батч из 8 занимает 16 ГБ,
+      а батч из 12 заполняет всё оставшееся место.
+    </desc>
+  </svg>
+
+  <noscript>
+    Схема должна показать: 14 ГБ весов, 28 ГБ состояний Adam и 14 ГБ
+    градиентов оставляют 24 ГБ из 80 ГБ памяти A100 для активаций.
+  </noscript>
+
+  <script>
+    const DATA = Object.freeze({
+      canvas: [1120, 420],
+      canvasLocal: [-36, -10],
+      origin: [36, 10],
+      scale: [1, 1],
+      mainBar: [36, 36, 976, 112],
+      segments: [
+        ["weights", 14, "Веса BF16", "14 ГБ"],
+        ["adam", 28, "Adam FP32", "28 ГБ"],
+        ["gradients", 14, "Градиенты", "14 ГБ"],
+        ["activations", 16, "Активации", "16 ГБ · батч 8"]
+      ],
+      memory: [80, 56, 24],
+      samples: [2, 8, 12, 16, 24, 2048, 32],
+      comparison: [420, 252, 556, 42, 318],
+      layout: [16, 162, 190, 230, 393, 20, 13, 17, 8, 12],
+      rounding: [10, 8],
+      math: [2],
+      fallback: [
+        [36, 168],
+        [36, 202]
+      ]
+    });
+
+    const [canvasWidth, canvasHeight] = DATA.canvas;
+    const [canvasLocalX, canvasLocalY] = DATA.canvasLocal;
+    const [originX, originY] = DATA.origin;
+    const [scaleX, scaleY] = DATA.scale;
+
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const NS = "http://www.w3.org/2000/svg";
+      const zero = originX - originX;
+
+      const node = (tag, attributes, content) => {
+        const element = document.createElementNS(NS, tag);
+
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+
+        if (content !== undefined) {
+          element.textContent = content;
+        }
+
+        return element;
+      };
+
+      const addText = (parent, x, y, content, className, anchor) => {
+        parent.append(
+          node(
+            "text",
+            {
+              x: sx(x),
+              y: sy(y),
+              class: className,
+              "text-anchor": anchor,
+              "dominant-baseline": "middle"
+            },
+            content
+          )
+        );
+      };
+
+      const addRect = (parent, x, y, width, height, className, fill, radius) => {
+        const attributes = {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(x),
+          height: sy(y + height) - sy(y),
+          class: className
+        };
+
+        if (fill !== undefined) {
+          attributes.fill = fill;
+        }
+
+        if (radius !== undefined) {
+          attributes.rx = sx(radius) - sx(zero);
+          attributes.ry = sy(radius) - sy(zero);
+        }
+
+        parent.append(node("rect", attributes));
+      };
+
+      const addLine = (parent, x1, y1, x2, y2, className) => {
+        parent.append(
+          node("line", {
+            x1: sx(x1),
+            y1: sy(y1),
+            x2: sx(x2),
+            y2: sy(y2),
+            class: className
+          })
+        );
+      };
+
+      const addBracket = (parent, x1, x2, y, tick, labelY, label) => {
+        addLine(parent, x1, y, x1, y + tick, "bracket");
+        addLine(parent, x1, y + tick, x2, y + tick, "bracket");
+        addLine(parent, x2, y + tick, x2, y, "bracket");
+
+        addText(
+          parent,
+          x1 + (x2 - x1) / divisor,
+          labelY,
+          label,
+          "bracket-label",
+          "middle"
+        );
+      };
+
+      const layer = node("g", {});
+      const [barX, barY, barWidth, barHeight] = DATA.mainBar;
+      const [capacity, fixedMemory, activationWindow] = DATA.memory;
+      const [
+        perSample,
+        batchEight,
+        batchTwelve,
+        batchEightMemory,
+        batchTwelveMemory,
+        tokens,
+        layers
+      ] = DATA.samples;
+      const [
+        bracketTick,
+        bracketY,
+        bracketLabelY,
+        comparisonTitleY,
+        noteY,
+        labelOffset,
+        titleOffset,
+        valueOffset,
+        boundaryOffset,
+        oomOffset
+      ] = DATA.layout;
+      const [barRadius, rowRadius] = DATA.rounding;
+      const [divisor] = DATA.math;
+      const [rowX, firstRowY, rowWidth, rowHeight, secondRowY] =
+        DATA.comparison;
+
+      addRect(
+        layer,
+        canvasLocalX,
+        canvasLocalY,
+        canvasWidth,
+        canvasHeight,
+        "diagram-surface",
+        "var(--bg)"
+      );
+
+      addText(
+        layer,
+        barX,
+        barY - titleOffset,
+        "NVIDIA A100",
+        "gpu-name",
+        "start"
+      );
+
+      addText(
+        layer,
+        barX + barWidth,
+        barY - titleOffset,
+        `${capacity} ГБ`,
+        "gpu-capacity",
+        "end"
+      );
+
+      const defs = node("defs", {});
+      const clip = node("clipPath", { id: "memory-bar-clip" });
+
+      addRect(
+        clip,
+        barX,
+        barY,
+        barWidth,
+        barHeight,
+        "",
+        undefined,
+        barRadius
+      );
+
+      defs.append(clip);
+      layer.append(defs);
+
+      const segmentLayer = node("g", {
+        "clip-path": "url(#memory-bar-clip)"
+      });
+
+      let cursor = barX;
+
+      DATA.segments.forEach(([kind, value, title, detail]) => {
+        const segmentWidth = barWidth * value / capacity;
+        const center = cursor + segmentWidth / divisor;
+
+        addRect(
+          segmentLayer,
+          cursor,
+          barY,
+          segmentWidth,
+          barHeight,
+          "",
+          `var(--${kind})`
+        );
+
+        addText(
+          segmentLayer,
+          center,
+          barY + barHeight / divisor - valueOffset,
+          title,
+          "segment-title",
+          "middle"
+        );
+
+        addText(
+          segmentLayer,
+          center,
+          barY + barHeight / divisor + valueOffset,
+          detail,
+          "segment-value",
+          "middle"
+        );
+
+        cursor += segmentWidth;
+      });
+
+      const freeWidth = barX + barWidth - cursor;
+
+      addRect(
+        segmentLayer,
+        cursor,
+        barY,
+        freeWidth,
+        barHeight,
+        "",
+        "var(--free)"
+      );
+
+      addText(
+        segmentLayer,
+        cursor + freeWidth / divisor,
+        barY + barHeight / divisor,
+        "запас",
+        "free-label",
+        "middle"
+      );
+
+      layer.append(segmentLayer);
+
+      addRect(
+        layer,
+        barX,
+        barY,
+        barWidth,
+        barHeight,
+        "frame",
+        undefined,
+        barRadius
+      );
+
+      const fixedEnd = barX + barWidth * fixedMemory / capacity;
+
+      addBracket(
+        layer,
+        barX,
+        fixedEnd,
+        bracketY,
+        bracketTick,
+        bracketLabelY,
+        `Обязательно занято: ${fixedMemory} ГБ`
+      );
+
+      addBracket(
+        layer,
+        fixedEnd,
+        barX + barWidth,
+        bracketY,
+        bracketTick,
+        bracketLabelY,
+        `Для активаций: ${activationWindow} ГБ`
+      );
+
+      addText(
+        layer,
+        barX + barWidth / divisor,
+        comparisonTitleY,
+        `Активации: ${perSample} ГБ на сэмпл · ${tokens} токенов · ${layers} слоя`,
+        "section-label",
+        "middle"
+      );
+
+      const drawComparison = (
+        rowY,
+        batch,
+        activationMemory,
+        showFree,
+        reachesBoundary
+      ) => {
+        addText(
+          layer,
+          rowX - labelOffset,
+          rowY + rowHeight / divisor,
+          `Батч ${batch}: ${batch} × ${perSample} ГБ`,
+          "row-label",
+          "end"
+        );
+
+        addRect(
+          layer,
+          rowX,
+          rowY,
+          rowWidth,
+          rowHeight,
+          "",
+          "var(--free)",
+          rowRadius
+        );
+
+        const activationWidth =
+          rowWidth * activationMemory / activationWindow;
+
+        addRect(
+          layer,
+          rowX,
+          rowY,
+          activationWidth,
+          rowHeight,
+          "",
+          "var(--activations)",
+          rowRadius
+        );
+
+        addRect(
+          layer,
+          rowX,
+          rowY,
+          rowWidth,
+          rowHeight,
+          "frame",
+          undefined,
+          rowRadius
+        );
+
+        addText(
+          layer,
+          rowX + activationWidth / divisor,
+          rowY + rowHeight / divisor,
+          `${activationMemory} ГБ активаций`,
+          "row-value",
+          "middle"
+        );
+
+        if (showFree) {
+          addText(
+            layer,
+            rowX + activationWidth +
+              (rowWidth - activationWidth) / divisor,
+            rowY + rowHeight / divisor,
+            "остаётся запас",
+            "row-free",
+            "middle"
+          );
+        }
+
+        if (reachesBoundary) {
+          addLine(
+            layer,
+            rowX + rowWidth,
+            rowY - boundaryOffset,
+            rowX + rowWidth,
+            rowY + rowHeight + boundaryOffset,
+            "boundary"
+          );
+
+          addText(
+            layer,
+            rowX + rowWidth + oomOffset,
+            rowY + rowHeight / divisor,
+            "OOM",
+            "oom",
+            "start"
+          );
+        }
+      };
+
+      drawComparison(
+        firstRowY,
+        batchEight,
+        batchEightMemory,
+        true,
+        false
+      );
+
+      drawComparison(
+        secondRowY,
+        batchTwelve,
+        batchTwelveMemory,
+        false,
+        true
+      );
+
+      addText(
+        layer,
+        rowX + rowWidth / divisor,
+        noteY,
+        `Батч ${batchTwelve} заполняет все ${activationWindow} ГБ · дальше — OOM`,
+        "note",
+        "middle"
+      );
+
+      svg.append(layer);
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const NS = "http://www.w3.org/2000/svg";
+      const fallback = document.createElementNS(NS, "g");
+      const [[firstX, firstY], [secondX, secondY]] = DATA.fallback;
+
+      const firstLine = document.createElementNS(NS, "text");
+      firstLine.setAttribute("x", String(sx(firstX)));
+      firstLine.setAttribute("y", String(sy(firstY)));
+      firstLine.setAttribute("class", "fallback");
+      firstLine.textContent =
+        "Схема памяти A100: 14 ГБ весов + 28 ГБ Adam + 14 ГБ градиентов.";
+
+      const secondLine = document.createElementNS(NS, "text");
+      secondLine.setAttribute("x", String(sx(secondX)));
+      secondLine.setAttribute("y", String(sy(secondY)));
+      secondLine.setAttribute("class", "fallback");
+      secondLine.textContent =
+        "Из 80 ГБ остаётся 24 ГБ для активаций: батч 8 занимает 16 ГБ, батч 12 — все 24 ГБ.";
+
+      fallback.append(firstLine, secondLine);
+      svg.append(fallback);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Порча спанов на одном предложении</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c1f26; --muted:#5d6470;
+    --keep:#2f6f4f; --keepbg:#e3f2e9;
+    --cut:#a03a2e; --cutbg:#fbe4e0;
+    --sent:#2b4a86; --sentbg:#e2eaf9;
+    --line:#8a93a3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171d; --fg:#e8ebf1; --muted:#9aa3b2;
+      --keep:#7fd6a6; --keepbg:#1d3329;
+      --cut:#f0907f; --cutbg:#3a221e;
+      --sent:#9dbcf5; --sentbg:#1d2942;
+      --line:#69728a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:10px 12px 14px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .err{font-size:13px;color:var(--cut);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Один спан — одна метка, независимо от длины</h2>
+  <div id="host"><svg id="d" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet" role="img"></svg></div>
+  <div id="fallback"></div>
+</div>
+<script>
+(function(){
+try{
+  /* ---------- данные схемы ---------- */
+  // x — колонка в токен-сетке, y — строка сверху вниз
+  var ROW = { orig:0, source:1.9, target:3.2 };
+
+  var original = [
+    {t:"The",   x:0,  w:2,   kind:"keep"},
+    {t:"quick", x:2,  w:2.6, kind:"keep"},
+    {t:"brown", x:4.6,w:2.6, kind:"cut", id:0},
+    {t:"fox",   x:7.2,w:1.9, kind:"keep"},
+    {t:"jumps", x:9.1,w:2.7, kind:"keep"},
+    {t:"over",  x:11.8,w:2.2,kind:"cut", id:1},
+    {t:"the",   x:14, w:1.9, kind:"cut", id:1},
+    {t:"lazy",  x:15.9,w:2.1,kind:"cut", id:1},
+    {t:"dog",   x:18, w:2,   kind:"keep"}
+  ];
+
+  var source = [
+    {t:"The",           x:1,   w:2,   kind:"keep"},
+    {t:"quick",         x:3,   w:2.6, kind:"keep"},
+    {t:"<extra_id_0>",  x:5.6, w:5.4, kind:"sent", id:0},
+    {t:"fox",           x:11,  w:1.9, kind:"keep"},
+    {t:"jumps",         x:12.9,w:2.7, kind:"keep"},
+    {t:"<extra_id_1>",  x:15.6,w:5.4, kind:"sent", id:1},
+    {t:"dog",           x:21,  w:2,   kind:"keep"}
+  ];
+
+  var target = [
+    {t:"<extra_id_0>",  x:1,   w:5.4, kind:"sent", id:0},
+    {t:"brown",         x:6.4, w:2.6, kind:"cut",  id:0},
+    {t:"<extra_id_1>",  x:9,   w:5.4, kind:"sent", id:1},
+    {t:"over",          x:14.4,w:2.2, kind:"cut",  id:1},
+    {t:"the",           x:16.6,w:1.9, kind:"cut",  id:1},
+    {t:"lazy",          x:18.5,w:2.1, kind:"cut",  id:1}
+  ];
+
+  // вырезанные спаны: [первый токен, последний токен] в исходной строке
+  var spans = [
+    {id:0, from:2, to:2},
+    {id:1, from:5, to:7}
+  ];
+
+  var rowLabels = [
+    {y:ROW.orig,   t:"исходное предложение"},
+    {y:ROW.source, t:"source (вход энкодера)"},
+    {y:ROW.target, t:"target (выход декодера)"}
+  ];
+
+  /* ---------- одна пара функций перевода ---------- */
+  var origin = {x:118, y:40};
+  var scale  = {x:20.5, y:74};
+  function sx(x){ return origin.x + x*scale.x; }
+  function sy(y){ return origin.y + y*scale.y; }
+
+  /* ---------- константы отрисовки (пиксели) ---------- */
+  var FS_TOK = 15, FS_LBL = 12, FS_LEG = 12;
+  var STROKE = 1.6, PAD = 5, BOXH = 26, DY_TXT = 5;
+
+  var NS="http://www.w3.org/2000/svg";
+  var svg=document.getElementById("d");
+  function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+  function txt(x,y,s,cls,anchor,size){
+    var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle","font-size":size||FS_TOK,
+      "font-family":"ui-monospace,SFMono-Regular,Menlo,monospace",class:cls||""});
+    t.textContent=s; svg.appendChild(t); return t;
+  }
+
+  var COL={keep:["var(--keep)","transparent"],cut:["var(--cut)","var(--cutbg)"],
+           sent:["var(--sent)","var(--sentbg)"]};
+
+  function drawRow(tokens,y){
+    tokens.forEach(function(tk){
+      var c=COL[tk.kind];
+      if(c[1]!=="transparent"){
+        svg.appendChild(el("rect",{x:sx(tk.x)+PAD*0.4,y:sy(y)-BOXH/2,
+          width:(tk.w*scale.x)-PAD*0.8,height:BOXH,rx:5,
+          fill:c[1],stroke:c[0],"stroke-width":STROKE*0.7}));
+      }
+      var t=txt(sx(tk.x+tk.w/2), sy(y)+DY_TXT, tk.t);
+      t.setAttribute("fill",c[0]);
+      if(tk.kind==="cut"&&y===ROW.orig){
+        svg.appendChild(el("line",{x1:sx(tk.x)+PAD*0.6,y1:sy(y)-1,
+          x2:sx(tk.x+tk.w)-PAD*0.6,y2:sy(y)-1,
+          stroke:"var(--cut)","stroke-width":STROKE}));
+      }
+    });
+  }
+
+  // подписи строк — слева, anchor end, поле под самую длинную
+  rowLabels.forEach(function(r){
+    var t=txt(sx(0)-PAD*2, sy(r.y)+DY_TXT*0.8, r.t, "", "end", FS_LBL);
+    t.setAttribute("fill","var(--muted)");
+    t.setAttribute("font-family","inherit");
+  });
+
+  drawRow(original, ROW.orig);
+  drawRow(source,   ROW.source);
+  drawRow(target,   ROW.target);
+
+  // стрелка
+  var defs=el("defs",{});
+  var mk=el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"8",refY:"5",
+    markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+  mk.appendChild(el("path",{d:"M0,1 L9,5 L0,9 z",fill:"var(--line)"}));
+  defs.appendChild(mk); svg.appendChild(defs);
+
+  function findTok(list,id,first){
+    var f=list.filter(function(t){return t.id===id&&t.kind!=="sent";});
+    return first?f[0]:f[f.length-1];
+  }
+  function sentTok(list,id){
+    return list.filter(function(t){return t.id===id&&t.kind==="sent";})[0];
+  }
+
+  spans.forEach(function(sp){
+    var a=original[sp.from], b=original[sp.to];
+    var cx=(a.x+b.x+b.w)/2;
+    var s=sentTok(source,sp.id);
+    var g=sentTok(target,sp.id);
+
+    // исходный спан -> sentinel во входе
+    var y1=sy(ROW.orig)+BOXH/2, y2=sy(ROW.source)-BOXH/2;
+    svg.appendChild(el("path",{d:"M"+sx(cx)+","+y1+" C"+sx(cx)+","+((y1+y2)/2)+
+      " "+sx(s.x+s.w/2)+","+((y1+y2)/2)+" "+sx(s.x+s.w/2)+","+y2,
+      fill:"none",stroke:"var(--line)","stroke-width":STROKE,
+      "stroke-dasharray":"5 4","marker-end":"url(#ah)"}));
+
+    // содержимое спана -> его метка в цели
+    var y3=sy(ROW.source)+BOXH/2, y4=sy(ROW.target)-BOXH/2;
+    var tf=findTok(target,sp.id,true), tl=findTok(target,sp.id,false);
+    var tcx=(tf.x+tl.x+tl.w)/2;
+    svg.appendChild(el("path",{d:"M"+sx(s.x+s.w/2)+","+y3+" C"+sx(s.x+s.w/2)+","+((y3+y4)/2)+
+      " "+sx(g.x+g.w/2)+","+((y3+y4)/2)+" "+sx(g.x+g.w/2)+","+y4,
+      fill:"none",stroke:"var(--line)","stroke-width":STROKE,
+      "marker-end":"url(#ah)"}));
+
+    // скоба над содержимым спана в target
+    svg.appendChild(el("line",{x1:sx(tf.x)+PAD*0.4,y1:sy(ROW.target)+BOXH/2+PAD,
+      x2:sx(tl.x+tl.w)-PAD*0.4,y2:sy(ROW.target)+BOXH/2+PAD,
+      stroke:"var(--cut)","stroke-width":STROKE}));
+    var n=sp.to-sp.from+1;
+    var lb=txt(sx(tcx), sy(ROW.target)+BOXH/2+PAD*4,
+      n===1?"1 токен":n+" токена", "", "middle", FS_LBL);
+    lb.setAttribute("fill","var(--cut)"); lb.setAttribute("font-family","inherit");
+  });
+
+  // хвостовые подписи стрелок — сбоку, не у наконечника
+  var l1=txt(sx(0)-PAD*2, sy((ROW.orig+ROW.source)/2)+DY_TXT*0.8,
+    "спан → одна метка", "", "end", FS_LBL);
+  l1.setAttribute("fill","var(--line)"); l1.setAttribute("font-family","inherit");
+  var l2=txt(sx(0)-PAD*2, sy((ROW.source+ROW.target)/2)+DY_TXT*0.8,
+    "метка → что под ней было", "", "end", FS_LBL);
+  l2.setAttribute("fill","var(--line)"); l2.setAttribute("font-family","inherit");
+
+  // легенда одной строкой под схемой
+  var leg=txt(sx(0), sy(ROW.target)+BOXH/2+PAD*9,
+    "порядок меток слева направо: <extra_id_0> раньше <extra_id_1>; в цели тот же порядок",
+    "", "start", FS_LEG);
+  leg.setAttribute("fill","var(--muted)"); leg.setAttribute("font-family","inherit");
+
+  // viewBox по содержимому
+  var maxX=sx(23.6), maxY=sy(ROW.target)+BOXH/2+PAD*11;
+  svg.setAttribute("viewBox","0 0 "+maxX+" "+maxY);
+
+}catch(e){
+  document.getElementById("host").innerHTML="";
+  document.getElementById("fallback").className="err";
+  document.getElementById("fallback").textContent=
+    "Схема не построилась. Она должна показывать три строки:\n"+
+    "1) исходное предложение «The quick brown fox jumps over the lazy dog», "+
+    "в нём зачёркнуты «brown» и «over the lazy»;\n"+
+    "2) source: The quick <extra_id_0> fox jumps <extra_id_1> dog;\n"+
+    "3) target: <extra_id_0> brown <extra_id_1> over the lazy;\n"+
+    "стрелки ведут от вырезанных кусков к их меткам, "+
+    "спан из 3 токенов и спан из 1 токена дают по одной метке.";
+}
+})();
+</script>
+</body>
+</html>

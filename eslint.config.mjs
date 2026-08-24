@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // Shallow clone of the upstream course repo, rebuilt by the importer —
     // not our code, and repopulated the moment anyone clicks "Импортировать".
     ".cache/**",
+    ".venv-phase19/**",
   ]),
 ]);
 

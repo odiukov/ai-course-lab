@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Полный путь решения о масштабировании</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --text: #172033;
+    --muted: #526078;
+    --line: #526078;
+    --planner-fill: #eee8ff;
+    --planner-stroke: #7457c9;
+    --pod-fill: #e7f0ff;
+    --pod-stroke: #3974bd;
+    --pending-fill: #ffe9e7;
+    --pending-stroke: #c94c43;
+    --infra-fill: #fff0d8;
+    --infra-stroke: #b86a13;
+    --ready-fill: #e3f6e9;
+    --ready-stroke: #27864b;
+    --neutral-fill: #ffffff;
+    --neutral-stroke: #607089;
+    --feedback: #7255bd;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --text: #edf2f7;
+      --muted: #b7c1d1;
+      --line: #a7b3c7;
+      --planner-fill: #2d2548;
+      --planner-stroke: #b69af5;
+      --pod-fill: #172c48;
+      --pod-stroke: #78aee9;
+      --pending-fill: #482624;
+      --pending-stroke: #f08b82;
+      --infra-fill: #422f18;
+      --infra-stroke: #efad59;
+      --ready-fill: #183925;
+      --ready-stroke: #6bcc8b;
+      --neutral-fill: #1d2737;
+      --neutral-stroke: #9dabc0;
+      --feedback: #c1a9f7;
+    }
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    margin: unset;
+    padding: unset;
+    color: var(--text);
+    font-size: 21px;
+    line-height: normal;
+  }
+
+  figure {
+    margin: unset;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .node-shape {
+    stroke-width: 2px;
+    stroke-linejoin: round;
+  }
+
+  .neutral { fill: var(--neutral-fill); stroke: var(--neutral-stroke); }
+  .planner { fill: var(--planner-fill); stroke: var(--planner-stroke); }
+  .pod { fill: var(--pod-fill); stroke: var(--pod-stroke); }
+  .pending { fill: var(--pending-fill); stroke: var(--pending-stroke); }
+  .infra { fill: var(--infra-fill); stroke: var(--infra-stroke); }
+  .ready { fill: var(--ready-fill); stroke: var(--ready-stroke); }
+
+  .node-text {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+    text-anchor: middle;
+  }
+
+  .node-text.small {
+    font-size: 13px;
+  }
+
+  .flow-line {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow-head {
+    fill: currentColor;
+    stroke: none;
+  }
+
+  .edge-normal { color: var(--line); }
+  .edge-infra { color: var(--infra-stroke); }
+  .edge-warm { color: var(--ready-stroke); }
+  .edge-feedback { color: var(--feedback); }
+
+  .edge-label {
+    fill: var(--muted);
+    stroke: var(--bg);
+    stroke-width: 5px;
+    paint-order: stroke;
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .edge-label.warm { fill: var(--ready-stroke); }
+  .edge-label.infra { fill: var(--infra-stroke); }
+  .edge-label.feedback { fill: var(--feedback); }
+
+  #failure {
+    color: var(--text);
+    font-size: 15px;
+  }
+
+  #failure[hidden] {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<h1>Полный путь решения о масштабировании</h1>
+<figure aria-labelledby="diagram-title">
+  <svg id="canvas" viewBox="0 0 1560 430" width="1560" height="430"
+       role="img" aria-labelledby="diagram-title diagram-desc"
+       preserveAspectRatio="xMidYMid meet">
+    <title id="diagram-title">От роста очереди до новых GPU-реплик</title>
+    <desc id="diagram-desc">Очередь растёт, планировщик создаёт поды, а при нехватке GPU через Pending запускается Karpenter. После создания узла KAI размещает группу подов. Отдельно показана тёплая реплика.</desc>
+    <g id="diagram"></g>
+  </svg>
+  <p id="failure" hidden>Схема не построилась: здесь должен быть показан путь от роста очереди через Pending-поды, Karpenter и KAI к работающим репликам, а также отдельная тёплая ветка.</p>
+</figure>
+
+<script>
+const data = Object.freeze([
+  {
+    kind: "config",
+    origin: { x: 22, y: 20 },
+    scale: 1.06,
+    zero: 0,
+    one: 1,
+    two: 2,
+    lineGap: 16,
+    smallGap: 15,
+    radius: 10,
+    arrowSize: 9,
+    arrowHalf: 5,
+    dash: [7, 6],
+    fallback: "Схема не построилась. Она должна показать путь: очередь 6 → 30, решение 2 → 5 реплик, 3 Pending-пода, KAI для группы из 8 GPU, новый узел Karpenter за 45–60 секунд и тёплую реплику min_workers=1."
+  },
+
+  { kind: "node", id: "queue", shape: "box", className: "neutral",
+    x: 55, y: 100, w: 90, h: 66, lines: ["Очередь", "6 → 30"] },
+
+  { kind: "node", id: "planner", shape: "box", className: "planner",
+    x: 190, y: 100, w: 115, h: 84,
+    lines: ["Планировщик", "реплик", "2 → 5 реплик"] },
+
+  { kind: "node", id: "pods", shape: "box", className: "pod",
+    x: 330, y: 100, w: 100, h: 66,
+    lines: ["Заявки:", "3 новых пода"] },
+
+  { kind: "node", id: "capacity", shape: "diamond", className: "neutral",
+    x: 465, y: 100, rx: 55, ry: 55,
+    lines: ["Есть", "свободные", "GPU?"] },
+
+  { kind: "node", id: "pending", shape: "box", className: "pending",
+    x: 580, y: 220, w: 120, h: 68,
+    lines: ["Нет места:", "3 пода", "Pending"] },
+
+  { kind: "node", id: "karpenter", shape: "box", className: "infra",
+    x: 720, y: 220, w: 125, h: 72,
+    lines: ["Karpenter", "видит", "Pending"] },
+
+  { kind: "node", id: "nodepool", shape: "box", className: "infra",
+    x: 855, y: 220, w: 120, h: 72,
+    lines: ["NodePool", "допустимый", "тип GPU"] },
+
+  { kind: "node", id: "node", shape: "box", className: "infra",
+    x: 985, y: 220, w: 120, h: 78,
+    lines: ["Новый GPU-узел", "готов через", "45–60 секунд"] },
+
+  { kind: "node", id: "kai", shape: "box", className: "pod",
+    x: 1100, y: 100, w: 150, h: 100, small: true,
+    lines: ["KAI Scheduler", "группа из 8 GPU", "gang • топология", "квоты • приоритет"] },
+
+  { kind: "node", id: "load", shape: "box", className: "planner",
+    x: 1240, y: 100, w: 105, h: 70,
+    lines: ["Загрузка", "модели"] },
+
+  { kind: "node", id: "ready", shape: "box", className: "ready",
+    x: 1380, y: 100, w: 110, h: 76,
+    lines: ["5 реплик", "принимают", "запросы"] },
+
+  { kind: "node", id: "warm", shape: "box", className: "ready",
+    x: 400, y: 330, w: 260, h: 70,
+    lines: ["min_workers=1", "тёплая реплика уже", "принимает запросы"] },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:100,y:100},{x:132.5,y:100}],
+    label: {x:108,y:54,dx:0,dy:-5,anchor:"start",text:"метрики"} },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:247.5,y:100},{x:280,y:100}],
+    label: {x:263,y:67,dx:0,dy:-5,anchor:"middle",text:"создаёт"} },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:380,y:100},{x:410,y:100}] },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:465,y:45},{x:465,y:33},{x:1100,y:33},{x:1100,y:50}],
+    label: {x:485,y:29,dx:7,dy:-5,anchor:"start",
+      text:"да: GPU свободны — Karpenter не нужен"} },
+
+  { kind: "edge", className: "edge-infra",
+    points: [{x:465,y:155},{x:465,y:174},{x:580,y:174},{x:580,y:186}],
+    label: {x:476,y:171,dx:7,dy:-6,anchor:"start",text:"нет места"} },
+
+  { kind: "edge", className: "edge-infra",
+    points: [{x:640,y:220},{x:657.5,y:220}],
+    label: {x:649,y:173,dx:0,dy:-5,anchor:"middle",text:"факт Pending"} },
+
+  { kind: "edge", className: "edge-infra",
+    points: [{x:782.5,y:220},{x:795,y:220}],
+    label: {x:789,y:173,dx:0,dy:-5,anchor:"middle",text:"требования подов"} },
+
+  { kind: "edge", className: "edge-infra",
+    points: [{x:915,y:220},{x:925,y:220}],
+    label: {x:920,y:173,dx:0,dy:-5,anchor:"middle",text:"выбор типа GPU"} },
+
+  { kind: "edge", className: "edge-infra",
+    points: [{x:1045,y:220},{x:1060,y:220},{x:1060,y:174},{x:1100,y:174},{x:1100,y:150}],
+    label: {x:1046,y:193,dx:7,dy:-5,anchor:"start",text:"узел подключён"} },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:1175,y:100},{x:1187.5,y:100}] },
+
+  { kind: "edge", className: "edge-normal",
+    points: [{x:1292.5,y:100},{x:1325,y:100}] },
+
+  { kind: "edge", className: "edge-feedback", dashed: true,
+    points: [{x:1380,y:62},{x:1380,y:7},{x:190,y:7},{x:190,y:58}],
+    label: {x:1340,y:13,dx:0,dy:6,anchor:"end",
+      text:"новые метрики замыкают цикл"} },
+
+  { kind: "edge", className: "edge-warm",
+    points: [{x:190,y:142},{x:190,y:330},{x:270,y:330}],
+    label: {x:202,y:282,dx:7,dy:-5,anchor:"start",
+      text:"отдельная тёплая ветка"} }
+]);
+
+const config = data.find(item => item.kind === "config");
+const origin = Object.freeze(config.origin);
+const scale = config.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const namespace = "http://www.w3.org/2000/svg";
+const root = document.getElementById("diagram");
+const canvas = document.getElementById("canvas");
+const failure = document.getElementById("failure");
+
+function element(name, attributes = {}) {
+  const result = document.createElementNS(namespace, name);
+  Object.entries(attributes).forEach(([key, value]) => {
+    result.setAttribute(key, String(value));
+  });
+  return result;
+}
+
+function appendText(item) {
+  const gap = item.small ? config.smallGap : config.lineGap;
+  const start = item.y - ((item.lines.length - config.one) * gap) / config.two;
+  const text = element("text", {
+    class: `node-text${item.small ? " small" : ""}`,
+    "aria-hidden": "true"
+  });
+
+  item.lines.forEach((line, index) => {
+    const span = element("tspan", {
+      x: sx(item.x),
+      y: sy(start + index * gap)
+    });
+    span.textContent = line;
+    text.appendChild(span);
+  });
+
+  root.appendChild(text);
+}
+
+function appendNode(item) {
+  let shape;
+
+  if (item.shape === "diamond") {
+    const corners = [
+      {x:item.x,y:item.y-item.ry},
+      {x:item.x+item.rx,y:item.y},
+      {x:item.x,y:item.y+item.ry},
+      {x:item.x-item.rx,y:item.y}
+    ];
+    shape = element("polygon", {
+      points: corners.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: `node-shape ${item.className}`
+    });
+  } else {
+    shape = element("rect", {
+      x: sx(item.x - item.w / config.two),
+      y: sy(item.y - item.h / config.two),
+      width: sx(item.w) - sx(config.zero),
+      height: sy(item.h) - sy(config.zero),
+      rx: sx(config.radius) - sx(config.zero),
+      ry: sy(config.radius) - sy(config.zero),
+      class: `node-shape ${item.className}`
+    });
+  }
+
+  root.appendChild(shape);
+  appendText(item);
+}
+
+function appendEdge(item) {
+  const line = element("polyline", {
+    points: item.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: `flow-line ${item.className}`
+  });
+
+  if (item.dashed) {
+    line.setAttribute(
+      "stroke-dasharray",
+      config.dash.map(value => sx(value) - sx(config.zero)).join(" ")
+    );
+  }
+
+  root.appendChild(line);
+
+  const end = item.points[item.points.length - config.one];
+  const previous = item.points[item.points.length - config.two];
+  const dx = end.x - previous.x;
+  const dy = end.y - previous.y;
+  const length = Math.hypot(dx, dy);
+  const ux = dx / length;
+  const uy = dy / length;
+  const baseX = end.x - ux * config.arrowSize;
+  const baseY = end.y - uy * config.arrowSize;
+  const head = [
+    {x:end.x,y:end.y},
+    {x:baseX-uy*config.arrowHalf,y:baseY+ux*config.arrowHalf},
+    {x:baseX+uy*config.arrowHalf,y:baseY-ux*config.arrowHalf}
+  ];
+
+  root.appendChild(element("polygon", {
+    points: head.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: `arrow-head ${item.className}`
+  }));
+
+  if (item.label) {
+    const labelClass = item.className.replace("edge-", "");
+    const label = element("text", {
+      x: sx(item.label.x) + item.label.dx,
+      y: sy(item.label.y) + item.label.dy,
+      "text-anchor": item.label.anchor,
+      class: `edge-label ${labelClass}`
+    });
+    label.textContent = item.label.text;
+    root.appendChild(label);
+  }
+}
+
+try {
+  data.filter(item => item.kind === "edge").forEach(appendEdge);
+  data.filter(item => item.kind === "node").forEach(appendNode);
+} catch (error) {
+  root.replaceChildren();
+  canvas.hidden = true;
+  failure.textContent = config.fallback;
+  failure.hidden = false;
+  console.error(error);
+}
+</script>
+</body>
+</html>

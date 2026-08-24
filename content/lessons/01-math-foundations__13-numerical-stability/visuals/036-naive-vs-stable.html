@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Наивный и устойчивый softmax</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --surface: #ffffff;
+      --surface-soft: #eef3f9;
+      --ink: #172033;
+      --muted: #5e6b80;
+      --line: #9aa8bb;
+      --input: #e8eef8;
+      --naive: #b4233d;
+      --naive-soft: #fde8ec;
+      --naive-strong: #7e1830;
+      --stable: #087f5b;
+      --stable-soft: #ddf6ed;
+      --stable-strong: #056044;
+      --warning: #fff2d6;
+      --warning-ink: #865600;
+      --shadow: #d5dce7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --surface: #192231;
+        --surface-soft: #222e40;
+        --ink: #edf2fa;
+        --muted: #aeb9ca;
+        --line: #65758b;
+        --input: #25344b;
+        --naive: #ff7f98;
+        --naive-soft: #3c202a;
+        --naive-strong: #ffb3c2;
+        --stable: #63d9b4;
+        --stable-soft: #173b32;
+        --stable-strong: #9aefd4;
+        --warning: #3b321e;
+        --warning-ink: #ffd98a;
+        --shadow: #0b0f17;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--page);
+    }
+
+    .diagram-title {
+      margin: 0;
+      padding: 12px 18px 4px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 750;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 468px;
+      background: var(--page);
+    }
+
+    .panel {
+      fill: var(--surface);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .panel-shadow {
+      fill: var(--shadow);
+      opacity: .45;
+    }
+
+    .input-box {
+      fill: var(--input);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .stage {
+      fill: var(--surface-soft);
+      stroke: var(--line);
+      stroke-width: 1.5px;
+    }
+
+    .stage-naive {
+      fill: var(--naive-soft);
+      stroke: var(--naive);
+      stroke-width: 2px;
+    }
+
+    .stage-stable {
+      fill: var(--stable-soft);
+      stroke: var(--stable);
+      stroke-width: 2px;
+    }
+
+    .warning-box {
+      fill: var(--warning);
+      stroke: var(--naive);
+      stroke-width: 1.5px;
+    }
+
+    .footer-box {
+      fill: var(--surface-soft);
+      stroke: var(--line);
+      stroke-width: 1.5px;
+    }
+
+    .route {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .route-naive {
+      stroke: var(--naive);
+    }
+
+    .route-stable {
+      stroke: var(--stable);
+    }
+
+    .arrow-naive {
+      fill: var(--naive);
+    }
+
+    .arrow-stable {
+      fill: var(--stable);
+    }
+
+    .arrow-neutral {
+      fill: var(--line);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 16px;
+      dominant-baseline: middle;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .column-title {
+      font-size: 21px;
+      font-weight: 800;
+    }
+
+    .naive-text {
+      fill: var(--naive-strong);
+    }
+
+    .stable-text {
+      fill: var(--stable-strong);
+    }
+
+    .value {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .result {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .warning-text {
+      fill: var(--warning-ink);
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .footer-text {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .fallback {
+      margin: 12px 18px 18px;
+      padding: 16px;
+      border: 2px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    .fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-heading">
+    <h1 class="diagram-title" id="diagram-heading">
+      Одни логиты — два маршрута softmax
+    </h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 450"
+      role="img"
+      aria-labelledby="diagram-heading diagram-description"
+      preserveAspectRatio="xMidYMid meet">
+      <title id="diagram-description">
+        Наивный softmax переполняется и возвращает nan, устойчивый softmax
+        вычитает максимум и возвращает корректные вероятности.
+      </title>
+    </svg>
+
+    <p class="fallback" id="fallback">
+      Схема должна была показать две колонки для логитов [100, 101, 102]:
+      наивный softmax получает [inf, inf, inf], затем [nan, nan, nan];
+      устойчивый вычитает 102, получает [-2, -1, 0] и вероятности
+      [0.090, 0.245, 0.665].
+    </p>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze([{
+      canvas: { width: 120, height: 45 },
+      input: { x: 39, y: 1, width: 42, height: 5, rx: 1.4 },
+      panels: [
+        { x: 2, y: 9, width: 56, height: 31, rx: 1.5, kind: "naive" },
+        { x: 62, y: 9, width: 56, height: 31, rx: 1.5, kind: "stable" }
+      ],
+      shadows: [
+        { x: 2.5, y: 9.5, width: 56, height: 31, rx: 1.5 },
+        { x: 62.5, y: 9.5, width: 56, height: 31, rx: 1.5 }
+      ],
+      boxes: [
+        { x: 6, y: 14, width: 48, height: 4.5, rx: 1, className: "stage" },
+        { x: 6, y: 22, width: 48, height: 4.5, rx: 1, className: "stage-naive" },
+        { x: 11, y: 29, width: 38, height: 3.5, rx: 1, className: "warning-box" },
+        { x: 6, y: 35, width: 48, height: 4, rx: 1, className: "stage-naive" },
+        { x: 66, y: 14, width: 48, height: 4.5, rx: 1, className: "stage" },
+        { x: 66, y: 21, width: 48, height: 4, rx: 1, className: "stage-stable" },
+        { x: 66, y: 28, width: 48, height: 4, rx: 1, className: "stage-stable" },
+        { x: 66, y: 35, width: 48, height: 4, rx: 1, className: "stage-stable" }
+      ],
+      footer: { x: 15, y: 41.5, width: 90, height: 3, rx: 1 },
+      lines: [
+        { a: { x: 60, y: 6 }, b: { x: 60, y: 7.5 }, className: "route" },
+        { a: { x: 60, y: 7.5 }, b: { x: 30, y: 7.5 }, className: "route route-naive" },
+        { a: { x: 30, y: 7.5 }, b: { x: 30, y: 9 }, className: "route route-naive" },
+        { a: { x: 60, y: 7.5 }, b: { x: 90, y: 7.5 }, className: "route route-stable" },
+        { a: { x: 90, y: 7.5 }, b: { x: 90, y: 9 }, className: "route route-stable" },
+        { a: { x: 30, y: 18.5 }, b: { x: 30, y: 21.5 }, className: "route route-naive" },
+        { a: { x: 30, y: 26.5 }, b: { x: 30, y: 28.5 }, className: "route route-naive" },
+        { a: { x: 30, y: 32.5 }, b: { x: 30, y: 34.5 }, className: "route route-naive" },
+        { a: { x: 90, y: 18.5 }, b: { x: 90, y: 20.5 }, className: "route route-stable" },
+        { a: { x: 90, y: 25 }, b: { x: 90, y: 27.5 }, className: "route route-stable" },
+        { a: { x: 90, y: 32 }, b: { x: 90, y: 34.5 }, className: "route route-stable" }
+      ],
+      arrowheads: [
+        { points: [{ x: 29.4, y: 8.2 }, { x: 30, y: 9 }, { x: 30.6, y: 8.2 }], className: "arrow-naive" },
+        { points: [{ x: 89.4, y: 8.2 }, { x: 90, y: 9 }, { x: 90.6, y: 8.2 }], className: "arrow-stable" },
+        { points: [{ x: 29.4, y: 20.7 }, { x: 30, y: 21.5 }, { x: 30.6, y: 20.7 }], className: "arrow-naive" },
+        { points: [{ x: 29.4, y: 27.7 }, { x: 30, y: 28.5 }, { x: 30.6, y: 27.7 }], className: "arrow-naive" },
+        { points: [{ x: 29.4, y: 33.7 }, { x: 30, y: 34.5 }, { x: 30.6, y: 33.7 }], className: "arrow-naive" },
+        { points: [{ x: 89.4, y: 19.7 }, { x: 90, y: 20.5 }, { x: 90.6, y: 19.7 }], className: "arrow-stable" },
+        { points: [{ x: 89.4, y: 26.7 }, { x: 90, y: 27.5 }, { x: 90.6, y: 26.7 }], className: "arrow-stable" },
+        { points: [{ x: 89.4, y: 33.7 }, { x: 90, y: 34.5 }, { x: 90.6, y: 33.7 }], className: "arrow-stable" }
+      ],
+      labels: [
+        { x: 60, y: 2.6, text: "логиты  [100, 101, 102]", anchor: "middle", className: "value" },
+        { x: 30, y: 11.5, text: "Наивный маршрут", anchor: "middle", className: "column-title naive-text" },
+        { x: 90, y: 11.5, text: "Устойчивый маршрут", anchor: "middle", className: "column-title stable-text" },
+        { x: 30, y: 16.3, text: "[100, 101, 102]", anchor: "middle", className: "value" },
+        { x: 7, y: 20.2, text: "exp(x) в float32", anchor: "start", className: "small naive-text" },
+        { x: 30, y: 24.3, text: "[inf, inf, inf]", anchor: "middle", className: "value naive-text" },
+        { x: 30, y: 30.8, text: "inf / inf", anchor: "middle", className: "warning-text" },
+        { x: 7, y: 33.6, text: "вероятности потеряны", anchor: "start", className: "small naive-text" },
+        { x: 30, y: 37, text: "[nan, nan, nan]", anchor: "middle", className: "result naive-text" },
+        { x: 90, y: 16.3, text: "[100, 101, 102]", anchor: "middle", className: "value" },
+        { x: 67, y: 19.7, text: "− max(x) = −102", anchor: "start", className: "small stable-text" },
+        { x: 90, y: 23, text: "[-2, -1, 0]", anchor: "middle", className: "value stable-text" },
+        { x: 67, y: 26.7, text: "exp(x)", anchor: "start", className: "small stable-text" },
+        { x: 90, y: 30, text: "[0.135, 0.368, 1]", anchor: "middle", className: "value stable-text" },
+        { x: 67, y: 33.7, text: "нормализация", anchor: "start", className: "small stable-text" },
+        { x: 90, y: 37, text: "[0.090, 0.245, 0.665]", anchor: "middle", className: "result stable-text" },
+        { x: 60, y: 43, text: "Одинаковая математика · разные вычислительные маршруты", anchor: "middle", className: "footer-text" }
+      ]
+    }]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 10, y: 10 });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [scene] = diagramData;
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = name => document.createElementNS(namespace, name);
+
+      const addRect = (box, className) => {
+        const element = make("rect");
+        element.setAttribute("x", sx(box.x));
+        element.setAttribute("y", sy(box.y));
+        element.setAttribute("width", sx(box.x + box.width) - sx(box.x));
+        element.setAttribute("height", sy(box.y + box.height) - sy(box.y));
+        element.setAttribute("rx", sx(box.x + box.rx) - sx(box.x));
+        element.setAttribute("class", className);
+        svg.appendChild(element);
+      };
+
+      const addLine = item => {
+        const element = make("line");
+        element.setAttribute("x1", sx(item.a.x));
+        element.setAttribute("y1", sy(item.a.y));
+        element.setAttribute("x2", sx(item.b.x));
+        element.setAttribute("y2", sy(item.b.y));
+        element.setAttribute("class", item.className);
+        svg.appendChild(element);
+      };
+
+      const addArrowhead = item => {
+        const element = make("polygon");
+        element.setAttribute(
+          "points",
+          item.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+        );
+        element.setAttribute("class", item.className);
+        svg.appendChild(element);
+      };
+
+      const addText = item => {
+        const element = make("text");
+        element.setAttribute("x", sx(item.x));
+        element.setAttribute("y", sy(item.y));
+        element.setAttribute("text-anchor", item.anchor);
+        element.setAttribute("class", item.className);
+        element.textContent = item.text;
+        svg.appendChild(element);
+      };
+
+      for (const shadow of scene.shadows) {
+        addRect(shadow, "panel-shadow");
+      }
+
+      for (const panel of scene.panels) {
+        addRect(panel, "panel");
+      }
+
+      addRect(scene.input, "input-box");
+
+      for (const box of scene.boxes) {
+        addRect(box, box.className);
+      }
+
+      addRect(scene.footer, "footer-box");
+
+      for (const line of scene.lines) {
+        addLine(line);
+      }
+
+      for (const arrowhead of scene.arrowheads) {
+        addArrowhead(arrowhead);
+      }
+
+      for (const label of scene.labels) {
+        addText(label);
+      }
+
+      fallback.hidden = true;
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      fallback.hidden = false;
+      fallback.textContent =
+        "Схема должна была показать: для логитов [100, 101, 102] наивный softmax получает [nan, nan, nan], а устойчивый — [0.090, 0.245, 0.665].";
+    }
+  </script>
+</body>
+</html>

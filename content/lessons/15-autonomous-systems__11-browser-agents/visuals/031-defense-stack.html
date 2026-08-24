@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Многоуровневая защита браузерного агента</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f4ec;
+    --panel: #fffdf7;
+    --ink: #242c35;
+    --muted: #596573;
+    --line: #7b8793;
+    --risk: #b7473f;
+    --risk-fill: #f8e4df;
+    --safe: #24745a;
+    --safe-fill: #dff1e8;
+    --guard: #9a641d;
+    --guard-fill: #f5ead2;
+    --info: #315f8c;
+    --info-fill: #e1edf7;
+    --memory: #7450a1;
+    --memory-fill: #eee5f7;
+    --shadow: #d6d0c4;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171c22;
+      --panel: #202730;
+      --ink: #eef2f5;
+      --muted: #b8c1ca;
+      --line: #8d99a5;
+      --risk: #f08b82;
+      --risk-fill: #482c2d;
+      --safe: #72d3aa;
+      --safe-fill: #203d35;
+      --guard: #edbd69;
+      --guard-fill: #473a25;
+      --info: #8bc1ef;
+      --info-fill: #243b50;
+      --memory: #c6a1ef;
+      --memory-fill: #3c304b;
+      --shadow: #101419;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  h1 {
+    margin: 0;
+    text-align: center;
+    font-size: 20px;
+    font-weight: 750;
+    background: var(--bg);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--bg);
+  }
+
+  .box {
+    stroke-width: 1.6px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .neutral-box { fill: var(--panel); stroke: var(--line); }
+  .risk-box { fill: var(--risk-fill); stroke: var(--risk); }
+  .safe-box { fill: var(--safe-fill); stroke: var(--safe); }
+  .guard-box { fill: var(--guard-fill); stroke: var(--guard); }
+  .info-box { fill: var(--info-fill); stroke: var(--info); }
+  .memory-box { fill: var(--memory-fill); stroke: var(--memory); }
+
+  .arrow {
+    fill: none;
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .risk-arrow { stroke: var(--risk); }
+  .safe-arrow { stroke: var(--safe); }
+  .info-arrow { stroke: var(--info); }
+  .memory-arrow { stroke: var(--memory); }
+  .muted-arrow { stroke: var(--line); }
+  .missed { stroke-dasharray: 6px 5px; }
+
+  .head-risk { fill: var(--risk); }
+  .head-safe { fill: var(--safe); }
+  .head-info { fill: var(--info); }
+  .head-memory { fill: var(--memory); }
+  .head-muted { fill: var(--line); }
+
+  .leader {
+    fill: none;
+    stroke: var(--risk);
+    stroke-width: 1.6px;
+    stroke-dasharray: 4px 4px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: inherit;
+  }
+
+  .cap {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+  }
+
+  .title {
+    font-size: 15px;
+    font-weight: 760;
+  }
+
+  .body {
+    font-size: 12px;
+    fill: var(--muted);
+  }
+
+  .step {
+    font-size: 11px;
+    font-weight: 760;
+  }
+
+  .callout {
+    font-size: 12px;
+    font-weight: 720;
+  }
+
+  .risk-text { fill: var(--risk); }
+  .safe-text { fill: var(--safe); }
+  .guard-text { fill: var(--guard); }
+  .info-text { fill: var(--info); }
+  .memory-text { fill: var(--memory); }
+
+  .port {
+    stroke: var(--bg);
+    stroke-width: 1.6px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  #fallback {
+    border: 2px solid var(--risk);
+    background: var(--risk-fill);
+    color: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<h1 id="figure-title">Многоуровневая защита браузерного агента</h1>
+
+<svg id="diagram"
+     viewBox="0 0 1000 430"
+     width="1000"
+     height="430"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="figure-title figure-desc">
+  <desc id="figure-desc">
+    Поток от недоверенной страницы проходит через санитайзер, режим только
+    чтения, подтверждение человека, allowlist инструмента и изолированную
+    сессию. Отдельно показаны журнал HTTP-запросов и канарейка постоянной памяти.
+  </desc>
+</svg>
+
+<div id="fallback" hidden>
+  Схема должна была показать независимые рубежи защиты: санитайзер, режим
+  только чтения, подтверждение человека, allowlist, изолированную сессию,
+  журнал HTTP-запросов и канарейку постоянной памяти.
+</div>
+
+<script>
+const diagramData = {
+  boxes: [
+    {
+      x1: 2, y1: 8, x2: 17, y2: 28.5, r: 0.8, tone: "risk",
+      labels: [
+        {x: 9.5, y: 11.2, text: "ВНЕШНЯЯ ГРАНИЦА", kind: "cap risk-text"},
+        {x: 9.5, y: 16.2, text: "Недоверенная", kind: "title"},
+        {x: 9.5, y: 19.1, text: "страница", kind: "title"},
+        {x: 9.5, y: 23.1, text: "«отправь форму", kind: "body risk-text"},
+        {x: 9.5, y: 26, text: "немедленно»", kind: "body risk-text"}
+      ]
+    },
+    {
+      x1: 19, y1: 8, x2: 33, y2: 28.5, r: 0.8, tone: "guard",
+      labels: [
+        {x: 26, y: 11.2, text: "СОДЕРЖИМОЕ", kind: "cap guard-text"},
+        {x: 26, y: 16.7, text: "Санитайзер", kind: "title"},
+        {x: 26, y: 20.1, text: "шаг 24", kind: "step guard-text"},
+        {x: 26, y: 23.8, text: "известные шаблоны", kind: "body"},
+        {x: 26, y: 26.5, text: "не безошибочен", kind: "body"}
+      ]
+    },
+    {
+      x1: 35, y1: 8, x2: 49, y2: 28.5, r: 0.8, tone: "safe",
+      labels: [
+        {x: 42, y: 11.2, text: "ТИП ДЕЙСТВИЯ", kind: "cap safe-text"},
+        {x: 42, y: 16.7, text: "Только чтение", kind: "title"},
+        {x: 42, y: 20.1, text: "шаг 27", kind: "step safe-text"},
+        {x: 42, y: 23.8, text: "сравнить тарифы", kind: "body"},
+        {x: 42, y: 26.5, text: "без последствий", kind: "body"}
+      ]
+    },
+    {
+      x1: 51, y1: 8, x2: 65, y2: 28.5, r: 0.8, tone: "guard",
+      labels: [
+        {x: 58, y: 11.2, text: "ГРАНИЦА ЗАПИСИ", kind: "cap guard-text"},
+        {x: 58, y: 16.1, text: "Подтверждение", kind: "title"},
+        {x: 58, y: 19, text: "человека", kind: "title"},
+        {x: 58, y: 23.1, text: "свежее «да» перед", kind: "body"},
+        {x: 58, y: 26, text: "действием", kind: "body"}
+      ]
+    },
+    {
+      x1: 67, y1: 8, x2: 81, y2: 28.5, r: 0.8, tone: "info",
+      labels: [
+        {x: 74, y: 11.2, text: "ПОЛНОМОЧИЯ", kind: "cap info-text"},
+        {x: 74, y: 16.1, text: "Allowlist", kind: "title"},
+        {x: 74, y: 19, text: "инструмента", kind: "title"},
+        {x: 74, y: 22.3, text: "шаг 29", kind: "step info-text"},
+        {x: 74, y: 25.8, text: "нет в списке → стоп", kind: "body"}
+      ]
+    },
+    {
+      x1: 83, y1: 8, x2: 98, y2: 28.5, r: 0.8, tone: "safe",
+      labels: [
+        {x: 90.5, y: 11.2, text: "СРЕДА", kind: "cap safe-text"},
+        {x: 90.5, y: 15.8, text: "Изолированная", kind: "title"},
+        {x: 90.5, y: 18.7, text: "сессия", kind: "title"},
+        {x: 90.5, y: 22.1, text: "шаг 29", kind: "step safe-text"},
+        {x: 90.5, y: 25.7, text: "узкие ключи доступа", kind: "body"}
+      ]
+    },
+    {
+      x1: 52.5, y1: 31, x2: 63.5, y2: 35.5, r: 0.8, tone: "risk",
+      labels: [
+        {x: 58, y: 33.9, text: "нет → СТОП", kind: "callout risk-text"}
+      ]
+    },
+    {
+      x1: 2, y1: 38, x2: 51, y2: 49.5, r: 0.8, tone: "neutral",
+      labels: [
+        {x: 4, y: 41.2, text: "ПОЧЕМУ ПРОПУСК НЕ РАВЕН ПРОВАЛУ", kind: "cap"},
+        {x: 4, y: 45, text: "Пропуск одного слоя ≠ отправленная заявка", kind: "title"},
+        {x: 4, y: 48, text: "Нужно пройти все независимые рубежи.", kind: "body"}
+      ],
+      align: "start"
+    },
+    {
+      x1: 55, y1: 38, x2: 75.5, y2: 49.5, r: 0.8, tone: "info",
+      labels: [
+        {x: 65.25, y: 41.1, text: "АУДИТ", kind: "cap info-text"},
+        {x: 65.25, y: 44.7, text: "Журнал HTTP-запросов", kind: "title"},
+        {x: 65.25, y: 47.8, text: "всё сохраняется для разбора", kind: "body"}
+      ]
+    },
+    {
+      x1: 78, y1: 38, x2: 98, y2: 49.5, r: 0.8, tone: "memory",
+      labels: [
+        {x: 88, y: 41.1, text: "ПОСТОЯННАЯ ПАМЯТЬ", kind: "cap memory-text"},
+        {x: 88, y: 44.3, text: "Канарейка · шаг 30", kind: "title"},
+        {x: 88, y: 47.8, text: "сигнал при нежелательной записи", kind: "body"}
+      ]
+    }
+  ],
+  arrows: [
+    {
+      points: [[17, 18.25], [19, 18.25]],
+      head: [[19, 18.25], [18.2, 17.55], [18.2, 18.95]],
+      tone: "risk"
+    },
+    {
+      points: [[33, 18.25], [35, 18.25]],
+      head: [[35, 18.25], [34.2, 17.55], [34.2, 18.95]],
+      tone: "risk", missed: true
+    },
+    {
+      points: [[49, 18.25], [51, 18.25]],
+      head: [[51, 18.25], [50.2, 17.55], [50.2, 18.95]],
+      tone: "risk"
+    },
+    {
+      points: [[65, 18.25], [67, 18.25]],
+      head: [[67, 18.25], [66.2, 17.55], [66.2, 18.95]],
+      tone: "safe"
+    },
+    {
+      points: [[81, 18.25], [83, 18.25]],
+      head: [[83, 18.25], [82.2, 17.55], [82.2, 18.95]],
+      tone: "safe"
+    },
+    {
+      points: [[58, 28.5], [58, 31]],
+      head: [[58, 31], [57.3, 30.2], [58.7, 30.2]],
+      tone: "risk"
+    },
+    {
+      points: [[87.5, 28.5], [87.5, 34.5], [65.25, 34.5], [65.25, 38]],
+      head: [[65.25, 38], [64.55, 37.2], [65.95, 37.2]],
+      tone: "info"
+    },
+    {
+      points: [[93, 28.5], [93, 34.5], [88, 34.5], [88, 38]],
+      head: [[88, 38], [87.3, 37.2], [88.7, 37.2]],
+      tone: "memory"
+    }
+  ],
+  leaders: [
+    {
+      points: [[34, 6.2], [34, 14.7], [34.7, 17.2]]
+    }
+  ],
+  notes: [
+    {
+      x: 34, y: 4.7, text: "скрытая фраза прошла",
+      kind: "callout risk-text", anchor: "middle"
+    },
+    {
+      x: 76.5, y: 33.1, text: "каждый запрос",
+      kind: "callout info-text", anchor: "middle"
+    },
+    {
+      x: 92.2, y: 33.1, text: "запись памяти",
+      kind: "callout memory-text", anchor: "end"
+    }
+  ],
+  ports: [
+    {x: 87.5, y: 28.5, r: 0.45, tone: "info"},
+    {x: 93, y: 28.5, r: 0.45, tone: "memory"}
+  ]
+};
+
+const origin = {x: 18, y: 8};
+const scale = {x: 9.8, y: 8.2};
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const namespace = "http://www.w3.org/2000/svg";
+  const layer = document.createElementNS(namespace, "g");
+
+  const make = (name, attributes) => {
+    const node = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, value);
+    }
+    return node;
+  };
+
+  const pathData = points =>
+    points.map((point, index) =>
+      `${index ? "L" : "M"} ${sx(point[0])} ${sy(point[1])}`
+    ).join(" ");
+
+  for (const arrow of diagramData.arrows) {
+    const path = make("path", {
+      d: pathData(arrow.points),
+      class: `arrow ${arrow.tone}-arrow${arrow.missed ? " missed" : ""}`
+    });
+    const head = make("polygon", {
+      points: arrow.head.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: `head-${arrow.tone}`
+    });
+    layer.append(path, head);
+  }
+
+  for (const leader of diagramData.leaders) {
+    layer.append(make("path", {
+      d: pathData(leader.points),
+      class: "leader"
+    }));
+  }
+
+  for (const box of diagramData.boxes) {
+    const group = make("g", {});
+    group.append(make("rect", {
+      x: sx(box.x1),
+      y: sy(box.y1),
+      width: sx(box.x2) - sx(box.x1),
+      height: sy(box.y2) - sy(box.y1),
+      rx: sx(box.r) - sx(0),
+      ry: sy(box.r) - sy(0),
+      class: `box ${box.tone}-box`
+    }));
+
+    for (const label of box.labels) {
+      const text = make("text", {
+        x: sx(label.x),
+        y: sy(label.y),
+        class: label.kind,
+        "text-anchor": box.align || "middle",
+        "dominant-baseline": "middle"
+      });
+      text.textContent = label.text;
+      group.append(text);
+    }
+    layer.append(group);
+  }
+
+  for (const port of diagramData.ports) {
+    layer.append(make("circle", {
+      cx: sx(port.x),
+      cy: sy(port.y),
+      r: sx(port.r) - sx(0),
+      class: `port head-${port.tone}`
+    }));
+  }
+
+  for (const note of diagramData.notes) {
+    const text = make("text", {
+      x: sx(note.x),
+      y: sy(note.y),
+      class: note.kind,
+      "text-anchor": note.anchor,
+      "dominant-baseline": "middle"
+    });
+    text.textContent = note.text;
+    layer.append(text);
+  }
+
+  svg.append(layer);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Путь n-gram-модели от корпуса до предсказания</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ed;
+      --panel: #fffdf8;
+      --panel-soft: #f0ece2;
+      --ink: #262a31;
+      --muted: #66707d;
+      --line: #aeb6c0;
+      --accent: #315fbd;
+      --accent-soft: #dce7ff;
+      --warm: #a64b2a;
+      --warm-soft: #f9dfd3;
+      --green: #23765a;
+      --green-soft: #d9eee6;
+      --shadow: #d8d2c7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #171a20;
+        --panel: #222730;
+        --panel-soft: #2a303a;
+        --ink: #f2f4f7;
+        --muted: #aab3c0;
+        --line: #596373;
+        --accent: #8db2ff;
+        --accent-soft: #283d68;
+        --warm: #ffad88;
+        --warm-soft: #563325;
+        --green: #79d6b1;
+        --green-soft: #254b40;
+        --shadow: #101319;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: 0;
+      padding: 14px 16px 12px;
+      background: var(--page);
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 19px;
+      line-height: 1.25;
+      font-weight: 750;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 476px;
+      background: var(--page);
+    }
+
+    .stage {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .stage-head {
+      fill: var(--panel-soft);
+    }
+
+    .divider,
+    .guide {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.5px;
+    }
+
+    .guide {
+      stroke-dasharray: var(--dash);
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .loop {
+      fill: none;
+      stroke: var(--green);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .arrow {
+      fill: var(--accent);
+    }
+
+    .loop-arrow {
+      fill: var(--green);
+    }
+
+    .chip {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 1.5px;
+    }
+
+    .warm-chip {
+      fill: var(--warm-soft);
+      stroke: var(--warm);
+      stroke-width: 1.5px;
+    }
+
+    .green-chip {
+      fill: var(--green-soft);
+      stroke: var(--green);
+      stroke-width: 1.5px;
+    }
+
+    .plain-chip {
+      fill: var(--panel-soft);
+      stroke: var(--line);
+      stroke-width: 1.5px;
+    }
+
+    .bar-track {
+      fill: var(--panel-soft);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .bar-main {
+      fill: var(--accent);
+    }
+
+    .bar-alt {
+      fill: var(--warm);
+    }
+
+    .bar-unseen {
+      fill: var(--green);
+    }
+
+    .ghost {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.5px;
+      stroke-dasharray: var(--dash);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+      dominant-baseline: middle;
+    }
+
+    .stage-title {
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      fill: var(--muted);
+    }
+
+    .small {
+      font-size: 12px;
+      fill: var(--muted);
+    }
+
+    .label {
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .value {
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .formula {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .choice {
+      font-size: 25px;
+      font-weight: 800;
+    }
+
+    .footer {
+      font-size: 13px;
+      fill: var(--green);
+      font-weight: 650;
+    }
+
+    .fallback {
+      font-size: 17px;
+      fill: var(--ink);
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h2 id="diagram-title">Путь n-gram-модели от корпуса до предсказания</h2>
+    <svg id="diagram" viewBox="0 0 1120 452"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-desc">
+      <desc id="diagram-desc">
+        Конвейер: корпус превращается в счётчики продолжений для контекста
+        the cat, затем счётчики сглаживаются, нормализуются и дают выбор sat.
+      </desc>
+    </svg>
+  </figure>
+
+  <script>
+    const data = {
+      dash: 6,
+      radius: 12,
+      headHeight: 48,
+      stages: [
+        { x: 22,  y: 48, w: 240, h: 316, title: "СОСЧИТАТЬ" },
+        { x: 302, y: 48, w: 240, h: 316, title: "СГЛАДИТЬ" },
+        { x: 582, y: 48, w: 240, h: 316, title: "НОРМАЛИЗОВАТЬ" },
+        { x: 862, y: 48, w: 236, h: 316, title: "ВЫБРАТЬ СЛОВО" }
+      ],
+      arrows: [
+        { x1: 264, y1: 206, x2: 298, y2: 206, labelX: 281, labelY: 184 },
+        { x1: 544, y1: 206, x2: 578, y2: 206, labelX: 561, labelY: 184 },
+        { x1: 824, y1: 206, x2: 858, y2: 206, labelX: 841, labelY: 184 }
+      ],
+      arrowHead: { back: 10, half: 6 },
+      count: {
+        sourceLabel: { x: 42, y: 116, text: "фрагменты корпуса" },
+        cards: [
+          { x: 42, y: 134, w: 200, h: 34, text: "the cat  →  sat" },
+          { x: 48, y: 174, w: 194, h: 34, text: "the cat  →  sat" },
+          { x: 42, y: 214, w: 200, h: 34, text: "the cat  →  jumped" }
+        ],
+        fold: { x1: 142, y1: 256, x2: 142, y2: 274 },
+        context: { x: 42, y: 284, w: 200, h: 34, text: "контекст: the cat" },
+        rows: [
+          { labelX: 50, labelY: 338, text: "sat", valueX: 226, valueY: 338, value: "47" },
+          { labelX: 50, labelY: 356, text: "jumped", valueX: 226, valueY: 356, value: "12" }
+        ]
+      },
+      smooth: {
+        note: { x: 322, y: 116, text: "освободить малую долю" },
+        rows: [
+          {
+            labelX: 322, labelY: 154, text: "sat · 47",
+            trackX: 322, trackY: 169, trackW: 194, trackH: 22,
+            fillX: 322, fillY: 169, fillW: 154, fillH: 22
+          },
+          {
+            labelX: 322, labelY: 218, text: "jumped · 12",
+            trackX: 322, trackY: 233, trackW: 194, trackH: 22,
+            fillX: 322, fillY: 233, fillW: 62, fillH: 22
+          }
+        ],
+        transfer: { x1: 478, y1: 180, x2: 490, y2: 292 },
+        unseen: {
+          x: 322, y: 286, w: 194, h: 50,
+          titleX: 419, titleY: 301,
+          textX: 419, textY: 320,
+          title: "невиданные слова",
+          text: "получают вероятность"
+        }
+      },
+      normalize: {
+        context: { x: 602, y: 116, w: 200, h: 34, text: "для контекста the cat" },
+        rows: [
+          {
+            labelX: 602, labelY: 182, word: "sat",
+            formulaX: 704, formulaY: 182, formula: "47 / (47 + 12)",
+            trackX: 602, trackY: 204, trackW: 200, trackH: 25,
+            fillX: 602, fillY: 204, fillW: 158, fillH: 25
+          },
+          {
+            labelX: 602, labelY: 264, word: "jumped",
+            formulaX: 704, formulaY: 264, formula: "12 / (47 + 12)",
+            trackX: 602, trackY: 286, trackW: 200, trackH: 25,
+            fillX: 602, fillY: 286, fillW: 58, fillH: 25
+          }
+        ],
+        caption: { x: 702, y: 337, text: "скорректированные счётчики → доли" }
+      },
+      choose: {
+        query: { x: 882, y: 112, w: 196, h: 42, text: "the cat  →  ?" },
+        winner: { x: 882, y: 178, w: 196, h: 90 },
+        winnerLabel: { x: 980, y: 203, text: "самый большой вес" },
+        winnerText: { x: 980, y: 239, text: "sat" },
+        alternate: { x: 882, y: 286, w: 196, h: 48 },
+        alternateText: { x: 980, y: 304, text: "jumped" },
+        alternateLabel: { x: 980, y: 326, text: "остаётся вариантом" }
+      },
+      loop: {
+        x1: 980, y1: 366, x2: 980, y2: 403,
+        x3: 144, y3: 403, x4: 144, y4: 369,
+        labelX: 562, labelY: 430,
+        label: "для генерации: добавить слово → сдвинуть контекст → повторить",
+        headBack: 10, headHalf: 6
+      },
+      fallback: {
+        x: 560,
+        y: 220,
+        text: "Схема должна показать: сосчитать → сгладить → нормализовать → выбрать слово."
+      }
+    };
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+      svg.style.setProperty("--dash", `${sx(data.dash) - sx(origin.x)}px`);
+
+      const make = (name, attrs, parent = svg) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+        parent.appendChild(node);
+        return node;
+      };
+
+      const text = (x, y, value, cls, anchor = "start", parent = svg) => {
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: cls,
+          "text-anchor": anchor
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const rect = (item, cls, parent = svg) => make("rect", {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y),
+        rx: sx(data.radius) - sx(origin.x),
+        ry: sy(data.radius) - sy(origin.y),
+        class: cls
+      }, parent);
+
+      const line = (item, cls, parent = svg) => make("line", {
+        x1: sx(item.x1),
+        y1: sy(item.y1),
+        x2: sx(item.x2),
+        y2: sy(item.y2),
+        class: cls
+      }, parent);
+
+      const arrowHead = (item, cls, back, half, parent = svg) => {
+        const points = [
+          `${sx(item.x2)},${sy(item.y2)}`,
+          `${sx(item.x2 - back)},${sy(item.y2 - half)}`,
+          `${sx(item.x2 - back)},${sy(item.y2 + half)}`
+        ].join(" ");
+        return make("polygon", { points, class: cls }, parent);
+      };
+
+      data.stages.forEach(stage => {
+        const group = make("g", {});
+        rect(stage, "stage", group);
+        make("path", {
+          d: [
+            `M ${sx(stage.x + data.radius)} ${sy(stage.y)}`,
+            `H ${sx(stage.x + stage.w - data.radius)}`,
+            `Q ${sx(stage.x + stage.w)} ${sy(stage.y)} ${sx(stage.x + stage.w)} ${sy(stage.y + data.radius)}`,
+            `V ${sy(stage.y + data.headHeight)}`,
+            `H ${sx(stage.x)}`,
+            `V ${sy(stage.y + data.radius)}`,
+            `Q ${sx(stage.x)} ${sy(stage.y)} ${sx(stage.x + data.radius)} ${sy(stage.y)}`,
+            "Z"
+          ].join(" "),
+          class: "stage-head"
+        }, group);
+        line({
+          x1: stage.x,
+          y1: stage.y + data.headHeight,
+          x2: stage.x + stage.w,
+          y2: stage.y + data.headHeight
+        }, "divider", group);
+        text(
+          stage.x + stage.w / scale.x / (scale.x + scale.x),
+          stage.y + data.headHeight / scale.y / (scale.y + scale.y),
+          stage.title,
+          "stage-title",
+          "middle",
+          group
+        );
+      });
+
+      data.arrows.forEach(item => {
+        line(item, "flow");
+        arrowHead(item, "arrow", data.arrowHead.back, data.arrowHead.half);
+        text(item.labelX, item.labelY, "дальше", "small", "middle");
+      });
+
+      text(
+        data.count.sourceLabel.x,
+        data.count.sourceLabel.y,
+        data.count.sourceLabel.text,
+        "small"
+      );
+
+      data.count.cards.forEach((card, cardIndex) => {
+        rect(card, cardIndex === data.count.cards.at(-1) ? "warm-chip" : "plain-chip");
+        text(
+          card.x + card.w / scale.x / (scale.x + scale.x),
+          card.y + card.h / scale.y / (scale.y + scale.y),
+          card.text,
+          "label",
+          "middle"
+        );
+      });
+
+      line(data.count.fold, "flow");
+      arrowHead(
+        data.count.fold,
+        "arrow",
+        data.arrowHead.back,
+        data.arrowHead.half
+      );
+
+      rect(data.count.context, "chip");
+      text(
+        data.count.context.x + data.count.context.w / scale.x / (scale.x + scale.x),
+        data.count.context.y + data.count.context.h / scale.y / (scale.y + scale.y),
+        data.count.context.text,
+        "label",
+        "middle"
+      );
+
+      data.count.rows.forEach(row => {
+        text(row.labelX, row.labelY, row.text, "label");
+        text(row.valueX, row.valueY, row.value, "value", "end");
+      });
+
+      text(data.smooth.note.x, data.smooth.note.y, data.smooth.note.text, "small");
+
+      data.smooth.rows.forEach((row, rowIndex) => {
+        text(row.labelX, row.labelY, row.text, "label");
+        rect(
+          { x: row.trackX, y: row.trackY, w: row.trackW, h: row.trackH },
+          "bar-track"
+        );
+        rect(
+          { x: row.fillX, y: row.fillY, w: row.fillW, h: row.fillH },
+          rowIndex === data.smooth.rows.at(-1) ? "bar-alt" : "bar-main"
+        );
+      });
+
+      line(data.smooth.transfer, "loop");
+      arrowHead(
+        data.smooth.transfer,
+        "loop-arrow",
+        data.arrowHead.back,
+        data.arrowHead.half
+      );
+
+      rect(data.smooth.unseen, "green-chip");
+      text(
+        data.smooth.unseen.titleX,
+        data.smooth.unseen.titleY,
+        data.smooth.unseen.title,
+        "label",
+        "middle"
+      );
+      text(
+        data.smooth.unseen.textX,
+        data.smooth.unseen.textY,
+        data.smooth.unseen.text,
+        "small",
+        "middle"
+      );
+
+      rect(data.normalize.context, "chip");
+      text(
+        data.normalize.context.x + data.normalize.context.w / scale.x / (scale.x + scale.x),
+        data.normalize.context.y + data.normalize.context.h / scale.y / (scale.y + scale.y),
+        data.normalize.context.text,
+        "label",
+        "middle"
+      );
+
+      data.normalize.rows.forEach((row, rowIndex) => {
+        text(row.labelX, row.labelY, row.word, "label");
+        text(row.formulaX, row.formulaY, row.formula, "formula", "middle");
+        rect(
+          { x: row.trackX, y: row.trackY, w: row.trackW, h: row.trackH },
+          "bar-track"
+        );
+        rect(
+          { x: row.fillX, y: row.fillY, w: row.fillW, h: row.fillH },
+          rowIndex === data.normalize.rows.at(-1) ? "bar-alt" : "bar-main"
+        );
+      });
+
+      text(
+        data.normalize.caption.x,
+        data.normalize.caption.y,
+        data.normalize.caption.text,
+        "small",
+        "middle"
+      );
+
+      rect(data.choose.query, "plain-chip");
+      text(
+        data.choose.query.x + data.choose.query.w / scale.x / (scale.x + scale.x),
+        data.choose.query.y + data.choose.query.h / scale.y / (scale.y + scale.y),
+        data.choose.query.text,
+        "formula",
+        "middle"
+      );
+
+      rect(data.choose.winner, "green-chip");
+      text(
+        data.choose.winnerLabel.x,
+        data.choose.winnerLabel.y,
+        data.choose.winnerLabel.text,
+        "small",
+        "middle"
+      );
+      text(
+        data.choose.winnerText.x,
+        data.choose.winnerText.y,
+        data.choose.winnerText.text,
+        "choice",
+        "middle"
+      );
+
+      rect(data.choose.alternate, "warm-chip");
+      text(
+        data.choose.alternateText.x,
+        data.choose.alternateText.y,
+        data.choose.alternateText.text,
+        "label",
+        "middle"
+      );
+      text(
+        data.choose.alternateLabel.x,
+        data.choose.alternateLabel.y,
+        data.choose.alternateLabel.text,
+        "small",
+        "middle"
+      );
+
+      make("path", {
+        d: [
+          `M ${sx(data.loop.x1)} ${sy(data.loop.y1)}`,
+          `V ${sy(data.loop.y2)}`,
+          `H ${sx(data.loop.x3)}`,
+          `V ${sy(data.loop.y4)}`
+        ].join(" "),
+        class: "loop"
+      });
+
+      make("polygon", {
+        points: [
+          `${sx(data.loop.x4)},${sy(data.loop.y4)}`,
+          `${sx(data.loop.x4 - data.loop.headHalf)},${sy(data.loop.y4 + data.loop.headBack)}`,
+          `${sx(data.loop.x4 + data.loop.headHalf)},${sy(data.loop.y4 + data.loop.headBack)}`
+        ].join(" "),
+        class: "loop-arrow"
+      });
+
+      text(
+        data.loop.labelX,
+        data.loop.labelY,
+        data.loop.label,
+        "footer",
+        "middle"
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      svg.replaceChildren();
+      const fallback = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "text"
+      );
+      fallback.setAttribute("x", sx(data.fallback.x));
+      fallback.setAttribute("y", sy(data.fallback.y));
+      fallback.setAttribute("class", "fallback");
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.textContent = data.fallback.text;
+      svg.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

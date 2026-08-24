@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как DPO улучшает отступ и одновременно ухудшает chosen</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #182033;
+      --muted: #637089;
+      --axis: #8994a8;
+      --guide: #d7dce7;
+      --chosen: #2475d0;
+      --chosen-soft: #e8f2ff;
+      --rejected: #d34b59;
+      --rejected-soft: #fff0f1;
+      --gap: #6d45c6;
+      --gap-soft: #f1ebff;
+      --old: #7b879c;
+      --error: #a52e3d;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --panel: #171d2a;
+        --ink: #f0f3fa;
+        --muted: #aeb8ca;
+        --axis: #818da4;
+        --guide: #343d50;
+        --chosen: #69adff;
+        --chosen-soft: #182d47;
+        --rejected: #ff7e8c;
+        --rejected-soft: #42242b;
+        --gap: #b79aff;
+        --gap-soft: #30284a;
+        --old: #a4aec0;
+        --error: #ff929c;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      padding: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--guide);
+    }
+
+    figcaption {
+      margin: unset;
+      padding: 14px 18px 8px;
+      font-size: 22px;
+      font-weight: bold;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 1.5px;
+      fill: none;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1.5px;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1.5px;
+      fill: none;
+    }
+
+    .trajectory-chosen {
+      stroke: var(--chosen);
+      stroke-width: 4px;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .trajectory-rejected {
+      stroke: var(--rejected);
+      stroke-width: 4px;
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .arrow-chosen {
+      fill: var(--chosen);
+    }
+
+    .arrow-rejected {
+      fill: var(--rejected);
+    }
+
+    .point-old {
+      fill: var(--panel);
+      stroke: var(--old);
+      stroke-width: 3px;
+    }
+
+    .point-chosen {
+      fill: var(--chosen);
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .point-rejected {
+      fill: var(--rejected);
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .gap-before {
+      stroke: var(--old);
+      stroke-width: 2px;
+      fill: none;
+    }
+
+    .gap-after {
+      stroke: var(--gap);
+      stroke-width: 3px;
+      fill: none;
+    }
+
+    .callout {
+      fill: var(--chosen-soft);
+      stroke: var(--chosen);
+      stroke-width: 1.5px;
+    }
+
+    .gap-box {
+      fill: var(--gap-soft);
+      stroke: var(--gap);
+      stroke-width: 1.5px;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 18px;
+    }
+
+    .label-small {
+      fill: var(--muted);
+      font-size: 16px;
+    }
+
+    .lane-chosen {
+      fill: var(--chosen);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .lane-rejected {
+      fill: var(--rejected);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .callout-text {
+      fill: var(--ink);
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .gap-text {
+      fill: var(--gap);
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 18px;
+      color: var(--error);
+      background: var(--panel);
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <figcaption id="diagram-title">
+      Как DPO улучшает отступ и одновременно ухудшает chosen
+    </figcaption>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1000 330"
+      width="1000"
+      height="330"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Изменение logprob chosen и rejected после DPO</title>
+      <desc id="svg-description">
+        Chosen сдвигается от минус двадцати к минус двадцати двум,
+        rejected — от минус двадцати пяти к минус сорока. Разрыв растёт
+        с пяти до восемнадцати, хотя chosen становится менее вероятным.
+      </desc>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать: chosen −20 → −22, rejected −25 → −40;
+      разрыв 5 → 18, но chosen стал в exp(2) ≈ 7,4 раза менее вероятным.
+    </p>
+  </figure>
+
+  <script>
+    const DATA = [{
+      zero: 0,
+      axis: {
+        from: { x: -44, y: 0 },
+        to: { x: 0, y: 0 },
+        verticalFrom: { x: 0, y: -8 },
+        verticalTo: { x: 0, y: 10 }
+      },
+      lanes: [
+        {
+          from: { x: -43, y: 5.5 },
+          to: { x: -8, y: 5.5 },
+          className: "guide"
+        },
+        {
+          from: { x: -43, y: -5.5 },
+          to: { x: -8, y: -5.5 },
+          className: "guide"
+        }
+      ],
+      ticks: [
+        { value: -40, label: "−40", top: 0.35, bottom: -0.35, labelY: -1.15 },
+        { value: -25, label: "−25", top: 0.35, bottom: -0.35, labelY: -1.15 },
+        { value: -22, label: "−22", top: 0.35, bottom: -0.35, labelY: -1.15 },
+        { value: -20, label: "−20", top: 0.35, bottom: -0.35, labelY: -1.15 }
+      ],
+      trajectories: [
+        {
+          className: "trajectory-chosen",
+          from: { x: -20, y: 5.5 },
+          to: { x: -22, y: 5.5 },
+          arrowClass: "arrow-chosen",
+          arrow: [
+            { x: -22, y: 5.5 },
+            { x: -21.35, y: 5.95 },
+            { x: -21.35, y: 5.05 }
+          ]
+        },
+        {
+          className: "trajectory-rejected",
+          from: { x: -25, y: -5.5 },
+          to: { x: -40, y: -5.5 },
+          arrowClass: "arrow-rejected",
+          arrow: [
+            { x: -40, y: -5.5 },
+            { x: -39.25, y: -5.05 },
+            { x: -39.25, y: -5.95 }
+          ]
+        }
+      ],
+      points: [
+        { at: { x: -20, y: 5.5 }, r: 0.36, className: "point-old" },
+        { at: { x: -22, y: 5.5 }, r: 0.42, className: "point-chosen" },
+        { at: { x: -25, y: -5.5 }, r: 0.36, className: "point-old" },
+        { at: { x: -40, y: -5.5 }, r: 0.42, className: "point-rejected" }
+      ],
+      brackets: [
+        {
+          className: "gap-before",
+          segments: [
+            [{ x: -25, y: 2.35 }, { x: -20, y: 2.35 }],
+            [{ x: -25, y: 1.95 }, { x: -25, y: 2.75 }],
+            [{ x: -20, y: 1.95 }, { x: -20, y: 2.75 }]
+          ]
+        },
+        {
+          className: "gap-after",
+          segments: [
+            [{ x: -40, y: -2.65 }, { x: -22, y: -2.65 }],
+            [{ x: -40, y: -3.05 }, { x: -40, y: -2.25 }],
+            [{ x: -22, y: -3.05 }, { x: -22, y: -2.25 }]
+          ]
+        }
+      ],
+      boxes: [
+        {
+          className: "callout",
+          from: { x: -39, y: 9.7 },
+          to: { x: -3, y: 7.35 },
+          radius: 0.42
+        },
+        {
+          className: "gap-box",
+          from: { x: -36.5, y: 1.75 },
+          to: { x: -25.5, y: 0.35 },
+          radius: 0.36
+        }
+      ],
+      texts: [
+        {
+          text: "chosen",
+          at: { x: -42.2, y: 5.5 },
+          dx: -8,
+          dy: 6,
+          anchor: "end",
+          className: "lane-chosen"
+        },
+        {
+          text: "rejected",
+          at: { x: -42.2, y: -5.5 },
+          dx: -8,
+          dy: 6,
+          anchor: "end",
+          className: "lane-rejected"
+        },
+        {
+          text: "до: −20",
+          at: { x: -20, y: 5.5 },
+          dx: 10,
+          dy: 25,
+          anchor: "start",
+          className: "label-small"
+        },
+        {
+          text: "после: −22",
+          at: { x: -22, y: 5.5 },
+          dx: -10,
+          dy: -15,
+          anchor: "end",
+          className: "label"
+        },
+        {
+          text: "до: −25",
+          at: { x: -25, y: -5.5 },
+          dx: 10,
+          dy: -14,
+          anchor: "start",
+          className: "label-small"
+        },
+        {
+          text: "после: −40",
+          at: { x: -40, y: -5.5 },
+          dx: -10,
+          dy: 25,
+          anchor: "end",
+          className: "label"
+        },
+        {
+          text: "до",
+          at: { x: -22.5, y: 2.35 },
+          dx: 0,
+          dy: -9,
+          anchor: "middle",
+          className: "label-small"
+        },
+        {
+          text: "после",
+          at: { x: -31, y: -2.65 },
+          dx: 0,
+          dy: 22,
+          anchor: "middle",
+          className: "label-small"
+        },
+        {
+          text: "разрыв 5 → 18",
+          at: { x: -31, y: 1.05 },
+          dx: 0,
+          dy: 6,
+          anchor: "middle",
+          className: "gap-text"
+        },
+        {
+          text: "chosen стал в exp(2) ≈ 7,4 раза менее вероятным",
+          at: { x: -21, y: 8.52 },
+          dx: 0,
+          dy: 6,
+          anchor: "middle",
+          className: "callout-text"
+        },
+        {
+          text: "log π(y | x)",
+          at: { x: -1, y: 0 },
+          dx: -8,
+          dy: -13,
+          anchor: "end",
+          className: "label-small"
+        }
+      ]
+    }];
+
+    const origin = Object.freeze({ x: 930, y: 190 });
+    const scale = Object.freeze({ x: 19, y: 14 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const [chart] = DATA;
+      const svg = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const append = (name, attributes, content) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+        svg.appendChild(node);
+        return node;
+      };
+
+      const addLine = (from, to, className) => append("line", {
+        x1: sx(from.x),
+        y1: sy(from.y),
+        x2: sx(to.x),
+        y2: sy(to.y),
+        class: className
+      });
+
+      const addPolygon = (points, className) => append("polygon", {
+        points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+        class: className
+      });
+
+      const addBox = box => append("rect", {
+        x: sx(box.from.x),
+        y: sy(box.from.y),
+        width: Math.abs(sx(box.to.x) - sx(box.from.x)),
+        height: Math.abs(sy(box.to.y) - sy(box.from.y)),
+        rx: Math.abs(sx(box.radius) - sx(chart.zero)),
+        ry: Math.abs(sy(box.radius) - sy(chart.zero)),
+        class: box.className
+      });
+
+      chart.lanes.forEach(lane => {
+        addLine(lane.from, lane.to, lane.className);
+      });
+
+      addLine(chart.axis.from, chart.axis.to, "axis");
+      addLine(chart.axis.verticalFrom, chart.axis.verticalTo, "axis");
+
+      chart.ticks.forEach(tick => {
+        addLine(
+          { x: tick.value, y: tick.top },
+          { x: tick.value, y: tick.bottom },
+          "tick"
+        );
+
+        append("text", {
+          x: sx(tick.value),
+          y: sy(tick.labelY),
+          "text-anchor": "middle",
+          class: "label-small"
+        }, tick.label);
+      });
+
+      chart.brackets.forEach(bracket => {
+        bracket.segments.forEach(([from, to]) => {
+          addLine(from, to, bracket.className);
+        });
+      });
+
+      chart.boxes.forEach(addBox);
+
+      chart.trajectories.forEach(trajectory => {
+        addLine(trajectory.from, trajectory.to, trajectory.className);
+        addPolygon(trajectory.arrow, trajectory.arrowClass);
+      });
+
+      chart.points.forEach(point => {
+        append("circle", {
+          cx: sx(point.at.x),
+          cy: sy(point.at.y),
+          r: Math.abs(sx(point.r) - sx(chart.zero)),
+          class: point.className
+        });
+      });
+
+      chart.texts.forEach(label => {
+        append("text", {
+          x: sx(label.at.x),
+          y: sy(label.at.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.anchor,
+          class: label.className
+        }, label.text);
+      });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

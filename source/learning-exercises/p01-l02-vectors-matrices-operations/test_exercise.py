@@ -64,11 +64,11 @@ def test_trace_of_identity_is_size():
 
 
 # ---------------------------------------------------------- is_symmetric
-def test_symmetric_true():
+def test_is_symmetric_true():
     assert is_symmetric([[1, 2], [2, 1]]) is True
 
 
-def test_symmetric_false():
+def test_is_symmetric_false():
     assert is_symmetric([[1, 2], [3, 1]]) is False
 
 

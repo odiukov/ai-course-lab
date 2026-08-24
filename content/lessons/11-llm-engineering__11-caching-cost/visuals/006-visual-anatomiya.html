@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Кто занял место в запросе</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#6b7280; --line:#9aa3ad;
+    --sys:#c2410c; --ctx:#1d4ed8; --usr:#15803d; --sysbg:#fdba74; --ctxbg:#93b4fd; --usrbg:#86efac;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --fg:#e8eaed; --muted:#9aa3ad; --line:#5b6672;
+      --sys:#fdba74; --ctx:#93b4fd; --usr:#86efac; --sysbg:#7c3a10; --ctxbg:#1e3a8a; --usrbg:#14532d;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{background:var(--bg);padding:10px 12px 4px}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:470px}
+  .t{fill:var(--fg);font-size:13px}
+  .s{fill:var(--muted);font-size:12px}
+  .b{fill:var(--fg);font-size:14px;font-weight:600}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5}
+</style>
+<div class="wrap">
+  <h2>Один запрос: 3600 входных токенов — из них пользователь написал 100</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные ----
+    var PARTS=[
+      {key:'sys',n:1500,name:'Системный промпт',note:'одинаковый у всех запросов',c:'--sys',bg:'--sysbg'},
+      {key:'ctx',n:2000,name:'Найденный контекст',note:'куски документации про возвраты',c:'--ctx',bg:'--ctxbg'},
+      {key:'usr',n:100, name:'Вопрос пользователя',note:'«как вернуть товар?»',c:'--usr',bg:'--usrbg'}
+    ];
+    var TOTAL=3600, USER=100;
+
+    // ---- одна система координат ----
+    // x: токены 0..3600 ; y: условные строки
+    var W=880,H=470;
+    var origin={x:150,y:96}, scale={x:0.19,y:34};
+    function sx(x){return origin.x+x*scale.x}
+    function sy(y){return origin.y+y*scale.y}
+
+    var PAD=4, LW=1.6, HEAD=7;
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e}
+    function txt(x,y,s,cls,anch){var t=el('text',{x:x,y:y,'class':cls,'text-anchor':anch||'start'});t.textContent=s;return t}
+
+    var svg=el('svg',{viewBox:'0 0 '+W+' '+H,preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Полоса запроса на 3600 токенов: 1500 системный промпт, 2000 найденный контекст, 100 вопрос пользователя'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+    var g=el('g');svg.appendChild(g);
+
+    // ---- полоса запроса (строка 0) ----
+    var barTop=0, barBot=1;   // в единицах y
+    var acc=0, mid={};
+    PARTS.forEach(function(p){
+      var x0=acc, x1=acc+p.n; acc=x1;
+      mid[p.key]=(x0+x1)/2;
+      g.appendChild(el('rect',{x:sx(x0),y:sy(barTop),width:sx(x1)-sx(x0),height:sy(barBot)-sy(barTop),
+        fill:'var('+p.bg+')',stroke:'var('+p.c+')','stroke-width':LW}));
+      // число внутри плашки (кроме узкой)
+      if(p.n>300){
+        var lbl=txt(sx(mid[p.key]),(sy(barTop)+sy(barBot))/2+5,p.n+' ток.','b','middle');
+        lbl.setAttribute('fill','var('+p.c+')');g.appendChild(lbl);
+      }
+    });
+    // подпись всей полосы — слева, anchor end
+    g.appendChild(txt(sx(0)-PAD*3,(sy(barTop)+sy(barBot))/2-2,'Один запрос','t','end'));
+    g.appendChild(txt(sx(0)-PAD*3,(sy(barTop)+sy(barBot))/2+14,'3600 входных ток.','s','end'));
+
+    // ---- подписи частей: разведены вверх и вниз ----
+    // системный промпт и контекст — сверху полосы
+    [['sys',barTop],['ctx',barTop]].forEach(function(pair){
+      var p=PARTS.filter(function(q){return q.key===pair[0]})[0];
+      var y=sy(pair[1])-PAD*3;
+      var a=txt(sx(mid[p.key]),y-16,p.name,'t','middle');a.setAttribute('fill','var('+p.c+')');
+      g.appendChild(a);
+      g.appendChild(txt(sx(mid[p.key]),y,p.note,'s','middle'));
+    });
+    // вопрос пользователя — снизу, выноской вправо от узкой плашки
+    var usr=PARTS[2];
+    var ux=sx(3500+usr.n/2), uy=sy(barBot);
+    g.appendChild(el('path',{d:'M '+ux+' '+uy+' L '+ux+' '+sy(barBot+0.45),
+      stroke:'var(--usr)','stroke-width':LW,fill:'none'}));
+    var un=txt(sx(TOTAL)+PAD*2,sy(barBot+0.45)+4,usr.name+' — 100 ток.','t','start');
+    un.setAttribute('fill','var(--usr)');g.appendChild(un);
+    g.appendChild(txt(sx(TOTAL)+PAD*2,sy(barBot+0.45)+21,usr.note,'s','start'));
+
+    // ---- шкала токенов под полосой ----
+    var axY=sy(barBot+1.1);
+    g.appendChild(el('line',{x1:sx(0),y1:axY,x2:sx(TOTAL),y2:axY,stroke:'var(--line)','stroke-width':LW}));
+    [0,1500,3500,TOTAL].forEach(function(v){
+      g.appendChild(el('line',{x1:sx(v),y1:axY,x2:sx(v),y2:axY+PAD*2,stroke:'var(--line)','stroke-width':LW}));
+      g.appendChild(txt(sx(v),axY+PAD*2+15,String(v),'s','middle'));
+    });
+    g.appendChild(txt(sx(TOTAL)+PAD*2,axY+5,'токены','s','start'));
+
+    // ---- три потока сливаются в один вход (строки ниже) ----
+    var joinX=sx(TOTAL*0.62), joinY=sy(barBot+2.6);
+    function arrow(x1,y1,x2,y2,col){
+      var dx=x2-x1,dy=y2-y1,L=Math.sqrt(dx*dx+dy*dy),ux2=dx/L,uy2=dy/L;
+      var bx=x2-ux2*HEAD, by=y2-uy2*HEAD, px=-uy2*HEAD*0.55, py=ux2*HEAD*0.55;
+      g.appendChild(el('line',{x1:x1,y1:y1,x2:bx,y2:by,stroke:col,'stroke-width':LW}));
+      g.appendChild(el('path',{d:'M '+x2+' '+y2+' L '+(bx+px)+' '+(by+py)+' L '+(bx-px)+' '+(by-py)+' Z',fill:col}));
+    }
+    PARTS.forEach(function(p){
+      arrow(sx(mid[p.key]),axY+PAD*2+22,joinX,joinY-PAD*3,'var('+p.c+')');
+    });
+
+    // плашка «оплачивается по входному тарифу»
+    var bx0=sx(TOTAL*0.30), bx1=sx(TOTAL*0.94), by0=joinY-PAD*3, by1=sy(barBot+3.5);
+    g.appendChild(el('rect',{x:bx0,y:by0,width:bx1-bx0,height:by1-by0,rx:PAD,
+      fill:'none',stroke:'var(--line)','stroke-width':LW}));
+    g.appendChild(txt((bx0+bx1)/2,(by0+by1)/2+5,'Один поток на вход — счёт за все 3600','t','middle'));
+    // подпись у хвоста стрелок, сбоку
+    g.appendChild(txt(bx0-PAD*2,by0+16,'сливаются','s','end'));
+
+    // ---- доли: пользователь 2,8% против 97% ----
+    var dY0=sy(barBot+4.1), dY1=sy(barBot+4.8);
+    var uw=sx(USER)-sx(0);
+    g.appendChild(el('rect',{x:sx(0),y:dY0,width:uw,height:dY1-dY0,fill:'var(--usrbg)',stroke:'var(--usr)','stroke-width':LW}));
+    g.appendChild(el('rect',{x:sx(USER),y:dY0,width:sx(TOTAL)-sx(USER),height:dY1-dY0,
+      fill:'none',stroke:'var(--line)','stroke-width':LW,'stroke-dasharray':'5 4'}));
+    g.appendChild(txt(sx(0)-PAD*3,dY0+15,'Доля счёта','t','end'));
+    var d1=txt(sx(USER)+PAD*2,dY1+18,'2,8% написал пользователь','t','start');
+    d1.setAttribute('fill','var(--usr)');g.appendChild(d1);
+    g.appendChild(txt(sx(TOTAL),dY0-PAD*2,'97% — текст, который человек не видел','t','end'));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема должна была показать полосу одного запроса на 3600 входных токенов: '+
+      '1500 токенов системного промпта, 2000 токенов найденного контекста и всего 100 токенов вопроса '+
+      'пользователя. Все три куска сливаются в один входной поток и оплачиваются целиком: пользователь '+
+      'написал 2,8% счёта, остальные 97% — служебные инструкции и подтянутая документация.</p>';
+  }
+})();
+</script>
+</html>

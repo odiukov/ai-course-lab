@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Компромисс между ростом награды и отклонением от reference</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: whitesmoke;
+    --ink: midnightblue;
+    --muted: slategray;
+    --panel: white;
+    --grid: lightsteelblue;
+    --axis: darkslategray;
+    --reward: mediumslateblue;
+    --kl: darkorange;
+    --point: white;
+    --badge: lavender;
+    --error: firebrick;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 12px 16px 8px;
+    background: var(--page);
+  }
+
+  .heading {
+    margin: 0;
+    font-size: 21px;
+    line-height: 1.2;
+    font-weight: bold;
+  }
+
+  .subheading {
+    margin: 5px 0 8px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 400px;
+    overflow: visible;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 1.2;
+  }
+
+  .grid {
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .axis {
+    stroke: var(--axis);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+  }
+
+  .reward-line,
+  .kl-line {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .reward-line { stroke: var(--reward); }
+  .kl-line { stroke: var(--kl); }
+
+  .reward-point,
+  .kl-point {
+    fill: var(--point);
+    stroke-width: 2;
+  }
+
+  .reward-point { stroke: var(--reward); }
+  .kl-point { stroke: var(--kl); }
+
+  .reward-end {
+    fill: var(--reward);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .kl-end {
+    fill: var(--kl);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .column-title {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: .04em;
+  }
+
+  .beta {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .row-note {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .axis-label {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .series-label {
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .reward-text { fill: var(--reward); }
+  .kl-text { fill: var(--kl); }
+
+  .badge {
+    fill: var(--badge);
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .badge-text {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--error);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --ink: whitesmoke;
+      --muted: lightsteelblue;
+      --panel: darkslategray;
+      --grid: slategray;
+      --axis: gainsboro;
+      --reward: mediumpurple;
+      --kl: orange;
+      --point: darkslategray;
+      --badge: slateblue;
+      --error: lightsalmon;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1 id="diagram-heading" class="heading">Компромисс между ростом награды и отклонением от reference</h1>
+  <p id="diagram-caption" class="subheading">Один и тот же PPO при разной силе KL-штрафа: сравнивай форму траекторий, а не только финальную награду.</p>
+
+  <svg id="diagram"
+       viewBox="0 0 1000 400"
+       width="1000"
+       height="400"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-heading diagram-caption">
+    <title>Три пары графиков награды и KL по эпизодам для beta 0.001, 0.02 и 0.5</title>
+    <desc>Малый beta допускает резкий дрейф, средний удерживает KL, большой почти блокирует обучение.</desc>
+    <g id="drawing"></g>
+  </svg>
+</main>
+
+<script>
+const data = {
+  canvas: { width: 100, height: 40 },
+  columns: {
+    labelX: 2.2,
+    reward: { x0: 22, x1: 57 },
+    kl: { x0: 63, x1: 98 },
+    titleY: 38.35
+  },
+  rows: [
+    {
+      beta: "0.001",
+      note: ["награда быстро растёт", "KL резко уходит вверх"],
+      bottom: 26.7,
+      top: 35.9,
+      reward: [
+        [0, 0.10], [0.14, 0.23], [0.28, 0.38], [0.42, 0.56],
+        [0.56, 0.72], [0.70, 0.84], [0.84, 0.92], [1, 0.97]
+      ],
+      kl: [
+        [0, 0.04], [0.14, 0.07], [0.28, 0.11], [0.42, 0.18],
+        [0.56, 0.31], [0.70, 0.52], [0.84, 0.75], [1, 0.96]
+      ],
+      rewardLabel: { text: "рост награды", x: 0.57, y: 0.78, side: "above" },
+      klLabel: { text: "резкий дрейф", x: 0.69, y: 0.57, side: "below" },
+      badge: "страховка ослаблена"
+    },
+    {
+      beta: "0.02",
+      note: ["награда растёт устойчиво", "KL остаётся ограниченным"],
+      bottom: 15.15,
+      top: 24.35,
+      reward: [
+        [0, 0.10], [0.14, 0.19], [0.28, 0.31], [0.42, 0.43],
+        [0.56, 0.55], [0.70, 0.65], [0.84, 0.72], [1, 0.77]
+      ],
+      kl: [
+        [0, 0.04], [0.14, 0.10], [0.28, 0.18], [0.42, 0.25],
+        [0.56, 0.30], [0.70, 0.33], [0.84, 0.34], [1, 0.35]
+      ],
+      rewardLabel: { text: "устойчивый рост", x: 0.61, y: 0.59, side: "above" },
+      klLabel: { text: "KL удерживается", x: 0.69, y: 0.35, side: "above" },
+      badge: "разумный компромисс"
+    },
+    {
+      beta: "0.5",
+      note: ["policy возле reference", "обучение почти стоит"],
+      bottom: 3.6,
+      top: 12.8,
+      reward: [
+        [0, 0.10], [0.14, 0.12], [0.28, 0.14], [0.42, 0.15],
+        [0.56, 0.17], [0.70, 0.18], [0.84, 0.19], [1, 0.20]
+      ],
+      kl: [
+        [0, 0.03], [0.14, 0.04], [0.28, 0.05], [0.42, 0.06],
+        [0.56, 0.07], [0.70, 0.08], [0.84, 0.08], [1, 0.09]
+      ],
+      rewardLabel: { text: "почти без роста", x: 0.62, y: 0.20, side: "above" },
+      klLabel: { text: "почти без дрейфа", x: 0.66, y: 0.09, side: "above" },
+      badge: "страховка затянута"
+    }
+  ],
+  gridFractions: [0.25, 0.5, 0.75],
+  yGridFractions: [0.5],
+  label: {
+    betaOffset: 1.45,
+    noteFirstOffset: 3.55,
+    noteSecondOffset: 5.05,
+    episodeOffset: 1.05,
+    seriesOffset: 0.72,
+    tickLength: 0.22,
+    pointRadius: 0.20,
+    endRadius: 0.31,
+    panelPadX: 0.75,
+    panelPadY: 0.48,
+    badgeX0: 2.15,
+    badgeX1: 19.25,
+    badgeHeight: 1.85,
+    badgeBottomOffset: 1.05
+  },
+  fallback: {
+    x: 5,
+    y: 22,
+    gap: 2.4,
+    lines: [
+      "Схема должна сравнивать reward и KL по эпизодам:",
+      "beta 0.001 — резкий дрейф; beta 0.02 — ограниченный KL;",
+      "beta 0.5 — обучение почти заблокировано."
+    ]
+  }
+};
+
+const origin = Object.freeze({ x: 0, y: 40 });
+const scale = Object.freeze({ x: 10, y: 10 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y * scale.y - y * scale.y;
+
+try {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+
+  const make = (name, attrs = {}, text = "") => {
+    const node = document.createElementNS(svgNS, name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (text) node.textContent = text;
+    return node;
+  };
+
+  const add = (parent, name, attrs, text) => {
+    const node = make(name, attrs, text);
+    parent.appendChild(node);
+    return node;
+  };
+
+  const pxLength = value => Math.abs(sx(value) - sx(0));
+  const pyLength = value => Math.abs(sy(value) - sy(0));
+
+  const plotPoint = (chart, row, point) => {
+    const [episode, value] = point;
+    const x = chart.x0 + episode * (chart.x1 - chart.x0);
+    const y = row.bottom + value * (row.top - row.bottom);
+    return { x, y, px: sx(x), py: sy(y) };
+  };
+
+  const textAt = (parent, x, y, className, content, anchor = "start") =>
+    add(parent, "text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, content);
+
+  const drawPanel = (parent, chart, row, values, kind, label) => {
+    const group = add(parent, "g", {
+      "aria-label": kind === "reward" ? "График награды" : "График KL"
+    });
+
+    add(group, "rect", {
+      x: sx(chart.x0 - data.label.panelPadX),
+      y: sy(row.top + data.label.panelPadY),
+      width: sx(chart.x1 + data.label.panelPadX) -
+             sx(chart.x0 - data.label.panelPadX),
+      height: sy(row.bottom - data.label.panelPadY) -
+              sy(row.top + data.label.panelPadY),
+      class: "panel"
+    });
+
+    data.yGridFractions.forEach(fraction => {
+      const y = row.bottom + fraction * (row.top - row.bottom);
+      add(group, "line", {
+        x1: sx(chart.x0),
+        y1: sy(y),
+        x2: sx(chart.x1),
+        y2: sy(y),
+        class: "grid"
+      });
+    });
+
+    data.gridFractions.forEach(fraction => {
+      const x = chart.x0 + fraction * (chart.x1 - chart.x0);
+      add(group, "line", {
+        x1: sx(x),
+        y1: sy(row.bottom),
+        x2: sx(x),
+        y2: sy(row.top),
+        class: "grid"
+      });
+      add(group, "line", {
+        x1: sx(x),
+        y1: sy(row.bottom),
+        x2: sx(x),
+        y2: sy(row.bottom - data.label.tickLength),
+        class: "axis"
+      });
+    });
+
+    add(group, "line", {
+      x1: sx(chart.x0),
+      y1: sy(row.bottom),
+      x2: sx(chart.x1),
+      y2: sy(row.bottom),
+      class: "axis"
+    });
+
+    add(group, "line", {
+      x1: sx(chart.x0),
+      y1: sy(row.bottom),
+      x2: sx(chart.x0),
+      y2: sy(row.top),
+      class: "axis"
+    });
+
+    const mapped = values.map(point => plotPoint(chart, row, point));
+    add(group, "polyline", {
+      points: mapped.map(point => `${point.px},${point.py}`).join(" "),
+      class: kind === "reward" ? "reward-line" : "kl-line"
+    });
+
+    mapped.forEach((point, position, allPoints) => {
+      const isEnd = point === allPoints[allPoints.length - data.label.tickLength /
+        data.label.tickLength];
+      add(group, "circle", {
+        cx: point.px,
+        cy: point.py,
+        r: pxLength(isEnd ? data.label.endRadius : data.label.pointRadius),
+        class: isEnd
+          ? (kind === "reward" ? "reward-end" : "kl-end")
+          : (kind === "reward" ? "reward-point" : "kl-point")
+      });
+    });
+
+    const anchorPoint = plotPoint(chart, row, [label.x, label.y]);
+    const labelY = label.side === "above"
+      ? label.y * (row.top - row.bottom) + row.bottom + data.label.seriesOffset
+      : label.y * (row.top - row.bottom) + row.bottom - data.label.seriesOffset;
+
+    textAt(
+      group,
+      anchorPoint.x,
+      labelY,
+      `series-label ${kind === "reward" ? "reward-text" : "kl-text"}`,
+      label.text,
+      "middle"
+    );
+
+    textAt(
+      group,
+      chart.x0 + (chart.x1 - chart.x0) * data.yGridFractions[0],
+      row.bottom - data.label.episodeOffset,
+      "axis-label",
+      "эпизоды",
+      "middle"
+    );
+  };
+
+  textAt(
+    root,
+    data.columns.reward.x0,
+    data.columns.titleY,
+    "column-title reward-text",
+    "REWARD",
+    "start"
+  );
+
+  textAt(
+    root,
+    data.columns.kl.x0,
+    data.columns.titleY,
+    "column-title kl-text",
+    "ОТКЛОНЕНИЕ ОТ REFERENCE · KL",
+    "start"
+  );
+
+  data.rows.forEach(row => {
+    const rowGroup = add(root, "g", {
+      "aria-label": `beta ${row.beta}: ${row.note.join(", ")}`
+    });
+
+    textAt(
+      rowGroup,
+      data.columns.labelX,
+      row.top - data.label.betaOffset,
+      "beta",
+      `β = ${row.beta}`,
+      "start"
+    );
+
+    textAt(
+      rowGroup,
+      data.columns.labelX,
+      row.top - data.label.noteFirstOffset,
+      "row-note",
+      row.note[0],
+      "start"
+    );
+
+    textAt(
+      rowGroup,
+      data.columns.labelX,
+      row.top - data.label.noteSecondOffset,
+      "row-note",
+      row.note[row.note.length - data.label.tickLength /
+        data.label.tickLength],
+      "start"
+    );
+
+    const badgeBottom = row.bottom + data.label.badgeBottomOffset;
+    add(rowGroup, "rect", {
+      x: sx(data.label.badgeX0),
+      y: sy(badgeBottom + data.label.badgeHeight),
+      width: sx(data.label.badgeX1) - sx(data.label.badgeX0),
+      height: pyLength(data.label.badgeHeight),
+      class: "badge"
+    });
+
+    textAt(
+      rowGroup,
+      data.label.badgeX0 +
+        (data.label.badgeX1 - data.label.badgeX0) *
+        data.yGridFractions[0],
+      badgeBottom + data.label.badgeHeight * data.yGridFractions[0] -
+        data.label.tickLength,
+      "badge-text",
+      row.badge,
+      "middle"
+    );
+
+    drawPanel(
+      rowGroup,
+      data.columns.reward,
+      row,
+      row.reward,
+      "reward",
+      row.rewardLabel
+    );
+
+    drawPanel(
+      rowGroup,
+      data.columns.kl,
+      row,
+      row.kl,
+      "kl",
+      row.klLabel
+    );
+  });
+} catch (error) {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+  root.replaceChildren();
+
+  data.fallback.lines.forEach((line, position) => {
+    const node = document.createElementNS(svgNS, "text");
+    node.setAttribute("x", sx(data.fallback.x));
+    node.setAttribute(
+      "y",
+      sy(data.fallback.y - position * data.fallback.gap)
+    );
+    node.setAttribute("class", "fallback");
+    node.textContent = line;
+    root.appendChild(node);
+  });
+}
+</script>
+</body>
+</html>

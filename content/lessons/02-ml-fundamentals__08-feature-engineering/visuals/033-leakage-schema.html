@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Где возникает утечка в target encoding</title>
+<style>
+  :root{
+    color-scheme:light dark;
+    --page:#f7f8fb;
+    --panel:#ffffff;
+    --text:#172033;
+    --muted:#5f6b7d;
+    --line:#aab3c2;
+    --soft:#eef1f6;
+    --bad:#c93f4b;
+    --bad-soft:#fff0f1;
+    --good:#19805f;
+    --good-soft:#eaf8f2;
+    --blue:#3568b8;
+    --blue-soft:#edf4ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--page);color:var(--text)}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+  figure{
+    width:100%;
+    max-width:1040px;
+    margin:0 auto;
+    padding:14px 16px 12px;
+    background:var(--page);
+  }
+  h1{
+    margin:0 0 8px;
+    font-size:20px;
+    line-height:1.2;
+    font-weight:bold;
+    text-align:center;
+  }
+  svg{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:470px;
+    background:var(--page);
+  }
+  text{font-family:inherit;fill:var(--text)}
+  .panel{fill:var(--panel);stroke:var(--line);stroke-width:2}
+  .panel-bad{stroke:var(--bad)}
+  .panel-good{stroke:var(--good)}
+  .box{fill:var(--soft);stroke:var(--line);stroke-width:2}
+  .data-box{fill:var(--blue-soft);stroke:var(--blue)}
+  .bad-box{fill:var(--bad-soft);stroke:var(--bad)}
+  .good-box{fill:var(--good-soft);stroke:var(--good)}
+  .feature-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:2}
+  .feature-good{fill:var(--good-soft);stroke:var(--good);stroke-width:2}
+  .divider{stroke:var(--line);stroke-width:1}
+  .arrow{fill:none;stroke:var(--line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .arrow-bad{stroke:var(--bad)}
+  .arrow-good{stroke:var(--good)}
+  .arrow-blue{stroke:var(--blue)}
+  .head-bad{fill:var(--bad)}
+  .head-good{fill:var(--good)}
+  .head-blue{fill:var(--blue)}
+  .heading{font-size:17px;font-weight:bold}
+  .bad-text{fill:var(--bad)}
+  .good-text{fill:var(--good)}
+  .box-title{font-size:14px;font-weight:bold}
+  .body-text{font-size:14px}
+  .small{font-size:12px;fill:var(--muted)}
+  .arrow-label{font-size:12px;font-weight:bold}
+  .badge-bad{fill:var(--bad)}
+  .badge-good{fill:var(--good)}
+  .badge-text{fill:#ffffff;font-size:11px;font-weight:bold}
+  .note{fill:var(--soft);stroke:var(--line);stroke-width:1}
+  .note-text{font-size:13px}
+  #fallback{
+    margin:16px;
+    padding:16px;
+    border:2px solid var(--bad);
+    background:var(--bad-soft);
+    color:var(--text);
+    font-size:15px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --page:#11151c;
+      --panel:#181e28;
+      --text:#edf1f7;
+      --muted:#adb7c6;
+      --line:#566174;
+      --soft:#222a36;
+      --bad:#ff7780;
+      --bad-soft:#352126;
+      --good:#58d3a5;
+      --good-soft:#17342b;
+      --blue:#76a8ff;
+      --blue-soft:#1c2d47;
+    }
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Где возникает утечка в target encoding</h1>
+  <svg id="diagram" viewBox="0 0 1040 450" width="1040" height="450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Сравнение ошибочного и честного расчёта target encoding"></svg>
+  <div id="fallback" hidden>
+    Схема должна была показать два пути: ошибочный расчёт средних по train и
+    test вместе и честный расчёт только по train с применением сохранённой
+    таблицы к test.
+  </div>
+</figure>
+
+<script>
+const D={
+  origin:[0,0],
+  scale:[1,1],
+  zero:0,
+  unit:1,
+  two:2,
+  radius:12,
+  head:{length:11,width:6},
+  lineGap:18,
+  panels:[
+    {x:24,y:22,w:488,h:354,kind:"panel panel-bad"},
+    {x:528,y:22,w:488,h:354,kind:"panel panel-good"}
+  ],
+  headings:[
+    {x:48,y:55,text:"ОШИБОЧНО: среднее видит test",cls:"heading bad-text"},
+    {x:552,y:55,text:"ЧЕСТНО: таблица строится до test",cls:"heading good-text"}
+  ],
+  boxes:[
+    {
+      x:48,y:82,w:188,h:82,cls:"box data-box",
+      lines:[
+        {text:"TRAIN",cls:"box-title",y:106},
+        {text:"район + ответ",cls:"body-text",y:132},
+        {text:"известные строки",cls:"small",y:151}
+      ]
+    },
+    {
+      x:278,y:82,w:206,h:82,cls:"box data-box",
+      lines:[
+        {text:"TEST",cls:"box-title",y:106},
+        {text:"«Порт» · ответ = 1",cls:"body-text",y:132},
+        {text:"строка для прогноза",cls:"small",y:151}
+      ]
+    },
+    {
+      x:137,y:218,w:270,h:72,cls:"box bad-box",
+      lines:[
+        {text:"Среднее по району",cls:"box-title bad-text",y:242},
+        {text:"считается по train + test",cls:"body-text",y:268}
+      ]
+    },
+    {
+      x:91,y:316,w:334,h:48,cls:"feature-bad",
+      lines:[
+        {text:"Признак test содержит ответ этой строки",cls:"box-title bad-text",y:346}
+      ]
+    },
+    {
+      x:552,y:82,w:188,h:82,cls:"box data-box",
+      lines:[
+        {text:"TRAIN",cls:"box-title",y:106},
+        {text:"район + ответ",cls:"body-text",y:132},
+        {text:"только обучение",cls:"small",y:151}
+      ]
+    },
+    {
+      x:782,y:82,w:206,h:82,cls:"box data-box",
+      lines:[
+        {text:"TEST",cls:"box-title",y:106},
+        {text:"район «Порт»",cls:"body-text",y:132},
+        {text:"ответ не используется",cls:"small good-text",y:151}
+      ]
+    },
+    {
+      x:618,y:218,w:280,h:72,cls:"box good-box",
+      lines:[
+        {text:"Сохранённая таблица",cls:"box-title good-text",y:242},
+        {text:"район → средний ответ train",cls:"body-text",y:268}
+      ]
+    },
+    {
+      x:609,y:316,w:342,h:48,cls:"feature-good",
+      lines:[
+        {text:"Признак test: значение из таблицы",cls:"box-title good-text",y:346}
+      ]
+    }
+  ],
+  badges:[
+    {x:151,y:202,w:112,h:24,text:"TRAIN + TEST",cls:"badge-bad"},
+    {x:634,y:202,w:106,h:24,text:"СОХРАНИТЬ",cls:"badge-good"}
+  ],
+  arrows:[
+    {
+      points:[{x:142,y:164},{x:142,y:188},{x:202,y:218}],
+      line:"arrow arrow-bad",head:"head-bad",
+      label:{x:92,y:191,text:"ответы train",anchor:"start",cls:"arrow-label bad-text"}
+    },
+    {
+      points:[{x:381,y:164},{x:381,y:188},{x:340,y:218}],
+      line:"arrow arrow-bad",head:"head-bad",
+      label:{x:390,y:191,text:"ответ test",anchor:"start",cls:"arrow-label bad-text"}
+    },
+    {
+      points:[{x:272,y:290},{x:272,y:316}],
+      line:"arrow arrow-bad",head:"head-bad",
+      label:{x:286,y:307,text:"попадает в признак",anchor:"start",cls:"arrow-label bad-text"}
+    },
+    {
+      points:[{x:425,y:340},{x:466,y:340},{x:466,y:180},{x:406,y:180},{x:406,y:164}],
+      line:"arrow arrow-bad",head:"head-bad",
+      label:{x:454,y:310,text:"в ту же строку",anchor:"end",cls:"arrow-label bad-text"}
+    },
+    {
+      points:[{x:646,y:164},{x:646,y:190},{x:680,y:218}],
+      line:"arrow arrow-good",head:"head-good",
+      label:{x:570,y:191,text:"считать по train",anchor:"start",cls:"arrow-label good-text"}
+    },
+    {
+      points:[{x:758,y:290},{x:758,y:316}],
+      line:"arrow arrow-good",head:"head-good",
+      label:{x:771,y:307,text:"без пересчёта",anchor:"start",cls:"arrow-label good-text"}
+    },
+    {
+      points:[{x:885,y:164},{x:885,y:196},{x:940,y:196},{x:940,y:316},{x:900,y:316}],
+      line:"arrow arrow-blue",head:"head-blue",
+      label:{x:928,y:211,text:"только район",anchor:"end",cls:"arrow-label"}
+    }
+  ],
+  separators:[
+    {a:{x:260,y:72},b:{x:260,y:180}},
+    {a:{x:764,y:72},b:{x:764,y:180}}
+  ],
+  note:{
+    x:90,y:394,w:860,h:38,
+    text:"Для train: среднее считают без самой строки или по отдельным фолдам.",
+    tx:520,ty:418
+  }
+};
+
+const origin={x:D.origin.shift(),y:D.origin.shift()};
+const scale={x:D.scale.shift(),y:D.scale.shift()};
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const NS="http://www.w3.org/2000/svg";
+  const make=(tag,attrs,content)=>{
+    const node=document.createElementNS(NS,tag);
+    Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,value));
+    if(content!==undefined)node.textContent=content;
+    return node;
+  };
+  const width=w=>sx(w)-sx(D.zero);
+  const height=h=>sy(h)-sy(D.zero);
+  const point=p=>`${sx(p.x)},${sy(p.y)}`;
+
+  const rect=(item,extraClass)=>{
+    svg.appendChild(make("rect",{
+      x:sx(item.x),y:sy(item.y),
+      width:width(item.w),height:height(item.h),
+      rx:width(D.radius),ry:height(D.radius),
+      class:extraClass||item.cls
+    }));
+  };
+
+  const label=item=>{
+    svg.appendChild(make("text",{
+      x:sx(item.x),y:sy(item.y),
+      class:item.cls||"body-text",
+      "text-anchor":item.anchor||"middle"
+    },item.text));
+  };
+
+  const arrow=item=>{
+    svg.appendChild(make("polyline",{
+      points:item.points.map(point).join(" "),
+      class:item.line
+    }));
+    const reversed=[...item.points].reverse();
+    const [tip,previous]=reversed;
+    const angle=Math.atan2(tip.y-previous.y,tip.x-previous.x);
+    const back=D.head.length;
+    const wing=D.head.width;
+    const left={
+      x:tip.x-back*Math.cos(angle)+wing*Math.sin(angle),
+      y:tip.y-back*Math.sin(angle)-wing*Math.cos(angle)
+    };
+    const right={
+      x:tip.x-back*Math.cos(angle)-wing*Math.sin(angle),
+      y:tip.y-back*Math.sin(angle)+wing*Math.cos(angle)
+    };
+    svg.appendChild(make("polygon",{
+      points:[tip,left,right].map(point).join(" "),
+      class:item.head
+    }));
+    label(item.label);
+  };
+
+  D.panels.forEach(panel=>rect(panel));
+  D.headings.forEach(label);
+
+  D.separators.forEach(line=>{
+    svg.appendChild(make("line",{
+      x1:sx(line.a.x),y1:sy(line.a.y),
+      x2:sx(line.b.x),y2:sy(line.b.y),
+      class:"divider"
+    }));
+  });
+
+  D.boxes.forEach(box=>{
+    rect(box);
+    box.lines.forEach(line=>label({
+      x:box.x+box.w/D.two,
+      y:line.y,text:line.text,cls:line.cls,anchor:"middle"
+    }));
+  });
+
+  D.badges.forEach(badge=>{
+    rect(badge,badge.cls);
+    label({
+      x:badge.x+badge.w/D.two,
+      y:badge.y+badge.h/D.two+D.unit+D.unit,
+      text:badge.text,cls:"badge-text",anchor:"middle"
+    });
+  });
+
+  D.arrows.forEach(arrow);
+
+  rect(D.note,"note");
+  label({
+    x:D.note.tx,y:D.note.ty,text:D.note.text,
+    cls:"note-text",anchor:"middle"
+  });
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const fallback=document.getElementById("fallback");
+  if(svg)svg.hidden=true;
+  if(fallback)fallback.hidden=false;
+}
+</script>
+</body>
+</html>

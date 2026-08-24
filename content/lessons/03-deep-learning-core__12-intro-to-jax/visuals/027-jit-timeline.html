@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Первый и последующие вызовы JIT-функции</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #eef3f9;
+    --panel-next: #edf8f3;
+    --ink: #182235;
+    --muted: #536176;
+    --line: #718096;
+    --input-fill: #e5efff;
+    --input-stroke: #3972b9;
+    --trace-fill: #fff2d8;
+    --trace-stroke: #ad6b16;
+    --compile-fill: #f0e9ff;
+    --compile-stroke: #7752b5;
+    --code-fill: #daf4e5;
+    --code-stroke: #267b4a;
+    --cache-fill: #e7f8ee;
+    --result-fill: #e7eef8;
+    --result-stroke: #506b91;
+    --fast: #16794b;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #192231;
+      --panel-next: #14271f;
+      --ink: #edf3fb;
+      --muted: #b9c5d4;
+      --line: #8b99ad;
+      --input-fill: #172f4d;
+      --input-stroke: #72aaf0;
+      --trace-fill: #3e3019;
+      --trace-stroke: #e2a64c;
+      --compile-fill: #302647;
+      --compile-stroke: #b99ae9;
+      --code-fill: #173b29;
+      --code-stroke: #6ac18c;
+      --cache-fill: #183528;
+      --result-fill: #243248;
+      --result-stroke: #91a9cb;
+      --fast: #67d49a;
+    }
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .diagram-title {
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--bg);
+    shape-rendering: geometricPrecision;
+  }
+
+  .background {
+    fill: var(--bg);
+  }
+
+  .lane-first {
+    fill: var(--panel);
+  }
+
+  .lane-next {
+    fill: var(--panel-next);
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .box {
+    stroke-width: 2.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .input {
+    fill: var(--input-fill);
+    stroke: var(--input-stroke);
+  }
+
+  .python,
+  .trace {
+    fill: var(--trace-fill);
+    stroke: var(--trace-stroke);
+  }
+
+  .compile {
+    fill: var(--compile-fill);
+    stroke: var(--compile-stroke);
+  }
+
+  .machine {
+    fill: var(--code-fill);
+    stroke: var(--code-stroke);
+  }
+
+  .cache {
+    fill: var(--cache-fill);
+    stroke: var(--code-stroke);
+  }
+
+  .result {
+    fill: var(--result-fill);
+    stroke: var(--result-stroke);
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow-head {
+    fill: var(--line);
+  }
+
+  .fast-arrow {
+    stroke: var(--fast);
+    stroke-width: 4px;
+  }
+
+  .fast-head {
+    fill: var(--fast);
+  }
+
+  .lane-label {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .node-label {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .arrow-label {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .fast-label {
+    fill: var(--fast);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="diagram-title">Первый и последующие вызовы JIT-функции</div>
+
+<svg
+  id="jit-diagram"
+  viewBox="0 0 1200 440"
+  width="1200"
+  height="440"
+  preserveAspectRatio="xMidYMid meet"
+  role="img"
+  aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Пути первого и последующих вызовов JIT-функции</title>
+  <desc id="svg-desc">Первый вызов проходит Python, трассировку и XLA-компиляцию, сохраняет машинный код в кэше и выполняет его. Следующие совместимые вызовы сразу используют сохранённый код.</desc>
+  <g id="runtime-diagram"></g>
+</svg>
+
+<script>
+const DATA = [{
+  originX: 15,
+  originY: 10,
+  scaleX: 1,
+  scaleY: 1,
+
+  background: { x1: -15, y1: -10, x2: 1185, y2: 430 },
+  panels: [
+    { x1: 0, y1: 0, x2: 1170, y2: 252, className: "lane-first" },
+    { x1: 0, y1: 270, x2: 1170, y2: 382, className: "lane-next" }
+  ],
+  divider: { x1: 0, y1: 261, x2: 1170, y2: 261 },
+
+  headings: [
+    { x: 20, y: 27, text: "Первый вызов — подготовка исполняемого варианта" },
+    { x: 20, y: 297, text: "Следующие вызовы — короткий путь через кэш" }
+  ],
+
+  boxes: [
+    {
+      x1: 20, y1: 52, x2: 165, y2: 124, className: "input",
+      lines: [{ x: 92, y: 93, text: "32 примера" }]
+    },
+    {
+      x1: 205, y1: 52, x2: 345, y2: 124, className: "python",
+      lines: [{ x: 275, y: 93, text: "Python-функция" }]
+    },
+    {
+      x1: 385, y1: 52, x2: 535, y2: 124, className: "trace",
+      lines: [
+        { x: 460, y: 81, text: "Трассировка" },
+        { x: 460, y: 103, text: "операций" }
+      ]
+    },
+    {
+      x1: 575, y1: 52, x2: 725, y2: 124, className: "compile",
+      lines: [
+        { x: 650, y: 81, text: "XLA-" },
+        { x: 650, y: 103, text: "компиляция" }
+      ]
+    },
+    {
+      x1: 765, y1: 52, x2: 965, y2: 124, className: "machine",
+      lines: [
+        { x: 865, y: 81, text: "Машинный код" },
+        { x: 865, y: 103, text: "выполнение данных" }
+      ]
+    },
+    {
+      x1: 1025, y1: 52, x2: 1170, y2: 124, className: "result",
+      lines: [{ x: 1097, y: 93, text: "Результат" }]
+    },
+    {
+      x1: 765, y1: 166, x2: 965, y2: 232, className: "cache",
+      lines: [
+        { x: 865, y: 192, text: "Кэш" },
+        { x: 865, y: 214, text: "сохранённый вариант" }
+      ]
+    },
+    {
+      x1: 20, y1: 315, x2: 260, y2: 379, className: "input",
+      lines: [
+        { x: 140, y: 341, text: "Другие числа" },
+        { x: 140, y: 362, text: "совместимые тип и форма" }
+      ]
+    },
+    {
+      x1: 765, y1: 315, x2: 965, y2: 379, className: "machine",
+      lines: [
+        { x: 865, y: 341, text: "Сохранённый" },
+        { x: 865, y: 362, text: "машинный код" }
+      ]
+    },
+    {
+      x1: 1025, y1: 315, x2: 1170, y2: 379, className: "result",
+      lines: [{ x: 1097, y: 352, text: "Результат" }]
+    }
+  ],
+
+  arrows: [
+    {
+      x1: 165, y1: 88, x2: 205, y2: 88,
+      head: [{ x: 195, y: 82 }, { x: 205, y: 88 }, { x: 195, y: 94 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 345, y1: 88, x2: 385, y2: 88,
+      head: [{ x: 375, y: 82 }, { x: 385, y: 88 }, { x: 375, y: 94 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 535, y1: 88, x2: 575, y2: 88,
+      head: [{ x: 565, y: 82 }, { x: 575, y: 88 }, { x: 565, y: 94 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 725, y1: 88, x2: 765, y2: 88,
+      head: [{ x: 755, y: 82 }, { x: 765, y: 88 }, { x: 755, y: 94 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 965, y1: 88, x2: 1025, y2: 88,
+      head: [{ x: 1015, y: 82 }, { x: 1025, y: 88 }, { x: 1015, y: 94 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 865, y1: 124, x2: 865, y2: 166,
+      head: [{ x: 859, y: 156 }, { x: 865, y: 166 }, { x: 871, y: 156 }],
+      className: "arrow", headClass: "arrow-head"
+    },
+    {
+      x1: 865, y1: 232, x2: 865, y2: 315,
+      head: [{ x: 859, y: 305 }, { x: 865, y: 315 }, { x: 871, y: 305 }],
+      className: "arrow fast-arrow", headClass: "arrow-head fast-head"
+    },
+    {
+      x1: 260, y1: 347, x2: 765, y2: 347,
+      head: [{ x: 755, y: 341 }, { x: 765, y: 347 }, { x: 755, y: 353 }],
+      className: "arrow fast-arrow", headClass: "arrow-head fast-head"
+    },
+    {
+      x1: 965, y1: 347, x2: 1025, y2: 347,
+      head: [{ x: 1015, y: 341 }, { x: 1025, y: 347 }, { x: 1015, y: 353 }],
+      className: "arrow fast-arrow", headClass: "arrow-head fast-head"
+    }
+  ],
+
+  labels: [
+    {
+      x: 865, y: 145, dx: 14, dy: 0,
+      anchor: "start", className: "arrow-label",
+      text: "сохранить в кэш"
+    },
+    {
+      x: 865, y: 272, dx: 14, dy: 0,
+      anchor: "start", className: "fast-label",
+      text: "готовый вариант из кэша"
+    },
+    {
+      x: 512, y: 329, dx: 0, dy: 0,
+      anchor: "middle", className: "fast-label",
+      text: "попадание в кэш"
+    },
+    {
+      x: 512, y: 374, dx: 0, dy: 0,
+      anchor: "middle", className: "arrow-label",
+      text: "Python-тело, трассировка и компиляция не выполняются"
+    }
+  ],
+
+  note: {
+    x: 20, y: 416, dx: 0, dy: 0,
+    text: "Новая форма или тип → трассировка и XLA-компиляция нового варианта."
+  },
+
+  fallback: {
+    lines: [
+      { x: 30, y: 90, text: "Первый вызов: Python → трассировка → XLA-компиляция → машинный код." },
+      { x: 30, y: 135, text: "Следующие совместимые вызовы сразу запускают сохранённый машинный код." }
+    ]
+  }
+}];
+
+const [D] = DATA;
+const origin = { x: D.originX, y: D.originY };
+const scale = { x: D.scaleX, y: D.scaleY };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const NS = "http://www.w3.org/2000/svg";
+const root = document.getElementById("runtime-diagram");
+
+function svgElement(name, attributes) {
+  const element = document.createElementNS(NS, name);
+  Object.entries(attributes).forEach(([key, value]) => {
+    element.setAttribute(key, String(value));
+  });
+  return element;
+}
+
+function rect(item, className) {
+  return svgElement("rect", {
+    x: sx(item.x1),
+    y: sy(item.y1),
+    width: sx(item.x2) - sx(item.x1),
+    height: sy(item.y2) - sy(item.y1),
+    class: className
+  });
+}
+
+function line(item, className) {
+  return svgElement("line", {
+    x1: sx(item.x1),
+    y1: sy(item.y1),
+    x2: sx(item.x2),
+    y2: sy(item.y2),
+    class: className
+  });
+}
+
+function polygon(points, className) {
+  return svgElement("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: className
+  });
+}
+
+function textLine(item, className, anchor, dx, dy) {
+  const element = svgElement("text", {
+    x: sx(item.x),
+    y: sy(item.y),
+    dx: dx,
+    dy: dy,
+    "text-anchor": anchor,
+    class: className
+  });
+  element.textContent = item.text;
+  return element;
+}
+
+try {
+  root.appendChild(rect(D.background, "background"));
+
+  D.panels.forEach(panel => {
+    root.appendChild(rect(panel, panel.className));
+  });
+
+  root.appendChild(line(D.divider, "divider"));
+
+  D.headings.forEach(heading => {
+    root.appendChild(textLine(heading, "lane-label", "start", D.note.dx, D.note.dy));
+  });
+
+  D.boxes.forEach(box => {
+    root.appendChild(rect(box, `box ${box.className}`));
+    box.lines.forEach(label => {
+      root.appendChild(textLine(label, "node-label", "middle", D.note.dx, D.note.dy));
+    });
+  });
+
+  D.arrows.forEach(arrow => {
+    root.appendChild(line(arrow, arrow.className));
+    root.appendChild(polygon(arrow.head, arrow.headClass));
+  });
+
+  D.labels.forEach(label => {
+    root.appendChild(textLine(label, label.className, label.anchor, label.dx, label.dy));
+  });
+
+  root.appendChild(textLine(D.note, "note", "start", D.note.dx, D.note.dy));
+} catch (error) {
+  root.replaceChildren();
+  D.fallback.lines.forEach(item => {
+    root.appendChild(textLine(item, "fallback", "start", D.note.dx, D.note.dy));
+  });
+}
+</script>
+</body>
+</html>

@@ -115,6 +115,8 @@ export function countWords(text: string): number {
  */
 const WORDS_PER_STEP = 80;
 export const LAB_STEP_BUDGET = 10;
+export const LAB_MIN_STEPS = 8;
+export const LAB_MAX_STEPS = 12;
 
 function isLab(source: LessonSource): boolean {
   return source.ref.phaseNumber === 19 && source.ref.lessonNumber >= 20;
@@ -224,6 +226,11 @@ export async function generateLessonPlan(opts: {
       lastErrors = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     } else {
       lastErrors = validatePlan(parsed.data, source, written, budget);
+      if (lab && (parsed.data.length < LAB_MIN_STEPS || parsed.data.length > LAB_MAX_STEPS)) {
+        lastErrors.push(
+          `У практикума должно быть ${LAB_MIN_STEPS}–${LAB_MAX_STEPS} шагов, получено ${parsed.data.length}`,
+        );
+      }
       if (lastErrors.length === 0) {
         const plan: LessonPlan = {
           slug: source.ref.slug,

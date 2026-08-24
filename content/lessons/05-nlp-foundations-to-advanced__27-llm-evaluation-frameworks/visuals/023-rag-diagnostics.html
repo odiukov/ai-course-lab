@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как четыре метрики локализуют поломку RAG</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #eef4ff;
+    --ink: #172033;
+    --muted: #5e6b82;
+    --line: #c8d2e3;
+    --retriever: #2673d9;
+    --retriever-soft: #e9f2ff;
+    --generator: #7657d6;
+    --generator-soft: #f0ecff;
+    --good: #17795b;
+    --good-soft: #e2f5ed;
+    --bad: #b93d4d;
+    --bad-soft: #fdecef;
+    --accent: #b87000;
+    --accent-soft: #fff3d8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101521;
+      --panel: #181f2e;
+      --panel-soft: #1d2a40;
+      --ink: #edf2ff;
+      --muted: #aeb9ce;
+      --line: #39465d;
+      --retriever: #69a7ff;
+      --retriever-soft: #182d49;
+      --generator: #ad96ff;
+      --generator-soft: #292344;
+      --good: #65d1ad;
+      --good-soft: #17372f;
+      --bad: #ff8997;
+      --bad-soft: #43232b;
+      --accent: #ffc45c;
+      --accent-soft: #3d321d;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    background: var(--page);
+  }
+
+  figcaption {
+    padding: 10px 18px 6px;
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--ink);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--page);
+  }
+
+  .surface {
+    fill: var(--page);
+  }
+
+  .component {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .metric {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .retriever-tint {
+    fill: var(--retriever-soft);
+  }
+
+  .generator-tint {
+    fill: var(--generator-soft);
+  }
+
+  .retriever-bar,
+  .retriever-line {
+    fill: var(--retriever);
+    stroke: var(--retriever);
+  }
+
+  .generator-bar,
+  .generator-line {
+    fill: var(--generator);
+    stroke: var(--generator);
+  }
+
+  .example {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+
+  .good-box {
+    fill: var(--good-soft);
+    stroke: var(--good);
+    stroke-width: 1.5;
+  }
+
+  .bad-box {
+    fill: var(--bad-soft);
+    stroke: var(--bad);
+    stroke-width: 1.5;
+  }
+
+  .good-line {
+    fill: var(--good);
+    stroke: var(--good);
+  }
+
+  .bad-line {
+    fill: var(--bad);
+    stroke: var(--bad);
+  }
+
+  .flow {
+    stroke: var(--muted);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .component-name {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .component-hint {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .metric-name {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .metric-question {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .metric-result {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .flow-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .example-label {
+    fill: var(--accent);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .score {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .score-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .diagnosis {
+    fill: var(--bad);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Как четыре метрики локализуют поломку RAG</figcaption>
+  <svg id="diagram"
+       viewBox="0 0 960 450"
+       width="960"
+       height="450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Матрица метрик ретривера и генератора с примером высокого context recall и низкого faithfulness">
+    <noscript>
+      Четыре метрики делятся на две пары: context precision и context recall
+      проверяют ретривер, faithfulness и answer relevance — генератор.
+      Высокий context recall при низком faithfulness указывает на ошибку генератора.
+    </noscript>
+  </svg>
+</figure>
+
+<script>
+const data = Object.freeze([
+  Object.freeze({
+    zero: 0,
+    canvas: { x: 0, y: 0, w: 960, h: 450 },
+    heading: { x: 35, y: 35 },
+    flow: {
+      x1: 360, y1: 70, x2: 600, y2: 70,
+      head: [
+        { x: 600, y: 70 },
+        { x: 588, y: 63 },
+        { x: 588, y: 77 }
+      ],
+      labelX: 374, labelY: 57
+    },
+    groups: [
+      {
+        kind: "retriever",
+        x: 35, y: 88, w: 425, h: 238,
+        titleX: 57, titleY: 118,
+        hintX: 57, hintY: 136,
+        title: "Ретривер",
+        hint: "ранний этап · выбирает контекст",
+        metrics: [
+          {
+            x: 55, y: 151, w: 385, h: 70, barW: 7,
+            nameX: 78, nameY: 177,
+            questionX: 78, questionY: 198,
+            resultX: 270, resultY: 177,
+            name: "Context precision",
+            question: "Среди найденного нет лишнего?",
+            result: "низкая → принёс шум"
+          },
+          {
+            x: 55, y: 236, w: 385, h: 70, barW: 7,
+            nameX: 78, nameY: 262,
+            questionX: 78, questionY: 283,
+            resultX: 270, resultY: 262,
+            name: "Context recall",
+            question: "Все нужные факты найдены?",
+            result: "низкая → потерял факты"
+          }
+        ]
+      },
+      {
+        kind: "generator",
+        x: 500, y: 88, w: 425, h: 238,
+        titleX: 522, titleY: 118,
+        hintX: 522, hintY: 136,
+        title: "Генератор",
+        hint: "поздний этап · формирует ответ",
+        metrics: [
+          {
+            x: 520, y: 151, w: 385, h: 70, barW: 7,
+            nameX: 543, nameY: 177,
+            questionX: 543, questionY: 198,
+            resultX: 735, resultY: 177,
+            name: "Faithfulness",
+            question: "Каждый факт есть в контексте?",
+            result: "низкая → сочиняет"
+          },
+          {
+            x: 520, y: 236, w: 385, h: 70, barW: 7,
+            nameX: 543, nameY: 262,
+            questionX: 543, questionY: 283,
+            resultX: 735, resultY: 262,
+            name: "Answer relevance",
+            question: "Ответ остаётся по вопросу?",
+            result: "низкая → уходит в сторону"
+          }
+        ]
+      }
+    ],
+    example: {
+      x: 35, y: 344, w: 890, h: 88,
+      labelX: 55, labelY: 365,
+      left: {
+        x: 55, y: 377, w: 250, h: 40,
+        scoreX: 72, scoreY: 401,
+        text: "Context recall 0.91",
+        noteX: 183, noteY: 401,
+        note: "высокий"
+      },
+      firstArrow: {
+        x1: 318, y1: 397, x2: 414, y2: 397,
+        head: [
+          { x: 414, y: 397 },
+          { x: 403, y: 390 },
+          { x: 403, y: 404 }
+        ],
+        labelX: 318, labelY: 382,
+        label: "контекст полный"
+      },
+      middle: {
+        x: 428, y: 377, w: 245, h: 40,
+        scoreX: 445, scoreY: 401,
+        text: "Faithfulness 0.55",
+        noteX: 574, noteY: 401,
+        note: "низкий"
+      },
+      secondArrow: {
+        x1: 686, y1: 397, x2: 752, y2: 397,
+        head: [
+          { x: 752, y: 397 },
+          { x: 741, y: 390 },
+          { x: 741, y: 404 }
+        ],
+        labelX: 686, labelY: 382,
+        label: "значит"
+      },
+      diagnosis: {
+        x: 766, y: 377, w: 139, h: 40,
+        textX: 835, textY: 394,
+        subX: 835, subY: 410,
+        text: "ОШИБКА",
+        sub: "ГЕНЕРАТОРА"
+      }
+    }
+  })
+]);
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const [scene] = data;
+const labelPadding = 8;
+const svg = document.getElementById("diagram");
+const namespace = "http://www.w3.org/2000/svg";
+
+function node(name, attributes = {}) {
+  const item = document.createElementNS(namespace, name);
+  for (const [key, value] of Object.entries(attributes)) {
+    item.setAttribute(key, value);
+  }
+  return item;
+}
+
+function add(parent, name, attributes = {}) {
+  const item = node(name, attributes);
+  parent.appendChild(item);
+  return item;
+}
+
+function rectangle(parent, box, className) {
+  return add(parent, "rect", {
+    x: sx(box.x),
+    y: sy(box.y),
+    width: sx(box.w) - sx(scene.zero),
+    height: sy(box.h) - sy(scene.zero),
+    class: className
+  });
+}
+
+function line(parent, spec, className) {
+  return add(parent, "line", {
+    x1: sx(spec.x1),
+    y1: sy(spec.y1),
+    x2: sx(spec.x2),
+    y2: sy(spec.y2),
+    class: className
+  });
+}
+
+function polygon(parent, points, className) {
+  const mapped = points
+    .map(point => `${sx(point.x)},${sy(point.y)}`)
+    .join(" ");
+  return add(parent, "polygon", {
+    points: mapped,
+    class: className
+  });
+}
+
+function text(parent, value, x, y, className, anchor = "start") {
+  const item = add(parent, "text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor
+  });
+  item.textContent = value;
+  return item;
+}
+
+function metricCard(parent, metric, kind) {
+  rectangle(parent, metric, "metric");
+  rectangle(parent, {
+    x: metric.x,
+    y: metric.y,
+    w: metric.barW,
+    h: metric.h
+  }, `${kind}-bar`);
+
+  text(
+    parent,
+    metric.name,
+    metric.nameX,
+    metric.nameY,
+    "metric-name"
+  );
+  text(
+    parent,
+    metric.question,
+    metric.questionX,
+    metric.questionY,
+    "metric-question"
+  );
+  text(
+    parent,
+    metric.result,
+    metric.resultX,
+    metric.resultY,
+    "metric-result"
+  );
+}
+
+function component(parent, group) {
+  rectangle(parent, group, `component ${group.kind}-tint`);
+  text(
+    parent,
+    group.title,
+    group.titleX,
+    group.titleY,
+    "component-name"
+  );
+  text(
+    parent,
+    group.hint,
+    group.hintX,
+    group.hintY,
+    "component-hint"
+  );
+
+  for (const metric of group.metrics) {
+    metricCard(parent, metric, group.kind);
+  }
+}
+
+function arrow(parent, spec, lineClass, headClass) {
+  line(parent, spec, lineClass);
+  polygon(parent, spec.head, headClass);
+}
+
+function build() {
+  rectangle(svg, scene.canvas, "surface");
+
+  text(
+    svg,
+    "ЧЕТЫРЕ ИНДИКАТОРА → ДВА МЕСТА ПОИСКА",
+    scene.heading.x,
+    scene.heading.y,
+    "title"
+  );
+
+  arrow(svg, scene.flow, "flow", "flow-label");
+  const flowLabel = text(
+    svg,
+    "найденный контекст",
+    scene.flow.labelX,
+    scene.flow.labelY,
+    "flow-label"
+  );
+  flowLabel.setAttribute("dx", labelPadding);
+
+  for (const group of scene.groups) {
+    component(svg, group);
+  }
+
+  const example = scene.example;
+  rectangle(svg, example, "example");
+  text(
+    svg,
+    "ПОКАЗАТЕЛЬНЫЙ СЛУЧАЙ",
+    example.labelX,
+    example.labelY,
+    "example-label"
+  );
+
+  rectangle(svg, example.left, "good-box");
+  text(
+    svg,
+    example.left.text,
+    example.left.scoreX,
+    example.left.scoreY,
+    "score"
+  );
+  text(
+    svg,
+    example.left.note,
+    example.left.noteX,
+    example.left.noteY,
+    "score-note"
+  );
+
+  arrow(
+    svg,
+    example.firstArrow,
+    "flow",
+    "flow-label"
+  );
+  text(
+    svg,
+    example.firstArrow.label,
+    example.firstArrow.labelX,
+    example.firstArrow.labelY,
+    "flow-label"
+  );
+
+  rectangle(svg, example.middle, "bad-box");
+  text(
+    svg,
+    example.middle.text,
+    example.middle.scoreX,
+    example.middle.scoreY,
+    "score"
+  );
+  text(
+    svg,
+    example.middle.note,
+    example.middle.noteX,
+    example.middle.noteY,
+    "score-note"
+  );
+
+  arrow(
+    svg,
+    example.secondArrow,
+    "flow",
+    "flow-label"
+  );
+  text(
+    svg,
+    example.secondArrow.label,
+    example.secondArrow.labelX,
+    example.secondArrow.labelY,
+    "flow-label"
+  );
+
+  rectangle(svg, example.diagnosis, "bad-box");
+  text(
+    svg,
+    example.diagnosis.text,
+    example.diagnosis.textX,
+    example.diagnosis.textY,
+    "diagnosis",
+    "middle"
+  );
+  text(
+    svg,
+    example.diagnosis.sub,
+    example.diagnosis.subX,
+    example.diagnosis.subY,
+    "diagnosis",
+    "middle"
+  );
+}
+
+try {
+  build();
+} catch (error) {
+  while (svg.firstChild) {
+    svg.removeChild(svg.firstChild);
+  }
+
+  rectangle(svg, scene.canvas, "surface");
+  text(
+    svg,
+    "Схема должна показать: context precision и context recall относятся к ретриверу;",
+    scene.heading.x,
+    scene.heading.y,
+    "fallback"
+  );
+  text(
+    svg,
+    "faithfulness и answer relevance — к генератору.",
+    scene.heading.x,
+    scene.groups[Symbol.iterator]().next().value.titleY,
+    "fallback"
+  );
+  text(
+    svg,
+    "Высокий context recall 0.91 при низком faithfulness 0.55 указывает на ошибку генератора.",
+    scene.heading.x,
+    scene.example.labelY,
+    "fallback"
+  );
+}
+</script>
+</body>
+</html>

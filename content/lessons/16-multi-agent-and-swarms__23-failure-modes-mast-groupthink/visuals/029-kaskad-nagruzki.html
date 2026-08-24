@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Лестница каскадной перегрузки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f7fb;
+      --panel: #ffffff;
+      --card: #ffffff;
+      --card-strong: #fff4f2;
+      --ink: #172033;
+      --muted: #657087;
+      --line: #aeb8c8;
+      --border: #d9dfeb;
+      --red: #d43d35;
+      --amber: #c87912;
+      --blue: #3972c9;
+      --loop: #aa2f53;
+      --strip: #f1f4f9;
+      --shadow: #ccd4e2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --panel: #171d29;
+        --card: #202837;
+        --card-strong: #39252a;
+        --ink: #f3f6fb;
+        --muted: #aeb8ca;
+        --line: #667288;
+        --border: #3d485b;
+        --red: #ff746c;
+        --amber: #f1b45c;
+        --blue: #72a6f2;
+        --loop: #f080a4;
+        --strip: #202736;
+        --shadow: #0b0e14;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 960px;
+      margin: auto;
+    }
+
+    h1 {
+      margin: 0;
+      padding: 10px 14px 8px;
+      font-size: 22px;
+      line-height: 1.15;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 448px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .connector.risk,
+    .arrow-head.risk {
+      stroke: var(--red);
+      fill: var(--red);
+    }
+
+    .connector.retry,
+    .arrow-head.retry {
+      stroke: var(--amber);
+      fill: var(--amber);
+    }
+
+    .connector.work,
+    .arrow-head.work {
+      stroke: var(--blue);
+      fill: var(--blue);
+    }
+
+    .connector.loop,
+    .arrow-head.loop {
+      stroke: var(--loop);
+      fill: var(--loop);
+    }
+
+    .card-shadow {
+      fill: var(--shadow);
+    }
+
+    .card {
+      fill: var(--card);
+      stroke: var(--border);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .card.failure {
+      fill: var(--card-strong);
+      stroke: var(--red);
+    }
+
+    .accent.risk {
+      fill: var(--red);
+    }
+
+    .accent.retry {
+      fill: var(--amber);
+    }
+
+    .accent.work {
+      fill: var(--blue);
+    }
+
+    .accent.loop {
+      fill: var(--loop);
+    }
+
+    .eyebrow {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .main-label {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .metric {
+      fill: var(--red);
+      font-size: 25px;
+      font-weight: bold;
+    }
+
+    .arrow-label {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .loop-label {
+      fill: var(--loop);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .summary-strip {
+      fill: var(--strip);
+      stroke: var(--border);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .summary {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 17px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Лестница каскадной перегрузки</h1>
+    <svg
+      viewBox="0 0 960 448"
+      width="960"
+      height="448"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Цепочка от десяти процентов ошибок платежей через повторы и перегрузку
+        склада до тайм-аутов, десятикратной нагрузки и падения кластера.
+      </desc>
+      <g id="drawing"></g>
+      <text id="fallback" class="fallback" hidden>
+        Схема: 10% ошибок платежей → повторы заказов → повторные проверки
+        склада → нагрузка 2× → тайм-ауты → новые повторы → нагрузка 10× →
+        падение кластера.
+      </text>
+    </svg>
+  </main>
+
+  <script>
+    const diagram = Object.freeze({
+      canvas: { width: 960, height: 448 },
+      units: { zero: 0, one: 1, two: 2 },
+      card: {
+        width: 300,
+        height: 66,
+        radius: 10,
+        accentWidth: 7,
+        shadowOffset: 4
+      },
+      text: {
+        leftPad: 18,
+        rightPad: 20,
+        eyebrowDrop: 20,
+        mainDrop: 45,
+        metricDrop: 46
+      },
+      arrow: {
+        headLength: 12,
+        headHalfWidth: 7
+      },
+      nodes: [
+        {
+          x: 100, y: 25,
+          eyebrow: "ПЕРВИЧНАЯ ОШИБКА",
+          label: "Ошибки платежей",
+          metric: "10%",
+          tone: "risk",
+          failure: false
+        },
+        {
+          x: 560, y: 25,
+          eyebrow: "РЕАКЦИЯ НА СБОЙ",
+          label: "Повторы заказов",
+          metric: "",
+          tone: "retry",
+          failure: false
+        },
+        {
+          x: 100, y: 126,
+          eyebrow: "ДОПОЛНИТЕЛЬНАЯ РАБОТА",
+          label: "Повторные проверки склада",
+          metric: "",
+          tone: "work",
+          failure: false
+        },
+        {
+          x: 560, y: 126,
+          eyebrow: "ПЕРЕХОД ЧЕРЕЗ ПРЕДЕЛ",
+          label: "Нагрузка склада",
+          metric: "2×",
+          tone: "retry",
+          failure: false
+        },
+        {
+          x: 100, y: 227,
+          eyebrow: "НОВЫЙ ОТКАЗ",
+          label: "Тайм-ауты",
+          metric: "",
+          tone: "risk",
+          failure: true
+        },
+        {
+          x: 560, y: 227,
+          eyebrow: "ПОЧТИ ВСЕ ЗАКАЗЫ",
+          label: "Новые повторы",
+          metric: "",
+          tone: "retry",
+          failure: false
+        },
+        {
+          x: 100, y: 328,
+          eyebrow: "КАСКАД РАСШИРЯЕТСЯ",
+          label: "Нагрузка склада",
+          metric: "10×",
+          tone: "loop",
+          failure: true
+        },
+        {
+          x: 560, y: 328,
+          eyebrow: "ИТОГ",
+          label: "Падение кластера",
+          metric: "",
+          tone: "risk",
+          failure: true
+        }
+      ],
+      arrows: [
+        {
+          tone: "risk",
+          points: [{ x: 400, y: 58 }, { x: 560, y: 58 }]
+        },
+        {
+          tone: "retry",
+          points: [
+            { x: 710, y: 91 },
+            { x: 710, y: 108 },
+            { x: 250, y: 108 },
+            { x: 250, y: 126 }
+          ]
+        },
+        {
+          tone: "work",
+          points: [{ x: 400, y: 159 }, { x: 560, y: 159 }]
+        },
+        {
+          tone: "risk",
+          points: [
+            { x: 710, y: 192 },
+            { x: 710, y: 209 },
+            { x: 250, y: 209 },
+            { x: 250, y: 227 }
+          ]
+        },
+        {
+          tone: "retry",
+          points: [{ x: 400, y: 260 }, { x: 560, y: 260 }]
+        },
+        {
+          tone: "loop",
+          points: [
+            { x: 710, y: 293 },
+            { x: 710, y: 310 },
+            { x: 250, y: 310 },
+            { x: 250, y: 328 }
+          ]
+        },
+        {
+          tone: "risk",
+          points: [{ x: 400, y: 361 }, { x: 560, y: 361 }]
+        }
+      ],
+      feedback: {
+        tone: "loop",
+        points: [
+          { x: 100, y: 361 },
+          { x: 42, y: 361 },
+          { x: 42, y: 260 },
+          { x: 100, y: 260 }
+        ]
+      },
+      arrowLabels: [
+        { x: 480, y: 48, text: "сбой → повтор" },
+        { x: 480, y: 149, text: "повтор → лишняя работа" },
+        { x: 480, y: 250, text: "тайм-аут → повтор" },
+        { x: 480, y: 351, text: "усиление" }
+      ],
+      loopLabel: {
+        x: 25,
+        y: 310,
+        rotation: -90,
+        text: "перегрузка снова создаёт тайм-ауты"
+      },
+      summary: {
+        x: 92,
+        y: 409,
+        width: 776,
+        height: 27,
+        radius: 8,
+        textX: 480,
+        textY: 428,
+        text: "Петля усиления: перегрузка → тайм-ауты → повторы → ещё большая перегрузка"
+      },
+      fallback: { x: 480, y: 224 }
+    });
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svgNS = "http://www.w3.org/2000/svg";
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+
+      const make = (name, attributes = {}) => {
+        const element = document.createElementNS(svgNS, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+        return element;
+      };
+
+      const addText = (parent, x, y, value, className, anchor) => {
+        const text = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        });
+        text.textContent = value;
+        parent.appendChild(text);
+        return text;
+      };
+
+      const arrow = spec => {
+        let firstPoint = true;
+        const pathData = spec.points.map(point => {
+          const command = firstPoint ? "M" : "L";
+          firstPoint = false;
+          return `${command} ${sx(point.x)} ${sy(point.y)}`;
+        }).join(" ");
+
+        drawing.appendChild(make("path", {
+          d: pathData,
+          class: `connector ${spec.tone}`
+        }));
+
+        const end = spec.points.at(-diagram.units.one);
+        const beforeEnd = spec.points.at(-diagram.units.two);
+        const dx = end.x - beforeEnd.x;
+        const dy = end.y - beforeEnd.y;
+        const length = Math.sqrt(dx * dx + dy * dy) || diagram.units.one;
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = end.x - ux * diagram.arrow.headLength;
+        const baseY = end.y - uy * diagram.arrow.headLength;
+        const sideX = -uy * diagram.arrow.headHalfWidth;
+        const sideY = ux * diagram.arrow.headHalfWidth;
+
+        const vertices = [
+          { x: end.x, y: end.y },
+          { x: baseX + sideX, y: baseY + sideY },
+          { x: baseX - sideX, y: baseY - sideY }
+        ];
+
+        drawing.appendChild(make("polygon", {
+          points: vertices.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          class: `arrow-head ${spec.tone}`
+        }));
+      };
+
+      arrow(diagram.feedback);
+      diagram.arrows.forEach(arrow);
+
+      diagram.nodes.forEach(node => {
+        const group = make("g", {
+          "aria-label": [node.eyebrow, node.label, node.metric]
+            .filter(Boolean)
+            .join(": ")
+        });
+
+        group.appendChild(make("rect", {
+          x: sx(node.x + diagram.card.shadowOffset),
+          y: sy(node.y + diagram.card.shadowOffset),
+          width: sx(diagram.card.width) - sx(diagram.units.zero),
+          height: sy(diagram.card.height) - sy(diagram.units.zero),
+          rx: sx(diagram.card.radius) - sx(diagram.units.zero),
+          ry: sy(diagram.card.radius) - sy(diagram.units.zero),
+          class: "card-shadow"
+        }));
+
+        group.appendChild(make("rect", {
+          x: sx(node.x),
+          y: sy(node.y),
+          width: sx(diagram.card.width) - sx(diagram.units.zero),
+          height: sy(diagram.card.height) - sy(diagram.units.zero),
+          rx: sx(diagram.card.radius) - sx(diagram.units.zero),
+          ry: sy(diagram.card.radius) - sy(diagram.units.zero),
+          class: node.failure ? "card failure" : "card"
+        }));
+
+        group.appendChild(make("rect", {
+          x: sx(node.x),
+          y: sy(node.y),
+          width: sx(diagram.card.accentWidth) - sx(diagram.units.zero),
+          height: sy(diagram.card.height) - sy(diagram.units.zero),
+          rx: sx(diagram.card.radius) - sx(diagram.units.zero),
+          ry: sy(diagram.card.radius) - sy(diagram.units.zero),
+          class: `accent ${node.tone}`
+        }));
+
+        addText(
+          group,
+          node.x + diagram.text.leftPad,
+          node.y + diagram.text.eyebrowDrop,
+          node.eyebrow,
+          "eyebrow",
+          "start"
+        );
+
+        addText(
+          group,
+          node.x + diagram.text.leftPad,
+          node.y + diagram.text.mainDrop,
+          node.label,
+          "main-label",
+          "start"
+        );
+
+        if (node.metric) {
+          addText(
+            group,
+            node.x + diagram.card.width - diagram.text.rightPad,
+            node.y + diagram.text.metricDrop,
+            node.metric,
+            "metric",
+            "end"
+          );
+        }
+
+        drawing.appendChild(group);
+      });
+
+      diagram.arrowLabels.forEach(label => {
+        addText(
+          drawing,
+          label.x,
+          label.y,
+          label.text,
+          "arrow-label",
+          "middle"
+        );
+      });
+
+      const loopText = addText(
+        drawing,
+        diagram.loopLabel.x,
+        diagram.loopLabel.y,
+        diagram.loopLabel.text,
+        "loop-label",
+        "middle"
+      );
+
+      loopText.setAttribute(
+        "transform",
+        `rotate(${diagram.loopLabel.rotation} ${sx(diagram.loopLabel.x)} ${sy(diagram.loopLabel.y)})`
+      );
+
+      drawing.appendChild(make("rect", {
+        x: sx(diagram.summary.x),
+        y: sy(diagram.summary.y),
+        width: sx(diagram.summary.width) - sx(diagram.units.zero),
+        height: sy(diagram.summary.height) - sy(diagram.units.zero),
+        rx: sx(diagram.summary.radius) - sx(diagram.units.zero),
+        ry: sy(diagram.summary.radius) - sy(diagram.units.zero),
+        class: "summary-strip"
+      }));
+
+      addText(
+        drawing,
+        diagram.summary.textX,
+        diagram.summary.textY,
+        diagram.summary.text,
+        "summary",
+        "middle"
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      drawing.replaceChildren();
+      fallback.setAttribute("x", sx(diagram.fallback.x));
+      fallback.setAttribute("y", sy(diagram.fallback.y));
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

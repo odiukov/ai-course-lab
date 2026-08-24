@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Карта ландшафта потерь</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b646e; --line:#8a94a0;
+    --high:#c94f3d; --saddle:#b07d1a; --local:#2f7fb0; --global:#2a8a55;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8ecf1; --muted:#9aa5b1; --line:#6c7885;
+      --high:#e8836f; --saddle:#e0b34a; --local:#66b6e0; --global:#5fc98c;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 10px 10px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  text{fill:var(--fg);font-family:inherit;}
+  .mut{fill:var(--muted);}
+  .fail{font-size:13px;color:var(--fg);line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Карта ландшафта потерь: линии равных потерь</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    var NS="http://www.w3.org/2000/svg";
+    var W=760, H=470;
+
+    // ---- данные схемы (модельные координаты) ----
+    var D={
+      axis:{x0:0,x1:12,y0:0,y1:7},
+      high:{c:[1.7,5.6], rings:[0.55,1.05,1.55,2.05]},           // область высоких потерь
+      saddle:{c:[6.0,3.5], arm:1.35},                             // седло
+      local:{c:[3.6,1.7], rings:[0.35,0.7,1.05]},                 // локальный минимум
+      global:{c:[9.4,1.9], rings:[0.4,0.85,1.3,1.75]},            // глобальный минимум
+      barrier:{a:[4.6,1.6], b:[8.4,1.85], top:[6.5,2.5]},         // пологий барьер
+      plateau:{c:[9.9,5.5], rings:[1.1,2.2]}                      // плато: линии редкие
+    };
+
+    // ---- одна пара функций перевода ----
+    var origin={x:44,y:H-38}, scale={x:58,y:58};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y - y*scale.y; }
+
+    var svg=document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox","0 0 "+W+" "+H);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","Карта ландшафта потерь");
+    host.appendChild(svg);
+
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle","font-size":size||13});
+      if(cls)t.setAttribute("class",cls);
+      t.textContent=s; return t;
+    }
+    // эллипс равных потерь
+    function ring(cx,cy,rx,ry,color,w,rot){
+      el("ellipse",{cx:sx(cx),cy:sy(cy),
+        rx:Math.abs(sx(rx)-sx(0)),ry:Math.abs(sy(ry)-sy(0)),
+        fill:"none",stroke:color,"stroke-width":w||1.4,
+        transform:"rotate("+(rot||0)+","+sx(cx)+","+sy(cy)+")"});
+    }
+    function line(p,q,color,w,dash){
+      var e=el("line",{x1:sx(p[0]),y1:sy(p[1]),x2:sx(q[0]),y2:sy(q[1]),
+        stroke:color,"stroke-width":w||1.4,"stroke-linecap":"round"});
+      if(dash)e.setAttribute("stroke-dasharray",dash);
+      return e;
+    }
+    function dot(p,color,r){
+      el("circle",{cx:sx(p[0]),cy:sy(p[1]),r:r||4,fill:color});
+    }
+    function path(pts,color,w,dash){
+      var d="";
+      for(var i=0;i<pts.length;i++) d+=(i?" L":"M")+sx(pts[i][0])+" "+sy(pts[i][1]);
+      var e=el("path",{d:d,fill:"none",stroke:color,"stroke-width":w||1.4,"stroke-linejoin":"round"});
+      if(dash)e.setAttribute("stroke-dasharray",dash);
+      return e;
+    }
+
+    var A=D.axis;
+    // рамка карты
+    el("rect",{x:sx(A.x0),y:sy(A.y1),
+      width:sx(A.x1)-sx(A.x0),height:sy(A.y0)-sy(A.y1),
+      fill:"none",stroke:"var(--line)","stroke-width":1});
+
+    // оси весов
+    line([A.x0,A.y0],[A.x1,A.y0],"var(--muted)",1.4);
+    line([A.x0,A.y0],[A.x0,A.y1],"var(--muted)",1.4);
+    txt(sx(A.x1),sy(A.y0)+20,"вес w₁","end","mut",12);
+    txt(sx(A.x0)-8,sy(A.y1)+12,"вес w₂","end","mut",12);
+
+    // --- плато: линии расползлись, градиент мал ---
+    var P=D.plateau;
+    for(var i=0;i<P.rings.length;i++) ring(P.c[0],P.c[1],P.rings[i],P.rings[i]*0.62,"var(--line)",1.1,-15);
+    txt(sx(P.c[0]),sy(P.c[1])+5,"плато","middle","mut",12);
+
+    // --- область высоких потерь: линии часто-часто ---
+    var Hg=D.high;
+    for(var i=0;i<Hg.rings.length;i++) ring(Hg.c[0],Hg.c[1],Hg.rings[i],Hg.rings[i]*0.78,"var(--high)",1.5,25);
+    dot(Hg.c,"var(--high)",4.5);
+    txt(sx(Hg.c[0]),sy(Hg.c[1]+Hg.rings[3]*0.78)-10,"высокие потери","middle",null,13);
+    txt(sx(Hg.c[0]),sy(Hg.c[1]+Hg.rings[3]*0.78)+6,"линии часто — склон крутой","middle","mut",11.5);
+
+    // --- седло: линии крестом ---
+    var S=D.saddle, a=S.arm;
+    for(var k=1;k<=3;k++){
+      var s=k*0.42;
+      path([[S.c[0]-a,S.c[1]-a*0.72-s],[S.c[0],S.c[1]-s],[S.c[0]+a,S.c[1]-a*0.72-s]],"var(--saddle)",1.3);
+      path([[S.c[0]-a,S.c[1]+a*0.72+s],[S.c[0],S.c[1]+s],[S.c[0]+a,S.c[1]+a*0.72+s]],"var(--saddle)",1.3);
+    }
+    dot(S.c,"var(--saddle)",4.5);
+    // стрелки направлений: вниз в одну сторону, вверх в другую (подписи у хвоста)
+    line([S.c[0]-a*0.85,S.c[1]],[S.c[0]-0.25,S.c[1]],"var(--saddle)",1.4);
+    path([[S.c[0]-0.55,S.c[1]+0.17],[S.c[0]-0.2,S.c[1]],[S.c[0]-0.55,S.c[1]-0.17]],"var(--saddle)",1.4);
+    txt(sx(S.c[0]-a*0.85)-6,sy(S.c[1])+4,"вниз","end","mut",11.5);
+    line([S.c[0],S.c[1]+0.3],[S.c[0],S.c[1]+a*0.95],"var(--saddle)",1.4);
+    path([[S.c[0]-0.15,S.c[1]+a*0.6],[S.c[0],S.c[1]+a*0.95],[S.c[0]+0.15,S.c[1]+a*0.6]],"var(--saddle)",1.4);
+    txt(sx(S.c[0])+8,sy(S.c[1]+a*0.95)+4,"вверх","start","mut",11.5);
+    txt(sx(S.c[0]+a)+8,sy(S.c[1]-0.15),"седло","start",null,13);
+
+    // --- локальный минимум ---
+    var L=D.local;
+    for(var i=0;i<L.rings.length;i++) ring(L.c[0],L.c[1],L.rings[i],L.rings[i]*0.72,"var(--local)",1.4);
+    dot(L.c,"var(--local)",4.5);
+    txt(sx(L.c[0]),sy(L.c[1]-L.rings[2]*0.72)+18,"локальный минимум","middle",null,13);
+
+    // --- глобальный минимум ---
+    var G=D.global;
+    for(var i=0;i<G.rings.length;i++) ring(G.c[0],G.c[1],G.rings[i],G.rings[i]*0.7,"var(--global)",1.4);
+    dot(G.c,"var(--global)",5);
+    txt(sx(G.c[0]),sy(G.c[1]-G.rings[3]*0.7)+18,"глобальный минимум","middle",null,13);
+    txt(sx(G.c[0]),sy(G.c[1]-G.rings[3]*0.7)+34,"дно ниже","middle","mut",11.5);
+
+    // --- пологий барьер между двумя минимумами ---
+    var B=D.barrier;
+    path([B.a,[ (B.a[0]+B.top[0])/2, B.top[1]-0.12 ],B.top,
+          [ (B.b[0]+B.top[0])/2, B.top[1]-0.12 ],B.b],"var(--muted)",1.8,"7 5");
+    dot(B.top,"var(--muted)",3.5);
+    txt(sx(B.top[0]),sy(B.top[1])-10,"пологий барьер","middle",null,13);
+    txt(sx(B.top[0]),sy(B.top[1])-26,"линии редкие — градиент мал","middle","mut",11.5);
+
+    // --- легенда строкой под схемой ---
+    var ly=A.y0-0.42;
+    txt(sx(A.x0),sy(ly),
+      "Линия соединяет точки с одинаковыми потерями. Густо — крутой склон; редко — почти плоско.",
+      "start","mut",12);
+  }catch(e){
+    host.innerHTML='<p class="fail">Схема должна была показать карту линий равных потерь: '
+      +'слева вверху область высоких потерь (линии сгущены), в центре седловая точка '
+      +'(линии крестом: вниз в одну сторону, вверх в другую), внизу слева локальный минимум '
+      +'и внизу справа более глубокий глобальный минимум, а между двумя минимумами — '
+      +'пологий барьер, где линии расходятся широко и градиент мал.</p>';
+  }
+})();
+</script>
+</body>
+</html>

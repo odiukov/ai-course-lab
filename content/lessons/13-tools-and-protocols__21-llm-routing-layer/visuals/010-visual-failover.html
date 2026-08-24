@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Каскад failover</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d1f22; --line:#3b3f45; --muted:#6b7078;
+    --box:#ffffff; --stop:#b3261e; --stopbg:#fdeceb; --acc:#1a6b57;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171a; --fg:#e8e9ea; --line:#a8b0b8; --muted:#98a0a8;
+      --box:#1d2126; --stop:#f2867c; --stopbg:#2c1d1d; --acc:#68d3b3;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;}
+  .wrap{max-width:660px;margin:0 auto;padding:10px 12px 14px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;background:var(--bg);}
+  .legend{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:6px;}
+  .fail{font-size:13px;color:var(--fg);line-height:1.5;}
+  .box{fill:var(--box);stroke:var(--line);}
+  .boxstop{fill:var(--stopbg);stroke:var(--stop);}
+  .nodetext{fill:var(--fg);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;}
+  .stoptext{fill:var(--stop);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;}
+  .edge{stroke:var(--line);fill:none;}
+  .head{fill:var(--line);}
+  .cond{fill:var(--stop);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;font-weight:600;}
+  .spine{stroke:var(--acc);fill:none;}
+  .dash{stroke:var(--muted);fill:none;stroke-dasharray:3 3;}
+  .dot{fill:var(--acc);}
+  .dotnum{fill:var(--bg);font-size:10px;font-weight:700;}
+  .cnt{fill:var(--acc);font-size:12.5px;}
+  .note{fill:var(--muted);font-size:12.5px;font-style:italic;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Каскад failover: на стрелках — условие, а не «потом»</h2>
+  <div id="host"></div>
+  <div class="legend">
+    Переход вниз срабатывает только на <code>5xx</code> провайдера. Счётчик справа —
+    оплаченные вызовы: один упавший запрос доходит до трёх списаний и трёх задержек.
+  </div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---- данные схемы ---- */
+    var D = {
+      boxW: 6.5, boxH: 1.2,
+      spineX: 7.0, spineTop: 0.6, spineBot: 5.0, labelX: 7.35,
+      dotR: 0.19, headLen: 0.3, headHalf: 0.15,
+      cond: '5xx',
+      nodes: [
+        { y:0.0, name:'openai/gpt-4o',               stop:false, paid:'оплачен 1 вызов' },
+        { y:2.2, name:'anthropic/claude-3-5-sonnet', stop:false, paid:'оплачено 2 вызова' },
+        { y:4.4, name:'google/gemini-1.5-pro',       stop:false, paid:'оплачено 3 вызова' },
+        { y:6.6, name:'refuse',                      stop:true,  paid:null }
+      ]
+    };
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var origin = { x:20, y:22 }, scale = 42;
+    function sx(x){ return origin.x + x * scale; }
+    function sy(y){ return origin.y + y * scale; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function mk(tag, at, txt){
+      var n=document.createElementNS(NS,tag), k;
+      for(k in at) n.setAttribute(k, at[k]);
+      if(txt!=null) n.textContent=txt;
+      return n;
+    }
+    var svg = mk('svg',{viewBox:'0 0 500 372',preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Каскад failover от gpt-4o к refuse'});
+
+    var cx = D.boxW / 2, i, n, nx;
+
+    /* ---- узлы ---- */
+    for(i=0;i<D.nodes.length;i++){
+      n = D.nodes[i];
+      svg.appendChild(mk('rect',{
+        x:sx(0), y:sy(n.y),
+        width: sx(D.boxW)-sx(0), height: sy(n.y+D.boxH)-sy(n.y),
+        rx: sy(0.18)-sy(0), 'stroke-width':1.6,
+        'stroke-dasharray': n.stop ? '6 4' : 'none',
+        class: n.stop ? 'boxstop' : 'box'
+      }));
+      svg.appendChild(mk('text',{
+        x:sx(cx), y:sy(n.y+D.boxH/2), 'text-anchor':'middle',
+        'dominant-baseline':'central', class: n.stop ? 'stoptext' : 'nodetext'
+      }, n.name));
+    }
+
+    /* ---- стрелки с условием 5xx ---- */
+    for(i=0;i<D.nodes.length-1;i++){
+      var yTail = D.nodes[i].y + D.boxH;
+      var yTip  = D.nodes[i+1].y;
+      svg.appendChild(mk('line',{
+        x1:sx(cx), y1:sy(yTail), x2:sx(cx), y2:sy(yTip - D.headLen),
+        'stroke-width':1.8, class:'edge'
+      }));
+      svg.appendChild(mk('polygon',{ class:'head', points:
+        sx(cx)+','+sy(yTip)+' '+
+        sx(cx-D.headHalf)+','+sy(yTip-D.headLen)+' '+
+        sx(cx+D.headHalf)+','+sy(yTip-D.headLen)
+      }));
+      /* подпись сбоку от середины стрелки, у хвоста, anchor start */
+      svg.appendChild(mk('text',{
+        x:sx(cx), y:sy((yTail+yTip)/2), dx:10, 'text-anchor':'start',
+        'dominant-baseline':'central', class:'cond'
+      }, D.cond));
+    }
+
+    /* ---- счётчик оплаченных вызовов сбоку ---- */
+    svg.appendChild(mk('line',{
+      x1:sx(D.spineX), y1:sy(D.spineTop), x2:sx(D.spineX), y2:sy(D.spineBot),
+      'stroke-width':1.4, class:'spine'
+    }));
+    for(i=0;i<D.nodes.length;i++){
+      n = D.nodes[i];
+      if(!n.paid) continue;
+      var ty = n.y + D.boxH/2;
+      svg.appendChild(mk('line',{
+        x1:sx(D.boxW), y1:sy(ty), x2:sx(D.spineX), y2:sy(ty),
+        'stroke-width':1.2, class:'dash'
+      }));
+      svg.appendChild(mk('circle',{
+        cx:sx(D.spineX), cy:sy(ty), r: sy(D.dotR)-sy(0), class:'dot'
+      }));
+      svg.appendChild(mk('text',{
+        x:sx(D.spineX), y:sy(ty), 'text-anchor':'middle',
+        'dominant-baseline':'central', class:'dotnum'
+      }, String(i+1)));
+      svg.appendChild(mk('text',{
+        x:sx(D.labelX), y:sy(ty), dx:4, 'text-anchor':'start',
+        'dominant-baseline':'central', class:'cnt'
+      }, n.paid));
+    }
+
+    /* ---- пометка у последнего узла, справа ---- */
+    nx = D.nodes[D.nodes.length-1];
+    svg.appendChild(mk('text',{
+      x:sx(D.boxW), y:sy(nx.y + D.boxH/2), dx:12, 'text-anchor':'start',
+      'dominant-baseline':'central', class:'note'
+    }, 'конец цепочки'));
+
+    /* ---- подпись оси счётчика сверху, anchor start ---- */
+    svg.appendChild(mk('text',{
+      x:sx(D.spineX), y:sy(D.spineTop), dy:-14, 'text-anchor':'start',
+      class:'cnt'
+    }, 'оплаченные вызовы'));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема не построилась. Она показывает каскад: '
+      + 'запрос идёт в <code>openai/gpt-4o</code>; при 5xx — в '
+      + '<code>anthropic/claude-3-5-sonnet</code>; при 5xx — в '
+      + '<code>google/gemini-1.5-pro</code>; при 5xx — <code>refuse</code>. '
+      + 'Сбоку счётчик оплаченных вызовов: 1, 2, 3 — по одному за каждую попытку.</p>';
+  }
+})();
+</script>
+</body>
+</html>

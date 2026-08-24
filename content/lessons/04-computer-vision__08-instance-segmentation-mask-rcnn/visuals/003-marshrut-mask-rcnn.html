@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Полный маршрут изображения через Mask R-CNN</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #5f6b7c;
+    --line: #637083;
+    --blue: #dbeafe;
+    --blue-stroke: #2563eb;
+    --amber: #fef3c7;
+    --amber-stroke: #d97706;
+    --red: #fee2e2;
+    --red-stroke: #dc2626;
+    --violet: #ede9fe;
+    --violet-stroke: #7c3aed;
+    --cyan: #cffafe;
+    --cyan-stroke: #0891b2;
+    --green: #dcfce7;
+    --green-stroke: #16a34a;
+    --shadow: #cbd5e1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111827;
+      --panel: #182235;
+      --text: #f1f5f9;
+      --muted: #aeb9c9;
+      --line: #a9b5c6;
+      --blue: #172f52;
+      --blue-stroke: #60a5fa;
+      --amber: #463616;
+      --amber-stroke: #fbbf24;
+      --red: #492323;
+      --red-stroke: #f87171;
+      --violet: #302657;
+      --violet-stroke: #a78bfa;
+      --cyan: #123b43;
+      --cyan-stroke: #22d3ee;
+      --green: #173d2a;
+      --green-stroke: #4ade80;
+      --shadow: #0b1220;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    width: 100%;
+    max-height: 520px;
+    margin: 0;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--shadow);
+  }
+
+  figcaption {
+    padding: 12px 18px 8px;
+    font-size: 20px;
+    font-weight: 750;
+    letter-spacing: .01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 472px;
+    background: var(--panel);
+  }
+
+  .node {
+    stroke-width: 2;
+    filter: drop-shadow(0 3px 2px var(--shadow));
+  }
+
+  .input { fill: var(--panel); stroke: var(--line); }
+  .backbone { fill: var(--blue); stroke: var(--blue-stroke); }
+  .fpn { fill: var(--amber); stroke: var(--amber-stroke); }
+  .rpn { fill: var(--red); stroke: var(--red-stroke); }
+  .roi { fill: var(--violet); stroke: var(--violet-stroke); }
+  .head { fill: var(--cyan); stroke: var(--cyan-stroke); }
+  .nms { fill: var(--amber); stroke: var(--amber-stroke); }
+  .output { fill: var(--green); stroke: var(--green-stroke); }
+
+  .edge {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow { fill: var(--line); }
+  .glyph {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .title {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 750;
+    text-anchor: middle;
+  }
+
+  .sub {
+    fill: var(--muted);
+    font-size: 11.5px;
+    font-weight: 550;
+    text-anchor: middle;
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+  }
+
+  .pixel { fill: var(--violet-stroke); opacity: .78; }
+  .proposal { fill: none; stroke: var(--red-stroke); stroke-width: 1.5; }
+  .feature { fill: var(--amber-stroke); opacity: .78; }
+  .result-mark { fill: none; stroke: var(--green-stroke); stroke-width: 2; }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <figcaption id="diagram-title">Полный маршрут изображения через Mask R-CNN</figcaption>
+  <svg id="diagram" viewBox="0 0 1200 420" width="1200" height="420"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Поток изображения через backbone, FPN, RPN, RoI Align, две головы, NMS и итоговые рамки, классы и маски">
+    <desc>Mask R-CNN превращает входной снимок в отдельную рамку, класс и маску для каждого объекта.</desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const diagramData = Object.freeze({
+  canvas: [1200, 420],
+  corner: [0.18, 0.18],
+  arrow: [0.22, 0.13],
+  nodes: [
+    {id:"input", kind:"input", box:[0.20,2.55,2.15,2.45], title:["Входной","снимок"], sub:[]},
+    {id:"bb", kind:"backbone", box:[2.95,2.45,2.45,2.65], title:["ResNet","backbone"], sub:["карты признаков"]},
+    {id:"fpn", kind:"fpn", box:[6.05,2.35,2.25,2.85], title:["FPN"], sub:["несколько","масштабов"]},
+    {id:"rpn", kind:"rpn", box:[9.05,0.55,2.75,2.30], title:["RPN"], sub:["рамки-кандидаты"]},
+    {id:"roi", kind:"roi", box:[12.45,2.35,2.55,2.85], title:["RoI Align"], sub:["фиксированный","участок признаков"]},
+    {id:"box", kind:"head", box:[15.75,0.75,2.80,2.30], title:["Box head"], sub:["класс +","уточнение рамки"]},
+    {id:"mask", kind:"head", box:[15.75,4.35,2.80,2.30], title:["Mask head"], sub:["бинарная маска","28 × 28"]},
+    {id:"nms", kind:"nms", box:[19.20,2.55,1.75,2.45], title:["NMS"], sub:["убирает","дубли"]},
+    {id:"out", kind:"output", box:[21.60,2.15,2.15,3.25], title:["Результат"], sub:["рамки","классы","маски"]}
+  ],
+  edges: [
+    {points:[[2.35,3.78],[2.95,3.78]]},
+    {points:[[5.40,3.78],[6.05,3.78]]},
+    {points:[[8.30,3.05],[8.67,3.05],[8.67,1.70],[9.05,1.70]], label:["≈ 1000 кандидатов",8.45,1.25,0,-6,"middle"]},
+    {points:[[8.30,4.35],[10.55,4.35],[10.55,3.93],[12.45,3.93]], label:["карты признаков",9.45,4.35,0,16,"middle"]},
+    {points:[[11.80,1.70],[12.10,1.70],[12.10,3.15],[12.45,3.15]], label:["top-K",11.92,2.42,-8,0,"end"]},
+    {points:[[15.00,3.15],[15.35,3.15],[15.35,1.90],[15.75,1.90]]},
+    {points:[[15.00,4.42],[15.35,4.42],[15.35,5.50],[15.75,5.50]]},
+    {points:[[18.55,1.90],[18.88,1.90],[18.88,3.28],[19.20,3.28]]},
+    {points:[[18.55,5.50],[18.88,5.50],[18.88,4.30],[19.20,4.30]]},
+    {points:[[20.95,3.78],[21.60,3.78]]}
+  ],
+  scene: {
+    personHead:[0.78,3.36,0.13],
+    person:[[0.78,3.50],[0.78,4.12],[0.52,4.55],[0.78,4.12],[1.05,4.55],[0.78,3.70],[1.10,3.87]],
+    wheels:[[1.25,4.45,0.30],[1.82,4.45,0.30]],
+    bicycle:[[1.25,4.45],[1.47,3.96],[1.82,4.45],[1.25,4.45],[1.66,4.12],[1.82,4.45],[1.93,3.91]],
+    dog:[[0.35,4.40],[0.48,4.18],[0.72,4.25],[0.85,4.43],[0.54,4.43],[0.48,4.70],[0.48,4.43],[0.30,4.70]]
+  },
+  fpnBars:[[6.55,4.45,1.20,0.16],[6.72,4.10,0.95,0.16],[6.88,3.75,0.68,0.16]],
+  proposals:[[9.46,1.38,0.72,0.72],[9.82,1.08,1.20,1.05],[10.43,1.48,0.82,0.65]],
+  roiGrid:{
+    frame:[12.92,3.05,1.60,1.42],
+    vertical:[[13.45,3.05,13.45,4.47],[13.98,3.05,13.98,4.47]],
+    horizontal:[[12.92,3.52,14.52,3.52],[12.92,4.00,14.52,4.00]]
+  },
+  maskCells:[[16.25,5.18],[16.53,4.90],[16.53,5.18],[16.53,5.46],[16.81,4.90],[16.81,5.18],[16.81,5.46],[17.09,5.18],[17.09,5.46]],
+  result:{
+    frame:[22.05,3.35,1.18,1.20],
+    mask:[[22.22,4.20],[22.18,3.82],[22.38,3.57],[22.73,3.50],[22.98,3.72],[22.91,4.16],[22.60,4.38]]
+  },
+  note:["Общие признаки","две задачи одновременно","отдельный результат для каждого объекта"],
+  noteAnchors:[[7.18,7.35],[17.15,7.35],[22.66,7.35]],
+  noteLines:[[[7.18,6.94],[7.18,5.55]],[[17.15,6.94],[17.15,6.72]],[[22.66,6.94],[22.66,5.52]]],
+  fallback:[0.55,3.85]
+});
+const origin = Object.freeze({x:26,y:25});
+const scale = Object.freeze({x:48,y:48});
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const layer = document.getElementById("drawing");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const el = (name, attrs, parent=layer) => {
+    const item = document.createElementNS(ns, name);
+    for (const [key,value] of Object.entries(attrs)) item.setAttribute(key,value);
+    parent.appendChild(item);
+    return item;
+  };
+
+  const pathFrom = points =>
+    points.map((point,index) => `${index ? "L" : "M"} ${sx(point[0])} ${sy(point[1])}`).join(" ");
+
+  const rect = (box, className, parent=layer) =>
+    el("rect", {
+      x:sx(box[0]), y:sy(box[1]),
+      width:sx(box[0]+box[2])-sx(box[0]),
+      height:sy(box[1]+box[3])-sy(box[1]),
+      rx:sx(diagramData.corner[0])-sx(0),
+      ry:sy(diagramData.corner[1])-sy(0),
+      class:className
+    }, parent);
+
+  const textLines = (lines, x, firstY, className, gap, parent=layer) => {
+    const text = el("text",{x:sx(x),y:sy(firstY),class:className},parent);
+    for (const [index,line] of lines.entries()) {
+      const span = el("tspan",{x:sx(x),y:sy(firstY+index*gap)},text);
+      span.textContent=line;
+    }
+    return text;
+  };
+
+  const arrow = points => {
+    const end=points[points.length-1];
+    const before=points[points.length-2];
+    const dx=end[0]-before[0], dy=end[1]-before[1];
+    const length=Math.hypot(dx,dy);
+    const ux=dx/length, uy=dy/length;
+    const back=diagramData.arrow[0], wing=diagramData.arrow[1];
+    const vertices=[
+      end,
+      [end[0]-ux*back-uy*wing,end[1]-uy*back+ux*wing],
+      [end[0]-ux*back+uy*wing,end[1]-uy*back-ux*wing]
+    ];
+    el("polygon",{
+      points:vertices.map(point=>`${sx(point[0])},${sy(point[1])}`).join(" "),
+      class:"arrow"
+    });
+  };
+
+  for (const edge of diagramData.edges) {
+    el("path",{d:pathFrom(edge.points),class:"edge"});
+    arrow(edge.points);
+    if (edge.label) {
+      const [label,x,y,dx,dy,anchor]=edge.label;
+      const item=el("text",{
+        x:sx(x)+dx,y:sy(y)+dy,
+        "text-anchor":anchor,
+        class:"edge-label"
+      });
+      item.textContent=label;
+    }
+  }
+
+  for (const node of diagramData.nodes) {
+    rect(node.box,`node ${node.kind}`);
+    const center=node.box[0]+node.box[2]/diagramData.corner.length;
+    const titleY=node.kind==="input" ? node.box[1]+0.45 : node.box[1]+0.58;
+    textLines(node.title,center,titleY,"title",0.36);
+    const subY=node.kind==="output" ? node.box[1]+1.38 : node.box[1]+1.55;
+    textLines(node.sub,center,subY,"sub",0.37);
+  }
+
+  const scene=diagramData.scene;
+  el("ellipse",{
+    cx:sx(scene.personHead[0]),cy:sy(scene.personHead[1]),
+    rx:sx(scene.personHead[2])-sx(0),ry:sy(scene.personHead[2])-sy(0),
+    class:"glyph"
+  });
+  el("path",{d:pathFrom(scene.person),class:"glyph"});
+  for (const wheel of scene.wheels) {
+    el("ellipse",{
+      cx:sx(wheel[0]),cy:sy(wheel[1]),
+      rx:sx(wheel[2])-sx(0),ry:sy(wheel[2])-sy(0),
+      class:"glyph"
+    });
+  }
+  el("path",{d:pathFrom(scene.bicycle),class:"glyph"});
+  el("path",{d:pathFrom(scene.dog),class:"glyph"});
+
+  for (const bar of diagramData.fpnBars) rect(bar,"feature");
+
+  for (const proposal of diagramData.proposals) {
+    el("rect",{
+      x:sx(proposal[0]),y:sy(proposal[1]),
+      width:sx(proposal[0]+proposal[2])-sx(proposal[0]),
+      height:sy(proposal[1]+proposal[3])-sy(proposal[1]),
+      class:"proposal"
+    });
+  }
+
+  rect(diagramData.roiGrid.frame,"glyph");
+  for (const line of [...diagramData.roiGrid.vertical,...diagramData.roiGrid.horizontal]) {
+    el("line",{
+      x1:sx(line[0]),y1:sy(line[1]),
+      x2:sx(line[2]),y2:sy(line[3]),
+      class:"glyph"
+    });
+  }
+
+  for (const cell of diagramData.maskCells) {
+    rect([cell[0],cell[1],0.24,0.24],"pixel");
+  }
+
+  rect(diagramData.result.frame,"result-mark");
+  el("path",{
+    d:`${pathFrom(diagramData.result.mask)} Z`,
+    class:"result-mark"
+  });
+
+  for (const line of diagramData.noteLines) {
+    el("path",{d:pathFrom(line),class:"edge"});
+  }
+
+  for (const [index,note] of diagramData.note.entries()) {
+    const anchor=diagramData.noteAnchors[index];
+    const item=el("text",{x:sx(anchor[0]),y:sy(anchor[1]),class:"note"});
+    item.textContent=note;
+  }
+} catch (error) {
+  const layer=document.getElementById("drawing");
+  layer.replaceChildren();
+  const message=document.createElementNS("http://www.w3.org/2000/svg","text");
+  message.setAttribute("x",sx(diagramData.fallback[0]));
+  message.setAttribute("y",sy(diagramData.fallback[1]));
+  message.setAttribute("class","title");
+  message.setAttribute("text-anchor","start");
+  message.textContent="Схема должна показать путь: вход → backbone → FPN → RPN → RoI Align → box/mask heads → NMS → рамки, классы и маски.";
+  layer.appendChild(message);
+}
+</script>
+</body>
+</html>

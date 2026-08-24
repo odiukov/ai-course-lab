@@ -5,7 +5,7 @@ import { isStale, readLessonPlan } from "@/lib/content/lesson-plan";
 import { readStepsById } from "@/lib/content/step-file";
 import { finalQuizQuestions, toPublicQuestions, toPublicStep } from "@/lib/practice/questions";
 import { openProgressDb } from "@/lib/progress/db";
-import { readLessonProgress } from "@/lib/progress/steps";
+import { readLessonProgress, readStepIdsInPlan } from "@/lib/progress/steps";
 import { findLesson } from "@/lib/source/catalog";
 import { readLessonSource } from "@/lib/source/lesson-source";
 
@@ -58,7 +58,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     quiz: toPublicQuestions(finalQuizQuestions(source)),
     clarifications: Object.fromEntries(readLessonClarifications(config.contentDir, slug)),
     progress: {
-      readStepIds: progress.readStepIds,
+      readStepIds: readStepIdsInPlan(progress.readStepIds, plan?.steps ?? []),
       resumeStepId: progress.resumeStepId,
     },
     source: {

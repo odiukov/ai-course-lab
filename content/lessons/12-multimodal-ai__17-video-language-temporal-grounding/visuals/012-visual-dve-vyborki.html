@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Две выборки на одной шкале</title>
+<style>
+  :root{
+    --bg:#ffffff;--fg:#1e293b;--muted:#64748b;--axis:#475569;
+    --uni:#2563eb;--dyn:#d97706;--goal:#dc2626;--grid:#cbd5e1;--band:rgba(217,119,6,.10);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--axis:#94a3b8;
+      --uni:#60a5fa;--dyn:#fbbf24;--goal:#f87171;--grid:#334155;--band:rgba(251,191,36,.14);
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{background:var(--bg);padding:8px 10px 10px}
+  .ttl{margin:0 0 4px;font-size:14px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:500px}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;fill:var(--fg)}
+  .mut{fill:var(--muted)}
+  .t-uni{fill:var(--uni)}
+  .t-dyn{fill:var(--dyn)}
+  .t-goal{fill:var(--goal)}
+  .fb{font-size:13px;line-height:1.55;color:var(--fg)}
+</style>
+<div class="wrap">
+  <p class="ttl">Один бюджет, 16 кадров на 60 секунд: равномерная и динамическая выборка на одной шкале</p>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* --- данные схемы (единственные литеральные величины) --- */
+    var D = {
+      total: 60,          // секунд в отрезке матча
+      budget: 16,         // кадров бюджета
+      quarters: 4,        // четвертей минуты
+      goal: 20,           // секунда гола
+      motion: [1, 5, 2, 2],
+      frames: [2, 8, 3, 3]
+    };
+
+    /* --- один origin, один scale, одна пара sx/sy --- */
+    var origin = { x: 60, y: 118 };
+    var scale  = { x: 12, y: 24 };
+    function sx(s){ return origin.x + s * scale.x; }   // s — секунды
+    function sy(u){ return origin.y - u * scale.y; }   // u — единицы дорожек
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 840 250');
+    svg.setAttribute('role', 'img');
+
+    function el(n, a, t){
+      var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]);
+      if(t != null) e.appendChild(document.createTextNode(t));
+      svg.appendChild(e);
+      return e;
+    }
+    function line(x1,y1,x2,y2,a){
+      a = a || {};
+      a.x1 = sx(x1); a.y1 = sy(y1); a.x2 = sx(x2); a.y2 = sy(y2);
+      return el('line', a);
+    }
+    function label(x,y,txt,anchor,dx,dy,cls,size){
+      return el('text', {
+        x: sx(x) + (dx||0), y: sy(y) + (dy||0),
+        'text-anchor': anchor, 'font-size': size || 12,
+        'class': cls || ''
+      }, txt);
+    }
+    function num(v, d){
+      var r = (Math.round(v * Math.pow(10,d)) / Math.pow(10,d)).toString();
+      return r.replace('.', ',');
+    }
+    function frameWord(n){
+      var t = n % 10, h = n % 100;
+      if(t === 1 && h !== 11) return 'кадр';
+      if(t >= 2 && t <= 4 && (h < 12 || h > 14)) return 'кадра';
+      return 'кадров';
+    }
+
+    /* --- производная геометрия выборок --- */
+    var qLen    = D.total / D.quarters;          // 15 с
+    var uniStep = D.total / D.budget;            // 3,75 с
+    var uniPerQ = D.budget / D.quarters;         // 4 кадра
+
+    var uniPos = [], i, q, j, n, step;
+    for(i = 0; i < D.budget; i++) uniPos.push(i * uniStep);
+
+    var dynPos = [], dynStep = [];
+    for(q = 0; q < D.quarters; q++){
+      n = D.frames[q];
+      step = qLen / n;
+      dynStep.push(step);
+      for(j = 0; j < n; j++) dynPos.push(q * qLen + j * step);
+    }
+    var goalQ    = Math.floor(D.goal / qLen);    // четверть с голом
+    var worstGap = Math.max.apply(null, dynStep);
+
+    /* --- фон --- */
+    el('rect', {x:0, y:0, width:840, height:250, fill:'var(--bg)'});
+
+    /* --- полоса четверти с голом --- */
+    el('rect', {
+      x: sx(goalQ * qLen), y: sy(2.6),
+      width: sx((goalQ + 1) * qLen) - sx(goalQ * qLen),
+      height: sy(-2.6) - sy(2.6),
+      fill: 'var(--band)'
+    });
+
+    /* --- границы четвертей --- */
+    for(q = 1; q < D.quarters; q++)
+      line(q * qLen, -2.6, q * qLen, 2.6,
+        {stroke:'var(--grid)', 'stroke-width':1, 'stroke-dasharray':'3 3'});
+
+    /* --- общая шкала секунд --- */
+    line(0, 0, D.total, 0, {stroke:'var(--axis)', 'stroke-width':1.5});
+    for(q = 0; q <= D.quarters; q++){
+      line(q * qLen, -0.16, q * qLen, 0.16, {stroke:'var(--axis)', 'stroke-width':1.5});
+      label(q * qLen, 0, q === D.quarters ? (q * qLen) + ' с' : String(q * qLen),
+            'middle', 0, 16, 'mut');
+    }
+
+    /* --- отметка гола --- */
+    line(D.goal, -2.4, D.goal, 2.4,
+      {stroke:'var(--goal)', 'stroke-width':1.5, 'stroke-dasharray':'4 3'});
+    label(D.goal, 0, 'гол, ' + D.goal + '-я с', 'start', 7, 16, 't-goal');
+
+    /* --- верхняя дорожка: равномерная --- */
+    for(i = 0; i < uniPos.length; i++)
+      line(uniPos[i], 1.4, uniPos[i], 2.4, {stroke:'var(--uni)', 'stroke-width':2});
+    for(q = 0; q < D.quarters; q++)
+      label(q * qLen + qLen / 2, 2.9,
+            uniPerQ + ' ' + frameWord(uniPerQ), 'middle', 0, 0, 't-uni');
+    label(0, 4.1, 'Равномерная: ' + D.budget + ' кадров, шаг ' + num(uniStep, 2) + ' с',
+          'start', 0, 0, 't-uni', 13);
+    label(D.total, 4.1, 'самый широкий разрыв ' + num(uniStep, 2) + ' с',
+          'end', 0, 0, 'mut');
+
+    /* --- нижняя дорожка: динамическая --- */
+    for(i = 0; i < dynPos.length; i++)
+      line(dynPos[i], -1.4, dynPos[i], -2.4, {stroke:'var(--dyn)', 'stroke-width':2});
+    for(q = 0; q < D.quarters; q++)
+      label(q * qLen + qLen / 2, -2.9,
+            D.frames[q] + ' ' + frameWord(D.frames[q]), 'middle', 0, 0, 't-dyn');
+
+    /* --- самая широкая дырка динамической (первая четверть) --- */
+    var gapY = -3.8, hx = 0.5, hy = 0.16;
+    line(0, gapY, worstGap, gapY, {stroke:'var(--dyn)', 'stroke-width':1.5});
+    el('polygon', {
+      points: sx(0)+','+sy(gapY)+' '+sx(hx)+','+sy(gapY+hy)+' '+sx(hx)+','+sy(gapY-hy),
+      fill:'var(--dyn)'
+    });
+    el('polygon', {
+      points: sx(worstGap)+','+sy(gapY)+' '+sx(worstGap-hx)+','+sy(gapY+hy)+' '+
+              sx(worstGap-hx)+','+sy(gapY-hy),
+      fill:'var(--dyn)'
+    });
+    label(worstGap / 2, gapY, 'разрыв ' + num(worstGap, 1) + ' с', 'middle', 0, -7, 't-dyn');
+
+    label(0, -4.8,
+      'Динамическая: движение ' + D.motion.join(' : ') + ', те же ' + D.budget +
+      ' кадров, шаг ' + num(dynStep[goalQ], 1) + ' с у гола',
+      'start', 0, 0, 't-dyn', 13);
+    label(D.total, -4.8, 'самый широкий разрыв ' + num(worstGap, 1) + ' с',
+          'end', 0, 0, 'mut');
+
+    host.appendChild(svg);
+  } catch(e){
+    host.innerHTML = '<p class="fb">Схема не построилась. Она должна показывать шкалу ' +
+      '60 секунд с общим бюджетом 16 кадров: сверху равномерная выборка — 16 меток с шагом ' +
+      '3,75 с, по 4 кадра в каждой четверти; снизу динамическая — при движении 1 : 5 : 2 : 2 ' +
+      'кадры делятся как 2, 8, 3, 3, у гола на 20-й секунде шаг падает до 1,9 с, ' +
+      'а в первой четверти между метками остаётся дырка 7,5 с.</p>';
+  }
+})();
+</script>

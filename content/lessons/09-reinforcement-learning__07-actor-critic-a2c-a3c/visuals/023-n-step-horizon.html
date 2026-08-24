@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как горизонт n соединяет TD и Monte Carlo</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted-text: #687386;
+      --track: #aab3c2;
+      --future: #e5e9f0;
+      --future-stroke: #aab3c2;
+      --reward: #ffb15a;
+      --reward-stroke: #b95816;
+      --critic: #d9c5ff;
+      --critic-stroke: #7048b8;
+      --mc: #bce8cf;
+      --mc-stroke: #27794e;
+      --boundary: #334155;
+      --node: #ffffff;
+      --node-stroke: #667085;
+      --terminal: #263347;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #172033;
+        --text: #f1f5f9;
+        --muted-text: #b7c0cf;
+        --track: #687386;
+        --future: #293449;
+        --future-stroke: #758197;
+        --reward: #8b481d;
+        --reward-stroke: #ffb15a;
+        --critic: #493670;
+        --critic-stroke: #c7a9ff;
+        --mc: #1f5139;
+        --mc-stroke: #8bd7aa;
+        --boundary: #dbe4f0;
+        --node: #172033;
+        --node-stroke: #aab3c2;
+        --terminal: #e7edf6;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .frame {
+      width: 100%;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 0;
+      padding: 12px 18px 6px;
+      font-size: 21px;
+      line-height: 1.2;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--panel);
+    }
+
+    .guide {
+      stroke: var(--track);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+    }
+
+    .observed {
+      stroke: var(--reward-stroke);
+      stroke-width: 5;
+      stroke-linecap: round;
+    }
+
+    .boundary {
+      stroke: var(--boundary);
+      stroke-width: 2.2;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--critic-stroke);
+      stroke-width: 2.2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
+    .arrowhead {
+      fill: var(--critic-stroke);
+    }
+
+    .node {
+      fill: var(--node);
+      stroke: var(--node-stroke);
+      stroke-width: 1.8;
+    }
+
+    .terminal {
+      fill: var(--terminal);
+      stroke: var(--terminal);
+      stroke-width: 1.8;
+    }
+
+    .reward-real {
+      fill: var(--reward);
+      stroke: var(--reward-stroke);
+      stroke-width: 1.8;
+    }
+
+    .reward-future {
+      fill: var(--future);
+      stroke: var(--future-stroke);
+      stroke-width: 1.5;
+    }
+
+    .critic-box {
+      fill: var(--critic);
+      stroke: var(--critic-stroke);
+      stroke-width: 1.8;
+    }
+
+    .mc-box {
+      fill: var(--mc);
+      stroke: var(--mc-stroke);
+      stroke-width: 1.8;
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 16px;
+    }
+
+    .subtitle {
+      fill: var(--muted-text);
+      font-size: 15px;
+    }
+
+    .row-label {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .reward-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .box-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .boundary-label {
+      fill: var(--muted-text);
+      font-size: 14px;
+    }
+
+    .legend-label {
+      fill: var(--muted-text);
+      font-size: 14px;
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 18px;
+      color: var(--text);
+      font-size: 16px;
+      background: var(--panel);
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <h1>Как горизонт n соединяет TD и Monte Carlo</h1>
+    <svg id="diagram"
+         viewBox="0 0 1200 450"
+         width="1200"
+         height="450"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <title id="diagram-title">Одна траектория при горизонтах один, пять и до конца эпизода</title>
+      <desc id="diagram-description">До границы выделены наблюдаемые награды, после границы используется bootstrap критика. В конце эпизода bootstrap исчезает.</desc>
+    </svg>
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать одну траекторию: при n = 1 используется первая
+      награда и bootstrap критика, при n = 5 — пять наблюдаемых наград и более
+      поздний bootstrap, а в конце эпизода остаются только фактические награды
+      Monte Carlo.
+    </p>
+  </main>
+
+  <script>
+    const DATA = [{
+      two: 2,
+      header: {
+        left: { x: 3.65, y: 0.38, text: "Одна траектория — три положения границы" },
+        right: { x: 18.8, y: 0.38, text: "после границы: γⁿ V(sₜ₊ₙ)" }
+      },
+      track: { start: 4, end: 18 },
+      states: [4, 6, 8, 10, 12, 14, 16],
+      rewards: [
+        { id: 1, x: 5, text: "2" },
+        { id: 2, x: 7, text: "0" },
+        { id: 3, x: 9, text: "3" },
+        { id: 4, x: 11, text: "1" },
+        { id: 5, x: 13, text: "rₜ₊₅" },
+        { id: 6, x: 15, text: "…" },
+        { id: 7, x: 17, text: "r финал" }
+      ],
+      rows: [
+        {
+          y: 1.82,
+          label: "n = 1 · TD",
+          boundary: 5.8,
+          boundaryText: "граница n = 1",
+          boundaryLabelX: 5.82,
+          boundaryAnchor: "middle",
+          real: [1],
+          box: { x: 6.55, y: 0.88, w: 3.25, h: 0.62, text: "γ V(sₜ₊₁)" }
+        },
+        {
+          y: 3.78,
+          label: "n = 5",
+          boundary: 13.8,
+          boundaryText: "граница n = 5",
+          boundaryLabelX: 13.8,
+          boundaryAnchor: "middle",
+          real: [1, 2, 3, 4, 5],
+          box: { x: 14.55, y: 2.84, w: 3.45, h: 0.62, text: "γ⁵ V(sₜ₊₅)" }
+        },
+        {
+          y: 5.78,
+          label: "до конца · MC",
+          boundary: 18,
+          boundaryText: "конец эпизода",
+          boundaryLabelX: 17.82,
+          boundaryAnchor: "end",
+          real: [1, 2, 3, 4, 5, 6, 7],
+          box: { x: 13.75, y: 4.72, w: 4.25, h: 0.62, text: "без bootstrap → Monte Carlo" }
+        }
+      ],
+      labels: { x: 3.35 },
+      chip: { w: 1.12, h: 0.55, lift: 0.74, corner: 0.13 },
+      node: { radius: 0.105 },
+      terminal: { size: 0.25 },
+      boundary: { halfHeight: 0.55, labelDrop: 0.82 },
+      arrow: { w: 0.16, h: 0.1 },
+      legend: {
+        y: 7.05,
+        swatchW: 0.42,
+        swatchH: 0.25,
+        corner: 0.08,
+        textGap: 0.16,
+        items: [
+          { x: 4, kind: "reward-real", text: "наблюдаемые награды" },
+          { x: 9.2, kind: "critic-box", text: "bootstrap критика" },
+          { x: 14.1, kind: "reward-future", text: "не входит в эту цель" }
+        ]
+      }
+    }];
+    const [D] = DATA;
+    const origin = { x: 0, y: 0 };
+    const scale = 60;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attrs, content) => {
+        const item = document.createElementNS(NS, tag);
+        Object.entries(attrs).forEach(([name, value]) => {
+          item.setAttribute(name, String(value));
+        });
+        if (content !== undefined) item.textContent = content;
+        return item;
+      };
+
+      const add = item => svg.appendChild(item);
+
+      const addLine = (x1, y1, x2, y2, className) => {
+        add(make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        }));
+      };
+
+      const addText = (x, y, value, anchor, className) => {
+        add(make("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor,
+          "dominant-baseline": "middle",
+          class: className
+        }, value));
+      };
+
+      const addRect = (x, y, w, h, corner, className) => {
+        add(make("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + w) - sx(x),
+          height: sy(y + h) - sy(y),
+          rx: sx(corner) - sx(origin.x),
+          ry: sy(corner) - sy(origin.y),
+          class: className
+        }));
+      };
+
+      const addCircle = (x, y, radius, className) => {
+        add(make("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(origin.x),
+          class: className
+        }));
+      };
+
+      const addTerminal = y => {
+        const half = D.terminal.size / D.two;
+        addRect(
+          D.track.end - half,
+          y - half,
+          D.terminal.size,
+          D.terminal.size,
+          origin.x,
+          "terminal"
+        );
+      };
+
+      const addConnector = row => {
+        const boxMidY = row.box.y + row.box.h / D.two;
+        const leadX = row.box.x - D.arrow.w;
+        const points = [
+          [row.boundary, row.y - D.boundary.halfHeight],
+          [row.boundary, boxMidY],
+          [leadX, boxMidY]
+        ].map(point => `${sx(point[0])},${sy(point[1])}`).join(" ");
+
+        add(make("polyline", {
+          points,
+          class: "connector"
+        }));
+
+        const arrowPoints = [
+          [row.box.x, boxMidY],
+          [leadX, boxMidY - D.arrow.h],
+          [leadX, boxMidY + D.arrow.h]
+        ].map(point => `${sx(point[0])},${sy(point[1])}`).join(" ");
+
+        add(make("polygon", {
+          points: arrowPoints,
+          class: "arrowhead"
+        }));
+      };
+
+      addText(
+        D.header.left.x,
+        D.header.left.y,
+        D.header.left.text,
+        "start",
+        "subtitle"
+      );
+      addText(
+        D.header.right.x,
+        D.header.right.y,
+        D.header.right.text,
+        "end",
+        "subtitle"
+      );
+
+      D.rows.forEach(row => {
+        addLine(D.track.start, row.y, D.track.end, row.y, "guide");
+        addLine(D.track.start, row.y, row.boundary, row.y, "observed");
+
+        D.states.forEach(stateX => {
+          addCircle(stateX, row.y, D.node.radius, "node");
+        });
+        addTerminal(row.y);
+
+        D.rewards.forEach(reward => {
+          const left = reward.x - D.chip.w / D.two;
+          const top = row.y - D.chip.lift;
+          const className = row.real.includes(reward.id)
+            ? "reward-real"
+            : "reward-future";
+
+          addRect(
+            left,
+            top,
+            D.chip.w,
+            D.chip.h,
+            D.chip.corner,
+            className
+          );
+          addText(
+            reward.x,
+            top + D.chip.h / D.two,
+            reward.text,
+            "middle",
+            "reward-label"
+          );
+        });
+
+        addLine(
+          row.boundary,
+          row.y - D.boundary.halfHeight,
+          row.boundary,
+          row.y + D.boundary.halfHeight,
+          "boundary"
+        );
+
+        addText(
+          D.labels.x,
+          row.y,
+          row.label,
+          "end",
+          "row-label"
+        );
+
+        addText(
+          row.boundaryLabelX,
+          row.y + D.boundary.labelDrop,
+          row.boundaryText,
+          row.boundaryAnchor,
+          "boundary-label"
+        );
+
+        const boxClass = row.real.length === D.rewards.length
+          ? "mc-box"
+          : "critic-box";
+
+        addRect(
+          row.box.x,
+          row.box.y,
+          row.box.w,
+          row.box.h,
+          D.chip.corner,
+          boxClass
+        );
+        addText(
+          row.box.x + row.box.w / D.two,
+          row.box.y + row.box.h / D.two,
+          row.box.text,
+          "middle",
+          "box-label"
+        );
+
+        if (boxClass === "critic-box") addConnector(row);
+      });
+
+      D.legend.items.forEach(item => {
+        const top = D.legend.y - D.legend.swatchH / D.two;
+        addRect(
+          item.x,
+          top,
+          D.legend.swatchW,
+          D.legend.swatchH,
+          D.legend.corner,
+          item.kind
+        );
+        addText(
+          item.x + D.legend.swatchW + D.legend.textGap,
+          D.legend.y,
+          item.text,
+          "start",
+          "legend-label"
+        );
+      });
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

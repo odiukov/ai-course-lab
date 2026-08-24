@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный путь изображения через обучение</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #536176;
+    --border: #cbd5e1;
+    --forward: #2563eb;
+    --train: #dc2626;
+    --update: #d97706;
+    --eval: #168447;
+    --data-fill: #dbeafe;
+    --data-stroke: #2563eb;
+    --model-fill: #fef3c7;
+    --model-stroke: #d97706;
+    --loss-fill: #fee2e2;
+    --loss-stroke: #dc2626;
+    --eval-fill: #dcfce7;
+    --eval-stroke: #168447;
+    --neutral-fill: #f1f5f9;
+    --neutral-stroke: #64748b;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0b1120;
+      --panel: #111827;
+      --text: #f1f5f9;
+      --muted: #aebbd0;
+      --border: #334155;
+      --forward: #60a5fa;
+      --train: #fb7185;
+      --update: #fbbf24;
+      --eval: #4ade80;
+      --data-fill: #102a4d;
+      --data-stroke: #60a5fa;
+      --model-fill: #3c2b0b;
+      --model-stroke: #fbbf24;
+      --loss-fill: #431820;
+      --loss-stroke: #fb7185;
+      --eval-fill: #102f21;
+      --eval-stroke: #4ade80;
+      --neutral-fill: #1e293b;
+      --neutral-stroke: #94a3b8;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--text);
+  }
+
+  body {
+    margin: unset;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  h1 {
+    margin: unset;
+    padding: 10px 18px 6px;
+    color: var(--text);
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+  }
+
+  .lane {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: .06em;
+  }
+
+  .node-title {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .node-detail {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .legend {
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .legend-forward { fill: var(--forward); }
+  .legend-train { fill: var(--train); }
+  .legend-eval { fill: var(--eval); }
+
+  .node {
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .node-data {
+    fill: var(--data-fill);
+    stroke: var(--data-stroke);
+  }
+
+  .node-model {
+    fill: var(--model-fill);
+    stroke: var(--model-stroke);
+  }
+
+  .node-loss {
+    fill: var(--loss-fill);
+    stroke: var(--loss-stroke);
+  }
+
+  .node-eval {
+    fill: var(--eval-fill);
+    stroke: var(--eval-stroke);
+  }
+
+  .node-neutral {
+    fill: var(--neutral-fill);
+    stroke: var(--neutral-stroke);
+  }
+
+  #fallback {
+    margin: unset;
+    padding: 18px;
+    color: var(--text);
+    background: var(--panel);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Полный путь изображения через обучение</h1>
+  <svg id="diagram" viewBox="0 0 1200 470" width="1200" height="470"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Конвейер от датасета через преобразования, DataLoader и CNN к логитам.
+      При обучении ошибка проходит через cross-entropy, backward, оптимизатор
+      и планировщик обратно к модели; при оценке argmax выбирает готовый класс.
+    </desc>
+  </svg>
+  <p id="fallback" hidden>
+    Схема должна была показать путь Dataset → Augment → Normalise → DataLoader
+    → CNN → логиты (N, C), обучающую ветку cross-entropy → backward →
+    optimizer → scheduler и отдельную ветку argmax для оценки.
+  </p>
+  <noscript>
+    <p id="noscript-fallback">
+      Схема: Dataset → Augment → Normalise → DataLoader → CNN → логиты (N, C).
+      Обучение: cross-entropy → backward → optimizer → scheduler. Оценка: argmax.
+    </p>
+  </noscript>
+</figure>
+
+<script>
+const data = {
+  metrics: {
+    half: 2,
+    arrowLength: 10,
+    arrowHalfWidth: 6
+  },
+  lanes: [
+    { x: 25, y: 30, text: "ПРЯМОЙ ПРОХОД: ИЗОБРАЖЕНИЕ → ОТВЕТ", anchor: "start" },
+    { x: 25, y: 205, text: "ДВА ПУТИ ИЗ СЫРЫХ ЛОГИТОВ", anchor: "start" },
+    { x: 25, y: 321, text: "ОБУЧЕНИЕ: ОШИБКА ИДЁТ НАЗАД", anchor: "start" }
+  ],
+  nodes: [
+    {
+      id: "dataset", x: 25, y: 52, w: 150, h: 104, tone: "data",
+      lines: [
+        { at: 29, text: "Датасет", kind: "title" },
+        { at: 54, text: "фото кота", kind: "detail" },
+        { at: 74, text: "+ метка «кот»", kind: "detail" }
+      ]
+    },
+    {
+      id: "augment", x: 205, y: 52, w: 160, h: 104, tone: "data",
+      lines: [
+        { at: 29, text: "Аугментация", kind: "title" },
+        { at: 54, text: "случайная обрезка", kind: "detail" },
+        { at: 74, text: "или отражение", kind: "detail" }
+      ]
+    },
+    {
+      id: "normalise", x: 395, y: 52, w: 155, h: 104, tone: "data",
+      lines: [
+        { at: 29, text: "Нормализация", kind: "title" },
+        { at: 56, text: "привести пиксели", kind: "detail" },
+        { at: 76, text: "к масштабу модели", kind: "detail" }
+      ]
+    },
+    {
+      id: "loader", x: 580, y: 52, w: 160, h: 104, tone: "data",
+      lines: [
+        { at: 29, text: "DataLoader", kind: "title" },
+        { at: 54, text: "пакет изображений", kind: "detail" },
+        { at: 74, text: "+ перемешивание", kind: "detail" }
+      ]
+    },
+    {
+      id: "cnn", x: 775, y: 52, w: 130, h: 104, tone: "model",
+      lines: [
+        { at: 37, text: "CNN", kind: "title" },
+        { at: 66, text: "прямой проход", kind: "detail" }
+      ]
+    },
+    {
+      id: "logits", x: 935, y: 52, w: 230, h: 104, tone: "neutral",
+      lines: [
+        { at: 24, text: "Логиты (N, C)", kind: "title" },
+        { at: 48, text: "сырые оценки классов", kind: "detail" },
+        { at: 69, text: "кот 2,4 · собака 0,7", kind: "detail" },
+        { at: 88, text: "лиса −1,1", kind: "detail" }
+      ]
+    },
+    {
+      id: "loss", x: 730, y: 225, w: 200, h: 88, tone: "loss",
+      lines: [
+        { at: 28, text: "Cross-entropy", kind: "title" },
+        { at: 53, text: "логиты + верные метки", kind: "detail" },
+        { at: 72, text: "→ одна ошибка пакета", kind: "detail" }
+      ]
+    },
+    {
+      id: "argmax", x: 970, y: 225, w: 195, h: 88, tone: "eval",
+      lines: [
+        { at: 28, text: "Argmax", kind: "title" },
+        { at: 53, text: "класс с наибольшим", kind: "detail" },
+        { at: 72, text: "логитом · без обновления", kind: "detail" }
+      ]
+    },
+    {
+      id: "backward", x: 590, y: 330, w: 160, h: 68, tone: "loss",
+      lines: [
+        { at: 25, text: "backward", kind: "title" },
+        { at: 49, text: "вычислить градиенты", kind: "detail" }
+      ]
+    },
+    {
+      id: "optimizer", x: 370, y: 330, w: 180, h: 68, tone: "model",
+      lines: [
+        { at: 21, text: "Оптимизатор", kind: "title" },
+        { at: 42, text: "zero_grad() до прохода", kind: "detail" },
+        { at: 58, text: "step() после backward", kind: "detail" }
+      ]
+    },
+    {
+      id: "scheduler", x: 150, y: 330, w: 180, h: 68, tone: "model",
+      lines: [
+        { at: 25, text: "Планировщик", kind: "title" },
+        { at: 49, text: "величина следующего шага", kind: "detail" }
+      ]
+    }
+  ],
+  edges: [
+    {
+      tone: "forward",
+      points: [{ x: 175, y: 104 }, { x: 205, y: 104 }]
+    },
+    {
+      tone: "forward",
+      points: [{ x: 365, y: 104 }, { x: 395, y: 104 }]
+    },
+    {
+      tone: "forward",
+      points: [{ x: 550, y: 104 }, { x: 580, y: 104 }]
+    },
+    {
+      tone: "forward",
+      points: [{ x: 740, y: 104 }, { x: 775, y: 104 }]
+    },
+    {
+      tone: "forward",
+      points: [{ x: 905, y: 104 }, { x: 935, y: 104 }]
+    },
+    {
+      tone: "train",
+      points: [
+        { x: 1030, y: 156 },
+        { x: 1030, y: 195 },
+        { x: 830, y: 195 },
+        { x: 830, y: 225 }
+      ]
+    },
+    {
+      tone: "eval",
+      points: [{ x: 1090, y: 156 }, { x: 1090, y: 225 }]
+    },
+    {
+      tone: "train",
+      points: [
+        { x: 830, y: 313 },
+        { x: 830, y: 364 },
+        { x: 750, y: 364 }
+      ]
+    },
+    {
+      tone: "train",
+      points: [{ x: 590, y: 364 }, { x: 550, y: 364 }]
+    },
+    {
+      tone: "update",
+      points: [{ x: 370, y: 364 }, { x: 330, y: 364 }]
+    },
+    {
+      tone: "update",
+      dash: "9 7",
+      points: [
+        { x: 240, y: 398 },
+        { x: 240, y: 414 },
+        { x: 565, y: 414 },
+        { x: 565, y: 183 },
+        { x: 840, y: 183 },
+        { x: 840, y: 156 }
+      ]
+    }
+  ],
+  labels: [
+    { x: 1015, y: 185, text: "обучение", anchor: "end", tone: "train" },
+    { x: 1110, y: 193, text: "оценка", anchor: "start", tone: "eval" },
+    { x: 255, y: 435, text: "следующий пакет · следующий шаг", anchor: "start", tone: "update" }
+  ],
+  legend: [
+    { x: 25, y: 458, text: "Синий — прямой проход", tone: "forward" },
+    { x: 420, y: 458, text: "Красный и жёлтый — обучение", tone: "train" },
+    { x: 850, y: 458, text: "Зелёный — только оценка", tone: "eval" }
+  ]
+};
+const origin = { x: 18, y: 8 };
+const scale = { x: 0.985, y: 0.985 };
+const W = 1200;
+const H = 470;
+const PAD = 8;
+const LINE = 2;
+const FONT = 16;
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const colors = {
+    forward: "var(--forward)",
+    train: "var(--train)",
+    update: "var(--update)",
+    eval: "var(--eval)"
+  };
+
+  function element(name, attributes) {
+    const item = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      item.setAttribute(key, String(value));
+    }
+    return item;
+  }
+
+  function drawText(parent, spec, className) {
+    const text = element("text", {
+      x: sx(spec.x),
+      y: sy(spec.y),
+      "text-anchor": spec.anchor || "middle",
+      class: className
+    });
+    text.textContent = spec.text;
+    parent.appendChild(text);
+  }
+
+  function drawArrow(parent, spec) {
+    const polyline = element("polyline", {
+      points: spec.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      fill: "none",
+      stroke: colors[spec.tone],
+      "stroke-width": LINE,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "vector-effect": "non-scaling-stroke"
+    });
+
+    if (spec.dash) {
+      polyline.setAttribute("stroke-dasharray", spec.dash);
+    }
+    parent.appendChild(polyline);
+
+    let previous;
+    let end;
+    for (const point of spec.points) {
+      previous = end;
+      end = point;
+    }
+
+    const dx = end.x - previous.x;
+    const dy = end.y - previous.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const backX = end.x - ux * data.metrics.arrowLength;
+    const backY = end.y - uy * data.metrics.arrowLength;
+    const sideX = -uy * data.metrics.arrowHalfWidth;
+    const sideY = ux * data.metrics.arrowHalfWidth;
+
+    const head = element("polygon", {
+      points: [
+        `${sx(end.x)},${sy(end.y)}`,
+        `${sx(backX + sideX)},${sy(backY + sideY)}`,
+        `${sx(backX - sideX)},${sy(backY - sideY)}`
+      ].join(" "),
+      fill: colors[spec.tone]
+    });
+    parent.appendChild(head);
+  }
+
+  const laneLayer = element("g", { "aria-hidden": "true" });
+  for (const lane of data.lanes) {
+    drawText(laneLayer, lane, "lane");
+  }
+  svg.appendChild(laneLayer);
+
+  const edgeLayer = element("g", { "aria-hidden": "true" });
+  for (const edge of data.edges) {
+    drawArrow(edgeLayer, edge);
+  }
+  svg.appendChild(edgeLayer);
+
+  const nodeLayer = element("g", {});
+  for (const node of data.nodes) {
+    const group = element("g", {
+      role: "group",
+      "aria-label": node.lines.map(line => line.text).join(". ")
+    });
+
+    const rect = element("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: sx(node.x + node.w) - sx(node.x),
+      height: sy(node.y + node.h) - sy(node.y),
+      class: `node node-${node.tone}`
+    });
+    group.appendChild(rect);
+
+    for (const line of node.lines) {
+      drawText(group, {
+        x: node.x + node.w / data.metrics.half,
+        y: node.y + line.at,
+        text: line.text,
+        anchor: "middle"
+      }, line.kind === "title" ? "node-title" : "node-detail");
+    }
+    nodeLayer.appendChild(group);
+  }
+  svg.appendChild(nodeLayer);
+
+  const labelLayer = element("g", { "aria-hidden": "true" });
+  for (const label of data.labels) {
+    const text = element("text", {
+      x: sx(label.x),
+      y: sy(label.y) - (label.anchor === "end" ? PAD : -PAD),
+      "text-anchor": label.anchor,
+      class: "edge-label",
+      fill: colors[label.tone]
+    });
+    text.textContent = label.text;
+    labelLayer.appendChild(text);
+  }
+  svg.appendChild(labelLayer);
+
+  const legendLayer = element("g", { "aria-hidden": "true" });
+  for (const item of data.legend) {
+    drawText(legendLayer, {
+      x: item.x,
+      y: item.y,
+      text: item.text,
+      anchor: "start"
+    }, `legend legend-${item.tone}`);
+  }
+  svg.appendChild(legendLayer);
+
+  svg.setAttribute("viewBox", `${sx(0) - origin.x} ${sy(0) - origin.y} ${W} ${H}`);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

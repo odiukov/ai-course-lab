@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Дерево спанов демо-прогона</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b2330; --mut:#6b7787; --grid:#dde3ea; --rail:#c3ccd7;
+    --llm:#3f6fd6; --tool:#2f9e73; --hand:#a05fd0; --guard:#d98324; --root:#8794a6;
+    --hot:#d63b3b; --hole:#d63b3b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e6ecf4; --mut:#96a3b4; --grid:#28313d; --rail:#3a4553;
+      --llm:#6f9bf0; --tool:#4cc294; --hand:#c089ea; --guard:#eaa54d; --root:#7d8b9d;
+      --hot:#ff7070; --hole:#ff7070;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{padding:8px 10px 10px}
+  .ttl{font-size:14px;font-weight:600;margin:0 0 2px}
+  svg{display:block;width:100%;height:auto;max-height:480px}
+  .fb{font-size:13px;color:var(--mut);line-height:1.5}
+  text{fill:var(--fg)}
+</style>
+<div class="wrap">
+  <p class="ttl">Дерево спанов демо-прогона: 6,2 с сверху вниз</p>
+  <svg id="s" viewBox="0 0 900 430" role="img"
+       aria-label="Дерево спанов прогона длительностью 6,2 секунды"></svg>
+  <div id="fb" class="fb" hidden>
+    Схема должна была показать дерево спанов прогона 6,2 с: input guardrail 0,3 с
+    параллельно с генерацией triage 1,1 с, затем tool-спан transfer_to_billing_agent,
+    внутри него спан хендоффа, а под ним — генерация биллинга 3,9 с, get_invoice 0,4 с
+    и output guardrail 0,3 с.
+  </div>
+</div>
+<script>
+(function(){
+  var SVG="http://www.w3.org/2000/svg";
+  try{
+    /* ---- данные схемы ---- */
+    var SPANS=[
+      {row:1,depth:0,kind:"root", s:0,   e:6.2, label:"прогон (корень)",          dur:"6,2 с"},
+      {row:2,depth:1,kind:"guard",s:0,   e:0.3, label:"input guardrail",          dur:"0,3 с"},
+      {row:3,depth:1,kind:"llm",  s:0,   e:1.1, label:"генерация triage",         dur:"1,1 с"},
+      {row:4,depth:1,kind:"tool", s:1.1, e:6.2, label:"transfer_to_billing_agent",dur:""},
+      {row:5,depth:2,kind:"hand", s:1.1, e:6.2, label:"хендофф",                  dur:""},
+      {row:6,depth:3,kind:"llm",  s:1.6, e:5.5, label:"генерация биллинга",       dur:"3,9 с",hot:true},
+      {row:7,depth:3,kind:"tool", s:5.5, e:5.9, label:"get_invoice",              dur:"0,4 с"},
+      {row:8,depth:3,kind:"guard",s:5.9, e:6.2, label:"output guardrail",         dur:"0,3 с"}
+    ];
+    var RAILS=[{depth:0,from:1,to:8},{depth:1,from:4,to:5},{depth:2,from:5,to:8}];
+    var TICKS=[0,1,2,3,4,5,6];
+    var HOLE={row:6,s:1.1,e:1.6};
+    var LEGEND=[
+      {x:-3.45,kind:"llm",  t:"генерация LLM"},
+      {x:-1.75,kind:"tool", t:"вызов инструмента"},
+      {x:-0.05,kind:"hand", t:"хендофф"},
+      {x:1.65, kind:"guard",t:"guardrail"}
+    ];
+    var NOTES=[
+      {row:10.4,t:"guardrail и генерация triage перекрываются по времени — режим parallel"},
+      {row:11.1,t:"пунктир: между хендоффом и генерацией биллинга нет ни одного guardrail-спана"},
+      {row:11.8,t:"3,9 с из 6,2 с — самый глубокий отрезок: ускорять промпт биллинга или модель"}
+    ];
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var origin={x:310,y:24}, scale={x:85,y:33};
+    function sx(x){return origin.x+x*scale.x;}
+    function sy(y){return origin.y+y*scale.y;}
+
+    /* координата колонки подписей задаётся в тех же данных-единицах */
+    function labelX(d){return -3.45+d*0.3;}
+
+    var LAB=6, PAD=6, LW=1, FS=12, FT=11;
+    var svg=document.getElementById("s");
+    function el(n,a){var e=document.createElementNS(SVG,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function add(n,a){var e=el(n,a);svg.appendChild(e);return e;}
+    function txt(x,y,s,anchor,cls,size,weight){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"dominant-baseline":"middle",
+        "font-size":(size||FS),"font-family":"system-ui,sans-serif"});
+      if(weight)t.setAttribute("font-weight",weight);
+      if(cls)t.setAttribute("fill",cls);
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+    var C={llm:"var(--llm)",tool:"var(--tool)",hand:"var(--hand)",guard:"var(--guard)",root:"var(--root)"};
+
+    add("rect",{x:0,y:0,width:900,height:430,fill:"var(--bg)"});
+
+    /* сетка времени */
+    TICKS.forEach(function(t){
+      add("line",{x1:sx(t),y1:sy(0.45),x2:sx(t),y2:sy(8.55),
+        stroke:"var(--grid)","stroke-width":LW});
+      txt(sx(t),sy(0),String(t),"middle","var(--mut)",FT);
+    });
+    txt(sx(6)+PAD*4,sy(0),"с","start","var(--mut)",FT);
+
+    /* рельсы вложенности */
+    RAILS.forEach(function(r){
+      var x=sx(labelX(r.depth)+0.1);
+      add("line",{x1:x,y1:sy(r.from+0.3),x2:x,y2:sy(r.to),
+        stroke:"var(--rail)","stroke-width":LW});
+    });
+
+    /* спаны */
+    SPANS.forEach(function(sp){
+      if(sp.depth>0){
+        var rx=sx(labelX(sp.depth-1)+0.1);
+        add("line",{x1:rx,y1:sy(sp.row),x2:sx(labelX(sp.depth))-PAD/2,y2:sy(sp.row),
+          stroke:"var(--rail)","stroke-width":LW});
+      }
+      txt(sx(labelX(sp.depth)),sy(sp.row),sp.label,"start",
+        sp.kind==="root"?"var(--mut)":"var(--fg)",FS,sp.hot?"600":null);
+
+      var x1=sx(sp.s), x2=sx(sp.e), y1=sy(sp.row-0.32), y2=sy(sp.row+0.32);
+      add("rect",{x:x1,y:y1,width:x2-x1,height:y2-y1,rx:3,
+        fill:C[sp.kind],opacity:sp.kind==="root"?0.35:0.85,
+        stroke:sp.hot?"var(--hot)":"none","stroke-width":sp.hot?2:0});
+      if(sp.dur)txt(x2+PAD,sy(sp.row),sp.dur,"start",
+        sp.hot?"var(--hot)":"var(--mut)",FS,sp.hot?"700":null);
+    });
+
+    /* дыра без guardrail */
+    add("rect",{x:sx(HOLE.s),y:sy(HOLE.row-0.32),
+      width:sx(HOLE.e)-sx(HOLE.s),height:sy(HOLE.row+0.32)-sy(HOLE.row-0.32),
+      fill:"none",stroke:"var(--hole)","stroke-width":LW,"stroke-dasharray":"3 3"});
+
+    /* легенда */
+    LEGEND.forEach(function(l){
+      var x=sx(l.x), y1=sy(9.55), y2=sy(9.85);
+      add("rect",{x:x,y:y1,width:sx(l.x+0.13)-x,height:y2-y1,rx:2,fill:C[l.kind],opacity:0.85});
+      txt(sx(l.x+0.13)+PAD,sy(9.7),l.t,"start","var(--mut)",FT);
+    });
+    NOTES.forEach(function(n){
+      txt(sx(labelX(0)),sy(n.row),n.t,"start","var(--mut)",FT);
+    });
+  }catch(err){
+    var s=document.getElementById("s"); if(s)s.setAttribute("hidden","");
+    var f=document.getElementById("fb"); if(f)f.removeAttribute("hidden");
+  }
+})();
+</script>
+</html>

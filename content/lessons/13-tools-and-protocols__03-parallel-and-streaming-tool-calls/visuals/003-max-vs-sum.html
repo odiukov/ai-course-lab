@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Сумма против максимума</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1c20;
+    --muted: #5c6470;
+    --axis: #8a929e;
+    --seq: #c2410c;
+    --par: #0e7490;
+    --idle: #cbd5e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --fg: #e8ebf0;
+      --muted: #9aa3b0;
+      --axis: #5a6472;
+      --seq: #fb923c;
+      --par: #38bdf8;
+      --idle: #313a47;
+    }
+  }
+  html, body { margin: 0; }
+  .wrap {
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 10px 12px 12px;
+    box-sizing: border-box;
+  }
+  h2 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; background: var(--bg); }
+  .fail { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  text { fill: var(--fg); }
+  text.muted { fill: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Сумма против максимума: 1800 мс → 800 мс</h2>
+  <svg id="d" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Две полосы времени: последовательно 400+600+800=1800 мс, параллельно максимум из 400, 600 и 800 равен 800 мс"></svg>
+  <noscript class="fail">Последовательно: 400+600+800 = 1800 мс. Параллельно: max(400,600,800) = 800 мс.</noscript>
+</div>
+<script>
+(function () {
+  var svg = document.getElementById("d");
+  try {
+    // ---- данные схемы ----
+    var CALLS = [
+      { name: "Бангалор", ms: 400, tag: "u\u2081" },
+      { name: "Токио",    ms: 600, tag: "u\u2082" },
+      { name: "Цюрих",    ms: 800, tag: "u\u2083" }
+    ];
+    var TOTAL = 1800;            // 400+600+800
+    var MAXV  = 800;             // max(400,600,800)
+    var TICKS = [0, 400, 600, 800, 1000, 1400, 1800];
+
+    // ---- единственный origin и scale ----
+    var ORIGIN = { x: 150, y: 60 };   // px: sx(0), sy(0)
+    var SCALE  = { x: 0.28, y: 34 };  // px за 1 мс по x, px за 1 дорожку по y
+
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y + y * SCALE.y; }
+
+    // ---- литералы оформления ----
+    var PAD = 6, LW = 1.4, BAR = 16, FS = 12, FSB = 13;
+
+    var ns = "http://www.w3.org/2000/svg";
+    function el(n, a) {
+      var e = document.createElementNS(ns, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      svg.appendChild(e);
+      return e;
+    }
+    function line(x1, y1, x2, y2, cls, w) {
+      el("line", { x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+                   stroke: cls, "stroke-width": w || LW, "stroke-linecap": "round" });
+    }
+    function bar(xa, xb, y, fill) {
+      el("rect", { x: sx(xa), y: sy(y) - BAR / 2, width: sx(xb) - sx(xa), height: BAR,
+                   rx: 3, fill: fill });
+    }
+    function txt(x, y, dx, dy, s, anchor, size, cls) {
+      var t = el("text", { x: sx(x) + dx, y: sy(y) + dy, "text-anchor": anchor,
+                           "font-size": size || FS, "font-family": "inherit" });
+      if (cls) t.setAttribute("class", cls);
+      t.textContent = s;
+      return t;
+    }
+
+    var SEQ = "var(--seq)", PAR = "var(--par)", AX = "var(--axis)", ID = "var(--idle)";
+
+    // ---- ось времени сверху ----
+    line(0, -0.55, TOTAL, -0.55, AX);
+    TICKS.forEach(function (t) {
+      line(t, -0.55, t, -0.75, AX);
+      txt(t, -0.75, 0, -PAD, String(t), "middle", FS, "muted");
+    });
+    txt(TOTAL, -0.75, 0, -PAD - 15, "мс", "middle", FS, "muted");
+
+    // ---- дорожка 1: последовательно ----
+    txt(0, 0.35, -PAD * 2, 0, "Последовательно", "end", FSB);
+    txt(0, 0.35, -PAD * 2, 15, "одна горелка", "end", FS, "muted");
+
+    var acc = 0;
+    CALLS.forEach(function (c) {
+      bar(acc, acc + c.ms, 0.35, SEQ);
+      txt(acc + c.ms / 2, 0.35, 0, 4, c.tag, "middle", FS);
+      txt(acc + c.ms / 2, 0.35, 0, BAR + 6, String(c.ms), "middle", FS, "muted");
+      acc += c.ms;
+      line(acc, 0.35, acc, 0.05, AX);
+    });
+    txt(TOTAL, 0.35, PAD * 2, 4, "= 1800 мс", "start", FSB);
+
+    // ---- дорожки 2..4: параллельно ----
+    txt(0, 1.6, -PAD * 2, 0, "Параллельно", "end", FSB);
+    txt(0, 1.6, -PAD * 2, 15, "три горелки", "end", FS, "muted");
+
+    CALLS.forEach(function (c, i) {
+      var y = 1.2 + i * 0.55;
+      bar(0, c.ms, y, PAR);
+      txt(c.ms / 2, y, 0, 4, c.tag, "middle", FS);
+      if (c.ms < MAXV) {
+        bar(c.ms, MAXV, y, ID);
+        txt(c.ms, y, PAD, 4, "ждёт " + (MAXV - c.ms), "start", FS, "muted");
+      }
+      txt(0, y, -PAD, 4, c.name, "end", FS, "muted");
+    });
+
+    // ---- линия максимума ----
+    line(MAXV, -0.55, MAXV, 2.6, PAR);
+    txt(MAXV, 2.6, PAD, 14, "max = 800 мс — ждём Цюрих", "start", FSB);
+
+    // ---- выигрыш: стрелка от 1800 к 800 ----
+    var gy = 3.35;
+    line(MAXV, gy, TOTAL, gy, SEQ, LW + 0.6);
+    line(TOTAL, gy, TOTAL, 0.35, SEQ, LW);
+    el("polygon", {
+      fill: SEQ,
+      points: [
+        sx(MAXV) + "," + sy(gy),
+        (sx(MAXV) + 10) + "," + (sy(gy) - 5),
+        (sx(MAXV) + 10) + "," + (sy(gy) + 5)
+      ].join(" ")
+    });
+    txt(TOTAL, gy, -PAD, -PAD, "экономия 1000 мс — 55 %", "end", FS, "muted");
+  } catch (e) {
+    svg.remove();
+    var p = document.createElement("p");
+    p.className = "fail";
+    p.textContent = "Схема должна была показать две полосы времени: последовательно "
+      + "400 + 600 + 800 = 1800 мс, параллельно max(400, 600, 800) = 800 мс.";
+    document.querySelector(".wrap").appendChild(p);
+  }
+})();
+</script>
+</body>
+</html>

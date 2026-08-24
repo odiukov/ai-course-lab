@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Форма на каждом шаге attention</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: whitesmoke;
+    --panel: white;
+    --card: aliceblue;
+    --card-stroke: slategray;
+    --text: midnightblue;
+    --muted: dimgray;
+    --arrow: royalblue;
+    --batch: lightblue;
+    --heads: thistle;
+    --position: moccasin;
+    --key-position: peachpuff;
+    --vector: palegreen;
+    --embedding: lightcyan;
+  }
+
+  html,
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  header {
+    text-align: center;
+    background: var(--panel);
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  header p {
+    margin: unset;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--panel);
+    border-top: 1px solid var(--card-stroke);
+  }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--card-stroke);
+    stroke-width: 1.5;
+  }
+
+  .divider {
+    stroke: var(--card-stroke);
+    stroke-width: 1;
+  }
+
+  .arrow {
+    stroke: var(--arrow);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    fill: var(--arrow);
+  }
+
+  .stage-title {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .shape {
+    fill: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 19px;
+    font-weight: 700;
+  }
+
+  .axis-label {
+    fill: midnightblue;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .transition {
+    fill: var(--arrow);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .legend-title,
+  .legend-label {
+    fill: var(--text);
+    font-size: 13px;
+  }
+
+  .legend-title,
+  .check {
+    font-weight: 700;
+  }
+
+  .check {
+    fill: var(--text);
+    font-size: 14px;
+  }
+
+  .fallback {
+    fill: var(--text);
+    font-size: 16px;
+  }
+
+  .axis-b { fill: var(--batch); }
+  .axis-h { fill: var(--heads); }
+  .axis-t { fill: var(--position); }
+  .axis-tk { fill: var(--key-position); }
+  .axis-d { fill: var(--vector); }
+  .axis-e { fill: var(--embedding); }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: black;
+      --panel: midnightblue;
+      --card: darkslategray;
+      --card-stroke: lightslategray;
+      --text: whitesmoke;
+      --muted: lightgray;
+      --arrow: lightskyblue;
+      --batch: steelblue;
+      --heads: rebeccapurple;
+      --position: darkgoldenrod;
+      --key-position: sienna;
+      --vector: seagreen;
+      --embedding: teal;
+    }
+
+    .axis-label {
+      fill: white;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Форма на каждом шаге attention</h1>
+  <p id="summary">Цепочка форм от входа до финального выхода</p>
+</header>
+
+<svg
+  id="diagram"
+  viewBox="0 0 1200 430"
+  width="1200"
+  height="430"
+  preserveAspectRatio="xMidYMid meet"
+  role="img"
+  aria-labelledby="svg-title svg-desc"
+>
+  <title id="svg-title">Формы тензоров внутри multi-head attention</title>
+  <desc id="svg-desc">
+    Цепочка показывает появление оси голов, две оси позиций в scores,
+    возвращение размера головы и сборку голов в embedding.
+  </desc>
+  <g id="drawing"></g>
+</svg>
+
+<script>
+const data = {
+  canvas: { width: 1200, height: 430 },
+  parameters: "B=2 · H=4 · T=8 · D=16 · E=64",
+  layout: {
+    cardWidth: 2.3,
+    cardHeight: 2.65,
+    titleY: 0.42,
+    shapeY: 0.98,
+    axisY: 1.25,
+    axisHeight: 0.68,
+    noteY: 2.28,
+    innerLeft: 0.12,
+    innerWidth: 2.06,
+    arrowLength: 0.16,
+    arrowHalfWidth: 0.10,
+    arrowInset: 0.08,
+    legendSwatchWidth: 0.24,
+    legendSwatchHeight: 0.34,
+    legendTextGap: 0.34
+  },
+  stages: [
+    {
+      x: 0.2, y: 0.45,
+      title: "Вход",
+      shape: "(2,8,64)",
+      note: "B — batch, T — позиции",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "T · 8", kind: "t" },
+        { label: "E · 64", kind: "e" }
+      ]
+    },
+    {
+      x: 3.2, y: 0.45,
+      title: "Q после проекции",
+      shape: "(2,8,64)",
+      note: "линейная проекция: форма та же",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "T · 8", kind: "t" },
+        { label: "E · 64", kind: "e" }
+      ]
+    },
+    {
+      x: 6.2, y: 0.45,
+      title: "Reshape + transpose",
+      shape: "(2,4,8,16)",
+      note: "E → H × D",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "H · 4", kind: "h" },
+        { label: "T · 8", kind: "t" },
+        { label: "D · 16", kind: "d" }
+      ]
+    },
+    {
+      x: 9.2, y: 0.45,
+      title: "Scores",
+      shape: "(2,4,8,8)",
+      note: "D исчезает; Tᑫ × Tₖ",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "H · 4", kind: "h" },
+        { label: "Tᑫ · 8", kind: "t" },
+        { label: "Tₖ · 8", kind: "tk" }
+      ]
+    },
+    {
+      x: 9.2, y: 5.05,
+      title: "Веса",
+      shape: "(2,4,8,8)",
+      note: "softmax форму не меняет",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "H · 4", kind: "h" },
+        { label: "Tᑫ · 8", kind: "t" },
+        { label: "Tₖ · 8", kind: "tk" }
+      ]
+    },
+    {
+      x: 6.2, y: 5.05,
+      title: "Выход голов",
+      shape: "(2,4,8,16)",
+      note: "Tₖ исчезает; D возвращается",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "H · 4", kind: "h" },
+        { label: "T · 8", kind: "t" },
+        { label: "D · 16", kind: "d" }
+      ]
+    },
+    {
+      x: 3.2, y: 5.05,
+      title: "Concat голов",
+      shape: "(2,8,64)",
+      note: "H × D → E",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "T · 8", kind: "t" },
+        { label: "E · 64", kind: "e" }
+      ]
+    },
+    {
+      x: 0.2, y: 5.05,
+      title: "Финал attention",
+      shape: "(2,8,64)",
+      note: "B и T те же, что на входе",
+      axes: [
+        { label: "B · 2", kind: "b" },
+        { label: "T · 8", kind: "t" },
+        { label: "E · 64", kind: "e" }
+      ]
+    }
+  ],
+  arrows: [
+    { ax: 2.58, ay: 1.78, bx: 3.12, by: 1.78 },
+    { ax: 5.58, ay: 1.78, bx: 6.12, by: 1.78 },
+    { ax: 8.58, ay: 1.78, bx: 9.12, by: 1.78 },
+    {
+      ax: 10.35, ay: 3.18, bx: 10.35, by: 4.97,
+      label: "softmax", lx: 10.55, ly: 4.08, anchor: "start"
+    },
+    { ax: 9.12, ay: 6.38, bx: 8.58, by: 6.38 },
+    { ax: 6.12, ay: 6.38, bx: 5.58, by: 6.38 },
+    { ax: 3.12, ay: 6.38, bx: 2.58, by: 6.38 }
+  ],
+  legend: {
+    titleX: 0.2,
+    y: 8.35,
+    items: [
+      { x: 1.55, kind: "b", label: "B — batch" },
+      { x: 3.05, kind: "h", label: "H — головы" },
+      { x: 4.72, kind: "t", label: "Tᑫ — запрос" },
+      { x: 6.45, kind: "tk", label: "Tₖ — ключ" },
+      { x: 8.0, kind: "d", label: "D — вектор головы" },
+      { x: 10.18, kind: "e", label: "E — embedding" }
+    ]
+  },
+  check: {
+    x: 5.85,
+    y: 9.7,
+    text: "Проверка: (B,T,E) → внутренние формы → (B,T,E)"
+  },
+  fallback: {
+    x: 0.55,
+    firstY: 3.6,
+    secondY: 4.4,
+    first: "Схема должна была показать цепочку форм attention:",
+    second: "(2,8,64) → (2,4,8,16) → (2,4,8,8) → (2,4,8,16) → (2,8,64)"
+  }
+};
+
+const origin = { x: 18, y: 10 };
+const scale = { x: 101, y: 39 };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const ns = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+  const layout = data.layout;
+  document.getElementById("summary").textContent = data.parameters;
+
+  const make = (tag, attrs, content) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => node.setAttribute(name, value));
+    if (content !== undefined) node.textContent = content;
+    return node;
+  };
+
+  const addText = (x, y, content, className, anchor) => {
+    drawing.appendChild(make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content));
+  };
+
+  const addRect = (x, y, width, height, className) => {
+    drawing.appendChild(make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      class: className
+    }));
+  };
+
+  const addArrow = arrow => {
+    const dx = arrow.bx - arrow.ax;
+    const dy = arrow.by - arrow.ay;
+    const distance = Math.hypot(dx, dy);
+    const ux = dx / distance;
+    const uy = dy / distance;
+    const baseX = arrow.bx - ux * layout.arrowLength;
+    const baseY = arrow.by - uy * layout.arrowLength;
+    const leftX = baseX - uy * layout.arrowHalfWidth;
+    const leftY = baseY + ux * layout.arrowHalfWidth;
+    const rightX = baseX + uy * layout.arrowHalfWidth;
+    const rightY = baseY - ux * layout.arrowHalfWidth;
+
+    drawing.appendChild(make("line", {
+      x1: sx(arrow.ax),
+      y1: sy(arrow.ay),
+      x2: sx(baseX + ux * layout.arrowInset),
+      y2: sy(baseY + uy * layout.arrowInset),
+      class: "arrow"
+    }));
+
+    drawing.appendChild(make("polygon", {
+      points: [
+        `${sx(arrow.bx)},${sy(arrow.by)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      class: "arrow-head"
+    }));
+
+    if (arrow.label) {
+      addText(arrow.lx, arrow.ly, arrow.label, "transition", arrow.anchor);
+    }
+  };
+
+  data.arrows.forEach(addArrow);
+
+  data.stages.forEach(stage => {
+    addRect(
+      stage.x,
+      stage.y,
+      layout.cardWidth,
+      layout.cardHeight,
+      "card"
+    );
+
+    addText(
+      stage.x + layout.cardWidth / stage.axes.length,
+      stage.y + layout.titleY,
+      stage.title,
+      "stage-title",
+      "start"
+    );
+
+    addText(
+      stage.x + layout.cardWidth / layout.cardWidth,
+      stage.y + layout.shapeY,
+      stage.shape,
+      "shape",
+      "middle"
+    );
+
+    const axisWidth = layout.innerWidth / stage.axes.length;
+
+    stage.axes.forEach((axis, axisIndex) => {
+      const axisX = stage.x + layout.innerLeft + axisIndex * axisWidth;
+      addRect(
+        axisX,
+        stage.y + layout.axisY,
+        axisWidth,
+        layout.axisHeight,
+        `axis-${axis.kind}`
+      );
+
+      drawing.appendChild(make("line", {
+        x1: sx(axisX),
+        y1: sy(stage.y + layout.axisY),
+        x2: sx(axisX),
+        y2: sy(stage.y + layout.axisY + layout.axisHeight),
+        class: "divider"
+      }));
+
+      addText(
+        axisX + axisWidth / stage.axes.length,
+        stage.y + layout.axisY + layout.axisHeight / stage.axes.length,
+        axis.label,
+        "axis-label",
+        "start"
+      );
+    });
+
+    addText(
+      stage.x + layout.cardWidth / stage.axes.length,
+      stage.y + layout.noteY,
+      stage.note,
+      "note",
+      "start"
+    );
+  });
+
+  addText(
+    data.legend.titleX,
+    data.legend.y,
+    "Буквы формы:",
+    "legend-title",
+    "start"
+  );
+
+  data.legend.items.forEach(item => {
+    addRect(
+      item.x,
+      data.legend.y - layout.legendSwatchHeight / layout.cardWidth,
+      layout.legendSwatchWidth,
+      layout.legendSwatchHeight,
+      `axis-${item.kind}`
+    );
+
+    addText(
+      item.x + layout.legendTextGap,
+      data.legend.y,
+      item.label,
+      "legend-label",
+      "start"
+    );
+  });
+
+  addText(
+    data.check.x,
+    data.check.y,
+    data.check.text,
+    "check",
+    "middle"
+  );
+} catch (error) {
+  const ns = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+  while (drawing.firstChild) drawing.firstChild.remove();
+
+  const fallbackText = (y, content) => {
+    const node = document.createElementNS(ns, "text");
+    node.setAttribute("x", sx(data.fallback.x));
+    node.setAttribute("y", sy(y));
+    node.setAttribute("class", "fallback");
+    node.textContent = content;
+    drawing.appendChild(node);
+  };
+
+  fallbackText(data.fallback.firstY, data.fallback.first);
+  fallbackText(data.fallback.secondY, data.fallback.second);
+}
+</script>
+</body>
+</html>

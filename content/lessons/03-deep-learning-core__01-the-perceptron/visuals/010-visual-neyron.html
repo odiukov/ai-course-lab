@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Схема нейрона</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --line:#3a4149; --accent:#1f6feb;
+    --node:#eef2f7; --nodeb:#8a97a6; --muted:#5b6470;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e6eaf0; --line:#98a4b3; --accent:#6aa8ff;
+      --node:#1e242b; --nodeb:#5d6b7a; --muted:#9aa5b1;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 10px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{padding:10px;border:1px solid var(--nodeb);border-radius:6px;
+    color:var(--fg);font-size:14px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Схема нейрона: входы → сумматор → активация → выход</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var INPUTS = [
+      {id:"x1", label:"x\u2081", w:"w\u2081", x:0, y:3},
+      {id:"x2", label:"x\u2082", w:"w\u2082", x:0, y:2},
+      {id:"x3", label:"x\u2083", w:"w\u2083", x:0, y:1},
+      {id:"b",  label:"bias",    w:null,     x:0, y:0}
+    ];
+    var SUM  = {x:3, y:2, label:"\u03a3(wi\u00b7xi) + b"};
+    var STEP = {x:6, y:2, label:"step(z)"};
+    var OUT  = {x:9, y:2, label:"0 \u0438\u043b\u0438 1"};
+
+    // ---- один origin, один scale ----
+    var ORIGIN = {x:110, y:250};
+    var SCALE  = 62;
+    function sx(x){ return ORIGIN.x + x*SCALE; }
+    function sy(y){ return ORIGIN.y - y*SCALE; }
+
+    // ---- литералы вида/стиля ----
+    var VB_W = 900, VB_H = 400;
+    var PAD = 9;          // отступ подписи от точки привязки, px
+    var STROKE = 2;       // толщина линий
+    var FS = 15;          // размер шрифта
+    var FS_SMALL = 13;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){
+      var e = document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function text(px,py,s,anchor,cls,size){
+      var t = el("text",{x:px, y:py, "text-anchor":anchor,
+        "dominant-baseline":"middle", "font-size":size||FS,
+        fill: cls==="w" ? "var(--accent)" : "var(--fg)"});
+      t.textContent = s;
+      return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Три входа с весами и смещение сходятся в сумматор, затем ступенчатая функция, затем выход 0 или 1"});
+
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah", markerWidth:"9", markerHeight:"7",
+      refX:"8", refY:"3.5", orient:"auto", markerUnits:"strokeWidth"});
+    var poly = el("polygon",{points:"0,0 9,3.5 0,7", fill:"var(--line)"});
+    mk.appendChild(poly); defs.appendChild(mk); svg.appendChild(defs);
+
+    function arrow(p1,p2){
+      return el("line",{x1:sx(p1.x), y1:sy(p1.y), x2:sx(p2.x), y2:sy(p2.y),
+        stroke:"var(--line)", "stroke-width":STROKE, "marker-end":"url(#ah)"});
+    }
+    function node(p,label,r){
+      var g = el("g",{});
+      g.appendChild(el("circle",{cx:sx(p.x), cy:sy(p.y), r:r,
+        fill:"var(--node)", stroke:"var(--nodeb)", "stroke-width":STROKE}));
+      g.appendChild(text(sx(p.x), sy(p.y), label, "middle", "", FS));
+      return g;
+    }
+
+    // радиусы узлов — через ту же функцию перевода (расстояние между точками)
+    var R_IN   = sx(0.42) - sx(0);
+    var R_BIG  = sx(0.92) - sx(0);
+    var R_STEP = sx(0.62) - sx(0);
+    var R_OUT  = sx(0.55) - sx(0);
+
+    // точка на отрезке от a к b, укороченная на радиусы обоих концов
+    function trim(a,b,ra,rb){
+      var ax=sx(a.x), ay=sy(a.y), bx=sx(b.x), by=sy(b.y);
+      var dx=bx-ax, dy=by-ay, L=Math.sqrt(dx*dx+dy*dy);
+      return {
+        from:{x:a.x + (dx/L)*ra/SCALE, y:a.y - (dy/L)*ra/SCALE},
+        to:  {x:b.x - (dx/L)*rb/SCALE, y:b.y + (dy/L)*rb/SCALE}
+      };
+    }
+
+    // ---- стрелки входов ----
+    INPUTS.forEach(function(inp){
+      var seg = trim(inp, SUM, R_IN, R_BIG);
+      svg.appendChild(arrow(seg.from, seg.to));
+      if(inp.w){
+        // подпись веса у хвоста стрелки, над линией
+        var t = 0.32;
+        var lx = seg.from.x + (seg.to.x - seg.from.x)*t;
+        var ly = seg.from.y + (seg.to.y - seg.from.y)*t;
+        svg.appendChild(text(sx(lx), sy(ly) - PAD, inp.w, "middle", "w", FS));
+      }
+    });
+
+    // ---- узлы входов и подписи слева ----
+    INPUTS.forEach(function(inp){
+      svg.appendChild(node(inp, inp.y === 0 ? "b" : inp.label, R_IN));
+      var caption = inp.y === 0 ? "\u0441\u043c\u0435\u0449\u0435\u043d\u0438\u0435 (bias)"
+                                : "\u0432\u0445\u043e\u0434";
+      svg.appendChild(text(sx(inp.x) - R_IN - PAD, sy(inp.y), caption,
+        "end", "", FS_SMALL));
+    });
+
+    // ---- сумматор -> активация -> выход ----
+    var s1 = trim(SUM, STEP, R_BIG, R_STEP);
+    svg.appendChild(arrow(s1.from, s1.to));
+    var s2 = trim(STEP, OUT, R_STEP, R_OUT);
+    svg.appendChild(arrow(s2.from, s2.to));
+
+    svg.appendChild(node(SUM, "", R_BIG));
+    svg.appendChild(text(sx(SUM.x), sy(SUM.y), SUM.label, "middle", "", FS_SMALL));
+    svg.appendChild(text(sx(SUM.x), sy(SUM.y) + R_BIG + PAD,
+      "\u0441\u0443\u043c\u043c\u0430\u0442\u043e\u0440", "middle", "", FS_SMALL));
+
+    svg.appendChild(node(STEP, "", R_STEP));
+    svg.appendChild(text(sx(STEP.x), sy(STEP.y), STEP.label, "middle", "", FS_SMALL));
+    svg.appendChild(text(sx(STEP.x), sy(STEP.y) - R_STEP - PAD,
+      "\u0430\u043a\u0442\u0438\u0432\u0430\u0446\u0438\u044f", "middle", "", FS_SMALL));
+
+    svg.appendChild(node(OUT, "", R_OUT));
+    svg.appendChild(text(sx(OUT.x), sy(OUT.y), OUT.label, "middle", "", FS_SMALL));
+    svg.appendChild(text(sx(OUT.x), sy(OUT.y) + R_OUT + PAD,
+      "\u0432\u044b\u0445\u043e\u0434", "middle", "", FS_SMALL));
+
+    // подпись z над стрелкой сумматор -> активация
+    var mz = {x:(s1.from.x + s1.to.x)/2, y:(s1.from.y + s1.to.y)/2};
+    svg.appendChild(text(sx(mz.x), sy(mz.y) - PAD, "z", "middle", "w", FS));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = "";
+    var d = document.createElement("div");
+    d.className = "fail";
+    d.textContent = "Схема не построилась. Она должна показывать: три входа "
+      + "x\u2081, x\u2082, x\u2083 слева; от каждого стрелка с весом "
+      + "w\u2081, w\u2082, w\u2083 в общий узел-сумматор \u03a3(wi\u00b7xi) + b; "
+      + "туда же отдельной стрелкой приходит смещение (bias). Из сумматора "
+      + "одно число z идёт в узел активации step(z), а оттуда в выход: 0 или 1. "
+      + "Сигнал движется только слева направо.";
+    host.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

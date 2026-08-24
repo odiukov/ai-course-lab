@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Таймлайн шага при K=4</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5c6773;
+    --axis:#8a94a0; --draft:#4c8dd8; --draft-fill:#cfe2f7;
+    --target:#2f9e6f; --target-fill:#c8ecdb; --accent:#d9822b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8edf2; --muted:#9aa7b4;
+      --axis:#5d6874; --draft:#6fb0f2; --draft-fill:#1e3a57;
+      --target:#5fd3a3; --target-fill:#16412f; --accent:#f0a758;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:10px 12px 14px;box-sizing:border-box;background:var(--bg);}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  text{fill:var(--fg);font-family:inherit;}
+  .muted{fill:var(--muted);}
+  .fallback{color:var(--fg);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Таймлайн одного шага при K=4: 4×2.5 мс черновика + 25 мс target = 35 мс</h2>
+  <svg id="chart" viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Таймлайн шага speculative decoding при K равном четырём"></svg>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна показывать шкалу времени в миллисекундах: четыре узкие полоски
+    draft-модели по 2.5 мс подряд (всего 10 мс), затем одна широкая полоса
+    target-модели 25 мс, накрывающая сразу 5 позиций. Весь шаг — 35 мс.
+    Принятый префикс из 5 токенов подсвечен: 7 мс на токен.
+  </div>
+</div>
+<script>
+(function(){
+try{
+  /* ---------- данные (мс) ---------- */
+  var DRAFT = [
+    {t0:0.0,  t1:2.5,  id:"d\u2081"},
+    {t0:2.5,  t1:5.0,  id:"d\u2082"},
+    {t0:5.0,  t1:7.5,  id:"d\u2083"},
+    {t0:7.5,  t1:10.0, id:"d\u2084"}
+  ];
+  var TARGET = {t0:10, t1:35, positions:5};
+  var TICKS  = [0, 10, 35];
+  var LANE_DRAFT = 1, LANE_TARGET = 2, LANE_AXIS = 0, LANE_ACC = 3;
+
+  /* ---------- одна пара переводов ---------- */
+  var origin = {x:70, y:210};      // пиксели: sx(0), sy(0)
+  var scale  = {x:17, y:-46};      // px на мс по X, px на «дорожку» по Y
+  function sx(x){ return origin.x + x * scale.x; }
+  function sy(y){ return origin.y + y * scale.y; }
+
+  /* ---------- литералы-константы оформления ---------- */
+  var LW = 1.6, LWB = 2.2, FS = 12, FSS = 11, PAD = 6, PAD2 = 12;
+
+  var svg = document.getElementById("chart");
+  var NS = "http://www.w3.org/2000/svg";
+  function el(n,a){ var e=document.createElementNS(NS,n);
+    for(var k in a){ e.setAttribute(k,a[k]); } svg.appendChild(e); return e; }
+  function txt(x,y,s,anchor,cls,size){
+    var e=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||FS,
+      "class":cls||""}); e.textContent=s; return e; }
+  function box(t0,t1,lane,fill,stroke,dash){
+    return el("rect",{x:sx(t0), y:sy(lane+0.62),
+      width:sx(t1)-sx(t0), height:sy(lane-0.28)-sy(lane+0.62),
+      rx:3, fill:fill, stroke:stroke, "stroke-width":LW,
+      "stroke-dasharray":dash||"none"});
+  }
+
+  /* ---------- маркер стрелки ---------- */
+  var defs = el("defs",{});
+  var mk = document.createElementNS(NS,"marker");
+  mk.setAttribute("id","ah"); mk.setAttribute("markerWidth","8");
+  mk.setAttribute("markerHeight","8"); mk.setAttribute("refX","7");
+  mk.setAttribute("refY","3"); mk.setAttribute("orient","auto");
+  var p = document.createElementNS(NS,"path");
+  p.setAttribute("d","M0,0 L7,3 L0,6 z"); p.setAttribute("fill","var(--axis)");
+  mk.appendChild(p); defs.appendChild(mk);
+
+  /* ---------- ось времени ---------- */
+  el("line",{x1:sx(0), y1:sy(LANE_AXIS), x2:sx(38.5), y2:sy(LANE_AXIS),
+    stroke:"var(--axis)","stroke-width":LW,"marker-end":"url(#ah)"});
+  txt(sx(38.5), sy(LANE_AXIS)+PAD2+PAD, "время, мс", "end", "muted", FSS);
+
+  TICKS.forEach(function(t){
+    el("line",{x1:sx(t), y1:sy(LANE_AXIS), x2:sx(t), y2:sy(LANE_AXIS)+PAD,
+      stroke:"var(--axis)","stroke-width":LW});
+    txt(sx(t), sy(LANE_AXIS)+PAD+PAD2, String(t), "middle", "muted", FSS);
+  });
+
+  /* ---------- четыре шага черновика ---------- */
+  DRAFT.forEach(function(d){
+    box(d.t0, d.t1, LANE_DRAFT, "var(--draft-fill)", "var(--draft)");
+    txt((sx(d.t0)+sx(d.t1))/2, sy(LANE_DRAFT+0.17), d.id, "middle", "", FSS);
+  });
+
+  /* скобка «10 мс, строго последовательно» — под полосками черновика */
+  el("line",{x1:sx(0), y1:sy(LANE_DRAFT-0.45), x2:sx(10), y2:sy(LANE_DRAFT-0.45),
+    stroke:"var(--draft)","stroke-width":LW});
+  txt(sx(5), sy(LANE_DRAFT-0.62), "4 \u00d7 2.5 = 10 мс", "middle", "", FSS);
+  txt(sx(0)-PAD, sy(LANE_DRAFT+0.17), "draft", "end", "", FS);
+
+  /* подпись над черновиком: риск */
+  txt(sx(0), sy(LANE_DRAFT+0.95),
+      "строго друг за другом \u2014 только это время можно потратить впустую",
+      "start", "muted", FSS);
+
+  /* ---------- один forward pass target ---------- */
+  box(TARGET.t0, TARGET.t1, LANE_TARGET, "var(--target-fill)", "var(--target)");
+  txt(sx(0)-PAD, sy(LANE_TARGET+0.17), "target", "end", "", FS);
+  txt((sx(TARGET.t0)+sx(TARGET.t1))/2, sy(LANE_TARGET+0.17),
+      "один проход \u2014 25 мс", "middle", "", FS);
+
+  /* 5 позиций внутри одной широкой полосы */
+  var i, span = (TARGET.t1-TARGET.t0)/TARGET.positions;
+  for(i=1;i<TARGET.positions;i++){
+    el("line",{x1:sx(TARGET.t0+i*span), y1:sy(LANE_TARGET-0.28),
+      x2:sx(TARGET.t0+i*span), y2:sy(LANE_TARGET+0.62),
+      stroke:"var(--target)","stroke-width":LW,"stroke-dasharray":"3 3"});
+  }
+  for(i=0;i<TARGET.positions;i++){
+    txt(sx(TARGET.t0+(i+0.5)*span), sy(LANE_TARGET+0.72),
+        "поз." + (i+1), "middle", "muted", FSS);
+  }
+
+  /* ---------- принятый префикс ---------- */
+  el("rect",{x:sx(TARGET.t0), y:sy(LANE_ACC+0.42),
+    width:sx(TARGET.t1)-sx(TARGET.t0),
+    height:sy(LANE_ACC-0.12)-sy(LANE_ACC+0.42),
+    rx:3, fill:"none", stroke:"var(--accent)","stroke-width":LWB,
+    "stroke-dasharray":"6 4"});
+  txt((sx(TARGET.t0)+sx(TARGET.t1))/2, sy(LANE_ACC+0.08),
+      "принятый префикс: 5 токенов", "middle", "", FS);
+
+  /* ---------- итог шага ---------- */
+  el("line",{x1:sx(0), y1:sy(LANE_ACC+0.85), x2:sx(35), y2:sy(LANE_ACC+0.85),
+    stroke:"var(--fg)","stroke-width":LW});
+  el("line",{x1:sx(0), y1:sy(LANE_ACC+0.72), x2:sx(0), y2:sy(LANE_ACC+0.98),
+    stroke:"var(--fg)","stroke-width":LW});
+  el("line",{x1:sx(35), y1:sy(LANE_ACC+0.72), x2:sx(35), y2:sy(LANE_ACC+0.98),
+    stroke:"var(--fg)","stroke-width":LW});
+  txt(sx(17.5), sy(LANE_ACC+1.12),
+      "шаг = 35 мс \u2192 7 мс на токен (или 35 мс на 1 токен при отказе)",
+      "middle", "", FS);
+}catch(e){
+  var f = document.getElementById("fallback");
+  if(f){ f.hidden = false; }
+  var s = document.getElementById("chart");
+  if(s){ s.setAttribute("hidden","hidden"); }
+}
+})();
+</script>
+</body>
+</html>

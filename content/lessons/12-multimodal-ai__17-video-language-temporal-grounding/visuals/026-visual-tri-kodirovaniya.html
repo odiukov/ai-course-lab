@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Три способа временного кодирования</title>
+<style>
+  :root{
+    --bg:#fbfbf9; --fg:#1c1c1e; --muted:#6b6b70; --line:#3a3a3c;
+    --a:#1f6feb; --b:#b9761f; --c:#1a8a5a; --bad:#c0392b; --card:#eeeeea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16171a; --fg:#eceff3; --muted:#9aa0a8; --line:#c7ccd3;
+      --a:#6ea8fe; --b:#e0a458; --c:#5cc79a; --bad:#f0736a; --card:#23252a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;line-height:1.5;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Три подписи к одному клипу: что переживает смену FPS</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var FRAMES = 16;                 // 16 кадров клипа
+    var JUMP_S = 4.2;                // прыжок кота на 4.2 с
+    var ROWS = [
+      {key:'bag',  color:'var(--b)', label:'Метка на клип (Q-former)', note:'одна метка на 16 кадров — «где-то в начале»'},
+      {key:'idx',  color:'var(--a)', label:'Индекс кадра 0..15',        note:'кадр 15: при 2 FPS — 7.5 с, при 4 FPS — 3.75 с'},
+      {key:'sec',  color:'var(--c)', label:'Абсолютное время, с',       note:'0.0 / 0.5 / … / 4.2 — не зависит от FPS'}
+    ];
+    var FPS = [2, 4];
+
+    // ---- одна система координат ----
+    var origin = {x: 168, y: 44};    // пиксель точки (0,0) в данных
+    var scale  = {x: 40,  y: 46};    // пикселей на единицу данных
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y + y * scale.y; }
+
+    // ---- литералы холста и типографики ----
+    var VB_W = 1000, VB_H = 470;
+    var PAD = 8, FS = 12, FS_SM = 11, LW = 1.4;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+    function txt(x, y, s, anchor, cls, size){
+      var t = el('text', {x:x, y:y, 'text-anchor':anchor||'middle',
+        'font-size':(size||FS), fill:'var(--fg)'});
+      if(cls) t.setAttribute('fill', cls);
+      t.textContent = s; return t;
+    }
+
+    var svg = el('svg', {viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet', role:'img'});
+    var defs = el('defs', {});
+    ['line','bad'].forEach(function(c){
+      var m = el('marker', {id:'ar-'+c, viewBox:'0 0 10 10', refX:'9', refY:'5',
+        markerWidth:'6', markerHeight:'6', orient:'auto-start-reverse'});
+      m.appendChild(el('path', {d:'M0,0 L10,5 L0,10 z', fill:'var(--'+c+')'}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+
+    // ---- ряды токенов: 16 клеток, ряд r ----
+    var CELL_W = 0.82;   // доля ширины шага по x
+    ROWS.forEach(function(row, r){
+      var y = r;
+      // подпись ряда — слева от первой клетки, text-anchor=end
+      svg.appendChild(txt(sx(0) - PAD*2, sy(y) + FS*0.35, row.label, 'end', row.color));
+      svg.appendChild(txt(sx(0) - PAD*2, sy(y) + FS*0.35 + FS*1.3, row.note, 'end', 'var(--muted)', FS_SM));
+
+      if(row.key === 'bag'){
+        // мешок: одна рамка на все 16 токенов
+        var x0 = sx(-0.5*CELL_W), x1 = sx(FRAMES - 1 + 0.5*CELL_W);
+        svg.appendChild(el('rect', {x:x0, y:sy(y) - scale.y*0.30,
+          width:x1-x0, height:scale.y*0.60, rx:sy(0.12)-sy(0),
+          fill:'var(--card)', stroke:row.color, 'stroke-width':LW,
+          'stroke-dasharray':(sx(0.1)-sx(0))+' '+(sx(0.07)-sx(0))}));
+        for(var i=0;i<FRAMES;i++){
+          svg.appendChild(el('circle', {cx:sx(i), cy:sy(y), r:(sx(0.09)-sx(0)),
+            fill:row.color, opacity:'0.55'}));
+        }
+        svg.appendChild(txt(sx((FRAMES-1)/2), sy(y) + FS*0.35, '≈ начало клипа',
+          'middle', 'var(--fg)'));
+      } else {
+        for(var i=0;i<FRAMES;i++){
+          var cx = sx(i);
+          svg.appendChild(el('rect', {x:sx(i-0.5*CELL_W), y:sy(y) - scale.y*0.26,
+            width:sx(i+0.5*CELL_W)-sx(i-0.5*CELL_W), height:scale.y*0.52,
+            rx:sy(0.08)-sy(0), fill:'var(--card)', stroke:row.color, 'stroke-width':LW}));
+          var s = row.key === 'idx' ? String(i) : (i*0.5).toFixed(1);
+          svg.appendChild(txt(cx, sy(y) + FS_SM*0.36, s, 'middle', 'var(--fg)', FS_SM));
+        }
+      }
+    });
+
+    // ---- отметка прыжка: 4.2 с попадает между токенами ряда секунд ----
+    var jx = sx(JUMP_S / 0.5);       // 4.2 с при шаге 0.5 с
+    var jyTop = sy(-0.62), jyBot = sy(2.30);
+    svg.appendChild(el('line', {x1:jx, y1:jyTop, x2:jx, y2:jyBot,
+      stroke:'var(--line)', 'stroke-width':LW,
+      'stroke-dasharray':(sx(0.12)-sx(0))+' '+(sx(0.09)-sx(0))}));
+    svg.appendChild(txt(jx, jyTop - PAD, 'кот прыгает: 4.2 с', 'middle', 'var(--fg)'));
+
+    // ---- смена FPS: индекс 15 читается по-разному ----
+    var iCell = FRAMES - 1;          // кадр 15
+    var tailX = sx(iCell), tailY = sy(1) + scale.y*0.30;
+    var midY  = sy(1.60);
+    FPS.forEach(function(f, k){
+      var toX = sx(iCell) + (k===0 ? sx(0)-sx(1.9) : sx(1.9)-sx(0));
+      var p = el('path', {d:'M'+tailX+','+tailY+' L'+toX+','+midY,
+        stroke:'var(--bad)', 'stroke-width':LW, fill:'none',
+        'marker-end':'url(#ar-bad)'});
+      svg.appendChild(p);
+      var secs = (iCell / f).toFixed(2);
+      svg.appendChild(txt(toX, midY + FS*1.15, f+' FPS → '+secs+' с',
+        k===0 ? 'end' : 'start', 'var(--bad)'));
+    });
+    // подпись у хвоста стрелок, сбоку
+    svg.appendChild(txt(sx(iCell) + sx(0.55)-sx(0), sy(1) - scale.y*0.34,
+      'кадр 15', 'start', 'var(--bad)', FS_SM));
+
+    // ---- вывод: секунды переживают смену FPS ----
+    var okX = sx(JUMP_S / 0.5), okY = sy(2) + scale.y*0.30;
+    svg.appendChild(el('path', {d:'M'+okX+','+sy(2.60)+' L'+okX+','+(okY + (sy(0.10)-sy(0))),
+      stroke:'var(--c)', 'stroke-width':LW, fill:'none', 'marker-end':'url(#ar-line)'}));
+    svg.appendChild(txt(okX, sy(2.60) + FS*1.05,
+      '4.2 с остаётся 4.2 с при 2 FPS и при 4 FPS', 'middle', 'var(--c)'));
+
+    // ---- легенда строкой под схемой ----
+    svg.appendChild(txt(sx(-0.5), sy(3.10),
+      'Разрешение ответа = разрешение метки: мешок — длина клипа, индекс — настройки выборки, секунда — ничего из этого.',
+      'start', 'var(--muted)', FS_SM));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать один клип в трёх кодировках: ' +
+      '(1) мешок из 16 токенов с одной меткой на весь клип — ответ только «где-то в начале»; ' +
+      '(2) индексы кадров 0..15 — кадр 15 это 7.5 с при 2 FPS и 3.75 с при 4 FPS, привязка ломается; ' +
+      '(3) абсолютное время 0.0 / 0.5 / … / 4.2 с на каждом токене — прыжок кота на 4.2 с ' +
+      'остаётся на 4.2 с при любой частоте выборки.</p>';
+  }
+})();
+</script>
+</body>
+</html>

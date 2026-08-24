@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Экономия от tool pruning</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1a1a2e; --muted:#5b6070; --axis:#8a8fa0;
+    --idle:#c8ccd8; --idle-ink:#3a3f52; --used:#e94560; --used-ink:#ffffff;
+    --guide:#ffa500;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12121a; --ink:#eef0f8; --muted:#a6acc0; --axis:#6e7488;
+      --idle:#2b3048; --idle-ink:#c9cee0; --used:#e94560; --used-ink:#ffffff;
+      --guide:#ffb733;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{padding:8px 10px 2px}
+  h1{margin:0;font-size:15px;font-weight:600}
+  p.sub{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+  svg{display:block;width:100%;height:auto;max-height:430px}
+  text{font-family:inherit}
+  .fb{margin:8px 0 10px;font-size:13px;color:var(--ink)}
+</style>
+<div class="wrap">
+  <h1>Экономия от tool pruning</h1>
+  <p class="sub">Запрос: «Schedule a meeting for Tuesday»</p>
+  <svg id="chart" viewBox="0 0 720 430" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Столбик полного реестра из 10 инструментов на 1580 токенов против одного create_calendar_event на 180 токенов"></svg>
+  <div id="fallback"></div>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById('chart');
+  try{
+    /* ---- данные схемы ---- */
+    var bars = [
+      { at: 3.0, caption: 'Полный реестр: 10 инструментов',
+        segments: [
+          { tokens: 180,  kind: 'used', lines: ['180'] },
+          { tokens: 1400, kind: 'idle', lines: ['9 остальных', 'описаний', '1 400'] }
+        ] },
+      { at: 8.5, caption: 'Только create_calendar_event',
+        segments: [
+          { tokens: 180, kind: 'used', lines: [] }
+        ] }
+    ];
+    var HALF = 1.2;                 /* полуширина столбика, в единицах x */
+    var TICKS = [0, 180, 1580];
+    var TOP = 1580, MID = 880, SAVED = 1400;
+
+    /* ---- одна система координат ---- */
+    var origin = { x: 60, y: 372 };
+    var scale  = { x: 52, y: 0.21 };
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(t){ return origin.y - t * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+    function add(n, a){ var e = el(n, a); svg.appendChild(e); return e; }
+    function label(x, y, s, anchor, size, fill){
+      var t = add('text', {x:x, y:y, 'text-anchor':anchor, 'font-size':size, fill:fill});
+      t.textContent = s; return t;
+    }
+
+    /* наконечники для двусторонней стрелки экономии */
+    var defs = add('defs');
+    ['s','e'].forEach(function(id){
+      var m = el('marker', {id:'ar'+id, viewBox:'0 0 10 10', refX:'8', refY:'5',
+        markerWidth:'7', markerHeight:'7', orient:'auto-start-reverse'});
+      m.appendChild(el('path', {d:'M 0 0 L 10 5 L 0 10 z', fill:'var(--guide)'}));
+      defs.appendChild(m);
+    });
+
+    /* ---- оси ---- */
+    add('line', {x1:sx(0), y1:sy(0), x2:sx(11.4), y2:sy(0),
+      stroke:'var(--axis)', 'stroke-width':1.5});
+    add('line', {x1:sx(0), y1:sy(0), x2:sx(0), y2:sy(TOP),
+      stroke:'var(--axis)', 'stroke-width':1.5});
+
+    TICKS.forEach(function(t){
+      add('line', {x1:sx(-0.13), y1:sy(t), x2:sx(0), y2:sy(t),
+        stroke:'var(--axis)', 'stroke-width':1.5});
+      label(sx(-0.13) - 6, sy(t) + 4, t === 0 ? '0' : (t === 180 ? '180' : '1 580'),
+        'end', 11.5, 'var(--muted)');
+    });
+    label(sx(-0.13) - 6, sy(TOP) - 14, 'токены', 'end', 11.5, 'var(--muted)');
+
+    /* ---- столбики ---- */
+    bars.forEach(function(bar){
+      var base = 0, top = 0;
+      bar.segments.forEach(function(seg){
+        var y0 = sy(base), y1 = sy(base + seg.tokens);
+        add('rect', {x:sx(bar.at - HALF), y:y1,
+          width:sx(bar.at + HALF) - sx(bar.at - HALF), height:y0 - y1,
+          fill: seg.kind === 'used' ? 'var(--used)' : 'var(--idle)',
+          stroke:'var(--axis)', 'stroke-width':1});
+        var cy = sy(base + seg.tokens / 2);
+        seg.lines.forEach(function(line, i){
+          var dy = (i - (seg.lines.length - 1) / 2) * 14 + 4;
+          label(sx(bar.at), cy + dy, line, 'middle', 11.5,
+            seg.kind === 'used' ? 'var(--used-ink)' : 'var(--idle-ink)');
+        });
+        base += seg.tokens; top = base;
+      });
+      label(sx(bar.at), sy(top) - 10,
+        (top === TOP ? '1 580' : '180') + ' токенов', 'middle', 13, 'var(--ink)');
+      label(sx(bar.at), sy(0) + 18, bar.caption, 'middle', 12, 'var(--muted)');
+    });
+
+    /* ---- уровень 180 как общая опора и стрелка экономии ---- */
+    add('line', {x1:sx(4.2), y1:sy(180), x2:sx(9.9), y2:sy(180),
+      stroke:'var(--guide)', 'stroke-width':1.2, 'stroke-dasharray':'5 4'});
+    add('line', {x1:sx(5.85), y1:sy(TOP), x2:sx(5.85), y2:sy(180),
+      stroke:'var(--guide)', 'stroke-width':1.5,
+      'marker-start':'url(#ars)', 'marker-end':'url(#are)'});
+    label(sx(5.85) + 10, sy(MID) - 4, 'освободилось', 'start', 12.5, 'var(--guide)');
+    label(sx(5.85) + 10, sy(MID) + 12, SAVED === 1400 ? '1 400 токенов' : '',
+      'start', 12.5, 'var(--guide)');
+
+    /* ---- легенда ---- */
+    var ly = sy(0) + 42;
+    add('rect', {x:sx(0), y:ly - 9, width:sx(0.22) - sx(0), height:11,
+      fill:'var(--used)', stroke:'var(--axis)', 'stroke-width':1});
+    label(sx(0.3), ly, 'create_calendar_event — нужен для этого запроса',
+      'start', 12, 'var(--muted)');
+    add('rect', {x:sx(6.0), y:ly - 9, width:sx(6.22) - sx(6.0), height:11,
+      fill:'var(--idle)', stroke:'var(--axis)', 'stroke-width':1});
+    label(sx(6.3), ly, 'описания, которые не понадобятся', 'start', 12, 'var(--muted)');
+  }catch(e){
+    svg.remove();
+    var p = document.createElement('p');
+    p.className = 'fb';
+    p.textContent = 'Схема должна была показать два столбика токенов для запроса '
+      + '«Schedule a meeting for Tuesday»: полный реестр из 10 инструментов — 1 580 токенов, '
+      + 'один create_calendar_event — 180 токенов. Разница в 1 400 токенов освобождается '
+      + 'под документацию и историю.';
+    document.getElementById('fallback').appendChild(p);
+  }
+})();
+</script>
+</html>

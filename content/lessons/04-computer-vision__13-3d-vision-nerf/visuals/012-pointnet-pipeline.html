@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как PointNet сжимает облако в глобальный признак</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #53627a;
+    --line: #9aa9bc;
+    --card: #f4f7fb;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --cyan: #0891b2;
+    --cyan-soft: #cffafe;
+    --gold: #b45309;
+    --gold-soft: #fef3c7;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
+    --grid: #cbd5e1;
+    --banner: #eef2ff;
+    --banner-line: #a5b4fc;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1020;
+      --panel: #111827;
+      --ink: #f1f5f9;
+      --muted: #b7c2d2;
+      --line: #64748b;
+      --card: #182235;
+      --blue: #60a5fa;
+      --blue-soft: #172d50;
+      --cyan: #22d3ee;
+      --cyan-soft: #143541;
+      --gold: #fbbf24;
+      --gold-soft: #403318;
+      --green: #4ade80;
+      --green-soft: #173725;
+      --violet: #c4b5fd;
+      --violet-soft: #302650;
+      --grid: #475569;
+      --banner: #202646;
+      --banner-line: #6366f1;
+    }
+  }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--panel);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 16px 20px 10px;
+    border-bottom: 1px solid var(--grid);
+    font-size: 24px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .heading {
+    font-size: 13px;
+    font-weight: bold;
+    fill: var(--muted);
+  }
+
+  .main-label {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .small {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .number {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .mlp-card {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 2;
+  }
+
+  .pool-card {
+    fill: var(--gold-soft);
+    stroke: var(--gold);
+    stroke-width: 2;
+  }
+
+  .vector-card {
+    fill: var(--violet-soft);
+    stroke: var(--violet);
+    stroke-width: 2;
+  }
+
+  .class-card {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 2;
+  }
+
+  .banner {
+    fill: var(--banner);
+    stroke: var(--banner-line);
+    stroke-width: 2;
+  }
+
+  .arrow-line {
+    stroke: var(--line);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    fill: var(--line);
+  }
+
+  .point {
+    fill: var(--blue);
+  }
+
+  .point-hot {
+    fill: var(--gold);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+
+  .grid-line {
+    stroke: var(--grid);
+    stroke-width: 1;
+  }
+
+  .matrix-hot {
+    fill: var(--gold);
+  }
+
+  .matrix-cool {
+    fill: var(--cyan);
+  }
+
+  .pool-line {
+    stroke: var(--gold);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .vector-a {
+    fill: var(--violet);
+  }
+
+  .vector-b {
+    fill: var(--cyan);
+  }
+
+  .vector-c {
+    fill: var(--gold);
+  }
+
+  .network-line {
+    stroke: var(--green);
+    stroke-width: 2;
+  }
+
+  .network-node {
+    fill: var(--panel);
+    stroke: var(--green);
+    stroke-width: 2;
+  }
+
+  .accent-blue {
+    fill: var(--blue);
+  }
+
+  .accent-gold {
+    fill: var(--gold);
+  }
+
+  #fallback {
+    margin: 0;
+    padding: 24px;
+    font-size: 16px;
+    color: var(--ink);
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Как PointNet сжимает облако в глобальный признак</h1>
+  <svg id="diagram" viewBox="0 0 1280 430" width="1280" height="430"
+       role="img" aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Конвейер PointNet</title>
+    <desc id="svg-desc">1024 точки формы 1024 на 3 проходят через общий MLP, образуют признаки формы 1024 на 1024, затем max pool создаёт глобальный вектор длиной 1024 для классификатора.</desc>
+  </svg>
+  <p id="fallback" hidden>Схема должна показать: 1024 точки формы (1024, 3) проходят через общий MLP и превращаются в признаки (1024, 1024); max pool оставляет максимум в каждом канале, создаёт один вектор (1024,), после чего классификатор выбирает класс объекта.</p>
+</figure>
+
+<script>
+const DATA = Object.freeze([
+  [0, 0],
+  [1, 1],
+  [1280, 430],
+  [28, 52, 202, 258, 18],
+  [282, 82, 200, 198, 18],
+  [536, 52, 254, 258, 18],
+  [835, 82, 110, 198, 18],
+  [990, 70, 105, 222, 18],
+  [1125, 100, 127, 162, 18],
+  [28, 332, 1224, 72, 18],
+  [10, 7],
+  [
+    [59, 126], [75, 113], [91, 106], [108, 111], [125, 121],
+    [71, 144], [91, 139], [111, 143], [132, 151], [153, 156],
+    [176, 158], [198, 154], [62, 166], [83, 168], [105, 168],
+    [128, 169], [151, 169], [176, 168], [201, 168], [85, 188],
+    [88, 213], [164, 187], [169, 214], [176, 139]
+  ],
+  [4],
+  [176, 139, 6],
+  [230, 181, 274, 181],
+  [482, 181, 528, 181],
+  [790, 181, 827, 181],
+  [945, 181, 982, 181],
+  [1095, 181, 1117, 181],
+  [558, 104, 210, 132, 8],
+  [558, 584, 610, 636, 662, 688, 714, 740, 768],
+  [104, 126, 148, 170, 192, 214, 236],
+  [
+    [559, 127, 24, 20, 3, "matrix-cool"],
+    [611, 105, 24, 20, 3, "matrix-hot"],
+    [637, 171, 24, 20, 3, "matrix-cool"],
+    [689, 149, 24, 20, 3, "matrix-hot"],
+    [715, 193, 24, 20, 3, "matrix-cool"],
+    [741, 127, 26, 20, 3, "matrix-hot"]
+  ],
+  [
+    [852, 128, 906, 154], [852, 154, 906, 154],
+    [852, 180, 906, 154], [852, 206, 906, 154]
+  ],
+  [907, 143, 22, 22, 5],
+  [
+    [1018, 112, 48, 18, 4, "vector-a"],
+    [1018, 132, 48, 18, 4, "vector-b"],
+    [1018, 152, 48, 18, 4, "vector-c"],
+    [1018, 172, 48, 18, 4, "vector-a"],
+    [1018, 192, 48, 18, 4, "vector-b"],
+    [1018, 212, 48, 18, 4, "vector-c"]
+  ],
+  [
+    [1150, 143, 1206, 157], [1150, 163, 1206, 157],
+    [1150, 183, 1206, 157], [1150, 143, 1206, 193],
+    [1150, 163, 1206, 193], [1150, 183, 1206, 193]
+  ],
+  [[1150, 143], [1150, 163], [1150, 183], [1206, 157], [1206, 193]],
+  [6],
+  [
+    [129, 76, "ВХОД", "heading", "middle"],
+    [129, 250, "1024 точки", "main-label", "middle"],
+    [129, 274, "(1024, 3)", "number", "middle"],
+    [129, 297, "3072 входных числа", "small", "middle"],
+
+    [382, 110, "ОБЩИЙ MLP", "heading", "middle"],
+    [382, 146, "для каждой точки", "small", "middle"],
+    [382, 188, "3 → 64 → 128 → 1024", "number", "middle"],
+    [382, 224, "одни и те же веса", "small", "middle"],
+    [382, 250, "для всех 1024 точек", "small", "middle"],
+
+    [663, 76, "ПРИЗНАКИ ТОЧЕК", "heading", "middle"],
+    [663, 264, "(1024, 1024)", "number", "middle"],
+    [663, 288, "для каждой точки — свой вектор", "small", "middle"],
+
+    [890, 109, "MAX POOL", "heading", "middle"],
+    [890, 191, "максимум", "main-label", "middle"],
+    [890, 218, "по всем", "small", "middle"],
+    [890, 240, "1024 точкам", "small", "middle"],
+    [890, 263, "в каждом канале", "small", "middle"],
+
+    [1042, 99, "ГЛОБАЛЬНЫЙ", "heading", "middle"],
+    [1042, 272, "(1024,)", "number", "middle"],
+
+    [1188, 128, "КЛАССИФИКАТОР", "heading", "middle"],
+    [1188, 226, "класс объекта", "main-label", "middle"],
+
+    [54, 361, "Сначала расширяем описание каждой точки:", "main-label", "start"],
+    [422, 361, "3 → 64 → 128 → 1024", "number accent-blue", "start"],
+    [54, 387, "Сжимаем только после этого:", "main-label", "start"],
+    [422, 387, "для каждого из 1024 каналов остаётся самый сильный сигнал", "number accent-gold", "start"]
+  ]
+]);
+
+const [
+  ORIGIN_DATA, SCALE_DATA, CANVAS, POINT_CARD, MLP_CARD, MATRIX_CARD,
+  POOL_CARD, VECTOR_CARD, CLASS_CARD, BANNER, ARROW_SIZE, POINTS,
+  DOT_SIZE, HOT_POINT, ARROW_ONE, ARROW_TWO, ARROW_THREE, ARROW_FOUR,
+  ARROW_FIVE, MATRIX_INNER, MATRIX_XS, MATRIX_YS, MATRIX_CELLS,
+  POOL_LINKS, POOL_CORE, VECTOR_CELLS, CLASS_LINKS, CLASS_NODES,
+  NODE_SIZE, LABELS
+] = DATA;
+
+const [originX, originY] = ORIGIN_DATA;
+const [scaleX, scaleY] = SCALE_DATA;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+
+  function node(tag, attrs, className) {
+    const element = document.createElementNS(svg.namespaceURI, tag);
+    if (className) element.setAttribute("class", className);
+    for (const [name, value] of Object.entries(attrs)) {
+      element.setAttribute(name, String(value));
+    }
+    svg.append(element);
+    return element;
+  }
+
+  function box(data, className) {
+    const [x, y, width, height, radius] = data;
+    return node("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(x + radius) - sx(x),
+      ry: sy(y + radius) - sy(y)
+    }, className);
+  }
+
+  function segment(data, className) {
+    const [x1, y1, x2, y2] = data;
+    return node("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    }, className);
+  }
+
+  function dot(data, radius, className) {
+    const [x, y] = data;
+    return node("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(x + radius) - sx(x)
+    }, className);
+  }
+
+  function arrow(data) {
+    const [x1, y1, x2, y2] = data;
+    const [headLength, headHalf] = ARROW_SIZE;
+    segment([x1, y1, x2, y2], "arrow-line");
+    node("polygon", {
+      points: [
+        [sx(x2), sy(y2)],
+        [sx(x2 - headLength), sy(y2 - headHalf)],
+        [sx(x2 - headLength), sy(y2 + headHalf)]
+      ].map(pair => pair.join(",")).join(" ")
+    }, "arrow-head");
+  }
+
+  box(POINT_CARD, "card");
+  box(MLP_CARD, "mlp-card");
+  box(MATRIX_CARD, "card");
+  box(POOL_CARD, "pool-card");
+  box(VECTOR_CARD, "vector-card");
+  box(CLASS_CARD, "class-card");
+  box(BANNER, "banner");
+
+  const [dotRadius] = DOT_SIZE;
+  POINTS.forEach(point => dot(point, dotRadius, "point"));
+  const [hotX, hotY, hotRadius] = HOT_POINT;
+  dot([hotX, hotY], hotRadius, "point-hot");
+
+  [ARROW_ONE, ARROW_TWO, ARROW_THREE, ARROW_FOUR, ARROW_FIVE].forEach(arrow);
+
+  box(MATRIX_INNER, "card");
+  const [matrixLeft, matrixTop, matrixWidth, matrixHeight] = MATRIX_INNER;
+  MATRIX_XS.forEach(x => segment(
+    [x, matrixTop, x, matrixTop + matrixHeight],
+    "grid-line"
+  ));
+  MATRIX_YS.forEach(y => segment(
+    [matrixLeft, y, matrixLeft + matrixWidth, y],
+    "grid-line"
+  ));
+  MATRIX_CELLS.forEach(cell => {
+    const [x, y, width, height, radius, className] = cell;
+    box([x, y, width, height, radius], className);
+  });
+
+  POOL_LINKS.forEach(link => segment(link, "pool-line"));
+  box(POOL_CORE, "matrix-hot");
+
+  VECTOR_CELLS.forEach(cell => {
+    const [x, y, width, height, radius, className] = cell;
+    box([x, y, width, height, radius], className);
+  });
+
+  CLASS_LINKS.forEach(link => segment(link, "network-line"));
+  const [networkRadius] = NODE_SIZE;
+  CLASS_NODES.forEach(point => dot(point, networkRadius, "network-node"));
+
+  LABELS.forEach(labelData => {
+    const [x, y, copy, className, anchor] = labelData;
+    const label = node("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor
+    }, className);
+    label.textContent = copy;
+  });
+
+  const [canvasWidth, canvasHeight] = CANVAS;
+  svg.setAttribute("viewBox", [
+    sx(originX),
+    sy(originY),
+    sx(canvasWidth) - sx(originX),
+    sy(canvasHeight) - sy(originY)
+  ].join(" "));
+  fallback.hidden = true;
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

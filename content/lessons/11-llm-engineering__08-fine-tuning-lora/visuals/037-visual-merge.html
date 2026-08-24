@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>До и после вплавления</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1b1f2a; --muted:#5a6474;
+    --line:#3b4252; --frozen:#1a1a2e; --frozenText:#ffffff;
+    --lora:#0f3460; --merged:#0d3b2e; --accent:#e94560;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12141a; --fg:#e8ebf2; --muted:#9aa4b5;
+      --line:#8b93a5; --frozen:#242a3d; --frozenText:#e8ebf2;
+      --lora:#1b4a7d; --merged:#155c45; --accent:#ff6b81;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{padding:10px 8px 12px;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;text-align:center;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fallback{padding:12px;color:var(--muted);font-size:13px;}
+  text{fill:var(--fg);font-family:inherit;}
+  .muted{fill:var(--muted);}
+  .head{font-weight:600;}
+  .onDark{fill:var(--frozenText);}
+  .stroke{stroke:var(--line);fill:none;}
+  .arrowFill{fill:var(--line);}
+  .div{stroke:var(--muted);stroke-dasharray:5 6;}
+</style>
+<div class="wrap">
+  <h2>До и после вплавления: три умножения против одного</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    /* ---- данные схемы (единственные литералы координат) ---- */
+    var SCALE=9, ORIGIN={x:64,y:10};
+    var HEAD={len:1.4,half:0.55};
+
+    var boxes=[
+      {cx:16,cy:28,w:12,h:5,fill:'var(--frozen)',cls:'onDark',
+       lines:['W  4096×4096','заморожена']},
+      {cx:13,cy:11,w:8,h:4,fill:'var(--lora)',cls:'onDark',
+       lines:['A  16×4096']},
+      {cx:25,cy:11,w:8,h:4,fill:'var(--lora)',cls:'onDark',
+       lines:['B  4096×16']},
+      {cx:74,cy:19,w:16,h:6,fill:'var(--merged)',cls:'onDark',
+       lines:['W′ = W + (α/r)·BA','4096×4096']}
+    ];
+    var dots=[
+      {x:4,y:19,r:1.2},{x:32,y:19,r:1.8,plus:true},
+      {x:58,y:19,r:1.2}
+    ];
+    var arrows=[
+      [[6.5,19],[9.6,27.6]],
+      [[6.5,19],[8.8,11.4]],
+      [[17,11],[20.6,11]],
+      [[22,27.6],[30.6,19.8]],
+      [[29,11],[30.9,17.6]],
+      [[33.9,19],[37.6,19]],
+      [[59.5,19],[65.6,19]],
+      [[82,19],[85.4,19]]
+    ];
+    var labels=[
+      {x:22,y:2,t:'С адаптером: три умножения на каждый токен',a:'middle',dy:0,fs:14,cls:'head'},
+      {x:74,y:2,t:'После merge_lora: одно умножение',a:'middle',dy:0,fs:14,cls:'head'},
+
+      {x:2.8,y:19,t:'вход x',a:'end',dx:-8,dy:5,fs:13},
+      {x:38.2,y:19,t:'выход y',a:'start',dx:8,dy:5,fs:13},
+      {x:32,y:22.4,t:'сложение',a:'middle',dy:12,fs:13,cls:'muted'},
+      {x:13,y:7.6,t:'сжатие в 16 чисел',a:'middle',dy:-6,fs:12,cls:'muted'},
+      {x:25,y:14.4,t:'разворот назад',a:'middle',dy:14,fs:12,cls:'muted'},
+
+      {x:56.8,y:19,t:'вход x',a:'end',dx:-8,dy:5,fs:13},
+      {x:85.8,y:19,t:'выход y',a:'start',dx:8,dy:5,fs:13},
+      {x:74,y:15.4,t:'адаптера в графе нет',a:'middle',dy:-8,fs:12,cls:'muted'},
+
+      {x:22,y:33.5,t:'64 лишние пары умножений на токен: 32 слоя × q_proj и v_proj',a:'middle',dy:0,fs:13,cls:'muted'},
+      {x:22,y:36,t:'A и B читаются из памяти отдельно: +5–10 % к времени ответа',a:'middle',dy:0,fs:13,cls:'muted'},
+
+      {x:74,y:33.5,t:'W′ — та же матрица 4096×4096, посчитана один раз',a:'middle',dy:0,fs:13,cls:'muted'},
+      {x:74,y:36,t:'одна ветка, одно чтение: скорость базовой модели',a:'middle',dy:0,fs:13,cls:'muted'},
+      {x:74,y:38.5,t:'расплата: поправку не отключить и alpha не подкрутить',a:'middle',dy:0,fs:13,cls:'muted'}
+    ];
+    var divider={x:50,y1:1,y2:31};
+
+    /* ---- единственный перевод координат ---- */
+    function sx(x){ return ORIGIN.x + x*SCALE; }
+    function sy(y){ return ORIGIN.y + y*SCALE; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,at){ var e=document.createElementNS(NS,n);
+      for(var k in at) e.setAttribute(k,at[k]); return e; }
+
+    var svg=el('svg',{viewBox:'0 0 1000 372',
+      preserveAspectRatio:'xMidYMid meet',role:'img',
+      'aria-label':'Слева три умножения с адаптером LoRA, справа одна вплавленная матрица'});
+    svg.appendChild(el('rect',{x:0,y:0,width:1000,height:372,fill:'var(--bg)'}));
+
+    svg.appendChild(el('line',{x1:sx(divider.x),y1:sy(divider.y1),
+      x2:sx(divider.x),y2:sy(divider.y2),'stroke-width':1.5,class:'div'}));
+
+    boxes.forEach(function(b){
+      svg.appendChild(el('rect',{
+        x:sx(b.cx-b.w/2), y:sy(b.cy-b.h/2),
+        width:sx(b.cx+b.w/2)-sx(b.cx-b.w/2),
+        height:sy(b.cy+b.h/2)-sy(b.cy-b.h/2),
+        rx:sx(0.7)-sx(0), fill:b.fill,
+        stroke:'var(--accent)','stroke-width':1.5}));
+      var n=b.lines.length;
+      b.lines.forEach(function(t,i){
+        var yy=b.cy+(i-(n-1)/2)*1.9;
+        var tx=el('text',{x:sx(b.cx),y:sy(yy),'text-anchor':'middle',
+          'dominant-baseline':'middle','font-size':i?12:14,class:b.cls});
+        tx.textContent=t; svg.appendChild(tx);
+      });
+    });
+
+    arrows.forEach(function(a){
+      var f=a[0], t=a[1];
+      var dx=t[0]-f[0], dy=t[1]-f[1], L=Math.sqrt(dx*dx+dy*dy)||1;
+      var ux=dx/L, uy=dy/L, px=-uy, py=ux;
+      var bx=t[0]-ux*HEAD.len, by=t[1]-uy*HEAD.len;
+      svg.appendChild(el('line',{x1:sx(f[0]),y1:sy(f[1]),
+        x2:sx(bx),y2:sy(by),'stroke-width':2,class:'stroke'}));
+      var pts=[[t[0],t[1]],
+               [bx+px*HEAD.half,by+py*HEAD.half],
+               [bx-px*HEAD.half,by-py*HEAD.half]]
+        .map(function(p){return sx(p[0])+','+sy(p[1]);}).join(' ');
+      svg.appendChild(el('polygon',{points:pts,class:'arrowFill'}));
+    });
+
+    dots.forEach(function(d){
+      svg.appendChild(el('circle',{cx:sx(d.x),cy:sy(d.y),
+        r:sx(d.r)-sx(0),fill:'var(--bg)',stroke:'var(--line)','stroke-width':2}));
+      if(d.plus){
+        svg.appendChild(el('line',{x1:sx(d.x-0.8),y1:sy(d.y),
+          x2:sx(d.x+0.8),y2:sy(d.y),'stroke-width':2,class:'stroke'}));
+        svg.appendChild(el('line',{x1:sx(d.x),y1:sy(d.y-0.8),
+          x2:sx(d.x),y2:sy(d.y+0.8),'stroke-width':2,class:'stroke'}));
+      }
+    });
+
+    labels.forEach(function(l){
+      var t=el('text',{x:sx(l.x)+(l.dx||0),y:sy(l.y)+(l.dy||0),
+        'text-anchor':l.a,'font-size':l.fs});
+      if(l.cls) t.setAttribute('class',l.cls);
+      t.textContent=l.t; svg.appendChild(t);
+    });
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fallback">Схема должна была показать: слева, с адаптером, '+
+      'вход x идёт в две ветки — замороженная W 4096×4096 даёт Wx, а A (16×4096) и B (4096×16) '+
+      'дают B(Ax); результаты складываются, итого три умножения на токен, 64 лишние пары на 32 слоя '+
+      'и +5–10 % к времени ответа. Справа, после merge_lora, — одна матрица '+
+      'W′ = W + (α/r)·BA того же размера 4096×4096: одно умножение, адаптера в графе нет, '+
+      'но поправку уже не отключить.</p>';
+  }
+})();
+</script>
+</html>

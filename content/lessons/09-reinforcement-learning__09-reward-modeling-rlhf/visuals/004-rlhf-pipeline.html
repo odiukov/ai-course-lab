@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Три этапа RLHF</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: ivory;
+    --panel: white;
+    --soft: aliceblue;
+    --soft-green: honeydew;
+    --soft-warm: oldlace;
+    --ink: midnightblue;
+    --muted: slategray;
+    --line: lightslategray;
+    --accent: royalblue;
+    --green: seagreen;
+    --warm: darkorange;
+    --negative: firebrick;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    border: 1px solid var(--line);
+  }
+
+  .title {
+    color: var(--ink);
+    background: var(--bg);
+    text-align: center;
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+
+  .stage {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .stage-band { fill: var(--soft); }
+
+  .stage-number {
+    fill: var(--accent);
+    stroke: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .stage-number-text {
+    fill: white;
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .subheading {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .box {
+    fill: var(--soft);
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .human {
+    fill: var(--soft-warm);
+    stroke: var(--warm);
+    stroke-width: 2px;
+  }
+
+  .reward {
+    fill: var(--soft-green);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .reference {
+    fill: var(--panel);
+    stroke: var(--muted);
+    stroke-width: 2px;
+  }
+
+  .total {
+    fill: var(--soft-green);
+    stroke: var(--green);
+    stroke-width: 3px;
+  }
+
+  .flow,
+  .branch,
+  .update {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .flow {
+    stroke: var(--accent);
+    stroke-width: 2px;
+  }
+
+  .branch {
+    stroke: var(--warm);
+    stroke-width: 2px;
+  }
+
+  .update {
+    stroke: var(--green);
+    stroke-width: 3px;
+  }
+
+  .arrow-flow { fill: var(--accent); }
+  .arrow-branch { fill: var(--warm); }
+  .arrow-update { fill: var(--green); }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .strong {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .formula {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .positive {
+    fill: var(--green);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .negative {
+    fill: var(--negative);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .edge-label {
+    fill: var(--accent);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--bg);
+    text-align: center;
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: midnightblue;
+      --panel: darkslategray;
+      --soft: slategray;
+      --soft-green: darkgreen;
+      --soft-warm: saddlebrown;
+      --ink: white;
+      --muted: gainsboro;
+      --line: lightsteelblue;
+      --accent: lightskyblue;
+      --green: lightgreen;
+      --warm: moccasin;
+      --negative: lightsalmon;
+    }
+
+    .stage-number-text { fill: midnightblue; }
+  }
+</style>
+</head>
+<body>
+<main class="figure" aria-labelledby="figure-title">
+  <div class="title" id="figure-title">Три этапа RLHF</div>
+  <svg id="diagram"
+       viewBox="0 0 1080 430"
+       width="1080"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="SFT, обучение модели награды на парах предпочтений и PPO с KL-штрафом к замороженной SFT-модели"></svg>
+  <p id="fallback" hidden>
+    Схема: SFT создаёт πSFT; человеческие пары y⁺ и y⁻ обучают модель награды;
+    PPO улучшает политику по награде RM минус KL-штраф к замороженной πSFT.
+  </p>
+</main>
+
+<script>
+const DATA = [{
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  style: {
+    zero: 0,
+    radius: 12,
+    pillRadius: 9,
+    head: 10,
+    halfHead: 5,
+    dash: [7, 6]
+  },
+  cards: [
+    {
+      x: 24, y: 20, w: 310, h: 388,
+      number: "1", cx: 52, cy: 54,
+      title: "SFT",
+      subtitle: "Обучение на человеческих примерах",
+      tx: 81, titleY: 47, subtitleY: 69
+    },
+    {
+      x: 384, y: 20, w: 310, h: 388,
+      number: "2", cx: 412, cy: 54,
+      title: "Пары и модель награды",
+      subtitle: "Сравнения обучают судью",
+      tx: 441, titleY: 47, subtitleY: 69
+    },
+    {
+      x: 744, y: 20, w: 312, h: 388,
+      number: "3", cx: 772, cy: 54,
+      title: "PPO",
+      subtitle: "Награда RM минус KL-штраф",
+      tx: 801, titleY: 47, subtitleY: 69
+    }
+  ],
+  stageLinks: [
+    {
+      points: [{ x: 334, y: 211 }, { x: 384, y: 211 }],
+      label: "πSFT", x: 359, y: 192
+    },
+    {
+      points: [{ x: 694, y: 211 }, { x: 744, y: 211 }],
+      label: "Rφ", x: 719, y: 192
+    }
+  ],
+  stageOne: {
+    examples: { x: 47, y: 105, w: 124, h: 56 },
+    base: { x: 190, y: 105, w: 120, h: 56 },
+    training: { x: 76, y: 220, w: 206, h: 61 },
+    output: { x: 85, y: 329, w: 188, h: 48 },
+    arrows: [
+      [{ x: 109, y: 161 }, { x: 109, y: 191 }, { x: 145, y: 191 }, { x: 145, y: 220 }],
+      [{ x: 250, y: 161 }, { x: 250, y: 191 }, { x: 213, y: 191 }, { x: 213, y: 220 }],
+      [{ x: 179, y: 281 }, { x: 179, y: 329 }]
+    ],
+    labels: [
+      { text: "Примеры ответов", x: 109, y: 126, cls: "strong", anchor: "middle" },
+      { text: "от людей", x: 109, y: 146, cls: "small", anchor: "middle" },
+      { text: "Базовая", x: 250, y: 126, cls: "strong", anchor: "middle" },
+      { text: "модель", x: 250, y: 146, cls: "small", anchor: "middle" },
+      { text: "Обучение отвечать", x: 179, y: 244, cls: "strong", anchor: "middle" },
+      { text: "по образцам", x: 179, y: 264, cls: "small", anchor: "middle" },
+      { text: "первая рабочая политика", x: 179, y: 309, cls: "small", anchor: "middle" },
+      { text: "πSFT", x: 179, y: 353, cls: "formula", anchor: "middle" }
+    ]
+  },
+  stageTwo: {
+    prompt: { x: 512, y: 94, w: 54, h: 38 },
+    plus: { x: 411, y: 172, w: 112, h: 50 },
+    minus: { x: 555, y: 172, w: 112, h: 50 },
+    preference: { x: 439, y: 244, w: 200, h: 48 },
+    training: { x: 443, y: 318, w: 192, h: 58 },
+    arrows: [
+      [{ x: 539, y: 132 }, { x: 539, y: 150 }, { x: 467, y: 150 }, { x: 467, y: 172 }],
+      [{ x: 539, y: 132 }, { x: 539, y: 150 }, { x: 611, y: 150 }, { x: 611, y: 172 }],
+      [{ x: 467, y: 222 }, { x: 467, y: 244 }],
+      [{ x: 611, y: 222 }, { x: 611, y: 244 }],
+      [{ x: 539, y: 292 }, { x: 539, y: 318 }]
+    ],
+    labels: [
+      { text: "промпт x", x: 539, y: 113, cls: "strong", anchor: "middle" },
+      { text: "ответ y⁺", x: 467, y: 197, cls: "positive", anchor: "middle" },
+      { text: "ответ y⁻", x: 611, y: 197, cls: "negative", anchor: "middle" },
+      { text: "человек: y⁺ ≻ y⁻", x: 539, y: 268, cls: "strong", anchor: "middle" },
+      { text: "пара предпочтений", x: 539, y: 307, cls: "small", anchor: "middle" },
+      { text: "обучение RM", x: 539, y: 339, cls: "strong", anchor: "middle" },
+      { text: "Rφ(x,y⁺) > Rφ(x,y⁻)", x: 539, y: 361, cls: "small", anchor: "middle" },
+      { text: "люди обучают судью", x: 539, y: 394, cls: "small", anchor: "middle" }
+    ]
+  },
+  stageThree: {
+    policy: { x: 772, y: 103, w: 120, h: 50 },
+    answer: { x: 928, y: 103, w: 96, h: 50 },
+    rm: { x: 928, y: 177, w: 96, h: 48 },
+    reference: { x: 772, y: 246, w: 126, h: 58 },
+    kl: { x: 928, y: 246, w: 96, h: 58 },
+    total: { x: 809, y: 335, w: 188, h: 48 },
+    arrows: [
+      { kind: "flow", points: [{ x: 892, y: 128 }, { x: 928, y: 128 }] },
+      { kind: "flow", points: [{ x: 976, y: 153 }, { x: 976, y: 177 }] },
+      { kind: "flow", points: [{ x: 832, y: 153 }, { x: 832, y: 218 }, { x: 956, y: 218 }, { x: 956, y: 246 }] },
+      { kind: "flow", points: [{ x: 898, y: 275 }, { x: 928, y: 275 }] },
+      { kind: "update", points: [{ x: 976, y: 225 }, { x: 976, y: 316 }, { x: 953, y: 316 }, { x: 953, y: 335 }] },
+      { kind: "update", points: [{ x: 976, y: 304 }, { x: 976, y: 335 }] },
+      { kind: "update", points: [{ x: 809, y: 359 }, { x: 760, y: 359 }, { x: 760, y: 128 }, { x: 772, y: 128 }] }
+    ],
+    labels: [
+      { text: "политика πθ", x: 832, y: 123, cls: "strong", anchor: "middle" },
+      { text: "обучается", x: 832, y: 143, cls: "small", anchor: "middle" },
+      { text: "ответ y", x: 976, y: 128, cls: "strong", anchor: "middle" },
+      { text: "RM", x: 976, y: 193, cls: "strong", anchor: "middle" },
+      { text: "Rφ(x,y)", x: 976, y: 213, cls: "small", anchor: "middle" },
+      { text: "πref = πSFT", x: 835, y: 266, cls: "strong", anchor: "middle" },
+      { text: "заморожена", x: 835, y: 288, cls: "small", anchor: "middle" },
+      { text: "KL", x: 976, y: 266, cls: "strong", anchor: "middle" },
+      { text: "отклонение", x: 976, y: 288, cls: "small", anchor: "middle" },
+      { text: "r = Rφ(x,y) − β · KL", x: 903, y: 359, cls: "formula", anchor: "middle" },
+      { text: "PPO", x: 775, y: 341, cls: "strong", anchor: "start", dx: 5 },
+      { text: "оценка судьи обучает ассистента", x: 903, y: 397, cls: "small", anchor: "middle" }
+    ]
+  }
+}];
+
+const [{
+  origin,
+  scale,
+  style,
+  cards,
+  stageLinks,
+  stageOne,
+  stageTwo,
+  stageThree
+}] = DATA;
+
+Object.freeze(origin);
+Object.freeze(scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.querySelector("#diagram");
+  const fallback = document.querySelector("#fallback");
+
+  function node(tag, attrs, content) {
+    const item = document.createElementNS(svg.namespaceURI, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => item.setAttribute(key, value));
+    if (content !== undefined) item.textContent = content;
+    return item;
+  }
+
+  function add(tag, attrs, content) {
+    const item = node(tag, attrs, content);
+    svg.appendChild(item);
+    return item;
+  }
+
+  function rect(box, cls, radius = style.radius) {
+    return add("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.w) - sx(style.zero),
+      height: sy(box.h) - sy(style.zero),
+      rx: sx(radius) - sx(style.zero),
+      ry: sy(radius) - sy(style.zero),
+      class: cls
+    });
+  }
+
+  function circle(x, y, radius, cls) {
+    return add("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(radius) - sx(style.zero),
+      class: cls
+    });
+  }
+
+  function label(item) {
+    const attrs = {
+      x: sx(item.x),
+      y: sy(item.y),
+      class: item.cls,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle"
+    };
+    if (item.dx !== undefined) attrs.dx = item.dx;
+    if (item.dy !== undefined) attrs.dy = item.dy;
+    return add("text", attrs, item.text);
+  }
+
+  function arrow(points, kind = "flow") {
+    const reversed = [...points].reverse();
+    const [tip, previous] = reversed;
+    const dx = tip.x - previous.x;
+    const dy = tip.y - previous.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const base = {
+      x: tip.x - ux * style.head,
+      y: tip.y - uy * style.head
+    };
+    const left = {
+      x: base.x - uy * style.halfHead,
+      y: base.y + ux * style.halfHead
+    };
+    const right = {
+      x: base.x + uy * style.halfHead,
+      y: base.y - ux * style.halfHead
+    };
+    const shaft = [...points];
+    shaft.pop();
+    shaft.push(base);
+    const commands = shaft.map((point, position) =>
+      `${position ? "L" : "M"} ${sx(point.x)} ${sy(point.y)}`
+    ).join(" ");
+
+    add("path", { d: commands, class: kind });
+    add("polygon", {
+      points: [tip, left, right]
+        .map(point => `${sx(point.x)},${sy(point.y)}`)
+        .join(" "),
+      class: `arrow-${kind}`
+    });
+  }
+
+  cards.forEach(card => {
+    rect(card, "stage");
+    add("rect", {
+      x: sx(card.x),
+      y: sy(card.y),
+      width: sx(card.w) - sx(style.zero),
+      height: sy(68) - sy(style.zero),
+      rx: sx(style.radius) - sx(style.zero),
+      ry: sy(style.radius) - sy(style.zero),
+      class: "stage-band"
+    });
+    circle(card.cx, card.cy, 18, "stage-number");
+    label({
+      text: card.number,
+      x: card.cx,
+      y: card.cy,
+      cls: "stage-number-text",
+      anchor: "middle"
+    });
+    label({
+      text: card.title,
+      x: card.tx,
+      y: card.titleY,
+      cls: "heading",
+      anchor: "start"
+    });
+    label({
+      text: card.subtitle,
+      x: card.tx,
+      y: card.subtitleY,
+      cls: "subheading",
+      anchor: "start"
+    });
+  });
+
+  stageLinks.forEach(link => {
+    arrow(link.points, "flow");
+    label({
+      text: link.label,
+      x: link.x,
+      y: link.y,
+      cls: "edge-label",
+      anchor: "middle"
+    });
+  });
+
+  rect(stageOne.examples, "human", style.pillRadius);
+  rect(stageOne.base, "box", style.pillRadius);
+  rect(stageOne.training, "box");
+  rect(stageOne.output, "reward", style.pillRadius);
+  stageOne.arrows.forEach(points => arrow(points, "flow"));
+  stageOne.labels.forEach(label);
+
+  rect(stageTwo.prompt, "box", style.pillRadius);
+  rect(stageTwo.plus, "reward", style.pillRadius);
+  rect(stageTwo.minus, "reference", style.pillRadius);
+  rect(stageTwo.preference, "human", style.pillRadius);
+  rect(stageTwo.training, "reward");
+  stageTwo.arrows.forEach(points => arrow(points, "branch"));
+  stageTwo.labels.forEach(label);
+
+  rect(stageThree.policy, "box", style.pillRadius);
+  rect(stageThree.answer, "box", style.pillRadius);
+  rect(stageThree.rm, "reward", style.pillRadius);
+  const referenceNode = rect(stageThree.reference, "reference", style.pillRadius);
+  referenceNode.setAttribute("stroke-dasharray", style.dash.join(" "));
+  rect(stageThree.kl, "reference", style.pillRadius);
+  rect(stageThree.total, "total", style.pillRadius);
+  stageThree.arrows.forEach(item => arrow(item.points, item.kind));
+  stageThree.labels.forEach(label);
+
+  fallback.hidden = true;
+} catch (error) {
+  const svg = document.querySelector("#diagram");
+  const fallback = document.querySelector("#fallback");
+  if (svg) svg.hidden = true;
+  if (fallback) fallback.hidden = false;
+}
+</script>
+</body>
+</html>

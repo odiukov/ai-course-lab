@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Жизненный цикл одного обучающего батча</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5d6880;
+      --border: #cbd3e1;
+      --node: #f2f5fa;
+      --node-strong: #e8edf6;
+      --data: #2563eb;
+      --backward: #d9465f;
+      --update: #138a63;
+      --cycle: #738096;
+      --batch: #eaf1ff;
+      --shadow: #dce3ef;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111620;
+        --panel: #171e2a;
+        --text: #eef2fa;
+        --muted: #aab5c8;
+        --border: #445067;
+        --node: #202938;
+        --node-strong: #283448;
+        --data: #70a5ff;
+        --backward: #ff788b;
+        --update: #55d2a1;
+        --cycle: #9ba8bc;
+        --batch: #203250;
+        --shadow: #0d1119;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+    }
+
+    h1 {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 22px;
+      text-align: center;
+      color: var(--text);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 440px;
+      max-height: 440px;
+      background: var(--panel);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .node {
+      fill: var(--node);
+      stroke: var(--border);
+    }
+
+    .node-strong {
+      fill: var(--node-strong);
+      stroke: var(--update);
+    }
+
+    .batch-card {
+      fill: var(--batch);
+      stroke: var(--data);
+    }
+
+    .shadow-card {
+      fill: var(--shadow);
+      stroke: var(--border);
+    }
+
+    .data-flow {
+      fill: none;
+      stroke: var(--data);
+    }
+
+    .backward-flow {
+      fill: none;
+      stroke: var(--backward);
+    }
+
+    .update-flow {
+      fill: none;
+      stroke: var(--update);
+    }
+
+    .cycle-flow {
+      fill: none;
+      stroke: var(--cycle);
+    }
+
+    .data-head {
+      fill: var(--data);
+    }
+
+    .backward-head {
+      fill: var(--backward);
+    }
+
+    .update-head {
+      fill: var(--update);
+    }
+
+    .cycle-head {
+      fill: var(--cycle);
+    }
+
+    .main-text {
+      fill: var(--text);
+      font-weight: 650;
+    }
+
+    .sub-text {
+      fill: var(--muted);
+    }
+
+    .data-text {
+      fill: var(--data);
+      font-weight: 650;
+    }
+
+    .backward-text {
+      fill: var(--backward);
+      font-weight: 650;
+    }
+
+    .update-text {
+      fill: var(--update);
+      font-weight: 650;
+    }
+
+    .cycle-text {
+      fill: var(--cycle);
+    }
+
+    #fallback {
+      background: var(--panel);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Жизненный цикл одного обучающего батча</h1>
+    <svg id="diagram"
+         viewBox="0 0 960 440"
+         width="960"
+         height="440"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Жизненный цикл одного обучающего батча</title>
+      <desc id="svg-desc">Кольцевая схема из пяти операций: очистка градиентов, прямой проход модели, вычисление ошибки, обратное распространение и обновление параметров.</desc>
+    </svg>
+    <p id="fallback" hidden>
+      Схема должна была показать цикл: optimizer.zero_grad → model(inputs) →
+      criterion(outputs, targets) → loss.backward → optimizer.step.
+    </p>
+    <noscript>
+      Схема: optimizer.zero_grad → model(inputs) →
+      criterion(outputs, targets) → loss.backward → optimizer.step.
+    </noscript>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze({
+      ns: "http://www.w3.org/2000/svg",
+      zero: 0,
+      canvas: { width: 960, height: 440 },
+      origin: { x: 480, y: 220 },
+      scale: { x: 38, y: 38 },
+      geometry: {
+        corner: 0.22,
+        nodeHeight: 1.42,
+        arrowLength: 0.32,
+        arrowHalf: 0.19,
+        lineWidth: 3,
+        thinWidth: 2,
+        dash: "7 7"
+      },
+      typography: {
+        code: 16,
+        caption: 13,
+        flow: 13,
+        legend: 13
+      },
+      batch: {
+        x: 0,
+        y: -4.42,
+        width: 3.62,
+        height: 0.82,
+        cards: [
+          { x: -0.20, y: 0.20, className: "shadow-card" },
+          { x: -0.10, y: 0.10, className: "shadow-card" },
+          { x: 0, y: 0, className: "batch-card" }
+        ],
+        label: {
+          x: 0,
+          y: -5.06,
+          text: "Батч: 64 изображения",
+          anchor: "middle",
+          className: "data-text"
+        }
+      },
+      nodes: [
+        {
+          key: "zeroGrad",
+          x: -6.18,
+          y: -2.28,
+          width: 4.62,
+          className: "node",
+          lines: [
+            { text: "optimizer.zero_grad()", y: -0.14, className: "main-text" },
+            { text: "очистить .grad", y: 0.34, className: "sub-text" }
+          ]
+        },
+        {
+          key: "model",
+          x: 0,
+          y: -2.28,
+          width: 3.92,
+          className: "node",
+          lines: [
+            { text: "model(inputs)", y: -0.14, className: "main-text" },
+            { text: "прямой проход", y: 0.34, className: "sub-text" }
+          ]
+        },
+        {
+          key: "criterion",
+          x: 6.04,
+          y: -0.34,
+          width: 5.18,
+          className: "node",
+          lines: [
+            { text: "criterion(outputs, targets)", y: -0.14, className: "main-text" },
+            { text: "свести ошибки в loss", y: 0.34, className: "sub-text" }
+          ]
+        },
+        {
+          key: "backward",
+          x: 2.34,
+          y: 3.04,
+          width: 4.18,
+          className: "node",
+          lines: [
+            { text: "loss.backward()", y: -0.14, className: "main-text" },
+            { text: "заполнить .grad", y: 0.34, className: "sub-text" }
+          ]
+        },
+        {
+          key: "step",
+          x: -5.02,
+          y: 3.04,
+          width: 4.34,
+          className: "node",
+          lines: [
+            { text: "optimizer.step()", y: -0.14, className: "main-text" },
+            { text: "применить градиенты", y: 0.34, className: "sub-text" }
+          ]
+        }
+      ],
+      parameters: {
+        x: -0.68,
+        y: 0.54,
+        width: 4.46,
+        height: 1.18,
+        className: "node-strong",
+        lines: [
+          { text: "Параметры модели", y: -0.12, className: "main-text" },
+          { text: "меняются только здесь", y: 0.30, className: "update-text" }
+        ]
+      },
+      arrows: [
+        {
+          start: { x: 0, y: -3.96 },
+          end: { x: 0, y: -3.02 },
+          className: "data-flow",
+          headClass: "data-head",
+          label: {
+            x: 0.32, y: -3.54, dx: 8, dy: 0,
+            text: "inputs", anchor: "start", className: "data-text"
+          }
+        },
+        {
+          start: { x: -3.87, y: -2.28 },
+          end: { x: -1.98, y: -2.28 },
+          className: "data-flow",
+          headClass: "data-head",
+          label: {
+            x: -2.93, y: -2.70, dx: 0, dy: -5,
+            text: "градиенты очищены", anchor: "middle", className: "data-text"
+          }
+        },
+        {
+          start: { x: 1.96, y: -2.15 },
+          controlOne: { x: 3.42, y: -2.02 },
+          controlTwo: { x: 3.86, y: -0.72 },
+          end: { x: 3.45, y: -0.45 },
+          className: "data-flow",
+          headClass: "data-head",
+          label: {
+            x: 3.10, y: -2.06, dx: 0, dy: -7,
+            text: "outputs: логиты", anchor: "middle", className: "data-text"
+          }
+        },
+        {
+          start: { x: 6.10, y: 0.38 },
+          controlOne: { x: 6.02, y: 1.55 },
+          controlTwo: { x: 5.04, y: 2.54 },
+          end: { x: 4.43, y: 2.92 },
+          className: "backward-flow",
+          headClass: "backward-head",
+          label: {
+            x: 6.58, y: 1.46, dx: 10, dy: 0,
+            text: "сигнал ошибки", anchor: "start", className: "backward-text"
+          }
+        },
+        {
+          start: { x: 0.25, y: 3.04 },
+          end: { x: -2.85, y: 3.04 },
+          className: "backward-flow",
+          headClass: "backward-head",
+          label: {
+            x: -1.28, y: 2.55, dx: 0, dy: -5,
+            text: "градиенты параметров", anchor: "middle", className: "backward-text"
+          }
+        },
+        {
+          start: { x: -3.26, y: 2.50 },
+          controlOne: { x: -2.76, y: 1.82 },
+          controlTwo: { x: -2.16, y: 1.25 },
+          end: { x: -1.90, y: 1.08 },
+          className: "update-flow",
+          headClass: "update-head",
+          label: {
+            x: -3.18, y: 1.64, dx: -10, dy: 0,
+            text: "обновление", anchor: "end", className: "update-text"
+          }
+        },
+        {
+          start: { x: -6.70, y: 2.58 },
+          controlOne: { x: -8.42, y: 1.62 },
+          controlTwo: { x: -8.54, y: -1.42 },
+          end: { x: -7.56, y: -1.82 },
+          className: "cycle-flow",
+          headClass: "cycle-head",
+          label: {
+            x: -8.34, y: 0.46, dx: -8, dy: 0,
+            text: "следующий батч", anchor: "end", className: "cycle-text"
+          }
+        }
+      ],
+      connector: {
+        start: { x: -0.55, y: -0.05 },
+        end: { x: -0.12, y: -1.56 },
+        className: "cycle-flow"
+      },
+      legend: [
+        {
+          start: { x: -8.36, y: 4.86 },
+          end: { x: -7.48, y: 4.86 },
+          textPoint: { x: -7.25, y: 4.86 },
+          text: "данные идут вперёд",
+          lineClass: "data-flow",
+          textClass: "data-text"
+        },
+        {
+          start: { x: -1.95, y: 4.86 },
+          end: { x: -1.07, y: 4.86 },
+          textPoint: { x: -0.84, y: 4.86 },
+          text: "ошибка идёт назад",
+          lineClass: "backward-flow",
+          textClass: "backward-text"
+        },
+        {
+          start: { x: 4.50, y: 4.86 },
+          end: { x: 5.38, y: 4.86 },
+          textPoint: { x: 5.61, y: 4.86 },
+          text: "параметры обновлены",
+          lineClass: "update-flow",
+          textClass: "update-text"
+        }
+      ]
+    });
+
+    const origin = Object.freeze(diagramData.origin);
+    const scale = Object.freeze(diagramData.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+
+      const element = (name, attributes, parent = svg) => {
+        const item = document.createElementNS(diagramData.ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          item.setAttribute(key, String(value));
+        });
+        parent.appendChild(item);
+        return item;
+      };
+
+      const addRect = (spec, className) => element("rect", {
+        x: sx(spec.x - spec.width / diagramData.geometry.lineWidth),
+        y: sy(spec.y - spec.height / diagramData.geometry.lineWidth),
+        width: sx(spec.width) - sx(diagramData.zero),
+        height: sy(spec.height) - sy(diagramData.zero),
+        rx: sx(diagramData.geometry.corner) - sx(diagramData.zero),
+        ry: sy(diagramData.geometry.corner) - sy(diagramData.zero),
+        class: className,
+        "stroke-width": diagramData.geometry.thinWidth
+      });
+
+      const addText = (spec, fontSize = diagramData.typography.flow) => {
+        const text = element("text", {
+          x: sx(spec.x) + (spec.dx ?? diagramData.zero),
+          y: sy(spec.y) + (spec.dy ?? diagramData.zero),
+          "text-anchor": spec.anchor ?? "middle",
+          "dominant-baseline": "middle",
+          class: spec.className,
+          "font-size": fontSize
+        });
+        text.textContent = spec.text;
+        return text;
+      };
+
+      const addArrow = spec => {
+        const isCurve = spec.controlOne && spec.controlTwo;
+        const pathData = isCurve
+          ? `M ${sx(spec.start.x)} ${sy(spec.start.y)} C ${sx(spec.controlOne.x)} ${sy(spec.controlOne.y)}, ${sx(spec.controlTwo.x)} ${sy(spec.controlTwo.y)}, ${sx(spec.end.x)} ${sy(spec.end.y)}`
+          : `M ${sx(spec.start.x)} ${sy(spec.start.y)} L ${sx(spec.end.x)} ${sy(spec.end.y)}`;
+
+        element("path", {
+          d: pathData,
+          class: spec.className,
+          "stroke-width": diagramData.geometry.lineWidth,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round"
+        });
+
+        const tangent = isCurve ? spec.controlTwo : spec.start;
+        const vectorX = spec.end.x - tangent.x;
+        const vectorY = spec.end.y - tangent.y;
+        const magnitude = Math.hypot(vectorX, vectorY);
+        const unitX = vectorX / magnitude;
+        const unitY = vectorY / magnitude;
+        const baseX = spec.end.x - unitX * diagramData.geometry.arrowLength;
+        const baseY = spec.end.y - unitY * diagramData.geometry.arrowLength;
+        const leftX = baseX - unitY * diagramData.geometry.arrowHalf;
+        const leftY = baseY + unitX * diagramData.geometry.arrowHalf;
+        const rightX = baseX + unitY * diagramData.geometry.arrowHalf;
+        const rightY = baseY - unitX * diagramData.geometry.arrowHalf;
+
+        element("polygon", {
+          points: `${sx(spec.end.x)},${sy(spec.end.y)} ${sx(leftX)},${sy(leftY)} ${sx(rightX)},${sy(rightY)}`,
+          class: spec.headClass
+        });
+
+        if (spec.label) addText(spec.label);
+      };
+
+      const addNode = node => {
+        addRect({
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: diagramData.geometry.nodeHeight
+        }, node.className);
+
+        node.lines.forEach(line => addText({
+          x: node.x,
+          y: node.y + line.y,
+          text: line.text,
+          anchor: "middle",
+          className: line.className
+        }, line.className === "main-text"
+          ? diagramData.typography.code
+          : diagramData.typography.caption));
+      };
+
+      diagramData.batch.cards.forEach(card => addRect({
+        x: diagramData.batch.x + card.x,
+        y: diagramData.batch.y + card.y,
+        width: diagramData.batch.width,
+        height: diagramData.batch.height
+      }, card.className));
+
+      addText(diagramData.batch.label, diagramData.typography.flow);
+      diagramData.arrows.forEach(addArrow);
+      diagramData.nodes.forEach(addNode);
+
+      addRect(diagramData.parameters, diagramData.parameters.className);
+      diagramData.parameters.lines.forEach(line => addText({
+        x: diagramData.parameters.x,
+        y: diagramData.parameters.y + line.y,
+        text: line.text,
+        anchor: "middle",
+        className: line.className
+      }, line.className === "main-text"
+        ? diagramData.typography.code
+        : diagramData.typography.caption));
+
+      element("line", {
+        x1: sx(diagramData.connector.start.x),
+        y1: sy(diagramData.connector.start.y),
+        x2: sx(diagramData.connector.end.x),
+        y2: sy(diagramData.connector.end.y),
+        class: diagramData.connector.className,
+        "stroke-width": diagramData.geometry.thinWidth,
+        "stroke-dasharray": diagramData.geometry.dash
+      });
+
+      diagramData.legend.forEach(item => {
+        element("line", {
+          x1: sx(item.start.x),
+          y1: sy(item.start.y),
+          x2: sx(item.end.x),
+          y2: sy(item.end.y),
+          class: item.lineClass,
+          "stroke-width": diagramData.geometry.lineWidth,
+          "stroke-linecap": "round"
+        });
+        addText({
+          x: item.textPoint.x,
+          y: item.textPoint.y,
+          dx: 6,
+          dy: diagramData.zero,
+          text: item.text,
+          anchor: "start",
+          className: item.textClass
+        }, diagramData.typography.legend);
+      });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сравнение потоковой AR-генерации и рендера целого клипа</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: whitesmoke;
+      --panel: white;
+      --text: midnightblue;
+      --muted: slategray;
+      --grid: lightgray;
+      --waiting: gainsboro;
+      --ar: mediumseagreen;
+      --ar-dark: seagreen;
+      --flow: darkorange;
+      --flow-dark: chocolate;
+      --ready: deepskyblue;
+      --ready-dark: dodgerblue;
+      --note: aliceblue;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: rgb(20, 24, 31);
+        --panel: rgb(27, 33, 42);
+        --text: ghostwhite;
+        --muted: lightsteelblue;
+        --grid: slategray;
+        --waiting: dimgray;
+        --ar: mediumseagreen;
+        --ar-dark: lightgreen;
+        --flow: orange;
+        --flow-dark: lightsalmon;
+        --ready: deepskyblue;
+        --ready-dark: lightskyblue;
+        --note: rgb(34, 45, 58);
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      box-sizing: border-box;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 18px 10px;
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 23px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 475px;
+      overflow: visible;
+      background: var(--panel);
+    }
+
+    .lane-title {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .label {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .metric {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .axis,
+    .guide,
+    .tick {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .waiting-line {
+      fill: none;
+      stroke: var(--waiting);
+      stroke-width: 8px;
+      stroke-linecap: round;
+    }
+
+    .ar-line {
+      fill: none;
+      stroke: var(--ar-dark);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    .ar-token {
+      fill: var(--ar);
+      stroke: var(--ar-dark);
+      stroke-width: 2px;
+    }
+
+    .flow-work {
+      fill: var(--flow);
+      stroke: var(--flow-dark);
+      stroke-width: 2px;
+    }
+
+    .ready-block {
+      fill: var(--ready);
+      stroke: var(--ready-dark);
+      stroke-width: 2px;
+    }
+
+    .event {
+      fill: var(--panel);
+      stroke: var(--text);
+      stroke-width: 3px;
+    }
+
+    .event-ready {
+      fill: var(--ready);
+      stroke: var(--ready-dark);
+      stroke-width: 3px;
+    }
+
+    .annotation {
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .divider {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .summary {
+      fill: var(--note);
+      stroke: var(--grid);
+      stroke-width: 2px;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Потоковый звук и готовый клип: две разные задержки</h1>
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 430"
+      width="1200"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title"
+      aria-describedby="diagram-description">
+      <desc id="diagram-description">
+        Потоковая AR-генерация начинает воспроизведение примерно через
+        300 миллисекунд и продолжает создавать токены. Flow matching
+        сначала обрабатывает весь клип и только затем отдаёт всю запись.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const data = Object.freeze({
+      origin: { x: 20, y: 10 },
+      scale: { x: 0.98, y: 0.98 },
+
+      frame: { left: 24, right: 1180, top: 16, bottom: 420 },
+      lanes: {
+        labelX: 158,
+        startX: 180,
+        firstX: 212,
+        flowReadyX: 760,
+        finishX: 1090,
+        arY: 122,
+        flowY: 247,
+        axisY: 327
+      },
+
+      ar: {
+        heading: { x: 158, y: 116 },
+        headingSub: { x: 158, y: 137 },
+        firstLabel: { x: 226, y: 67 },
+        firstLabelSub: { x: 226, y: 86 },
+        streamLabel: { x: 635, y: 92 },
+        waitingLabel: { x: 196, y: 156 },
+        finishLabel: { x: 1090, y: 157 },
+        calloutTail: { x: 212, y: 94 },
+        calloutTip: { x: 212, y: 108 },
+        arrow: [
+          { x: 207, y: 102 },
+          { x: 212, y: 110 },
+          { x: 217, y: 102 }
+        ],
+        tokenTop: 109,
+        tokenBottom: 135,
+        tokens: [
+          { x1: 212, x2: 247 },
+          { x1: 254, x2: 289 },
+          { x1: 296, x2: 331 },
+          { x1: 338, x2: 373 },
+          { x1: 380, x2: 415 },
+          { x1: 422, x2: 457 },
+          { x1: 464, x2: 499 },
+          { x1: 506, x2: 541 },
+          { x1: 548, x2: 583 },
+          { x1: 590, x2: 625 },
+          { x1: 632, x2: 667 },
+          { x1: 674, x2: 709 },
+          { x1: 716, x2: 751 },
+          { x1: 758, x2: 793 },
+          { x1: 800, x2: 835 },
+          { x1: 842, x2: 877 },
+          { x1: 884, x2: 919 },
+          { x1: 926, x2: 961 },
+          { x1: 968, x2: 1003 },
+          { x1: 1010, x2: 1045 },
+          { x1: 1052, x2: 1090 }
+        ]
+      },
+
+      flow: {
+        heading: { x: 158, y: 241 },
+        headingSub: { x: 158, y: 262 },
+        workTop: 234,
+        workBottom: 260,
+        workLabel: { x: 475, y: 213 },
+        silenceLabel: { x: 470, y: 284 },
+        readyLabel: { x: 774, y: 209 },
+        readySub: { x: 774, y: 284 },
+        outputLabel: { x: 925, y: 250 },
+        calloutTail: { x: 760, y: 216 },
+        calloutTip: { x: 760, y: 229 },
+        arrow: [
+          { x: 755, y: 223 },
+          { x: 760, y: 231 },
+          { x: 765, y: 223 }
+        ]
+      },
+
+      axis: {
+        labelStart: { x: 180, y: 352 },
+        labelEnd: { x: 1090, y: 352 },
+        arrow: [
+          { x: 1078, y: 320 },
+          { x: 1092, y: 327 },
+          { x: 1078, y: 334 }
+        ],
+        startTick: { x: 180, y1: 319, y2: 335 },
+        firstTick: { x: 212, y1: 319, y2: 335 },
+        readyTick: { x: 760, y1: 319, y2: 335 },
+        finishTick: { x: 1090, y1: 319, y2: 335 }
+      },
+
+      summary: {
+        box: { x1: 180, y1: 371, x2: 1090, y2: 414 },
+        splitX: 635,
+        first: { x: 200, y: 398 },
+        second: { x: 655, y: 398 }
+      },
+
+      eventRadius: { x: 7, y: 7 },
+      fallback: [
+        { x: 180, y: 165, text: "Потоковая AR-генерация начинает отдавать звук примерно через 300 мс." },
+        { x: 180, y: 215, text: "Flow matching сначала обрабатывает весь фиксированный клип." },
+        { x: 180, y: 265, text: "После завершения рендера вся запись становится доступна сразу." }
+      ]
+    });
+
+    const origin = Object.freeze(data.origin);
+    const scale = Object.freeze(data.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+
+    try {
+      const node = (tag, attributes, content) => {
+        const element = document.createElementNS(svg.namespaceURI, tag);
+        for (const [name, value] of Object.entries(attributes)) {
+          element.setAttribute(name, value);
+        }
+        if (content !== undefined) element.textContent = content;
+        return element;
+      };
+
+      const add = (tag, attributes, content) => {
+        const element = node(tag, attributes, content);
+        svg.appendChild(element);
+        return element;
+      };
+
+      const line = (x1, y1, x2, y2, className) =>
+        add("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+
+      const rect = (x1, y1, x2, y2, className) =>
+        add("rect", {
+          x: sx(x1),
+          y: sy(y1),
+          width: sx(x2) - sx(x1),
+          height: sy(y2) - sy(y1),
+          class: className
+        });
+
+      const circle = (x, y, radius, className) =>
+        add("ellipse", {
+          cx: sx(x),
+          cy: sy(y),
+          rx: sx(radius.x) - sx(data.origin.x),
+          ry: sy(radius.y) - sy(data.origin.y),
+          class: className
+        });
+
+      const polygon = (points, className) =>
+        add("polygon", {
+          points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+          class: className
+        });
+
+      const text = (point, value, className, anchor) =>
+        add("text", {
+          x: sx(point.x),
+          y: sy(point.y),
+          class: className,
+          "text-anchor": anchor
+        }, value);
+
+      line(
+        data.lanes.startX,
+        data.lanes.arY,
+        data.lanes.finishX,
+        data.lanes.arY,
+        "guide"
+      );
+
+      line(
+        data.lanes.startX,
+        data.lanes.flowY,
+        data.lanes.finishX,
+        data.lanes.flowY,
+        "guide"
+      );
+
+      text(data.ar.heading, "Потоковая AR-генерация", "lane-title", "end");
+      text(data.ar.headingSub, "звук по мере готовности", "small", "end");
+
+      line(
+        data.lanes.startX,
+        data.lanes.arY,
+        data.lanes.firstX,
+        data.lanes.arY,
+        "waiting-line"
+      );
+
+      line(
+        data.lanes.firstX,
+        data.lanes.arY,
+        data.lanes.finishX,
+        data.lanes.arY,
+        "ar-line"
+      );
+
+      for (const token of data.ar.tokens) {
+        rect(
+          token.x1,
+          data.ar.tokenTop,
+          token.x2,
+          data.ar.tokenBottom,
+          "ar-token"
+        );
+      }
+
+      circle(
+        data.lanes.firstX,
+        data.lanes.arY,
+        data.eventRadius,
+        "event"
+      );
+
+      text(data.ar.firstLabel, "первый звук: ≈ 300 мс", "label", "start");
+      text(data.ar.firstLabelSub, "воспроизведение начинается", "small", "start");
+      text(
+        data.ar.streamLabel,
+        "звук уже идёт, продолжение создаётся по токену",
+        "label",
+        "middle"
+      );
+      text(data.ar.waitingLabel, "короткое ожидание", "small", "middle");
+      text(data.ar.finishLabel, "реплика: 10 секунд", "label", "end");
+
+      line(
+        data.ar.calloutTail.x,
+        data.ar.calloutTail.y,
+        data.ar.calloutTip.x,
+        data.ar.calloutTip.y,
+        "annotation"
+      );
+      polygon(data.ar.arrow, "annotation");
+
+      text(data.flow.heading, "Рендер целого клипа", "lane-title", "end");
+      text(data.flow.headingSub, "flow matching", "small", "end");
+
+      rect(
+        data.lanes.startX,
+        data.flow.workTop,
+        data.lanes.flowReadyX,
+        data.flow.workBottom,
+        "flow-work"
+      );
+
+      rect(
+        data.lanes.flowReadyX,
+        data.flow.workTop,
+        data.lanes.finishX,
+        data.flow.workBottom,
+        "ready-block"
+      );
+
+      circle(
+        data.lanes.flowReadyX,
+        data.lanes.flowY,
+        data.eventRadius,
+        "event-ready"
+      );
+
+      text(
+        data.flow.workLabel,
+        "весь фиксированный клип обрабатывается как единый объект",
+        "label",
+        "middle"
+      );
+      text(data.flow.silenceLabel, "до готовности — тишина", "small", "middle");
+      text(data.flow.readyLabel, "весь клип готов", "label", "start");
+      text(data.flow.readySub, "после этой точки", "small", "start");
+      text(data.flow.outputLabel, "вся запись доступна сразу", "label", "middle");
+
+      line(
+        data.flow.calloutTail.x,
+        data.flow.calloutTail.y,
+        data.flow.calloutTip.x,
+        data.flow.calloutTip.y,
+        "annotation"
+      );
+      polygon(data.flow.arrow, "annotation");
+
+      line(
+        data.lanes.startX,
+        data.lanes.axisY,
+        data.lanes.finishX,
+        data.lanes.axisY,
+        "axis"
+      );
+      polygon(data.axis.arrow, "axis");
+
+      for (const tick of [
+        data.axis.startTick,
+        data.axis.firstTick,
+        data.axis.readyTick,
+        data.axis.finishTick
+      ]) {
+        line(tick.x, tick.y1, tick.x, tick.y2, "tick");
+      }
+
+      text(data.axis.labelStart, "запуск", "small", "start");
+      text(data.axis.labelEnd, "время →", "small", "end");
+
+      rect(
+        data.summary.box.x1,
+        data.summary.box.y1,
+        data.summary.box.x2,
+        data.summary.box.y2,
+        "summary"
+      );
+
+      line(
+        data.summary.splitX,
+        data.summary.box.y1,
+        data.summary.splitX,
+        data.summary.box.y2,
+        "divider"
+      );
+
+      text(
+        data.summary.first,
+        "До первого звука: выигрывает потоковый AR",
+        "metric",
+        "start"
+      );
+
+      text(
+        data.summary.second,
+        "До готового файла: раньше может закончить flow matching",
+        "metric",
+        "start"
+      );
+    } catch (error) {
+      while (svg.lastChild && svg.lastChild.tagName !== "desc") {
+        svg.removeChild(svg.lastChild);
+      }
+
+      for (const item of data.fallback) {
+        const message = document.createElementNS(svg.namespaceURI, "text");
+        message.setAttribute("x", sx(item.x));
+        message.setAttribute("y", sy(item.y));
+        message.setAttribute("class", "fallback");
+        message.setAttribute("text-anchor", "start");
+        message.textContent = item.text;
+        svg.appendChild(message);
+      }
+    }
+  </script>
+</body>
+</html>

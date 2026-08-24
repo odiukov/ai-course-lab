@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Границы доверия вокруг LLM-агента</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:ivory;
+  --ink:midnightblue;
+  --muted:slategray;
+  --untrusted:firebrick;
+  --untrusted-fill:mistyrose;
+  --model:royalblue;
+  --model-fill:aliceblue;
+  --control:seagreen;
+  --control-fill:honeydew;
+  --tool:darkgoldenrod;
+  --tool-fill:lightyellow;
+  --confirm:darkorange;
+  --confirm-fill:oldlace;
+  --evidence:purple;
+  --evidence-fill:lavender;
+  --arrow:darkslategray;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:darkslategray;
+    --ink:whitesmoke;
+    --muted:lightgray;
+    --untrusted:lightcoral;
+    --untrusted-fill:maroon;
+    --model:lightskyblue;
+    --model-fill:midnightblue;
+    --control:lightgreen;
+    --control-fill:darkgreen;
+    --tool:khaki;
+    --tool-fill:darkgoldenrod;
+    --confirm:orange;
+    --confirm-fill:saddlebrown;
+    --evidence:plum;
+    --evidence-fill:indigo;
+    --arrow:gainsboro;
+  }
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--ink)}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.frame{background:var(--bg)}
+.title{
+  padding:12px 20px 6px;
+  font-size:22px;
+  font-weight:bold;
+  color:var(--ink)
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:455px;
+  background:var(--bg)
+}
+.canvas-bg{fill:var(--bg)}
+.zone{fill:var(--untrusted-fill);stroke:var(--untrusted)}
+.source{fill:var(--bg);stroke:var(--untrusted)}
+.model{fill:var(--model-fill);stroke:var(--model)}
+.controller{fill:var(--control-fill);stroke:var(--control)}
+.tool{fill:var(--tool-fill);stroke:var(--tool)}
+.confirm{fill:var(--confirm-fill);stroke:var(--confirm)}
+.evidence{fill:var(--evidence-fill);stroke:var(--evidence)}
+.arrow{fill:none;stroke:var(--arrow);stroke-linejoin:round;stroke-linecap:round}
+.arrowhead{fill:var(--arrow)}
+.boundary{fill:none;stroke:var(--muted)}
+.label{fill:var(--ink);font-size:17px}
+.small{fill:var(--ink);font-size:15px}
+.note{fill:var(--muted);font-size:15px}
+.zone-title{fill:var(--untrusted);font-size:16px;font-weight:bold;letter-spacing:.04em}
+.box-title{fill:var(--ink);font-size:18px;font-weight:bold}
+.controller-title{fill:var(--control);font-size:19px;font-weight:bold}
+.tool-title{fill:var(--tool);font-size:16px;font-weight:bold}
+.warning{fill:var(--untrusted);font-size:16px;font-weight:bold}
+.confirm-title{fill:var(--confirm);font-size:16px;font-weight:bold}
+.evidence-title{fill:var(--evidence);font-size:16px;font-weight:bold}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="title" id="diagram-title">Границы доверия вокруг LLM-агента</div>
+  <svg id="diagram" viewBox="0 0 1200 500" width="1200" height="500"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">Недоверенные данные поступают в модель, но только отдельный контроллер может разрешить вызов инструмента. Разрушительное действие требует подтверждения пользователя.</desc>
+    <g id="drawing"></g>
+  </svg>
+</div>
+<script>
+const D={
+  canvas:{w:1200,h:500},zero:0,
+  stroke:{main:3,thin:2},dash:[10,8],
+  boxes:[
+    {kind:"zone",x:20,y:70,w:300,h:315,rx:16},
+    {kind:"source",x:45,y:115,w:240,h:60,rx:10},
+    {kind:"source",x:45,y:205,w:240,h:60,rx:10},
+    {kind:"source",x:45,y:295,w:240,h:70,rx:10},
+    {kind:"model",x:375,y:135,w:220,h:165,rx:16},
+    {kind:"controller",x:655,y:105,w:245,h:230,rx:16},
+    {kind:"tool",x:1000,y:125,w:175,h:120,rx:16},
+    {kind:"confirm",x:680,y:390,w:230,h:70,rx:14},
+    {kind:"evidence",x:1000,y:360,w:175,h:100,rx:14}
+  ],
+  boundaries:[
+    {points:[{x:625,y:95},{x:625,y:350}]},
+    {points:[{x:955,y:340},{x:1185,y:340}]}
+  ],
+  arrows:[
+    {points:[{x:285,y:145},{x:335,y:145},{x:335,y:165},{x:375,y:165}],
+     tip:[{x:375,y:165},{x:363,y:158},{x:363,y:172}]},
+    {points:[{x:285,y:235},{x:375,y:220}],
+     tip:[{x:375,y:220},{x:362,y:215},{x:364,y:229}]},
+    {points:[{x:285,y:330},{x:335,y:330},{x:335,y:275},{x:375,y:275}],
+     tip:[{x:375,y:275},{x:363,y:268},{x:363,y:282}]},
+    {points:[{x:595,y:220},{x:655,y:220}],
+     tip:[{x:655,y:220},{x:643,y:213},{x:643,y:227}]},
+    {points:[{x:900,y:175},{x:1000,y:175}],
+     tip:[{x:1000,y:175},{x:988,y:168},{x:988,y:182}]},
+    {points:[{x:778,y:335},{x:778,y:390}],
+     tip:[{x:778,y:390},{x:771,y:378},{x:785,y:378}]},
+    {points:[{x:910,y:425},{x:955,y:425},{x:955,y:225},{x:1000,y:225}],
+     tip:[{x:1000,y:225},{x:988,y:218},{x:988,y:232}]},
+    {points:[{x:1087,y:245},{x:1087,y:360}],
+     tip:[{x:1087,y:360},{x:1080,y:348},{x:1094,y:348}]},
+    {points:[{x:1000,y:415},{x:945,y:415},{x:945,y:485},{x:320,y:485},{x:320,y:345},{x:285,y:345}],
+     tip:[{x:285,y:345},{x:297,y:338},{x:297,y:352}]}
+  ],
+  texts:[
+    {x:45,y:96,a:"start",c:"zone-title",t:"НЕДОВЕРЕННЫЕ ДАННЫЕ"},
+    {x:65,y:142,a:"start",c:"box-title",t:"Пользователь"},
+    {x:65,y:162,a:"start",c:"small",t:"сообщение — это данные"},
+    {x:65,y:232,a:"start",c:"box-title",t:"Найденный документ"},
+    {x:65,y:252,a:"start",c:"small",t:"скрытый текст не получает прав"},
+    {x:65,y:322,a:"start",c:"box-title",t:"Вывод инструмента"},
+    {x:65,y:344,a:"start",c:"small",t:"результат тоже остаётся данными"},
+    {x:45,y:379,a:"start",c:"warning",t:"Не команды — даже внутри системы"},
+    {x:485,y:174,a:"middle",c:"box-title",t:"LLM-АГЕНТ"},
+    {x:485,y:207,a:"middle",c:"label",t:"читает контекст"},
+    {x:485,y:232,a:"middle",c:"label",t:"и предлагает следующий шаг"},
+    {x:485,y:273,a:"middle",c:"warning",t:"предложение ≠ разрешение"},
+    {x:625,y:82,a:"middle",c:"note",t:"граница полномочий"},
+    {x:625,y:207,a:"middle",c:"small",t:"план"},
+    {x:680,y:143,a:"start",c:"controller-title",t:"КОНТРОЛЛЕР"},
+    {x:680,y:178,a:"start",c:"label",t:"✓ исходная задача"},
+    {x:680,y:210,a:"start",c:"label",t:"✓ заранее принятый план"},
+    {x:680,y:242,a:"start",c:"label",t:"✓ разрешённые действия"},
+    {x:680,y:274,a:"start",c:"label",t:"✓ необходимые параметры"},
+    {x:680,y:306,a:"start",c:"label",t:"✓ минимальные права"},
+    {x:945,y:87,a:"middle",c:"small",t:"разрешённый вызов"},
+    {x:1087,y:160,a:"middle",c:"tool-title",t:"ИНСТРУМЕНТ"},
+    {x:1087,y:181,a:"middle",c:"tool-title",t:"ЗАПИСИ"},
+    {x:1087,y:210,a:"middle",c:"small",t:"исполняет только"},
+    {x:1087,y:230,a:"middle",c:"small",t:"проверенный вызов"},
+    {x:760,y:365,a:"end",c:"warning",t:"если действие разрушительное"},
+    {x:795,y:418,a:"middle",c:"confirm-title",t:"ПОДТВЕРЖДЕНИЕ"},
+    {x:795,y:441,a:"middle",c:"small",t:"пользователь явно разрешает"},
+    {x:930,y:447,a:"start",c:"small",t:"после подтверждения"},
+    {x:1175,y:329,a:"end",c:"note",t:"граница доказательства"},
+    {x:1068,y:286,a:"end",c:"small",t:"успешный ответ"},
+    {x:1068,y:307,a:"end",c:"small",t:"= доказательство"},
+    {x:1087,y:390,a:"middle",c:"evidence-title",t:"РЕЗУЛЬТАТ"},
+    {x:1087,y:413,a:"middle",c:"small",t:"наблюдаемый факт"},
+    {x:1087,y:436,a:"middle",c:"small",t:"+ запись в журнале"},
+    {x:650,y:476,a:"middle",c:"note",t:"результат возвращается как недоверенные данные, а не как инструкция"}
+  ],
+  fallback:{x:40,y:110}
+};
+const origin=Object.freeze({x:0,y:0});
+const scale=Object.freeze({x:1,y:1});
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const root=document.getElementById("drawing");
+  const make=(tag,attrs,cls)=>{
+    const n=document.createElementNS(svg.namespaceURI,tag);
+    if(cls)n.setAttribute("class",cls);
+    Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,String(v)));
+    return n;
+  };
+  const bg=make("rect",{
+    x:sx(D.zero),y:sy(D.zero),
+    width:sx(D.canvas.w),height:sy(D.canvas.h)
+  },"canvas-bg");
+  root.appendChild(bg);
+
+  D.boxes.forEach(b=>{
+    root.appendChild(make("rect",{
+      x:sx(b.x),y:sy(b.y),width:sx(b.w),height:sy(b.h),
+      rx:sx(b.rx),ry:sy(b.rx),"stroke-width":D.stroke.main
+    },b.kind));
+  });
+
+  D.boundaries.forEach(b=>{
+    root.appendChild(make("polyline",{
+      points:b.points.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" "),
+      "stroke-width":D.stroke.thin,
+      "stroke-dasharray":D.dash.map(sx).join(" ")
+    },"boundary"));
+  });
+
+  D.arrows.forEach(a=>{
+    root.appendChild(make("polyline",{
+      points:a.points.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" "),
+      "stroke-width":D.stroke.main
+    },"arrow"));
+    root.appendChild(make("polygon",{
+      points:a.tip.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" ")
+    },"arrowhead"));
+  });
+
+  D.texts.forEach(t=>{
+    const n=make("text",{
+      x:sx(t.x),y:sy(t.y),"text-anchor":t.a
+    },t.c);
+    n.textContent=t.t;
+    root.appendChild(n);
+  });
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const root=document.getElementById("drawing");
+  const n=document.createElementNS(svg.namespaceURI,"text");
+  n.setAttribute("x",String(sx(D.fallback.x)));
+  n.setAttribute("y",String(sy(D.fallback.y)));
+  n.setAttribute("class","label");
+  n.textContent="Схема должна показать: недоверенные данные входят в агента, контроллер проверяет план и разрешённые действия перед записью, а разрушительное действие требует подтверждения.";
+  root.appendChild(n);
+}
+</script>
+</body>
+</html>

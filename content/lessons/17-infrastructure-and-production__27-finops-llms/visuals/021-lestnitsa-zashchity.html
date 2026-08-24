@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Лестница ограничений мультитенантного сервиса</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5c667a;
+      --border: #d8deea;
+      --step-line: #8a96aa;
+      --rate: #1f78b4;
+      --rate-soft: #e5f3fb;
+      --spend: #b56a00;
+      --spend-soft: #fff1d8;
+      --kill: #b8324a;
+      --kill-soft: #fde8ec;
+      --axis: #4e5b70;
+      --shadow: rgba(34, 48, 74, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --panel: #181e29;
+        --ink: #f2f5fa;
+        --muted: #b2bccd;
+        --border: #354053;
+        --step-line: #738097;
+        --rate: #68bde8;
+        --rate-soft: #163849;
+        --spend: #f0b35a;
+        --spend-soft: #49351b;
+        --kill: #f08094;
+        --kill-soft: #4c2530;
+        --axis: #a8b4c8;
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      padding: 16px;
+    }
+
+    .diagram {
+      width: 100%;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 8px 28px var(--shadow);
+    }
+
+    .heading {
+      padding: 18px 24px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+
+    .heading p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--panel);
+    }
+
+    .card {
+      stroke-width: 2px;
+    }
+
+    .step-path {
+      fill: none;
+      stroke: var(--step-line);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--step-line);
+      stroke-width: 2px;
+      stroke-dasharray: 7px 7px;
+    }
+
+    .eyebrow {
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+    }
+
+    .metric {
+      fill: var(--ink);
+      font-size: 27px;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+    }
+
+    .detail {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 520;
+    }
+
+    .reaction {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .chip-text {
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: 0.025em;
+    }
+
+    .axis-end {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram" aria-labelledby="diagram-title">
+    <header class="heading">
+      <h1 id="diagram-title">Лестница ограничений мультитенантного сервиса</h1>
+      <p>Чем опаснее сигнал, тем жёстче реакция — без выбора между «разрешить всё» и «выключить клиента».</p>
+    </header>
+
+    <svg id="ladder" width="1200" height="480" viewBox="0 0 1200 480"
+      preserveAspectRatio="xMidYMid meet" role="img"
+      aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">Три последовательно усиливающиеся ступени: ограничение скорости, дневной потолок расходов и автоматическая пауза при аномалии.</desc>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = [
+      {
+        origin: { x: 32, y: 8 },
+        scale: { x: 1, y: 1 },
+        canvas: { width: 1200, height: 480 },
+        line: { card: 2, stair: 4, connector: 2, axis: 3 },
+        font: { eyebrow: 14, metric: 27, detail: 15, reaction: 15, chip: 13, axis: 14, fallback: 18 },
+        padding: { label: 0, card: 24, chip: 12 },
+        stair: [
+          { x: 38, y: 382 },
+          { x: 388, y: 382 },
+          { x: 388, y: 277 },
+          { x: 758, y: 277 },
+          { x: 758, y: 172 },
+          { x: 1108, y: 172 }
+        ],
+        axis: {
+          start: { x: 54, y: 419 },
+          end: { x: 1102, y: 419 },
+          head: [
+            { x: 1102, y: 419 },
+            { x: 1085, y: 409 },
+            { x: 1085, y: 429 }
+          ],
+          leftLabel: { x: 54, y: 449, dx: 0, dy: 0 },
+          rightLabel: { x: 1102, y: 449, dx: 0, dy: 0 }
+        },
+        fallback: { x: 568, y: 230, dx: 0, dy: 0 }
+      },
+      {
+        tone: "rate",
+        card: { x1: 38, y1: 242, x2: 348, y2: 367, radius: 14 },
+        tether: { x1: 193, y1: 367, x2: 193, y2: 382 },
+        eyebrow: { x: 62, y: 267, dx: 0, dy: 0, text: "ПЕРВАЯ СТУПЕНЬ" },
+        metric: { x: 62, y: 302, dx: 0, dy: 0, text: "Rate limit: 200–300/мин" },
+        details: [
+          { x: 62, y: 328, dx: 0, dy: 0, text: "Ожидаемый пик: 100/мин · сейчас: 230/мин" },
+          { x: 62, y: 351, dx: 0, dy: 0, text: "Ответ: 429 + Retry-After" }
+        ],
+        chip: {
+          box: { x1: 222, y1: 251, x2: 334, y2: 278, radius: 13 },
+          label: { x: 278, y: 269, dx: 0, dy: 0, text: "СДЕРЖАТЬ" }
+        }
+      },
+      {
+        tone: "spend",
+        card: { x1: 408, y1: 137, x2: 718, y2: 262, radius: 14 },
+        tether: { x1: 563, y1: 262, x2: 563, y2: 277 },
+        eyebrow: { x: 432, y: 162, dx: 0, dy: 0, text: "ВТОРАЯ СТУПЕНЬ" },
+        metric: { x: 432, y: 197, dx: 0, dy: 0, text: "Spend cap: 1,5–3×" },
+        details: [
+          { x: 432, y: 223, dx: 0, dy: 0, text: "Выше контрактного потолка тенанта" },
+          { x: 432, y: 246, dx: 0, dy: 0, text: "Ужать rate limit · позвать customer success" }
+        ],
+        chip: {
+          box: { x1: 581, y1: 146, x2: 704, y2: 173, radius: 13 },
+          label: { x: 642, y: 164, dx: 0, dy: 0, text: "ЭСКАЛАЦИЯ" }
+        }
+      },
+      {
+        tone: "kill",
+        card: { x1: 778, y1: 32, x2: 1108, y2: 157, radius: 14 },
+        tether: { x1: 943, y1: 157, x2: 943, y2: 172 },
+        eyebrow: { x: 802, y: 57, dx: 0, dy: 0, text: "ТРЕТЬЯ СТУПЕНЬ" },
+        metric: { x: 802, y: 92, dx: 0, dy: 0, text: "Kill switch: z-score > 4" },
+        details: [
+          { x: 802, y: 118, dx: 0, dy: 0, text: "Автоматически поставить тенанта на паузу" },
+          { x: 802, y: 141, dx: 0, dy: 0, text: "Дежурный · ops · customer success" }
+        ],
+        chip: {
+          box: { x1: 979, y1: 41, x2: 1094, y2: 68, radius: 13 },
+          label: { x: 1036, y: 59, dx: 0, dy: 0, text: "ПАУЗА" }
+        }
+      }
+    ];
+
+    const [settings, ...steps] = DATA;
+    const origin = Object.freeze(settings.origin);
+    const scale = Object.freeze(settings.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("ladder");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, content) => {
+        const element = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+        if (content !== undefined) element.textContent = content;
+        return element;
+      };
+
+      const mappedRect = (box, attributes) => make("rect", {
+        x: sx(box.x1),
+        y: sy(box.y1),
+        width: sx(box.x2) - sx(box.x1),
+        height: sy(box.y2) - sy(box.y1),
+        rx: sx(box.radius) - sx(0),
+        ry: sy(box.radius) - sy(0),
+        ...attributes
+      });
+
+      const mappedLine = (line, attributes) => make("line", {
+        x1: sx(line.x1),
+        y1: sy(line.y1),
+        x2: sx(line.x2),
+        y2: sy(line.y2),
+        ...attributes
+      });
+
+      const mappedText = (label, attributes) => make("text", {
+        x: sx(label.x) + label.dx,
+        y: sy(label.y) + label.dy,
+        ...attributes
+      }, label.text);
+
+      const stairPath = settings.stair.map((point, position) => {
+        const command = position === settings.stair.keys().next().value ? "M" : "L";
+        return `${command} ${sx(point.x)} ${sy(point.y)}`;
+      }).join(" ");
+
+      svg.appendChild(make("path", {
+        d: stairPath,
+        class: "step-path",
+        "aria-hidden": "true"
+      }));
+
+      steps.forEach(step => {
+        const group = make("g", {
+          "aria-label": `${step.eyebrow.text}. ${step.metric.text}`
+        });
+
+        group.appendChild(mappedLine(step.tether, {
+          class: "connector",
+          "aria-hidden": "true"
+        }));
+
+        group.appendChild(mappedRect(step.card, {
+          class: "card",
+          fill: `var(--${step.tone}-soft)`,
+          stroke: `var(--${step.tone})`
+        }));
+
+        group.appendChild(mappedRect(step.chip.box, {
+          fill: `var(--${step.tone})`,
+          stroke: `var(--${step.tone})`,
+          "stroke-width": settings.line.card
+        }));
+
+        group.appendChild(mappedText(step.eyebrow, {
+          class: "eyebrow",
+          fill: `var(--${step.tone})`,
+          "text-anchor": "start"
+        }));
+
+        group.appendChild(mappedText(step.metric, {
+          class: "metric",
+          "text-anchor": "start"
+        }));
+
+        step.details.forEach((detail, position, collection) => {
+          group.appendChild(mappedText(detail, {
+            class: position === collection.keys().next().value ? "detail" : "reaction",
+            "text-anchor": "start"
+          }));
+        });
+
+        group.appendChild(mappedText(step.chip.label, {
+          class: "chip-text",
+          fill: "var(--panel)",
+          "text-anchor": "middle"
+        }));
+
+        svg.appendChild(group);
+      });
+
+      svg.appendChild(mappedLine({
+        x1: settings.axis.start.x,
+        y1: settings.axis.start.y,
+        x2: settings.axis.end.x,
+        y2: settings.axis.end.y
+      }, {
+        class: "axis",
+        "aria-hidden": "true"
+      }));
+
+      svg.appendChild(make("polygon", {
+        points: settings.axis.head
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" "),
+        fill: "var(--axis)",
+        "aria-hidden": "true"
+      }));
+
+      svg.appendChild(mappedText({
+        ...settings.axis.leftLabel,
+        text: "Мягкое трение"
+      }, {
+        class: "axis-label",
+        "text-anchor": "start"
+      }));
+
+      svg.appendChild(mappedText({
+        ...settings.axis.rightLabel,
+        text: "Высокий риск → жёсткая реакция"
+      }, {
+        class: "axis-end",
+        "text-anchor": "end"
+      }));
+    } catch (error) {
+      const svg = document.getElementById("ladder");
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      const fallback = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      fallback.setAttribute("x", String(sx(settings.fallback.x) + settings.fallback.dx));
+      fallback.setAttribute("y", String(sy(settings.fallback.y) + settings.fallback.dy));
+      fallback.setAttribute("class", "fallback");
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.textContent = "Три ступени: rate limit, дневной spend cap и kill switch при z-score > 4.";
+      svg.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

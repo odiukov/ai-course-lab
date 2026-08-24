@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Рост результатов и смена измерительной линейки</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --ink: #172033;
+  --muted: #5f6b7a;
+  --grid: #cbd5e1;
+  --raw-zone: #fff4dc;
+  --verified-zone: #edf5ff;
+  --curve: #2563eb;
+  --curve-soft: #7c96bd;
+  --boundary: #d97706;
+  --pro: #0f9f8f;
+  --point: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101722;
+    --panel: #151f2d;
+    --ink: #edf4ff;
+    --muted: #aab8ca;
+    --grid: #405069;
+    --raw-zone: #30291f;
+    --verified-zone: #182a40;
+    --curve: #72a7ff;
+    --curve-soft: #7890b2;
+    --boundary: #f4b454;
+    --pro: #56d8c6;
+    --point: #151f2d;
+  }
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body {
+  margin: unset;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main {
+  background: var(--panel);
+  border: 1px solid var(--grid);
+}
+h1 {
+  margin: unset;
+  padding: 16px 20px 10px;
+  font-size: 21px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+figure { margin: unset; }
+svg {
+  display: block;
+  inline-size: stretch;
+  block-size: auto;
+  overflow: visible;
+  background: var(--panel);
+}
+svg text {
+  font-family: inherit;
+  fill: var(--ink);
+}
+.zone-label {
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: .05em;
+}
+.axis-label { font-size: 14px; fill: var(--muted); }
+.value-label { font-size: 16px; font-weight: 720; }
+.note-label { font-size: 14px; fill: var(--muted); }
+.boundary-label {
+  font-size: 15px;
+  font-weight: 720;
+  fill: var(--boundary);
+}
+.pro-label {
+  font-size: 15px;
+  font-weight: 720;
+  fill: var(--pro);
+}
+.geometry {
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Рост результатов и смена измерительной линейки</h1>
+  <figure>
+    <svg id="diagram" role="img" aria-labelledby="svg-title svg-desc"></svg>
+  </figure>
+</main>
+<script>
+const data = Object.freeze([
+  { id: "y2022", x: 0, year: "2022", low: 4, high: 4, value: "≈4%" },
+  { id: "y2024", x: 2, year: "2024", low: 12, high: 14, value: "12–14%" },
+  { id: "y2025", x: 3, year: "2025", low: 40, high: 55, value: "40–55%" },
+  { id: "y2026", x: 4, year: "2026", low: 80.9, high: 80.9, value: "80,9%" },
+  { id: "pro", x: 3.72, low: 23, high: 59, value: "Pro: 23–59%", cap: .08 },
+  {
+    id: "layout", zero: 0, pairCount: 2, maxX: 4, maxY: 90,
+    titleY: 94, zoneY: 87, boundaryX: 1, boundaryLabelY: 71,
+    rawLabelX: 0, verifiedLabelX: 1, proLabelX: 3.72,
+    yearsY: 0, legendY: -20, conclusionY: -29, fallbackY: 45,
+    rawSampleEnd: .22, rawLegendX: .28,
+    verifiedSampleStart: 2.18, verifiedSampleEnd: 2.4,
+    verifiedLegendX: 2.46, marginUnits: 8, rightMarginUnits: 4
+  }
+]);
+const canvas = Object.freeze({ width: 960, height: 470 });
+const offsets = Object.freeze({
+  small: 7, normal: 12, large: 20, labelUp: -12,
+  labelDown: 24, line: 18, year: 25, zone: 10
+});
+const strokes = Object.freeze({
+  hairline: 1, axis: 1.5, curve: 4, range: 7,
+  point: 5, boundary: 2, dash: 9, gap: 7
+});
+const fontSizes = Object.freeze({
+  title: 18, zone: 13, axis: 14, value: 16, note: 14
+});
+const layout = data.find(item => item.id === "layout");
+const origin = Object.freeze({
+  x: fontSizes.value * layout.marginUnits,
+  y: canvas.height - fontSizes.value * layout.marginUnits
+});
+const scale = Object.freeze({
+  x: (canvas.width - origin.x -
+      fontSizes.value * layout.rightMarginUnits) / layout.maxX,
+  y: -(origin.y - fontSizes.title - fontSizes.title) / layout.maxY
+});
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const svg = document.getElementById("diagram");
+const ns = "http://www.w3.org/2000/svg";
+
+function make(name, attrs, content) {
+  const node = document.createElementNS(ns, name);
+  Object.entries(attrs || {}).forEach(([key, value]) => {
+    node.setAttribute(key, String(value));
+  });
+  if (content !== undefined) node.textContent = content;
+  return node;
+}
+
+function line(x1, y1, x2, y2, attrs) {
+  return make("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+    class: "geometry", ...attrs
+  });
+}
+
+function textAt(x, y, content, attrs) {
+  return make("text", { x: sx(x), y: sy(y), ...attrs }, content);
+}
+
+function middle(item) {
+  return (item.low + item.high) / layout.pairCount;
+}
+
+try {
+  const [p2022, p2024, p2025, p2026, pro] = data;
+  svg.setAttribute(
+    "viewBox",
+    [layout.zero, layout.zero, canvas.width, canvas.height].join(" ")
+  );
+  svg.setAttribute("width", canvas.width);
+  svg.setAttribute("height", canvas.height);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  svg.append(
+    make("title", { id: "svg-title" },
+      "Рост результатов SWE-bench с отметкой смены измерительной линейки"),
+    make("desc", { id: "svg-desc" },
+      "Результат растёт примерно с четырёх процентов в 2022 году до 80,9 процента в 2026 году. Между ранней точкой сырого SWE-bench и поздними результатами SWE-bench Verified отмечена смена набора задач. Отдельно показан диапазон Pro от 23 до 59 процентов.")
+  );
+
+  svg.append(
+    make("rect", {
+      x: sx(layout.zero),
+      y: sy(layout.maxY),
+      width: sx(layout.boundaryX) - sx(layout.zero),
+      height: sy(layout.zero) - sy(layout.maxY),
+      fill: "var(--raw-zone)"
+    }),
+    make("rect", {
+      x: sx(layout.boundaryX),
+      y: sy(layout.maxY),
+      width: sx(layout.maxX) - sx(layout.boundaryX),
+      height: sy(layout.zero) - sy(layout.maxY),
+      fill: "var(--verified-zone)"
+    })
+  );
+
+  svg.append(
+    line(layout.zero, layout.zero, layout.maxX, layout.zero, {
+      stroke: "var(--grid)", "stroke-width": strokes.axis
+    }),
+    line(layout.zero, layout.zero, layout.zero, layout.maxY, {
+      stroke: "var(--grid)", "stroke-width": strokes.axis
+    }),
+    line(layout.boundaryX, layout.zero, layout.boundaryX, layout.maxY, {
+      stroke: "var(--boundary)",
+      "stroke-width": strokes.boundary,
+      "stroke-dasharray": [strokes.dash, strokes.gap].join(" ")
+    })
+  );
+
+  svg.append(
+    textAt(layout.zero, layout.titleY, "Доля решённых задач", {
+      class: "axis-label",
+      "font-size": fontSizes.title,
+      "font-weight": "700",
+      "text-anchor": "start"
+    }),
+    textAt(layout.rawLabelX, layout.zoneY, "СЫРОЙ SWE-BENCH", {
+      class: "zone-label",
+      dx: offsets.zone,
+      "font-size": fontSizes.zone,
+      "text-anchor": "start"
+    }),
+    textAt(layout.verifiedLabelX, layout.zoneY, "SWE-BENCH VERIFIED", {
+      class: "zone-label",
+      dx: offsets.normal,
+      "font-size": fontSizes.zone,
+      "text-anchor": "start"
+    })
+  );
+
+  const boundaryText = textAt(
+    layout.boundaryX,
+    layout.boundaryLabelY,
+    "",
+    {
+      class: "boundary-label",
+      dx: offsets.normal,
+      "font-size": fontSizes.value,
+      "text-anchor": "start"
+    }
+  );
+  boundaryText.append(
+    make("tspan", {
+      x: sx(layout.boundaryX),
+      dx: offsets.normal
+    }, "Смена измерительной линейки"),
+    make("tspan", {
+      x: sx(layout.boundaryX),
+      dx: offsets.normal,
+      dy: offsets.line
+    }, "сырой SWE-bench → Verified")
+  );
+  svg.append(boundaryText);
+
+  svg.append(
+    make("path", {
+      d: [
+        "M", sx(p2022.x), sy(middle(p2022)),
+        "L", sx(p2024.x), sy(middle(p2024))
+      ].join(" "),
+      fill: "none",
+      stroke: "var(--curve-soft)",
+      "stroke-width": strokes.curve,
+      "stroke-dasharray": [strokes.dash, strokes.gap].join(" "),
+      "stroke-linecap": "round",
+      class: "geometry"
+    }),
+    make("path", {
+      d: [
+        "M", sx(p2024.x), sy(middle(p2024)),
+        "L", sx(p2025.x), sy(middle(p2025)),
+        "L", sx(p2026.x), sy(middle(p2026))
+      ].join(" "),
+      fill: "none",
+      stroke: "var(--curve)",
+      "stroke-width": strokes.curve,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      class: "geometry"
+    })
+  );
+
+  [p2022, p2024, p2025, p2026].forEach(item => {
+    svg.append(
+      line(item.x, item.low, item.x, item.high, {
+        stroke: "var(--curve)",
+        "stroke-width": strokes.range,
+        "stroke-linecap": "round"
+      }),
+      make("circle", {
+        cx: sx(item.x),
+        cy: sy(middle(item)),
+        r: strokes.point,
+        fill: "var(--point)",
+        stroke: "var(--curve)",
+        "stroke-width": strokes.boundary,
+        class: "geometry"
+      }),
+      line(item.x, layout.zero, item.x, item.low, {
+        stroke: "var(--grid)",
+        "stroke-width": strokes.hairline,
+        "stroke-dasharray": [strokes.gap, strokes.gap].join(" ")
+      }),
+      textAt(item.x, layout.yearsY, item.year, {
+        class: "axis-label",
+        dy: offsets.year,
+        "font-size": fontSizes.axis,
+        "text-anchor": "middle"
+      })
+    );
+  });
+
+  svg.append(
+    textAt(p2022.x, p2022.high, p2022.value, {
+      class: "value-label",
+      dx: offsets.normal,
+      dy: offsets.labelUp,
+      "font-size": fontSizes.value,
+      "text-anchor": "start"
+    }),
+    textAt(p2024.x, p2024.low, p2024.value, {
+      class: "value-label",
+      dy: offsets.labelDown,
+      "font-size": fontSizes.value,
+      "text-anchor": "middle"
+    }),
+    textAt(p2025.x, p2025.high, p2025.value, {
+      class: "value-label",
+      dx: -offsets.normal,
+      dy: offsets.labelUp,
+      "font-size": fontSizes.value,
+      "text-anchor": "end"
+    }),
+    textAt(p2026.x, p2026.high, p2026.value, {
+      class: "value-label",
+      dx: -offsets.normal,
+      dy: offsets.labelUp,
+      "font-size": fontSizes.value,
+      "text-anchor": "end"
+    })
+  );
+
+  svg.append(
+    line(pro.x, pro.low, pro.x, pro.high, {
+      stroke: "var(--pro)",
+      "stroke-width": strokes.curve,
+      "stroke-linecap": "round"
+    }),
+    line(pro.x - pro.cap, pro.low, pro.x + pro.cap, pro.low, {
+      stroke: "var(--pro)", "stroke-width": strokes.boundary
+    }),
+    line(pro.x - pro.cap, pro.high, pro.x + pro.cap, pro.high, {
+      stroke: "var(--pro)", "stroke-width": strokes.boundary
+    }),
+    textAt(layout.proLabelX, middle(pro), pro.value, {
+      class: "pro-label",
+      dx: offsets.normal,
+      "font-size": fontSizes.value,
+      "text-anchor": "start"
+    })
+  );
+
+  svg.append(
+    line(layout.zero, layout.legendY, layout.rawSampleEnd, layout.legendY, {
+      stroke: "var(--curve-soft)",
+      "stroke-width": strokes.curve,
+      "stroke-dasharray": [strokes.dash, strokes.gap].join(" ")
+    }),
+    textAt(layout.rawLegendX, layout.legendY,
+      "переход между разными линейками", {
+        class: "note-label",
+        dy: offsets.small,
+        "font-size": fontSizes.note,
+        "text-anchor": "start"
+      }),
+    line(
+      layout.verifiedSampleStart,
+      layout.legendY,
+      layout.verifiedSampleEnd,
+      layout.legendY,
+      {
+        stroke: "var(--curve)",
+        "stroke-width": strokes.curve
+      }
+    ),
+    textAt(layout.verifiedLegendX, layout.legendY,
+      "результаты на Verified", {
+        class: "note-label",
+        dy: offsets.small,
+        "font-size": fontSizes.note,
+        "text-anchor": "start"
+      }),
+    textAt(layout.zero, layout.conclusionY,
+      "Кривая показывает рост; граница показывает, где сравнение перестаёт быть прямым.", {
+        class: "note-label",
+        dx: offsets.normal,
+        dy: offsets.small,
+        "font-size": fontSizes.note,
+        "font-weight": "650",
+        "text-anchor": "start"
+      })
+  );
+} catch (error) {
+  svg.replaceChildren(
+    textAt(
+      layout.zero,
+      layout.fallbackY,
+      "Схема должна была показать рост примерно с 4% в 2022 году до 80,9% в 2026-м, смену сырого SWE-bench на Verified и диапазон Pro 23–59%.",
+      {
+        dx: offsets.large,
+        "font-size": fontSizes.value,
+        "text-anchor": "start"
+      }
+    )
+  );
+}
+</script>
+</body>
+</html>

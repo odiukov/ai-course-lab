@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Маршрут turn через правила, LLM и подтверждение</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: ghostwhite;
+      --ink: #172033;
+      --muted: #526078;
+      --line: #60708a;
+      --rule-fill: aliceblue;
+      --rule-stroke: steelblue;
+      --state-fill: honeydew;
+      --state-stroke: seagreen;
+      --decision-fill: cornsilk;
+      --decision-stroke: darkorange;
+      --llm-fill: lavender;
+      --llm-stroke: mediumpurple;
+      --confirm-fill: mistyrose;
+      --confirm-stroke: firebrick;
+      --neutral-fill: white;
+      --neutral-stroke: slategray;
+      --note-fill: #eef2f7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --ink: #edf2fa;
+        --muted: #b7c2d4;
+        --line: #91a0b7;
+        --rule-fill: #172d43;
+        --rule-stroke: lightskyblue;
+        --state-fill: #17382d;
+        --state-stroke: lightgreen;
+        --decision-fill: #3b3018;
+        --decision-stroke: gold;
+        --llm-fill: #302548;
+        --llm-stroke: plum;
+        --confirm-fill: #432326;
+        --confirm-stroke: lightcoral;
+        --neutral-fill: #202938;
+        --neutral-stroke: lightsteelblue;
+        --note-fill: #192231;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      margin: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure,
+    h1 {
+      margin: unset;
+    }
+
+    h1 {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      font-size: 20px;
+      line-height: 24px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--page);
+    }
+
+    .edge {
+      fill: none;
+      stroke: var(--line);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrowhead {
+      fill: var(--line);
+      stroke: none;
+    }
+
+    .box,
+    .diamond,
+    .note {
+      stroke-linejoin: round;
+    }
+
+    .rule {
+      fill: var(--rule-fill);
+      stroke: var(--rule-stroke);
+    }
+
+    .state,
+    .action {
+      fill: var(--state-fill);
+      stroke: var(--state-stroke);
+    }
+
+    .decision {
+      fill: var(--decision-fill);
+      stroke: var(--decision-stroke);
+    }
+
+    .llm {
+      fill: var(--llm-fill);
+      stroke: var(--llm-stroke);
+    }
+
+    .confirm {
+      fill: var(--confirm-fill);
+      stroke: var(--confirm-stroke);
+    }
+
+    .neutral {
+      fill: var(--neutral-fill);
+      stroke: var(--neutral-stroke);
+    }
+
+    .note {
+      fill: var(--note-fill);
+      stroke: var(--neutral-stroke);
+    }
+
+    .label,
+    .node-label,
+    .fallback {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .node-label {
+      font-weight: bold;
+    }
+
+    .label {
+      fill: var(--muted);
+    }
+
+    .code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-weight: normal;
+    }
+
+    .merge {
+      fill: var(--line);
+      stroke: var(--page);
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Маршрут turn: правила, LLM и подтверждение</h1>
+    <svg
+      id="diagram"
+      viewBox="0 55 1200 425"
+      width="1200"
+      height="425"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Правила обновляют состояние, если уверенно извлечены не меньше двух slot; иначе вызывается LLM. Перед разрушительным действием система запрашивает подтверждение."
+    ></svg>
+  </figure>
+
+  <script>
+    const diagramData = [
+      {
+        kind: "config",
+        arrowLength: 12,
+        arrowWing: 7,
+        mergeRadius: 5,
+        fallback: [
+          {
+            text: "Схема должна была показать две ветки понимания реплики:",
+            x: 140,
+            y: 185
+          },
+          {
+            text: "не меньше 2 уверенных slot — обновление состояния;",
+            x: 140,
+            y: 215
+          },
+          {
+            text: "меньше 2 — LLM; разрушительное действие — подтверждение.",
+            x: 140,
+            y: 245
+          }
+        ]
+      },
+
+      {
+        kind: "edge",
+        points: [{ x: 150, y: 190 }, { x: 190, y: 190 }],
+        arrow: true
+      },
+      {
+        kind: "edge",
+        points: [{ x: 330, y: 190 }, { x: 345, y: 190 }],
+        arrow: true
+      },
+      {
+        kind: "edge",
+        points: [
+          { x: 475, y: 190 },
+          { x: 490, y: 190 },
+          { x: 490, y: 110 },
+          { x: 520, y: 110 }
+        ],
+        arrow: true,
+        label: {
+          text: "≥ 2 уверенных slot",
+          x: 490,
+          y: 110,
+          anchor: "end",
+          dx: -1,
+          dy: -1
+        }
+      },
+      {
+        kind: "edge",
+        points: [
+          { x: 410, y: 245 },
+          { x: 410, y: 325 },
+          { x: 520, y: 325 }
+        ],
+        arrow: true,
+        label: {
+          text: "< 2 уверенных slot",
+          x: 410,
+          y: 245,
+          anchor: "start",
+          dx: 1,
+          dy: 1
+        }
+      },
+      {
+        kind: "edge",
+        points: [
+          { x: 675, y: 110 },
+          { x: 715, y: 110 },
+          { x: 715, y: 190 }
+        ],
+        arrow: false
+      },
+      {
+        kind: "edge",
+        points: [
+          { x: 675, y: 325 },
+          { x: 715, y: 325 },
+          { x: 715, y: 190 }
+        ],
+        arrow: false
+      },
+      {
+        kind: "edge",
+        points: [{ x: 715, y: 190 }, { x: 740, y: 190 }],
+        arrow: true
+      },
+      {
+        kind: "edge",
+        points: [{ x: 875, y: 190 }, { x: 885, y: 190 }],
+        arrow: true
+      },
+      {
+        kind: "edge",
+        points: [{ x: 1015, y: 190 }, { x: 1040, y: 190 }],
+        arrow: true,
+        label: {
+          text: "нет",
+          x: 1015,
+          y: 190,
+          anchor: "end",
+          dx: -1,
+          dy: -1
+        }
+      },
+      {
+        kind: "edge",
+        points: [{ x: 950, y: 245 }, { x: 950, y: 300 }],
+        arrow: true,
+        label: {
+          text: "да",
+          x: 950,
+          y: 245,
+          anchor: "start",
+          dx: 1,
+          dy: 1
+        }
+      },
+      {
+        kind: "edge",
+        points: [
+          { x: 1035, y: 330 },
+          { x: 1095, y: 330 },
+          { x: 1095, y: 220 }
+        ],
+        arrow: true,
+        label: {
+          text: "подтверждено",
+          x: 1035,
+          y: 330,
+          anchor: "start",
+          dx: 1,
+          dy: -1
+        }
+      },
+
+      {
+        kind: "rect",
+        className: "neutral",
+        x1: 20,
+        y1: 160,
+        x2: 150,
+        y2: 220,
+        lines: [
+          { text: "Новый turn", x: 85, y: 185, className: "node-label" },
+          { text: "реплика", x: 85, y: 207, className: "node-label" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "rule",
+        x1: 190,
+        y1: 160,
+        x2: 330,
+        y2: 220,
+        lines: [
+          { text: "Правила", x: 260, y: 184, className: "node-label" },
+          { text: "извлекают slot", x: 260, y: 207, className: "node-label" }
+        ]
+      },
+      {
+        kind: "diamond",
+        className: "decision",
+        points: [
+          { x: 410, y: 135 },
+          { x: 475, y: 190 },
+          { x: 410, y: 245 },
+          { x: 345, y: 190 }
+        ],
+        lines: [
+          { text: "Правила нашли", x: 410, y: 174, className: "node-label" },
+          { text: "≥ 2 slot", x: 410, y: 195, className: "node-label code" },
+          { text: "уверенно?", x: 410, y: 216, className: "node-label" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "state",
+        x1: 520,
+        y1: 75,
+        x2: 675,
+        y2: 145,
+        lines: [
+          { text: "Обновить состояние", x: 597.5, y: 96, className: "node-label" },
+          { text: "area: centre", x: 597.5, y: 117, className: "code" },
+          { text: "price: cheap", x: 597.5, y: 137, className: "code" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "llm",
+        x1: 520,
+        y1: 285,
+        x2: 675,
+        y2: 365,
+        lines: [
+          { text: "Вызвать LLM", x: 597.5, y: 307, className: "node-label" },
+          { text: "прочитать историю", x: 597.5, y: 330, className: "node-label" },
+          { text: "пересобрать состояние", x: 597.5, y: 353, className: "node-label" }
+        ]
+      },
+      {
+        kind: "dot",
+        className: "merge",
+        x: 715,
+        y: 190
+      },
+      {
+        kind: "rect",
+        className: "neutral",
+        x1: 740,
+        y1: 160,
+        x2: 875,
+        y2: 220,
+        lines: [
+          { text: "Валидация", x: 807.5, y: 184, className: "node-label" },
+          { text: "по схеме", x: 807.5, y: 207, className: "node-label" }
+        ]
+      },
+      {
+        kind: "diamond",
+        className: "decision",
+        points: [
+          { x: 950, y: 135 },
+          { x: 1015, y: 190 },
+          { x: 950, y: 245 },
+          { x: 885, y: 190 }
+        ],
+        lines: [
+          { text: "Действие", x: 950, y: 181, className: "node-label" },
+          { text: "разрушительное?", x: 950, y: 204, className: "node-label" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "confirm",
+        x1: 835,
+        y1: 300,
+        x2: 1035,
+        y2: 360,
+        lines: [
+          { text: "Запросить явное", x: 935, y: 324, className: "node-label" },
+          { text: "подтверждение", x: 935, y: 347, className: "node-label" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "action",
+        x1: 1040,
+        y1: 160,
+        x2: 1150,
+        y2: 220,
+        lines: [
+          { text: "Действие", x: 1095, y: 184, className: "node-label" },
+          { text: "бэкенда", x: 1095, y: 207, className: "node-label" }
+        ]
+      },
+      {
+        kind: "rect",
+        className: "note",
+        x1: 260,
+        y1: 395,
+        x2: 920,
+        y2: 455,
+        lines: [
+          {
+            text: "Маршрут выбирает способ понять реплику.",
+            x: 590,
+            y: 419,
+            className: "node-label"
+          },
+          {
+            text: "Подтверждение решает, можно ли уже действовать.",
+            x: 590,
+            y: 442,
+            className: "node-label"
+          }
+        ]
+      }
+    ];
+
+    const origin = { x: 28, y: 18 };
+    const scale = { x: 1, y: 1 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const labelPadding = 12;
+    const lineWidth = 2;
+    const strongLineWidth = 3;
+    const bodyFontSize = 15;
+    const smallFontSize = 14;
+    const fallbackFontSize = 17;
+
+    const svg = document.getElementById("diagram");
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    const [config, ...items] = diagramData;
+
+    function element(name, attributes = {}) {
+      const node = document.createElementNS(svgNamespace, name);
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+      return node;
+    }
+
+    function logicalPath(points) {
+      const [first, ...rest] = points;
+      const commands = [`M ${sx(first.x)} ${sy(first.y)}`];
+      rest.forEach(point => {
+        commands.push(`L ${sx(point.x)} ${sy(point.y)}`);
+      });
+      return commands.join(" ");
+    }
+
+    function drawArrowhead(points) {
+      const [end, previous] = [...points].reverse();
+      const deltaX = end.x - previous.x;
+      const deltaY = end.y - previous.y;
+      const length = Math.hypot(deltaX, deltaY);
+      const unitX = deltaX / length;
+      const unitY = deltaY / length;
+      const base = {
+        x: end.x - unitX * config.arrowLength,
+        y: end.y - unitY * config.arrowLength
+      };
+      const left = {
+        x: base.x - unitY * config.arrowWing,
+        y: base.y + unitX * config.arrowWing
+      };
+      const right = {
+        x: base.x + unitY * config.arrowWing,
+        y: base.y - unitX * config.arrowWing
+      };
+
+      svg.appendChild(element("polygon", {
+        class: "arrowhead",
+        points: [end, left, right]
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ")
+      }));
+    }
+
+    function drawText(line, extraClass = "") {
+      const text = element("text", {
+        x: sx(line.x),
+        y: sy(line.y),
+        class: `${extraClass} ${line.className || ""}`.trim(),
+        "text-anchor": line.anchor || "middle",
+        "dominant-baseline": "middle",
+        "font-size": line.className && line.className.includes("code")
+          ? smallFontSize
+          : bodyFontSize
+      });
+      text.textContent = line.text;
+      svg.appendChild(text);
+    }
+
+    function drawEdge(item) {
+      svg.appendChild(element("path", {
+        class: "edge",
+        d: logicalPath(item.points),
+        "stroke-width": lineWidth,
+        "vector-effect": "non-scaling-stroke"
+      }));
+
+      if (item.arrow) {
+        drawArrowhead(item.points);
+      }
+
+      if (item.label) {
+        const label = element("text", {
+          x: sx(item.label.x),
+          y: sy(item.label.y),
+          dx: item.label.dx * labelPadding,
+          dy: item.label.dy * labelPadding,
+          class: "label",
+          "text-anchor": item.label.anchor,
+          "dominant-baseline": "middle",
+          "font-size": smallFontSize
+        });
+        label.textContent = item.label.text;
+        svg.appendChild(label);
+      }
+    }
+
+    function drawRect(item) {
+      svg.appendChild(element("rect", {
+        x: sx(item.x1),
+        y: sy(item.y1),
+        width: sx(item.x2) - sx(item.x1),
+        height: sy(item.y2) - sy(item.y1),
+        class: `box ${item.className}`,
+        "stroke-width": strongLineWidth,
+        "vector-effect": "non-scaling-stroke"
+      }));
+      item.lines.forEach(line => drawText(line));
+    }
+
+    function drawDiamond(item) {
+      svg.appendChild(element("polygon", {
+        points: item.points
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" "),
+        class: `diamond ${item.className}`,
+        "stroke-width": strongLineWidth,
+        "vector-effect": "non-scaling-stroke"
+      }));
+      item.lines.forEach(line => drawText(line));
+    }
+
+    function drawDot(item) {
+      svg.appendChild(element("circle", {
+        cx: sx(item.x),
+        cy: sy(item.y),
+        r: sx(item.x + config.mergeRadius) - sx(item.x),
+        class: item.className,
+        "stroke-width": lineWidth,
+        "vector-effect": "non-scaling-stroke"
+      }));
+    }
+
+    function drawFallback() {
+      svg.replaceChildren();
+      config.fallback.forEach(line => {
+        const text = element("text", {
+          x: sx(line.x),
+          y: sy(line.y),
+          class: "fallback",
+          "text-anchor": "start",
+          "dominant-baseline": "middle",
+          "font-size": fallbackFontSize
+        });
+        text.textContent = line.text;
+        svg.appendChild(text);
+      });
+    }
+
+    try {
+      items
+        .filter(item => item.kind === "edge")
+        .forEach(drawEdge);
+
+      items
+        .filter(item => item.kind === "rect")
+        .forEach(drawRect);
+
+      items
+        .filter(item => item.kind === "diamond")
+        .forEach(drawDiamond);
+
+      items
+        .filter(item => item.kind === "dot")
+        .forEach(drawDot);
+    } catch (error) {
+      drawFallback();
+    }
+  </script>
+</body>
+</html>

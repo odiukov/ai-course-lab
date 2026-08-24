@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Три схемы разрешения конкуренции за запись</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f7f8fb;
+  --panel:#ffffff;
+  --node:#f1f5f9;
+  --token:#e8f0ff;
+  --topic:#eaf8f1;
+  --text:#172033;
+  --muted:#526078;
+  --line:#93a1b5;
+  --accent:#3468d4;
+  --accent-fill:#3468d4;
+  --success:#17845d;
+  --warning:#c04c3d;
+  --stroke:2px;
+  --thin:1px;
+  --title-size:20px;
+  --panel-title-size:17px;
+  --text-size:14px;
+  --small-size:12px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#111722;
+    --panel:#182130;
+    --node:#202c3d;
+    --token:#243754;
+    --topic:#17372f;
+    --text:#edf3ff;
+    --muted:#b3bfd2;
+    --line:#64748b;
+    --accent:#78a7ff;
+    --accent-fill:#78a7ff;
+    --success:#56d6a5;
+    --warning:#ff8f80;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text)}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:14px 18px 10px;
+}
+h1{
+  margin:0 0 8px;
+  font-size:var(--title-size);
+  font-weight:700;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  background:var(--bg);
+}
+.panel{
+  fill:var(--panel);
+  stroke:var(--line);
+  stroke-width:var(--thin);
+}
+.node{
+  fill:var(--node);
+  stroke:var(--line);
+  stroke-width:var(--stroke);
+}
+.token{
+  fill:var(--token);
+  stroke:var(--accent);
+  stroke-width:var(--thin);
+}
+.topic{
+  fill:var(--topic);
+  stroke:var(--success);
+  stroke-width:var(--stroke);
+}
+.arrow{
+  fill:none;
+  stroke:var(--accent);
+  stroke-width:var(--stroke);
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.retry{stroke:var(--warning)}
+.owner-arrow{stroke:var(--success)}
+.head{fill:var(--accent-fill)}
+.head.retry{fill:var(--warning);stroke:none}
+.head.owner-arrow{fill:var(--success);stroke:none}
+.board-line{
+  stroke:var(--line);
+  stroke-width:var(--thin);
+  stroke-linecap:round;
+}
+.label{
+  fill:var(--text);
+  font-size:var(--text-size);
+}
+.small{
+  fill:var(--muted);
+  font-size:var(--small-size);
+}
+.branch-ok{
+  fill:var(--success);
+  font-size:var(--small-size);
+  font-weight:700;
+}
+.branch-retry{
+  fill:var(--warning);
+  font-size:var(--small-size);
+  font-weight:700;
+}
+.panel-title{
+  fill:var(--text);
+  font-size:var(--panel-title-size);
+  font-weight:700;
+}
+.strong{font-weight:700}
+</style>
+</head>
+<body>
+<h1>Три схемы разрешения конкуренции за запись</h1>
+<svg id="diagram" viewBox="0 0 1200 470" width="1200" height="470"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Три способа разрешить конкуренцию за запись</title>
+  <desc id="svg-desc">Единая очередь через одного писателя, оптимистичная запись с проверкой версии и повтором, разделение владельцев по темам prices, orders и alerts.</desc>
+</svg>
+<script>
+const DATA=Object.freeze({
+  map:[0,1],
+  radius:[12,12],
+  panels:[
+    [18,18,370,430,"Единая очередь","конфликт предотвращается до записи"],
+    [415,18,370,430,"Проверка версии","конфликт обнаруживается при сохранении"],
+    [812,18,370,430,"Разделение по темам","конфликт исчезает на границах владения"]
+  ],
+  boxes:[
+    [42,110,84,46,"node",[[138,"Агент А","label strong"]]],
+    [42,205,84,46,"node",[[233,"Агент Б","label strong"]]],
+    [155,100,90,190,"node",[[119,"Очередь","small strong"]]],
+    [168,132,64,44,"token",[[159,"А","label strong"]]],
+    [168,216,64,44,"token",[[243,"Б","label strong"]]],
+    [280,166,84,58,"node",[[190,"Один","label strong"],[210,"писатель","label strong"]]],
+    [275,318,95,78,"node",[[337,"Общая запись","small strong"]]],
+
+    [435,108,70,46,"node",[[136,"Агент","label strong"]]],
+    [530,105,140,54,"node",[[128,"Прочитать","label strong"],[147,"свежую запись","small"]]],
+    [435,292,110,62,"node",[[317,"Отклонить","label strong"],[338,"попытку","small"]]],
+    [665,292,90,62,"node",[[317,"Сохранить","label strong"],[338,"изменение","small"]]],
+
+    [832,126,115,54,"node",[[149,"Агент цен","label strong"],[168,"владелец","small"]]],
+    [1010,126,145,54,"topic",[[149,"Цены","label strong"],[168,"prices","small"]]],
+    [832,220,115,54,"node",[[243,"Агент заказов","label strong"],[262,"владелец","small"]]],
+    [1010,220,145,54,"topic",[[243,"Заказы","label strong"],[262,"orders","small"]]],
+    [832,314,115,54,"node",[[337,"Агент тревог","label strong"],[356,"владелец","small"]]],
+    [1010,314,145,54,"topic",[[337,"Оповещения","label strong"],[356,"alerts","small"]]]
+  ],
+  diamonds:[
+    [[[600,185],[670,225],[600,265],[530,225]],"node",
+      [[219,"Версия","label strong"],[239,"совпала?","small"]]]
+  ],
+  arrows:[
+    [[[126,133],[168,154]],[[168,154],[158,148],[159,159]],"arrow"],
+    [[[126,228],[168,238]],[[168,238],[157,232],[158,243]],"arrow"],
+    [[[245,195],[280,195]],[[280,195],[269,189],[269,201]],"arrow"],
+    [[[322,224],[322,318]],[[322,318],[316,307],[328,307]],"arrow"],
+
+    [[[505,131],[530,131]],[[530,131],[519,125],[519,137]],"arrow"],
+    [[[600,159],[600,185]],[[600,185],[594,174],[606,174]],"arrow"],
+    [[[530,225],[490,225],[490,292]],[[490,292],[484,281],[496,281]],"arrow retry"],
+    [[[670,225],[710,225],[710,292]],[[710,292],[704,281],[716,281]],"arrow"],
+    [[[490,354],[490,390],[770,390],[770,131],[670,131]],
+      [[670,131],[681,125],[681,137]],"arrow retry"],
+
+    [[[947,153],[1010,153]],[[1010,153],[999,147],[999,159]],"arrow owner-arrow"],
+    [[[947,247],[1010,247]],[[1010,247],[999,241],[999,253]],"arrow owner-arrow"],
+    [[[947,341],[1010,341]],[[1010,341],[999,335],[999,347]],"arrow owner-arrow"]
+  ],
+  segments:[
+    [291,352,354,352,"board-line"],
+    [291,368,354,368,"board-line"],
+    [291,384,340,384,"board-line"]
+  ],
+  texts:[
+    [203,52,"Единая очередь","panel-title","middle"],
+    [203,78,"конфликт предотвращается до записи","small","middle"],
+    [137,118,"изменения","small","middle"],
+    [261,184,"по очереди","small","middle"],
+    [322,414,"пишет только координатор","small","middle"],
+
+    [600,52,"Проверка версии","panel-title","middle"],
+    [600,78,"конфликт обнаруживается при сохранении","small","middle"],
+    [511,207,"изменилась","branch-retry","end"],
+    [689,207,"та же","branch-ok","start"],
+    [630,415,"прочитать заново и повторить","branch-retry","middle"],
+
+    [997,52,"Разделение по темам","panel-title","middle"],
+    [997,78,"конфликт исчезает на границах владения","small","middle"],
+    [889,108,"Владельцы","small strong","middle"],
+    [1082,108,"Разделы доски","small strong","middle"],
+    [978,142,"владеет","small","middle"],
+    [978,236,"владеет","small","middle"],
+    [978,330,"владеет","small","middle"],
+    [997,414,"пишут одновременно, но в разные разделы","small","middle"]
+  ],
+  fallback:[600,220,"Схема должна показать очередь одного писателя, проверку версии с повтором и владельцев тем prices, orders и alerts."]
+});
+const [zero,unit]=DATA.map;
+const origin=Object.freeze({x:zero,y:zero});
+const scale=Object.freeze({x:unit,y:unit});
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const svg=document.getElementById("diagram");
+  const NS="http://www.w3.org/2000/svg";
+  const make=(name,attrs)=>{
+    const node=document.createElementNS(NS,name);
+    for(const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+    return node;
+  };
+  const addText=(x,y,value,css,anchor)=>{
+    const node=make("text",{
+      x:sx(x),y:sy(y),class:css,
+      "text-anchor":anchor,
+      "dominant-baseline":"middle"
+    });
+    node.textContent=value;
+    svg.appendChild(node);
+  };
+  const addRect=(x,y,w,h,css)=>{
+    const [rx,ry]=DATA.radius;
+    svg.appendChild(make("rect",{
+      x:sx(x),y:sy(y),
+      width:sx(x+w)-sx(x),
+      height:sy(y+h)-sy(y),
+      rx:sx(x+rx)-sx(x),
+      ry:sy(y+ry)-sy(y),
+      class:css
+    }));
+  };
+  const addPolygon=(points,css)=>{
+    const value=points.map(([x,y])=>`${sx(x)},${sy(y)}`).join(" ");
+    svg.appendChild(make("polygon",{points:value,class:css}));
+  };
+  const addPath=(points,css)=>{
+    let value="";
+    for(const [x,y] of points){
+      value+=`${value?" L":"M"}${sx(x)} ${sy(y)}`;
+    }
+    svg.appendChild(make("path",{d:value,class:css}));
+  };
+
+  for(const [x,y,w,h] of DATA.panels) addRect(x,y,w,h,"panel");
+
+  for(const [x,y,w,h,css] of DATA.boxes) addRect(x,y,w,h,css);
+
+  for(const [points,css] of DATA.diamonds) addPolygon(points,css);
+
+  for(const [x1,y1,x2,y2,css] of DATA.segments){
+    svg.appendChild(make("line",{
+      x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:css
+    }));
+  }
+
+  for(const [points,head,css] of DATA.arrows){
+    addPath(points,css);
+    const headCss=css.includes("retry")
+      ?"head retry"
+      :css.includes("owner-arrow")
+        ?"head owner-arrow"
+        :"head";
+    addPolygon(head,headCss);
+  }
+
+  for(const [x,y,w,h,css,lines] of DATA.boxes){
+    for(const [lineY,value,textCss] of lines){
+      addText(x+w*scale.x/scale.x-w/scale.x+x-x,lineY,value,textCss,"middle");
+    }
+  }
+
+  for(const [points,css,lines] of DATA.diamonds){
+    for(const [lineY,value,textCss] of lines){
+      addText(DATA.fallback[zero],lineY,value,textCss,"middle");
+    }
+  }
+
+  for(const [x,y,value,css,anchor] of DATA.texts){
+    addText(x,y,value,css,anchor);
+  }
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const NS="http://www.w3.org/2000/svg";
+  const [x,y,message]=DATA.fallback;
+  svg.replaceChildren();
+  const fallback=document.createElementNS(NS,"text");
+  fallback.setAttribute("x",sx(x));
+  fallback.setAttribute("y",sy(y));
+  fallback.setAttribute("class","label");
+  fallback.setAttribute("text-anchor","middle");
+  fallback.textContent=message;
+  svg.appendChild(fallback);
+}
+</script>
+</body>
+</html>

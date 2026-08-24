@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Слои HNSW</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1d2126; --mut:#6b7280; --line:#98a2ae;
+    --dot:#3a434f; --dash:#c2c9d1; --acc:#b0510b; --accw:#fff;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#14171b; --fg:#e7eaef; --mut:#98a2ae; --line:#59636f;
+      --dot:#c6cdd7; --dash:#3d454f; --acc:#f2a154; --accw:#14171b;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 6px 14px;
+        font:400 14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+  h3{margin:0 0 6px;font-size:15px;font-weight:600;text-align:center}
+  svg{display:block;width:100%;max-height:520px;height:auto;background:var(--bg)}
+  #fb{display:none;padding:8px 10px;color:var(--mut);font-size:13px}
+</style>
+<div class="wrap">
+  <h3>Слои HNSW: сверху длинные прыжки, снизу все векторы</h3>
+  <svg id="d" viewBox="0 0 780 386" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Четыре слоя HNSW: 3, 40, 600 точек и все 10 000; запрос входит сверху и спускается к top-k"></svg>
+  <div id="fb">Схема: четыре слоя индекса. Верхний — 3 точки с очень длинными рёбрами,
+    ниже 40 точек, ниже 600, на нулевом слое все 10 000 тикетов с короткими рёбрами.
+    Пунктир по вертикали — один и тот же вектор, продублированный на нескольких слоях.
+    Запрос входит в единственную верхнюю точку, идёт к ближайшему соседу, проваливается
+    по пунктиру на слой ниже и так до нулевого слоя, где находит top-k.</div>
+</div>
+<script>
+(function(){
+var NS="http://www.w3.org/2000/svg";
+var svg=document.getElementById("d");
+
+function row(a,b,step){var r=[],v=a;while(v<=b+1e-9){r.push(Math.round(v*100)/100);v+=step}return r}
+
+/* ---- данные схемы ---- */
+var DATA={
+  layers:[
+    {y:3,name:"слой 3",count:"3 точки",        r:0.9,  xs:[15,50,85]},
+    {y:2,name:"слой 2",count:"40 точек",       r:0.75, xs:[8,15,29,42,50,58,70,85,95]},
+    {y:1,name:"слой 1",count:"600 точек",      r:0.6,  xs:row(0,100,5)},
+    {y:0,name:"слой 0",count:"все 10 000",     r:0.45, xs:row(0,100,2.5)}
+  ],
+  pillars:[15,50,85],
+  entry:[15,3],
+  query:{tail:[15,3.75],tip:[15,3.1],hw:1.0,hl:0.125},
+  path:[[15,3],[50,3],[50,2],[70,2],[70,1],[75,1],[75,0],[77.5,0]],
+  head:{hl:1.4,hw:0.09},
+  topk:[77.5,-0.3],
+  legend:[0,-0.75],
+  nameX:-4, countX:104
+};
+
+/* ---- единственный перевод координат ---- */
+var origin={x:110,y:310}, scale={x:5,y:-72};
+function sx(x){return origin.x+x*scale.x}
+function sy(y){return origin.y+y*scale.y}
+
+function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e}
+function line(x1,y1,x2,y2,cls,w){return el("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+  stroke:"var("+cls+")","stroke-width":w,"stroke-linecap":"round"})}
+function txt(x,y,s,anchor,dy,cls,size,weight){
+  var t=el("text",{x:sx(x),y:sy(y),dy:dy,"text-anchor":anchor,fill:"var("+cls+")",
+    "font-size":size,"font-family":'system-ui,-apple-system,"Segoe UI",sans-serif',
+    "font-weight":weight||400});
+  t.textContent=s;return t}
+
+try{
+  var g=el("g",{});
+
+  /* пунктирные вертикали: один вектор на нескольких слоях */
+  DATA.pillars.forEach(function(x){
+    var l=line(x,0,x,3,"--dash",1.5);
+    l.setAttribute("stroke-dasharray","4 5");
+    g.appendChild(l);
+  });
+
+  /* рёбра слоёв: длинные наверху, короткие внизу */
+  DATA.layers.forEach(function(L){
+    for(var i=0;i<L.xs.length-1;i++) g.appendChild(line(L.xs[i],L.y,L.xs[i+1],L.y,"--line",L.y===3?2:1.2));
+  });
+
+  /* точки и подписи слоёв */
+  DATA.layers.forEach(function(L){
+    L.xs.forEach(function(x){
+      g.appendChild(el("circle",{cx:sx(x),cy:sy(L.y),r:sx(L.r)-sx(0),fill:"var(--dot)"}));
+    });
+    g.appendChild(txt(DATA.nameX,L.y,L.name,"end",4,"--fg",13,600));
+    g.appendChild(txt(DATA.countX,L.y,L.count,"start",4,"--mut",13));
+  });
+
+  /* точка входа */
+  g.appendChild(el("circle",{cx:sx(DATA.entry[0]),cy:sy(DATA.entry[1]),
+    r:sx(1.7)-sx(0),fill:"none",stroke:"var(--acc)","stroke-width":1.8}));
+
+  /* стрелка запроса сверху */
+  var q=DATA.query;
+  g.appendChild(el("line",{x1:sx(q.tail[0]),y1:sy(q.tail[1]),x2:sx(q.tip[0]),y2:sy(q.tip[1]+q.hl),
+    stroke:"var(--acc)","stroke-width":2.5,"stroke-linecap":"round"}));
+  g.appendChild(el("polygon",{fill:"var(--acc)",points:[
+    sx(q.tip[0])+","+sy(q.tip[1]),
+    sx(q.tip[0]-q.hw)+","+sy(q.tip[1]+q.hl),
+    sx(q.tip[0]+q.hw)+","+sy(q.tip[1]+q.hl)].join(" ")}));
+  g.appendChild(txt(q.tail[0]+2,q.tail[1]-0.2,"запрос","start",0,"--acc",13,600));
+
+  /* спуск по слоям */
+  var pts=DATA.path.map(function(p){return sx(p[0])+","+sy(p[1])}).join(" ");
+  g.appendChild(el("polyline",{points:pts,fill:"none",stroke:"var(--acc)",
+    "stroke-width":3,"stroke-linejoin":"round","stroke-linecap":"round"}));
+  var e=DATA.path[DATA.path.length-1], h=DATA.head;
+  g.appendChild(el("polygon",{fill:"var(--acc)",points:[
+    sx(e[0])+","+sy(e[1]),
+    sx(e[0]-h.hl)+","+sy(e[1]+h.hw),
+    sx(e[0]-h.hl)+","+sy(e[1]-h.hw)].join(" ")}));
+  g.appendChild(el("circle",{cx:sx(e[0]),cy:sy(e[1]),r:sx(1.5)-sx(0),
+    fill:"var(--accw)",stroke:"var(--acc)","stroke-width":1.8}));
+  g.appendChild(txt(DATA.topk[0],DATA.topk[1],"top-k","middle",0,"--acc",13,600));
+
+  /* легенда */
+  g.appendChild(txt(DATA.legend[0],DATA.legend[1],
+    "линии — рёбра слоя · пунктир — один и тот же вектор на нескольких слоях · оранжевое — спуск запроса",
+    "start",0,"--mut",12));
+
+  svg.appendChild(g);
+}catch(err){
+  svg.style.display="none";
+  document.getElementById("fb").style.display="block";
+}
+})();
+</script>
+</html>

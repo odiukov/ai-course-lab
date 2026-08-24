@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Top-k и top-p</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef2f7;
+      --bg: #ffffff;
+      --panel: #f8fafc;
+      --ink: #172033;
+      --muted: #64748b;
+      --grid: #cbd5e1;
+      --divider: #d9e1eb;
+      --bar: #a8b5c7;
+      --bar-lead: #334155;
+      --k: #2563eb;
+      --k-soft: #dbeafe;
+      --k-ink: #163d8f;
+      --p: #16835c;
+      --p-soft: #d8f4e8;
+      --p-ink: #075a3b;
+      --footer: #eef2f7;
+      --white: #ffffff;
+      --error: #9f1239;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #080d16;
+        --bg: #111827;
+        --panel: #151e2d;
+        --ink: #edf3fb;
+        --muted: #a9b7ca;
+        --grid: #526077;
+        --divider: #344155;
+        --bar: #718097;
+        --bar-lead: #d5deeb;
+        --k: #78a8ff;
+        --k-soft: #203b69;
+        --k-ink: #e1ecff;
+        --p: #54d7a4;
+        --p-soft: #174d3c;
+        --p-ink: #dcfff1;
+        --footer: #192334;
+        --white: #07111f;
+        --error: #fda4af;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--divider);
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 14px 18px 10px;
+      font-size: 19px;
+      line-height: normal;
+      font-weight: 700;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--bg);
+    }
+
+    .canvas-bg {
+      fill: var(--bg);
+    }
+
+    .panel-bg {
+      fill: var(--panel);
+    }
+
+    .axis,
+    .separator,
+    .leader-line {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .divider {
+      stroke: var(--divider);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .bar {
+      fill: var(--bar);
+    }
+
+    .bar.lead {
+      fill: var(--bar-lead);
+    }
+
+    .heading {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .probability {
+      fill: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .row-label {
+      fill: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .candidate-k {
+      fill: var(--k-soft);
+      stroke: var(--k);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .candidate-k.lead {
+      fill: var(--k);
+    }
+
+    .candidate-p {
+      fill: var(--p-soft);
+      stroke: var(--p);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .candidate-p.lead {
+      fill: var(--p);
+    }
+
+    .token-k {
+      fill: var(--k-ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .token-p {
+      fill: var(--p-ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .candidate-k.lead + .token-k,
+    .candidate-p.lead + .token-p {
+      fill: var(--white);
+    }
+
+    .footer-bg {
+      fill: var(--footer);
+      stroke: var(--divider);
+      stroke-width: 1.5px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .footer-k {
+      fill: var(--k);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .footer-p {
+      fill: var(--p);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    #fallback {
+      margin: 18px;
+      color: var(--error);
+      font-size: 15px;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="figure-title">
+    <h1 id="figure-title">Top-k фиксирует число кандидатов, top-p — долю вероятности</h1>
+    <svg id="diagram" width="1080" height="450" role="img"
+         aria-label="Сравнение top-k и top-p для уверенного и размытого распределений"></svg>
+    <p id="fallback" hidden>
+      Схема должна была показать: top-k оставляет пять токенов в обоих случаях,
+      а top-p оставляет один токен при уверенном распределении и восемь при размытом.
+    </p>
+  </main>
+
+  <script>
+    const data = [{
+      zero: 0,
+      one: 1,
+      canvas: { width: 1080, height: 450 },
+      panels: [
+        {
+          x: 28,
+          title: "Уверенный контекст",
+          note: "один токен почти забрал всю вероятность",
+          values: [0.95, 0.02, 0.01, 0.008, 0.005, 0.003, 0.002, 0.001, 0.0005, 0.0003, 0.0001, 0.0001],
+          labels: [
+            { index: 0, text: "0,95", shiftX: 0, shiftY: -9, anchor: "middle" },
+            { index: 1, text: "0,02", shiftX: -8, shiftY: -26, anchor: "end" },
+            { index: 2, text: "0,01", shiftX: 8, shiftY: -45, anchor: "start" }
+          ],
+          pCount: 1,
+          pLabel: "top-p = 0,9 · 1 токен"
+        },
+        {
+          x: 552,
+          title: "Неоднозначный контекст",
+          note: "вероятность распределена между вариантами",
+          values: [0.18, 0.16, 0.14, 0.13, 0.11, 0.08, 0.06, 0.04, 0.03, 0.02, 0.015, 0.005],
+          labels: [
+            { index: 0, text: "0,18", shiftX: 0, shiftY: -9, anchor: "middle" },
+            { index: 1, text: "0,16", shiftX: 0, shiftY: -27, anchor: "middle" },
+            { index: 2, text: "0,14", shiftX: 0, shiftY: -45, anchor: "middle" }
+          ],
+          pCount: 8,
+          pLabel: "top-p = 0,9 · 8 токенов"
+        }
+      ],
+      tokens: ["t₁", "t₂", "t₃", "t₄", "t₅", "t₆", "t₇", "t₈", "t₉", "t₁₀", "t₁₁", "t₁₂"],
+      geometry: {
+        panelY: 8,
+        panelWidth: 500,
+        panelHeight: 374,
+        panelTitleX: 18,
+        panelTitleY: 29,
+        panelNoteY: 51,
+        dividerX: 540,
+        dividerTop: 15,
+        dividerBottom: 382,
+        axisX: 62,
+        axisTop: 72,
+        axisBottom: 229,
+        axisRight: 468,
+        barStart: 84,
+        barGap: 29,
+        barWidth: 18,
+        barScale: 150,
+        probabilityPad: 7,
+        axisLabelY: 247,
+        separatorY: 259,
+        rowLabelX: 18,
+        rowTextShiftY: 20,
+        kRowY: 276,
+        pRowY: 330,
+        chipStart: 190,
+        chipWidth: 27,
+        chipHeight: 30,
+        chipGap: 34,
+        chipTextShiftX: 13.5,
+        chipTextShiftY: 20,
+        footerX: 28,
+        footerY: 396,
+        footerWidth: 1024,
+        footerHeight: 40,
+        footerKX: 280,
+        footerPX: 800,
+        footerTextY: 422
+      },
+      k: 5,
+      kLabel: "top-k = 5 · ровно 5",
+      footerK: "top-k: постоянная ширина списка",
+      footerP: "top-p: постоянная доля вероятности"
+    }];
+
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 1, y: 1 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [cfg] = data;
+      const g = cfg.geometry;
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+      const labelPad = 6;
+
+      svg.setAttribute(
+        "viewBox",
+        [
+          sx(origin.x),
+          sy(origin.y),
+          sx(cfg.canvas.width) - sx(origin.x),
+          sy(cfg.canvas.height) - sy(origin.y)
+        ].join(" ")
+      );
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+      const make = (name, attributes, className, content) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+        if (className) node.setAttribute("class", className);
+        if (content !== undefined) node.textContent = content;
+        svg.appendChild(node);
+        return node;
+      };
+
+      make("title", {}, "", "Top-k и top-p при разной уверенности модели");
+      make(
+        "desc",
+        {},
+        "",
+        "Слева уверенное распределение, справа размытое. Top-k везде сохраняет пять кандидатов. Top-p сохраняет один кандидат слева и восемь справа."
+      );
+
+      make("rect", {
+        x: sx(origin.x),
+        y: sy(origin.y),
+        width: sx(cfg.canvas.width) - sx(origin.x),
+        height: sy(cfg.canvas.height) - sy(origin.y)
+      }, "canvas-bg");
+
+      cfg.panels.forEach(panel => {
+        make("rect", {
+          x: sx(panel.x),
+          y: sy(g.panelY),
+          width: sx(g.panelWidth) - sx(origin.x),
+          height: sy(g.panelHeight) - sy(origin.y)
+        }, "panel-bg");
+
+        make("text", {
+          x: sx(panel.x + g.panelTitleX),
+          y: sy(g.panelTitleY),
+          "text-anchor": "start"
+        }, "heading", panel.title);
+
+        make("text", {
+          x: sx(panel.x + g.panelTitleX),
+          y: sy(g.panelNoteY),
+          "text-anchor": "start"
+        }, "note", panel.note);
+
+        make("line", {
+          x1: sx(panel.x + g.axisX),
+          y1: sy(g.axisTop),
+          x2: sx(panel.x + g.axisX),
+          y2: sy(g.axisBottom)
+        }, "axis");
+
+        make("line", {
+          x1: sx(panel.x + g.axisX),
+          y1: sy(g.axisBottom),
+          x2: sx(panel.x + g.axisRight),
+          y2: sy(g.axisBottom)
+        }, "axis");
+
+        panel.values.forEach((probability, index) => {
+          const height = probability * g.barScale;
+          const barX = panel.x + g.barStart + index * g.barGap;
+          const barY = g.axisBottom - height;
+
+          make("rect", {
+            x: sx(barX),
+            y: sy(barY),
+            width: sx(g.barWidth) - sx(origin.x),
+            height: sy(height) - sy(origin.y)
+          }, index === cfg.zero ? "bar lead" : "bar");
+        });
+
+        panel.labels.forEach(label => {
+          const probability = panel.values[label.index];
+          const barCenter =
+            panel.x + g.barStart + label.index * g.barGap + g.barWidth / cfg.panels.length;
+          const barTop = g.axisBottom - probability * g.barScale;
+          const labelX = barCenter + label.shiftX;
+          const labelY = barTop + label.shiftY;
+
+          if (label.index !== cfg.zero) {
+            make("line", {
+              x1: sx(barCenter),
+              y1: sy(barTop - labelPad / scale.y),
+              x2: sx(labelX),
+              y2: sy(labelY + g.probabilityPad)
+            }, "leader-line");
+          }
+
+          make("text", {
+            x: sx(labelX),
+            y: sy(labelY),
+            "text-anchor": label.anchor
+          }, "probability", label.text);
+        });
+
+        make("text", {
+          x: sx(panel.x + g.axisRight),
+          y: sy(g.axisLabelY),
+          "text-anchor": "end"
+        }, "axis-label", "токены →");
+
+        make("line", {
+          x1: sx(panel.x + g.panelTitleX),
+          y1: sy(g.separatorY),
+          x2: sx(panel.x + g.axisRight),
+          y2: sy(g.separatorY)
+        }, "separator");
+
+        const drawSet = (rowY, count, type, rowLabel) => {
+          make("text", {
+            x: sx(panel.x + g.rowLabelX),
+            y: sy(rowY + g.rowTextShiftY),
+            "text-anchor": "start"
+          }, "row-label", rowLabel);
+
+          cfg.tokens.slice(cfg.zero, count).forEach((token, index) => {
+            const chipX = panel.x + g.chipStart + index * g.chipGap;
+            const rectClass =
+              type === "k"
+                ? index === cfg.zero ? "candidate-k lead" : "candidate-k"
+                : index === cfg.zero ? "candidate-p lead" : "candidate-p";
+            const textClass = type === "k" ? "token-k" : "token-p";
+
+            make("rect", {
+              x: sx(chipX),
+              y: sy(rowY),
+              width: sx(g.chipWidth) - sx(origin.x),
+              height: sy(g.chipHeight) - sy(origin.y)
+            }, rectClass);
+
+            make("text", {
+              x: sx(chipX + g.chipTextShiftX),
+              y: sy(rowY + g.chipTextShiftY),
+              "text-anchor": "middle"
+            }, textClass, token);
+          });
+        };
+
+        drawSet(g.kRowY, cfg.k, "k", cfg.kLabel);
+        drawSet(g.pRowY, panel.pCount, "p", panel.pLabel);
+      });
+
+      make("line", {
+        x1: sx(g.dividerX),
+        y1: sy(g.dividerTop),
+        x2: sx(g.dividerX),
+        y2: sy(g.dividerBottom)
+      }, "divider");
+
+      make("rect", {
+        x: sx(g.footerX),
+        y: sy(g.footerY),
+        width: sx(g.footerWidth) - sx(origin.x),
+        height: sy(g.footerHeight) - sy(origin.y)
+      }, "footer-bg");
+
+      make("text", {
+        x: sx(g.footerKX),
+        y: sy(g.footerTextY),
+        "text-anchor": "middle"
+      }, "footer-k", cfg.footerK);
+
+      make("text", {
+        x: sx(g.footerPX),
+        y: sy(g.footerTextY),
+        "text-anchor": "middle"
+      }, "footer-p", cfg.footerP);
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Обратный проход по графу</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5a6570;
+    --node:#f2f5f9; --stroke:#3b4a5a; --grad:#b4451f; --acc:#1f6fb4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8ecf1; --muted:#9aa6b2;
+      --node:#1f262e; --stroke:#7d8fa3; --grad:#ff9a6a; --acc:#6fb6ef;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:8px 4px;box-sizing:border-box;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:470px;background:var(--bg);}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);white-space:pre-wrap;}
+</style>
+<div class="wrap">
+  <h2>Обратный проход: тот же граф, справа налево</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var NODES = [
+      {id:'y',  gx:0, gy:0, main:'dy/dy = 1',  sub:'выход'},
+      {id:'c',  gx:0, gy:1, main:'dy/dc = 1',  sub:'relu'},
+      {id:'a',  gx:-1,gy:2, main:'dy/da = 1',  sub:'умножение'},
+      {id:'b',  gx:1, gy:2, main:'dy/db = 1',  sub:'b'},
+      {id:'x1', gx:-2,gy:3, main:'dy/dx1 = 3', sub:'x1'},
+      {id:'x2', gx:0, gy:3, main:'dy/dx2 = 2', sub:'x2'}
+    ];
+    var EDGES = [
+      {from:'y', to:'c',  label:"relu'(c) = 1", side:'left'},
+      {from:'c', to:'a',  label:'dc/da = 1',    side:'left'},
+      {from:'c', to:'b',  label:'dc/db = 1',    side:'right'},
+      {from:'a', to:'x1', label:'da/dx1 = x2 = 3', side:'left'},
+      {from:'a', to:'x2', label:'da/dx2 = x1 = 2', side:'right'}
+    ];
+
+    // ---- одна пара перевода координат ----
+    var ORIGIN = {x:330, y:52};
+    var SCALE  = {x:132, y:96};
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y + y * SCALE.y; }
+
+    // ---- пиксельные константы оформления ----
+    var W = 700, H = 460;
+    var PAD = 6, FS = 13, FS_SM = 11, LW = 1.6;
+    var BOX_W = SCALE.x * 0.82, BOX_H = SCALE.y * 0.42;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){ var e = document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t = el('text',{x:x,y:y,'text-anchor':anchor,'font-size':size||FS,
+        fill:cls,'dominant-baseline':'middle'});
+      t.textContent = s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,
+      preserveAspectRatio:'xMidYMid meet',role:'img',
+      'aria-label':'Обратный проход: градиенты от выхода ко входам'});
+
+    var defs = el('defs',{});
+    var mk = el('marker',{id:'ah',viewBox:'0 0 10 10',refX:'9',refY:'5',
+      markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+    mk.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:'var(--grad)'}));
+    defs.appendChild(mk);
+    svg.appendChild(defs);
+
+    var byId = {};
+    NODES.forEach(function(n){
+      n.cx = sx(n.gx); n.cy = sy(n.gy); byId[n.id] = n;
+    });
+
+    // ---- рёбра: от границы прямоугольника к границе ----
+    function edgePoint(n, tx, ty){
+      var dx = tx - n.cx, dy = ty - n.cy;
+      var hw = BOX_W/2 + PAD/2, hh = BOX_H/2 + PAD/2;
+      var s = Math.min(dx ? hw/Math.abs(dx) : Infinity,
+                       dy ? hh/Math.abs(dy) : Infinity);
+      return {x:n.cx + dx*s, y:n.cy + dy*s};
+    }
+
+    EDGES.forEach(function(e){
+      var A = byId[e.from], B = byId[e.to];
+      var p1 = edgePoint(A, B.cx, B.cy);
+      var p2 = edgePoint(B, A.cx, A.cy);
+      svg.appendChild(el('line',{x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,
+        stroke:'var(--grad)','stroke-width':LW,'marker-end':'url(#ah)'}));
+
+      // подпись у хвоста ребра, сбоку, разведена по стороне
+      var t = 0.34;
+      var lx = p1.x + (p2.x - p1.x) * t;
+      var ly = p1.y + (p2.y - p1.y) * t;
+      var anchor = e.side === 'left' ? 'end' : 'start';
+      var off = e.side === 'left' ? -PAD : PAD;
+      svg.appendChild(txt(lx + off, ly, e.label, anchor, 'var(--muted)', FS_SM));
+    });
+
+    // ---- узлы ----
+    NODES.forEach(function(n){
+      svg.appendChild(el('rect',{x:n.cx - BOX_W/2, y:n.cy - BOX_H/2,
+        width:BOX_W, height:BOX_H, rx:PAD,
+        fill:'var(--node)', stroke:'var(--stroke)','stroke-width':LW}));
+      svg.appendChild(txt(n.cx, n.cy - PAD/2, n.main, 'middle', 'var(--fg)', FS));
+      svg.appendChild(txt(n.cx, n.cy + BOX_H/2 - PAD - 1, n.sub, 'middle',
+        'var(--muted)', FS_SM));
+    });
+
+    // ---- направление обхода: подпись у правого края, вне узлов ----
+    var topY = sy(0), botY = sy(3);
+    var railX = sx(2);
+    svg.appendChild(el('line',{x1:railX,y1:topY,x2:railX,y2:botY,
+      stroke:'var(--acc)','stroke-width':LW,'stroke-dasharray':'5 4',
+      'marker-end':'url(#ah)'}));
+    svg.appendChild(txt(railX - PAD, sy(0.6), 'градиент', 'end', 'var(--acc)', FS_SM));
+    svg.appendChild(txt(railX - PAD, sy(1.0), 'течёт назад', 'end', 'var(--acc)', FS_SM));
+
+    // ---- легенда строкой снизу ----
+    svg.appendChild(txt(sx(-2) - BOX_W/2, sy(3.55),
+      'Старт: dy/dy = 1. Каждый узел множит пришедшее число на свою локальную производную.',
+      'start', 'var(--muted)', FS_SM));
+
+    host.appendChild(svg);
+  }catch(err){
+    var p = document.createElement('div');
+    p.className = 'fallback';
+    p.textContent =
+      'Схема не построилась. Что она показывает:\n' +
+      'Тот же граф, что на прямом проходе, но обход справа налево.\n' +
+      'dy/dy = 1 → relu\'(c) = 1 → dy/dc = 1\n' +
+      'dy/dc = 1 → dc/da = 1 → dy/da = 1; dc/db = 1 → dy/db = 1\n' +
+      'dy/da = 1 → da/dx1 = x2 = 3 → dy/dx1 = 3\n' +
+      'dy/da = 1 → da/dx2 = x1 = 2 → dy/dx2 = 2';
+    host.appendChild(p);
+  }
+})();
+</script>
+</html>

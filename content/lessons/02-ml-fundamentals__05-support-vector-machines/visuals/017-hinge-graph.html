@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как hinge loss меняется вместе с y·f(x)</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59657a;
+      --axis: #344159;
+      --grid: #cbd3df;
+      --loss: #7557d5;
+      --loss-soft: #f0ecff;
+      --zero-soft: #e8f5ee;
+      --zero-ink: #26734d;
+      --error: #d04e58;
+      --inside: #d48922;
+      --safe: #25865a;
+      --halo: #ffffff;
+      --fallback: #fff1f1;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #151821;
+        --panel: #1d2230;
+        --ink: #edf1f8;
+        --muted: #adb8ca;
+        --axis: #d7deeb;
+        --grid: #4a556b;
+        --loss: #ad96ff;
+        --loss-soft: #292542;
+        --zero-soft: #1d382f;
+        --zero-ink: #83d7ad;
+        --error: #ff858d;
+        --inside: #f2b354;
+        --safe: #70d5a3;
+        --halo: #1d2230;
+        --fallback: #3b2329;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: 0;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 14px 24px 7px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.25;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      margin-inline: auto;
+      background: var(--panel);
+    }
+
+    .region-penalty {
+      fill: var(--loss-soft);
+    }
+
+    .region-zero {
+      fill: var(--zero-soft);
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .axis-arrow {
+      fill: var(--axis);
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1.5px;
+    }
+
+    .margin-line {
+      stroke: var(--zero-ink);
+      stroke-width: 2px;
+    }
+
+    .guide {
+      stroke: var(--grid);
+      stroke-width: 1.5px;
+    }
+
+    .loss-line {
+      fill: none;
+      stroke: var(--loss);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
+    .point {
+      stroke: var(--halo);
+      stroke-width: 4px;
+    }
+
+    .point-error {
+      fill: var(--error);
+    }
+
+    .point-inside {
+      fill: var(--inside);
+    }
+
+    .point-safe {
+      fill: var(--safe);
+    }
+
+    .kink {
+      fill: var(--panel);
+      stroke: var(--loss);
+      stroke-width: 3px;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 560;
+    }
+
+    .tick-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 520;
+    }
+
+    .axis-label {
+      fill: var(--axis);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .margin-label {
+      fill: var(--zero-ink);
+      font-size: 14px;
+      font-weight: 720;
+      paint-order: stroke fill;
+      stroke: var(--halo);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .formula {
+      fill: var(--loss);
+      font-size: 15px;
+      font-weight: 720;
+      paint-order: stroke fill;
+      stroke: var(--halo);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .region-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .callout {
+      font-size: 14px;
+      font-weight: 720;
+      paint-order: stroke fill;
+      stroke: var(--halo);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .callout-error {
+      fill: var(--error);
+    }
+
+    .callout-inside {
+      fill: var(--inside);
+    }
+
+    .callout-safe {
+      fill: var(--safe);
+    }
+
+    #fallback {
+      margin: 16px 24px 24px;
+      padding: 16px;
+      background: var(--fallback);
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title diagram-note">
+    <header>
+      <h1 id="diagram-title">Как hinge loss меняется вместе с y·f(x)</h1>
+      <p id="diagram-note">
+        Штраф линейно растёт слева от margin и становится нулевым при y·f(x) ≥ 1.
+      </p>
+    </header>
+
+    <svg
+      id="chart"
+      viewBox="0 0 900 430"
+      width="900"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="График hinge loss с тремя отмеченными точками"
+    ></svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать ломаную hinge loss: для y·f(x)=−0,5
+      потеря равна 1,5; для y·f(x)=0,3 — 0,7; для y·f(x)=1,2 — 0.
+      В точке y·f(x)=1 наклонная линия изгибается и далее лежит на нуле.
+    </p>
+  </figure>
+
+  <script>
+    const data = Object.freeze([
+      {
+        kind: "bounds",
+        xMin: -0.65,
+        xMax: 1.55,
+        yMin: -0.12,
+        yMax: 1.72
+      },
+      {
+        kind: "hinge",
+        points: [
+          [-0.65, 1.65],
+          [1, 0],
+          [1.55, 0]
+        ]
+      },
+      {
+        kind: "points",
+        items: [
+          {
+            x: -0.5,
+            y: 1.5,
+            label: "ошибка: y·f(x)=−0,5; loss=1,5",
+            className: "point-error",
+            calloutClass: "callout-error",
+            dx: 18,
+            dy: -18,
+            anchor: "start",
+            guides: true
+          },
+          {
+            x: 0.3,
+            y: 0.7,
+            label: "внутри margin: y·f(x)=0,3; loss=0,7",
+            className: "point-inside",
+            calloutClass: "callout-inside",
+            dx: -18,
+            dy: 28,
+            anchor: "end",
+            guides: true
+          },
+          {
+            x: 1.2,
+            y: 0,
+            label: "за margin: y·f(x)=1,2; loss=0",
+            className: "point-safe",
+            calloutClass: "callout-safe",
+            dx: 0,
+            dy: -28,
+            anchor: "middle",
+            guides: false
+          }
+        ]
+      },
+      {
+        kind: "xTicks",
+        items: [
+          { value: -0.5, label: "−0,5", dx: 0, dy: 27, anchor: "middle" },
+          { value: 0, label: "0", dx: -11, dy: 27, anchor: "end" },
+          { value: 0.3, label: "0,3", dx: 0, dy: 27, anchor: "middle" },
+          { value: 1, label: "1", dx: 0, dy: 27, anchor: "middle" },
+          { value: 1.2, label: "1,2", dx: 0, dy: 27, anchor: "middle" }
+        ]
+      },
+      {
+        kind: "yTicks",
+        items: [
+          { value: 0.7, label: "0,7", dx: -14, dy: 5, anchor: "end" },
+          { value: 1, label: "1", dx: -14, dy: 5, anchor: "end" },
+          { value: 1.5, label: "1,5", dx: -14, dy: 5, anchor: "end" }
+        ]
+      },
+      {
+        kind: "margin",
+        x: 1,
+        yBottom: 0,
+        yTop: 1.58,
+        labelX: 1,
+        labelY: 1.66,
+        label: "изгиб при 1"
+      },
+      {
+        kind: "labels",
+        formulaX: 1.18,
+        formulaY: 1.37,
+        formula: "L = max(0, 1 − y·f(x))",
+        penaltyX: -0.53,
+        penaltyY: 0.2,
+        penalty: "штраф растёт",
+        zeroX: 1.29,
+        zeroY: 0.76,
+        zero: "loss = 0",
+        xAxisX: 1.55,
+        xAxisY: 0,
+        xAxisDx: 17,
+        xAxisDy: 5,
+        xAxis: "оценка y·f(x)",
+        yAxisX: -0.09,
+        yAxisY: 0.78,
+        yAxis: "потеря",
+        rotation: -90
+      },
+      {
+        kind: "geometry",
+        zero: 0,
+        tickHalfX: 0.018,
+        tickHalfY: 0.035,
+        pointRadius: 0.022,
+        kinkRadius: 0.017,
+        dash: 0.025,
+        gap: 0.018,
+        xArrow: [
+          [1.49, 0.045],
+          [1.55, 0],
+          [1.49, -0.045]
+        ],
+        yArrow: [
+          [-0.028, 1.65],
+          [0, 1.72],
+          [0.028, 1.65]
+        ]
+      }
+    ]);
+
+    const origin = Object.freeze({ x: 250, y: 320 });
+    const scale = Object.freeze({ x: 350, y: 160 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const NS = "http://www.w3.org/2000/svg";
+      const section = kind => data.find(item => item.kind === kind);
+      const bounds = section("bounds");
+      const hinge = section("hinge");
+      const samples = section("points");
+      const xTicks = section("xTicks");
+      const yTicks = section("yTicks");
+      const margin = section("margin");
+      const labels = section("labels");
+      const geometry = section("geometry");
+
+      const make = (name, attributes = {}, content = "") => {
+        const node = document.createElementNS(NS, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (content) node.textContent = content;
+        svg.appendChild(node);
+        return node;
+      };
+
+      const pair = point => {
+        const [x, y] = point;
+        return `${sx(x)},${sy(y)}`;
+      };
+
+      const dashPattern =
+        `${sx(geometry.dash) - sx(geometry.zero)} ` +
+        `${sx(geometry.gap) - sx(geometry.zero)}`;
+
+      make("rect", {
+        class: "region-penalty",
+        x: sx(bounds.xMin),
+        y: sy(bounds.yMax),
+        width: sx(margin.x) - sx(bounds.xMin),
+        height: sy(bounds.yMin) - sy(bounds.yMax)
+      });
+
+      make("rect", {
+        class: "region-zero",
+        x: sx(margin.x),
+        y: sy(bounds.yMax),
+        width: sx(bounds.xMax) - sx(margin.x),
+        height: sy(bounds.yMin) - sy(bounds.yMax)
+      });
+
+      samples.items
+        .filter(sample => sample.guides)
+        .forEach(sample => {
+          make("line", {
+            class: "guide",
+            x1: sx(sample.x),
+            y1: sy(geometry.zero),
+            x2: sx(sample.x),
+            y2: sy(sample.y),
+            "stroke-dasharray": dashPattern
+          });
+          make("line", {
+            class: "guide",
+            x1: sx(geometry.zero),
+            y1: sy(sample.y),
+            x2: sx(sample.x),
+            y2: sy(sample.y),
+            "stroke-dasharray": dashPattern
+          });
+        });
+
+      make("line", {
+        class: "margin-line",
+        x1: sx(margin.x),
+        y1: sy(margin.yBottom),
+        x2: sx(margin.x),
+        y2: sy(margin.yTop),
+        "stroke-dasharray": dashPattern
+      });
+
+      make("line", {
+        class: "axis",
+        x1: sx(bounds.xMin),
+        y1: sy(geometry.zero),
+        x2: sx(bounds.xMax),
+        y2: sy(geometry.zero)
+      });
+
+      make("line", {
+        class: "axis",
+        x1: sx(geometry.zero),
+        y1: sy(bounds.yMin),
+        x2: sx(geometry.zero),
+        y2: sy(bounds.yMax)
+      });
+
+      make("polygon", {
+        class: "axis-arrow",
+        points: geometry.xArrow.map(pair).join(" ")
+      });
+
+      make("polygon", {
+        class: "axis-arrow",
+        points: geometry.yArrow.map(pair).join(" ")
+      });
+
+      xTicks.items.forEach(tick => {
+        make("line", {
+          class: "tick",
+          x1: sx(tick.value),
+          y1: sy(geometry.tickHalfY),
+          x2: sx(tick.value),
+          y2: sy(-geometry.tickHalfY)
+        });
+        make(
+          "text",
+          {
+            class: "tick-label",
+            x: sx(tick.value) + tick.dx,
+            y: sy(geometry.zero) + tick.dy,
+            "text-anchor": tick.anchor
+          },
+          tick.label
+        );
+      });
+
+      yTicks.items.forEach(tick => {
+        make("line", {
+          class: "tick",
+          x1: sx(-geometry.tickHalfX),
+          y1: sy(tick.value),
+          x2: sx(geometry.tickHalfX),
+          y2: sy(tick.value)
+        });
+        make(
+          "text",
+          {
+            class: "tick-label",
+            x: sx(geometry.zero) + tick.dx,
+            y: sy(tick.value) + tick.dy,
+            "text-anchor": tick.anchor
+          },
+          tick.label
+        );
+      });
+
+      make("polyline", {
+        class: "loss-line",
+        points: hinge.points.map(pair).join(" ")
+      });
+
+      make("circle", {
+        class: "kink",
+        cx: sx(margin.x),
+        cy: sy(geometry.zero),
+        r: sx(geometry.kinkRadius) - sx(geometry.zero)
+      });
+
+      samples.items.forEach(sample => {
+        make("circle", {
+          class: `point ${sample.className}`,
+          cx: sx(sample.x),
+          cy: sy(sample.y),
+          r: sx(geometry.pointRadius) - sx(geometry.zero)
+        });
+        make(
+          "text",
+          {
+            class: `callout ${sample.calloutClass}`,
+            x: sx(sample.x) + sample.dx,
+            y: sy(sample.y) + sample.dy,
+            "text-anchor": sample.anchor
+          },
+          sample.label
+        );
+      });
+
+      make(
+        "text",
+        {
+          class: "margin-label",
+          x: sx(margin.labelX),
+          y: sy(margin.labelY),
+          "text-anchor": "middle"
+        },
+        margin.label
+      );
+
+      make(
+        "text",
+        {
+          class: "formula",
+          x: sx(labels.formulaX),
+          y: sy(labels.formulaY),
+          "text-anchor": "middle"
+        },
+        labels.formula
+      );
+
+      make(
+        "text",
+        {
+          class: "region-label",
+          x: sx(labels.penaltyX),
+          y: sy(labels.penaltyY),
+          "text-anchor": "start"
+        },
+        labels.penalty
+      );
+
+      make(
+        "text",
+        {
+          class: "region-label",
+          x: sx(labels.zeroX),
+          y: sy(labels.zeroY),
+          "text-anchor": "middle"
+        },
+        labels.zero
+      );
+
+      make(
+        "text",
+        {
+          class: "axis-label",
+          x: sx(labels.xAxisX) + labels.xAxisDx,
+          y: sy(labels.xAxisY) + labels.xAxisDy,
+          "text-anchor": "start"
+        },
+        labels.xAxis
+      );
+
+      const yAxisLabelX = sx(labels.yAxisX);
+      const yAxisLabelY = sy(labels.yAxisY);
+      make(
+        "text",
+        {
+          class: "axis-label",
+          x: yAxisLabelX,
+          y: yAxisLabelY,
+          "text-anchor": "middle",
+          transform:
+            `rotate(${labels.rotation} ${yAxisLabelX} ${yAxisLabelY})`
+        },
+        labels.yAxis
+      );
+    } catch (error) {
+      const chart = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      chart.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

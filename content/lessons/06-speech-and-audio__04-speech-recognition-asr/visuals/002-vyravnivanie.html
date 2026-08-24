@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Кадры не выстраиваются под буквы</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2430; --muted:#5d6ב;
+  }
+  :root{ --muted:#5d6b7d; --grid:#d6d9de; --frame:#c9d3e0; --hit:#3f6fd8; --pause:#d8792b; --band:#eef1f6; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12161c; --fg:#e8edf4; --muted:#9aa7b6; --grid:#333c48; --frame:#3a4756; --hit:#7aa2f7; --pause:#e0a35a; --band:#1b212a; }
+  }
+  html,body{margin:0;background:var(--bg);}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px;box-sizing:border-box;}
+  h2{font:600 15px/1.3 system-ui,sans-serif;color:var(--fg);margin:0 0 6px;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .t{font:12px system-ui,sans-serif;fill:var(--fg);}
+  .s{font:11px system-ui,sans-serif;fill:var(--muted);}
+  .m{font:600 12px system-ui,sans-serif;fill:var(--fg);}
+  .fail{font:13px system-ui,sans-serif;color:var(--fg);padding:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>1000 кадров по 10 ms против 25 символов</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var TOTAL_FRAMES = 1000;          // ~1000 кадров по 10 ms
+    var CHARS = 25;                   // «turn on the kitchen lights» = 25 символов
+    var PHRASE = "turn on the kitchen lights";
+    var segments = [                  // [начало в кадрах, длина в кадрах, метка, тип]
+      {at:0,   len:5,   label:"t",   kind:"hit"},
+      {at:5,   len:195, label:"urn on the",  kind:"norm"},
+      {at:200, len:200, label:"пауза",       kind:"pause"},
+      {at:400, len:280, label:"kitchen",     kind:"norm"},
+      {at:680, len:320, label:"lights",      kind:"norm"}
+    ];
+    var TICKS = [0,200,400,600,800,1000];
+
+    // ---- одна система координат ----
+    // x — кадры (0..1000), y — условные ряды (0 = базовая линия полосы, вверх положительно)
+    var ORIGIN = {x:70, y:250};       // пиксель точки (0,0)
+    var SCALE  = {x:0.86, y:26};      // px на кадр, px на ряд
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y - y*SCALE.y; }
+
+    // ---- литералы холста ----
+    var W = 1000, H = 300, PAD_L = 6, PAD_T = 5, LW = 1.5, LWT = 1;
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,cls,anchor){var t=el("text",{x:x,y:y,"class":cls,"text-anchor":anchor||"middle"});t.textContent=s;return t;}
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet",role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+    var g = el("g",{}); svg.appendChild(g);
+
+    // ---- строка символов (ряд 2.6) ----
+    var yText = sy(2.6);
+    for(var i=0;i<PHRASE.length;i++){
+      var frac = (i+0.5)/CHARS;
+      g.appendChild(txt(sx(frac*TOTAL_FRAMES), yText, PHRASE[i]==" "?"·":PHRASE[i], "m"));
+    }
+    g.appendChild(txt(sx(0)-PAD_L, yText, "буквы:", "s", "end"));
+    g.appendChild(txt(sx(TOTAL_FRAMES/2), sy(3.5), "25 символов, поровну по строке", "s"));
+
+    // ---- полоса кадров (ряд 0..1) ----
+    var yTop = sy(1), yBot = sy(0);
+    g.appendChild(el("rect",{x:sx(0),y:yTop,width:sx(TOTAL_FRAMES)-sx(0),height:yBot-yTop,fill:"var(--band)",stroke:"var(--frame)","stroke-width":LWT}));
+    // штрихи кадров: каждый штрих = 10 кадров = 100 ms
+    for(var f=0; f<=TOTAL_FRAMES; f+=10){
+      g.appendChild(el("line",{x1:sx(f),y1:sy(0.12),x2:sx(f),y2:sy(0.88),stroke:"var(--frame)","stroke-width":LWT,opacity:0.75}));
+    }
+    g.appendChild(txt(sx(0)-PAD_L, sy(0.42), "кадры:", "s", "end"));
+
+    // ---- сегменты поверх полосы ----
+    segments.forEach(function(s){
+      var col = s.kind==="hit" ? "var(--hit)" : (s.kind==="pause" ? "var(--pause)" : "var(--grid)");
+      g.appendChild(el("rect",{x:sx(s.at),y:sy(1),width:sx(s.at+s.len)-sx(s.at),height:sy(0)-sy(1),
+        fill:col,opacity:(s.kind==="norm"?0.28:0.55),stroke:col,"stroke-width":LW}));
+    });
+
+    // ---- ось кадров под полосой (ряд -0.5) ----
+    g.appendChild(el("line",{x1:sx(0),y1:sy(-0.5),x2:sx(TOTAL_FRAMES),y2:sy(-0.5),stroke:"var(--grid)","stroke-width":LW}));
+    TICKS.forEach(function(v){
+      g.appendChild(el("line",{x1:sx(v),y1:sy(-0.5),x2:sx(v),y2:sy(-0.68),stroke:"var(--grid)","stroke-width":LW}));
+      g.appendChild(txt(sx(v), sy(-0.95), v, "s"));
+    });
+    g.appendChild(txt(sx(TOTAL_FRAMES), sy(-1.55), "кадр (шаг 10 ms) — всего 1000", "s", "end"));
+
+    // ---- выноска «t»: 5 кадров, ниже полосы ----
+    var tMid = sx(2.5), tTailY = sy(-1.6), tHeadY = sy(-0.05);
+    g.appendChild(el("path",{d:"M "+sx(70)+" "+tTailY+" L "+tMid+" "+tHeadY,
+      stroke:"var(--hit)","stroke-width":LW,fill:"none"}));
+    g.appendChild(el("path",{d:"M "+tMid+" "+tHeadY+" L "+sx(14)+" "+sy(-0.35)+" L "+sx(-9)+" "+sy(-0.35)+" Z",
+      fill:"var(--hit)",stroke:"none"}));
+    g.appendChild(txt(sx(78), tTailY, "«t» — 5 кадров", "t", "start"));
+
+    // ---- выноска «пауза перед kitchen»: 200 кадров, выше полосы ----
+    var pL = sx(200), pR = sx(400), pY = sy(1.35);
+    g.appendChild(el("line",{x1:pL,y1:pY,x2:pR,y2:pY,stroke:"var(--pause)","stroke-width":LW}));
+    g.appendChild(el("line",{x1:pL,y1:sy(1.05),x2:pL,y2:sy(1.5),stroke:"var(--pause)","stroke-width":LW}));
+    g.appendChild(el("line",{x1:pR,y1:sy(1.05),x2:pR,y2:sy(1.5),stroke:"var(--pause)","stroke-width":LW}));
+    var lab = txt(sx(300), sy(1.75), "вдох перед «kitchen» — 200 кадров, ни одной буквы", "t");
+    lab.setAttribute("fill","var(--pause)"); g.appendChild(lab);
+
+    // ---- средняя мерка: 40 кадров на символ ----
+    g.appendChild(txt(sx(TOTAL_FRAMES), sy(1.35), "в среднем 40 кадров на символ", "s", "end"));
+
+    // ---- нижняя строка: границ нет ----
+    g.appendChild(txt(sx(TOTAL_FRAMES/2), sy(-2.6), "границ между буквами нет ни в аудио, ни в разметке: пара «файл — строка», без тайм-кодов", "s"));
+
+    host.appendChild(svg);
+  }catch(e){
+    var d=document.createElement("div"); d.className="fail";
+    d.textContent="Схема должна была показать: полоса из ~1000 кадров по 10 ms под строкой «turn on the kitchen lights» (25 символов). "+
+      "В среднем 40 кадров на символ, но неравномерно: на «t» — 5 кадров, на паузу-вдох перед «kitchen» — 200 кадров, которым не отвечает ни одна буква. "+
+      "Границы между буквами не заданы: в данных лежит только пара «аудиофайл — строка», без тайм-кодов.";
+    host.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

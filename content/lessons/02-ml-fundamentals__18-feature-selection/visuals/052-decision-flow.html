@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как выбрать метод по размерности и типу модели</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --ink: #172033;
+      --muted: #56637a;
+      --line: #64748b;
+      --panel: #ffffff;
+      --panel-stroke: #b8c4d6;
+      --size-fill: #eaf3ff;
+      --size-stroke: #4b83c3;
+      --model-fill: #f1edff;
+      --model-stroke: #7659b6;
+      --decision-fill: #fff4d6;
+      --decision-stroke: #b7791f;
+      --check-fill: #e8f7ee;
+      --check-stroke: #31845a;
+      --accent: #1f5f9f;
+      --model-accent: #6543a4;
+      --check-accent: #236c49;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      margin: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+    }
+
+    main {
+      background: var(--page);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 8px;
+      color: var(--ink);
+      font-size: 22px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      background: var(--page);
+    }
+
+    .pending,
+    .is-hidden {
+      display: none;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrowhead {
+      fill: var(--line);
+    }
+
+    .node rect {
+      stroke-width: 2px;
+    }
+
+    .node.size rect {
+      fill: var(--size-fill);
+      stroke: var(--size-stroke);
+    }
+
+    .node.model rect {
+      fill: var(--model-fill);
+      stroke: var(--model-stroke);
+    }
+
+    .node.decision rect {
+      fill: var(--decision-fill);
+      stroke: var(--decision-stroke);
+    }
+
+    .node.check rect {
+      fill: var(--check-fill);
+      stroke: var(--check-stroke);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+    }
+
+    .question {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .heading {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .size .heading {
+      fill: var(--accent);
+    }
+
+    .model .heading {
+      fill: var(--model-accent);
+    }
+
+    .check .heading {
+      fill: var(--check-accent);
+    }
+
+    .detail {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .stage-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 16px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 16px;
+      text-align: center;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101722;
+        --ink: #edf3fb;
+        --muted: #b6c2d3;
+        --line: #93a4ba;
+        --panel: #182231;
+        --panel-stroke: #46566c;
+        --size-fill: #152d47;
+        --size-stroke: #70a9e8;
+        --model-fill: #292140;
+        --model-stroke: #ab8ce2;
+        --decision-fill: #3b3019;
+        --decision-stroke: #e1ac4f;
+        --check-fill: #183629;
+        --check-stroke: #62bd8a;
+        --accent: #8fc5ff;
+        --model-accent: #c7aeef;
+        --check-accent: #8ed9ad;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="page-title">Как выбрать метод по размерности и типу модели</h1>
+
+    <svg id="flowchart"
+         class="pending"
+         viewBox="0 0 1200 480"
+         width="1200"
+         height="480"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="page-title diagram-desc">
+      <desc id="diagram-desc">
+        Дерево решений: первый отсев зависит от числа признаков,
+        а финальный метод отбора — от типа модели.
+      </desc>
+      <g id="stage"></g>
+    </svg>
+
+    <p id="fallback">
+      Схема должна была показать: меньше 50 признаков — порог дисперсии и mutual
+      information; от 50 до 500 — порог дисперсии, затем L1 или важность деревьев;
+      больше 500 — порог дисперсии, mutual information и RFE на оставшихся
+      признаках. Для линейной модели финальный выбор даёт L1, для деревьев —
+      встроенная и permutation importance, для другой модели — RFE.
+    </p>
+  </main>
+
+  <script>
+    const diagramData = {
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      radius: 12,
+      captions: [
+        {
+          x: 40,
+          y: 40,
+          anchor: "start",
+          text: "РАЗМЕР СПИСКА → ПЕРВЫЙ ОТСЕВ"
+        },
+        {
+          x: 40,
+          y: 260,
+          anchor: "start",
+          text: "ТИП МОДЕЛИ → ФИНАЛЬНЫЙ ВЫБОР"
+        }
+      ],
+      nodes: [
+        {
+          tone: "decision",
+          x: 430,
+          y: 14,
+          w: 340,
+          h: 50,
+          lines: [
+            {
+              x: 600,
+              y: 46,
+              anchor: "middle",
+              kind: "question",
+              text: "Сколько признаков?"
+            }
+          ]
+        },
+        {
+          tone: "size",
+          x: 40,
+          y: 98,
+          w: 340,
+          h: 102,
+          lines: [
+            {
+              x: 210,
+              y: 124,
+              anchor: "middle",
+              kind: "heading",
+              text: "Меньше 50 · пример 40"
+            },
+            {
+              x: 210,
+              y: 158,
+              anchor: "middle",
+              kind: "detail",
+              text: "Порог дисперсии"
+            },
+            {
+              x: 210,
+              y: 181,
+              anchor: "middle",
+              kind: "detail",
+              text: "+ mutual information"
+            }
+          ]
+        },
+        {
+          tone: "size",
+          x: 430,
+          y: 98,
+          w: 340,
+          h: 102,
+          lines: [
+            {
+              x: 600,
+              y: 124,
+              anchor: "middle",
+              kind: "heading",
+              text: "От 50 до 500 · пример 240"
+            },
+            {
+              x: 600,
+              y: 151,
+              anchor: "middle",
+              kind: "detail",
+              text: "Порог дисперсии,"
+            },
+            {
+              x: 600,
+              y: 172,
+              anchor: "middle",
+              kind: "detail",
+              text: "затем L1 или"
+            },
+            {
+              x: 600,
+              y: 193,
+              anchor: "middle",
+              kind: "detail",
+              text: "важность деревьев"
+            }
+          ]
+        },
+        {
+          tone: "size",
+          x: 820,
+          y: 98,
+          w: 340,
+          h: 102,
+          lines: [
+            {
+              x: 990,
+              y: 124,
+              anchor: "middle",
+              kind: "heading",
+              text: "Больше 500 · пример 3000"
+            },
+            {
+              x: 990,
+              y: 151,
+              anchor: "middle",
+              kind: "detail",
+              text: "Порог дисперсии →"
+            },
+            {
+              x: 990,
+              y: 172,
+              anchor: "middle",
+              kind: "detail",
+              text: "mutual information →"
+            },
+            {
+              x: 990,
+              y: 193,
+              anchor: "middle",
+              kind: "detail",
+              text: "RFE на оставшихся"
+            }
+          ]
+        },
+        {
+          tone: "decision",
+          x: 430,
+          y: 232,
+          w: 340,
+          h: 52,
+          lines: [
+            {
+              x: 600,
+              y: 265,
+              anchor: "middle",
+              kind: "question",
+              text: "Какой тип модели?"
+            }
+          ]
+        },
+        {
+          tone: "model",
+          x: 40,
+          y: 324,
+          w: 340,
+          h: 72,
+          lines: [
+            {
+              x: 210,
+              y: 350,
+              anchor: "middle",
+              kind: "heading",
+              text: "Линейная модель"
+            },
+            {
+              x: 210,
+              y: 379,
+              anchor: "middle",
+              kind: "detail",
+              text: "L1 для финального выбора"
+            }
+          ]
+        },
+        {
+          tone: "model",
+          x: 430,
+          y: 324,
+          w: 340,
+          h: 72,
+          lines: [
+            {
+              x: 600,
+              y: 348,
+              anchor: "middle",
+              kind: "heading",
+              text: "Деревья"
+            },
+            {
+              x: 600,
+              y: 371,
+              anchor: "middle",
+              kind: "detail",
+              text: "Встроенная важность +"
+            },
+            {
+              x: 600,
+              y: 390,
+              anchor: "middle",
+              kind: "detail",
+              text: "permutation importance"
+            }
+          ]
+        },
+        {
+          tone: "model",
+          x: 820,
+          y: 324,
+          w: 340,
+          h: 72,
+          lines: [
+            {
+              x: 990,
+              y: 350,
+              anchor: "middle",
+              kind: "heading",
+              text: "Другая модель"
+            },
+            {
+              x: 990,
+              y: 379,
+              anchor: "middle",
+              kind: "detail",
+              text: "RFE с этой моделью"
+            }
+          ]
+        },
+        {
+          tone: "check",
+          x: 330,
+          y: 428,
+          w: 540,
+          h: 46,
+          lines: [
+            {
+              x: 600,
+              y: 448,
+              anchor: "middle",
+              kind: "heading",
+              text: "Сравни качество: выбранные признаки ↔ все"
+            },
+            {
+              x: 600,
+              y: 467,
+              anchor: "middle",
+              kind: "detail",
+              text: "Есть выигрыш — используй отбор · Нет — оставь все"
+            }
+          ]
+        }
+      ],
+      paths: [
+        {
+          points: [
+            { x: 600, y: 64 },
+            { x: 600, y: 82 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 82 },
+            { x: 990, y: 82 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 82 },
+            { x: 210, y: 98 }
+          ],
+          head: [
+            { x: 204, y: 88 },
+            { x: 216, y: 88 },
+            { x: 210, y: 98 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 82 },
+            { x: 600, y: 98 }
+          ],
+          head: [
+            { x: 594, y: 88 },
+            { x: 606, y: 88 },
+            { x: 600, y: 98 }
+          ]
+        },
+        {
+          points: [
+            { x: 990, y: 82 },
+            { x: 990, y: 98 }
+          ],
+          head: [
+            { x: 984, y: 88 },
+            { x: 996, y: 88 },
+            { x: 990, y: 98 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 200 },
+            { x: 210, y: 216 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 200 },
+            { x: 600, y: 216 }
+          ]
+        },
+        {
+          points: [
+            { x: 990, y: 200 },
+            { x: 990, y: 216 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 216 },
+            { x: 990, y: 216 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 216 },
+            { x: 600, y: 232 }
+          ],
+          head: [
+            { x: 594, y: 222 },
+            { x: 606, y: 222 },
+            { x: 600, y: 232 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 284 },
+            { x: 600, y: 306 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 306 },
+            { x: 990, y: 306 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 306 },
+            { x: 210, y: 324 }
+          ],
+          head: [
+            { x: 204, y: 314 },
+            { x: 216, y: 314 },
+            { x: 210, y: 324 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 306 },
+            { x: 600, y: 324 }
+          ],
+          head: [
+            { x: 594, y: 314 },
+            { x: 606, y: 314 },
+            { x: 600, y: 324 }
+          ]
+        },
+        {
+          points: [
+            { x: 990, y: 306 },
+            { x: 990, y: 324 }
+          ],
+          head: [
+            { x: 984, y: 314 },
+            { x: 996, y: 314 },
+            { x: 990, y: 324 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 396 },
+            { x: 210, y: 414 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 396 },
+            { x: 600, y: 414 }
+          ]
+        },
+        {
+          points: [
+            { x: 990, y: 396 },
+            { x: 990, y: 414 }
+          ]
+        },
+        {
+          points: [
+            { x: 210, y: 414 },
+            { x: 990, y: 414 }
+          ]
+        },
+        {
+          points: [
+            { x: 600, y: 414 },
+            { x: 600, y: 428 }
+          ],
+          head: [
+            { x: 594, y: 418 },
+            { x: 606, y: 418 },
+            { x: 600, y: 428 }
+          ]
+        }
+      ]
+    };
+
+    const origin = Object.freeze(diagramData.origin);
+    const scale = Object.freeze(diagramData.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.querySelector("#flowchart");
+    const stage = document.querySelector("#stage");
+    const fallback = document.querySelector("#fallback");
+
+    const makeElement = (tag, attributes, content) => {
+      const node = document.createElementNS(svg.namespaceURI, tag);
+      for (const [name, value] of Object.entries(attributes)) {
+        node.setAttribute(name, String(value));
+      }
+      if (content) {
+        node.textContent = content;
+      }
+      return node;
+    };
+
+    const pointList = points =>
+      points.map(({ x, y }) => `${sx(x)},${sy(y)}`).join(" ");
+
+    try {
+      for (const path of diagramData.paths) {
+        stage.append(
+          makeElement("polyline", {
+            class: "connector",
+            points: pointList(path.points)
+          })
+        );
+
+        if (path.head) {
+          stage.append(
+            makeElement("polygon", {
+              class: "arrowhead",
+              points: pointList(path.head)
+            })
+          );
+        }
+      }
+
+      for (const nodeData of diagramData.nodes) {
+        const group = makeElement("g", {
+          class: `node ${nodeData.tone}`
+        });
+
+        group.append(
+          makeElement("rect", {
+            x: sx(nodeData.x),
+            y: sy(nodeData.y),
+            width: sx(nodeData.w),
+            height: sy(nodeData.h),
+            rx: sx(diagramData.radius),
+            ry: sy(diagramData.radius)
+          })
+        );
+
+        for (const line of nodeData.lines) {
+          group.append(
+            makeElement("text", {
+              x: sx(line.x),
+              y: sy(line.y),
+              class: line.kind,
+              "text-anchor": line.anchor
+            }, line.text)
+          );
+        }
+
+        stage.append(group);
+      }
+
+      for (const caption of diagramData.captions) {
+        stage.append(
+          makeElement("text", {
+            x: sx(caption.x),
+            y: sy(caption.y),
+            class: "stage-label",
+            "text-anchor": caption.anchor
+          }, caption.text)
+        );
+      }
+
+      svg.classList.remove("pending");
+      fallback.classList.add("is-hidden");
+    } catch (error) {
+      stage.replaceChildren();
+      svg.classList.add("pending");
+      fallback.classList.remove("is-hidden");
+    }
+  </script>
+</body>
+</html>

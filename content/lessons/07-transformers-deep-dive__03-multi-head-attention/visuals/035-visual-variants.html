@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Одна ручка: MHA → GQA → MQA</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2430; --muted:#5d6673; --grid:#c9cfd8;
+    --mem:#c2571a; --qual:#1f6f9c; --mark:#7a3fb5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e8edf4; --muted:#9aa5b4; --grid:#39424f;
+      --mem:#f0913f; --qual:#67b7e6; --mark:#c096ef;
+    }
+  }
+  html,body{margin:0}
+  .fig{background:var(--bg);color:var(--fg);padding:10px 12px 14px;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;box-sizing:border-box}
+  .fig h3{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  .axis{stroke:var(--fg);fill:none}
+  .grid{stroke:var(--grid);fill:none;stroke-dasharray:4 4}
+  .mem{stroke:var(--mem);fill:none;stroke-linejoin:round;stroke-linecap:round}
+  .qual{stroke:var(--qual);fill:none;stroke-linejoin:round;stroke-linecap:round}
+  .dot{fill:var(--mem)}
+  .mk{stroke:var(--mark);fill:none}
+  .mkdot{fill:var(--mark)}
+  text{fill:var(--fg)}
+  .t-mem{fill:var(--mem)}
+  .t-qual{fill:var(--qual)}
+  .t-mark{fill:var(--mark)}
+  .t-mut{fill:var(--muted)}
+  .fail{color:var(--fg);font-size:14px;line-height:1.5;margin:0}
+</style>
+<div class="fig">
+  <h3>Одна ось: MHA → GQA → MQA (KV-голов на 64 query-головы)</h3>
+  <div id="slot"></div>
+</div>
+<script>
+(function(){
+  var W = 880, H = 415, PAD = 7, FS = 13, FSB = 15, LW = 2;
+  var slot = document.getElementById('slot');
+  try{
+    // ---- данные схемы ----
+    var KV      = [64, 32, 16, 8, 4, 2, 1];          // KV-голов
+    var MEMORY  = [100, 50, 25, 12.5, 6.25, 3.125, 1.5625]; // доля кэша от MHA
+    var QUALITY = [100, 99.4, 98.6, 97.4, 95, 89, 77];      // качество, доля от MHA
+
+    // ---- один origin, один scale, одна пара sx/sy ----
+    var origin = {x: 110, y: 330};
+    var scale  = {x: 105, y: 2.6};
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y - y * scale.y; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+
+    function add(tag, attrs, cls){
+      var e = document.createElementNS(NS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (cls) e.setAttribute('class', cls);
+      svg.appendChild(e); return e;
+    }
+    function line(x1,y1,x2,y2,cls,w){
+      add('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),'stroke-width':(w||LW)},cls);
+    }
+    function poly(pts,cls,w){
+      var d = pts.map(function(p){ return sx(p[0])+','+sy(p[1]); }).join(' ');
+      add('polyline',{points:d,'stroke-width':(w||LW)},cls);
+    }
+    function dot(x,y,cls){
+      add('circle',{cx:sx(x),cy:sy(y),r:(sx(0.05)-sx(0))},cls);
+    }
+    function label(x,y,s,anchor,cls,size,dy){
+      var t = add('text',{x:sx(x),y:sy(y)+(dy||0),'text-anchor':anchor,
+                          'font-size':(size||FS)}, cls);
+      t.textContent = s; return t;
+    }
+    function arrowRight(x1,y1,x2,y2){
+      line(x1,y1,x2,y2,'axis',LW);
+      var head = [[x2,y2],[x2-0.15,y2+1.6],[x2-0.15,y2-1.6]];
+      add('polygon',{points:head.map(function(p){return sx(p[0])+','+sy(p[1]);}).join(' '),
+                     stroke:'none'},'dot');
+    }
+
+    var LAST = KV.length - 1;           // индекс в данных = координата x
+
+    // фон
+    add('rect',{x:sx(0)-sx(0),y:sy(0)-sy(0),width:W,height:H,fill:'transparent'});
+
+    // вертикальные направляющие у трёх опорных точек
+    [0, 3, LAST].forEach(function(i){ line(i,0,i,112,'grid',1); });
+
+    // оси
+    line(-0.1, 0, LAST + 0.1, 0, 'axis', LW);          // ось X
+    line(-0.1, 0, -0.1, 112, 'axis', LW);              // ось Y
+
+    // засечки и подписи делений
+    KV.forEach(function(k,i){
+      line(i, 0, i, -2.2, 'axis', 1);
+      label(i, -6, String(k), 'middle', 't-mut');
+    });
+    label(3, -13, 'KV-голов на 64 query-головы', 'middle', 't-mut');
+
+    // кривые
+    poly(KV.map(function(_,i){ return [i, QUALITY[i]]; }), 'qual', LW + 1);
+    poly(KV.map(function(_,i){ return [i, MEMORY[i]];  }), 'mem',  LW + 1);
+
+    // опорные точки на кривой памяти
+    [0, 3, LAST].forEach(function(i){ dot(i, MEMORY[i], 'dot'); });
+
+    // подписи режимов сверху: имя + что стало с кэшем
+    label(0,   112, 'MHA', 'start',  null,   FSB);
+    label(0,   105, '64 KV-головы', 'start', 't-mut');
+    label(3,   112, 'GQA', 'middle', null,   FSB);
+    label(3,   105, 'кэш в 8 раз меньше', 'middle', 't-mut');
+    label(LAST,112, 'MQA', 'end',    null,   FSB);
+    label(LAST,105, 'кэш в 64 раза меньше', 'end', 't-mut');
+
+    // подписи кривых — у пологих участков, по разные стороны
+    label(4.15, 84, 'качество', 'start', 't-qual', FSB);
+    label(0.9,  40, 'память KV-кэша', 'end', 't-mem', FSB);
+
+    // отметка Llama 3 70B на точке GQA
+    add('line',{x1:sx(3),y1:sy(MEMORY[3]),x2:sx(3.15),y2:sy(25),'stroke-width':1},'mk');
+    dot(3, MEMORY[3], 'mkdot');
+    label(3.2, 25, 'Llama 3 70B — 64 Q, 8 KV', 'start', 't-mark', FS, -PAD);
+
+    // MLA — соседняя ось, не деление этой шкалы
+    label(5.95, 45, 'MLA сюда не садится:', 'end', 't-mut');
+    label(5.95, 38, 'не режет головы, а сжимает K и V', 'end', 't-mut');
+
+    // направление ручки
+    arrowRight(0.3, -19, 5.7, -19);
+    label(3, -27, 'крутим вправо: память падает — и качество падает тоже',
+          'middle', 't-mut');
+
+    slot.appendChild(svg);
+  }catch(e){
+    slot.innerHTML = '<p class="fail">Схема (не отрисовалась): одна ось от MHA — ' +
+      '64 KV-головы на 64 query-головы — через GQA (8 KV-голов, кэш в 8 раз меньше) ' +
+      'к MQA (1 KV-голова, кэш в 64 раза меньше). Кривая памяти рушится сразу, ' +
+      'кривая качества держится почти до правого края. Llama 3 70B стоит на GQA: ' +
+      '64 Q, 8 KV. MLA — соседняя ось: сжимает K и V, а не убирает головы.</p>';
+  }
+})();
+</script>
+</html>

@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>От обнаружения агента к выбору возможности</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --page: #f5f7fb;
+  --surface: #ffffff;
+  --surface-soft: #eef3fa;
+  --ink: #182234;
+  --muted: #5d6b7f;
+  --line: #8a99ad;
+  --accent: #1769e0;
+  --accent-soft: #e6f0ff;
+  --accent-ink: #0d4ba7;
+  --good: #08765c;
+  --good-soft: #dff7ef;
+  --stop: #9b4b35;
+  --stop-soft: #fff0e9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #10151e;
+    --surface: #18212e;
+    --surface-soft: #202c3c;
+    --ink: #edf3fb;
+    --muted: #afbdd0;
+    --line: #718096;
+    --accent: #70a7ff;
+    --accent-soft: #1c3860;
+    --accent-ink: #cfe1ff;
+    --good: #67dbb9;
+    --good-soft: #173c35;
+    --stop: #ffad91;
+    --stop-soft: #492b25;
+  }
+}
+html, body {
+  background: var(--page);
+  color: var(--ink);
+}
+body {
+  margin: unset;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+h1 {
+  margin: unset;
+  padding: 14px 18px 10px;
+  font-size: 20px;
+  font-weight: bold;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 480px;
+  background: var(--surface);
+  font-family: inherit;
+}
+.node {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.card {
+  fill: var(--surface-soft);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.decision {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.selected {
+  fill: var(--good-soft);
+  stroke: var(--good);
+  stroke-width: 3;
+}
+.post {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.stop {
+  fill: var(--stop-soft);
+  stroke: var(--stop);
+  stroke-width: 2;
+}
+.skill {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.skill-target {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.flow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.flow-muted {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.flow-stop {
+  fill: none;
+  stroke: var(--stop);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.arrow-head {
+  fill: var(--accent);
+  stroke: none;
+}
+.arrow-head-muted {
+  fill: var(--line);
+  stroke: none;
+}
+.arrow-head-stop {
+  fill: var(--stop);
+  stroke: none;
+}
+.divider {
+  stroke: var(--line);
+  stroke-width: 2;
+}
+.text {
+  fill: var(--ink);
+  font-size: 14px;
+}
+.heading {
+  fill: var(--ink);
+  font-size: 16px;
+  font-weight: bold;
+}
+.small {
+  fill: var(--muted);
+  font-size: 13px;
+}
+.code {
+  fill: var(--accent-ink);
+  font-size: 14px;
+  font-weight: bold;
+}
+.good {
+  fill: var(--good);
+  font-size: 13px;
+  font-weight: bold;
+}
+.stop-text {
+  fill: var(--stop);
+  font-size: 13px;
+  font-weight: bold;
+}
+.arrow-label {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: bold;
+}
+#fallback {
+  padding: 14px 18px;
+  border: 2px solid var(--stop);
+  background: var(--stop-soft);
+  color: var(--ink);
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+<h1 id="diagram-title">От обнаружения агента к выбору возможности</h1>
+
+<svg id="diagram" viewBox="0 0 1280 460" width="1280" height="460"
+     preserveAspectRatio="xMidYMid meet"
+     role="img" aria-labelledby="diagram-title svg-description">
+  <title>Discovery завершается выбором подходящего skill</title>
+  <desc id="svg-description">
+    Клиент запрашивает Agent Card, декодирует skills review-python и
+    review-typescript, выбирает review-python и только затем отправляет POST /tasks.
+  </desc>
+  <g id="diagram-root"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать: клиент выполняет GET /.well-known/agent.json,
+  декодирует Agent Card со skills review-python и review-typescript, выбирает
+  review-python и только после этого выполняет POST /tasks.
+</p>
+
+<script>
+(() => {
+  const data = Object.freeze([
+    {
+      kind: "config", zero: 0, one: 1, two: 2,
+      headLength: 1.2, headHalfWidth: 0.65
+    },
+    {
+      kind: "arrow", style: "flow", head: "arrow-head",
+      points: [{x: 24, y: 4.6}, {x: 58, y: 4.6}],
+      label: {x: 26, y: 4.6, dx: 0, dy: -12, anchor: "start",
+        text: "GET /.well-known/agent.json"}
+    },
+    {
+      kind: "arrow", style: "flow-muted", head: "arrow-head-muted",
+      points: [{x: 58, y: 8}, {x: 24, y: 8}],
+      label: {x: 55, y: 8, dx: 0, dy: 18, anchor: "end",
+        text: "Agent Card JSON — ответ без ошибки"}
+    },
+    {
+      kind: "arrow", style: "flow-muted", head: "arrow-head-muted",
+      points: [
+        {x: 13, y: 10}, {x: 13, y: 12.5},
+        {x: 46, y: 12.5}, {x: 46, y: 15}
+      ],
+      label: {x: 16, y: 12.5, dx: 0, dy: -8, anchor: "start",
+        text: "безопасно декодирует ответ"}
+    },
+    {
+      kind: "arrow", style: "flow", head: "arrow-head",
+      points: [{x: 63, y: 24}, {x: 68, y: 24}]
+    },
+    {
+      kind: "arrow", style: "flow", head: "arrow-head",
+      points: [{x: 88, y: 24}, {x: 91, y: 24}],
+      label: {x: 88, y: 24, dx: 5, dy: -10, anchor: "start", text: "да"}
+    },
+    {
+      kind: "arrow", style: "flow-stop", head: "arrow-head-stop",
+      points: [{x: 78, y: 32.2}, {x: 78, y: 36}],
+      label: {x: 78, y: 33.5, dx: 12, dy: 0, anchor: "start", text: "нет"}
+    },
+    {
+      kind: "arrow", style: "flow", head: "arrow-head",
+      points: [{x: 104.5, y: 29.8}, {x: 104.5, y: 35.5}],
+      label: {x: 104.5, y: 32.5, dx: 12, dy: 0,
+        anchor: "start", text: "после выбора"}
+    },
+    {
+      kind: "node", shape: "rect", style: "node",
+      x: 2, y: 2, w: 22, h: 8, r: 1,
+      texts: [
+        {x: 13, y: 5.1, dx: 0, dy: 0, anchor: "middle",
+          style: "heading", text: "Клиент"},
+        {x: 13, y: 7.5, dx: 0, dy: 0, anchor: "middle",
+          style: "small", text: "ищет возможность"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "node",
+      x: 58, y: 2, w: 22, h: 8, r: 1,
+      texts: [
+        {x: 69, y: 5.1, dx: 0, dy: 0, anchor: "middle",
+          style: "heading", text: "Сервер агента"},
+        {x: 69, y: 7.5, dx: 0, dy: 0, anchor: "middle",
+          style: "good", text: "адрес работает ✓"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "card",
+      x: 29, y: 15, w: 34, h: 18, r: 1.2,
+      texts: [
+        {x: 46, y: 18.2, dx: 0, dy: 0, anchor: "middle",
+          style: "heading", text: "Декодированная Agent Card"},
+        {x: 32, y: 20.7, dx: 0, dy: 0, anchor: "start",
+          style: "small", text: "skills"}
+      ]
+    },
+    {
+      kind: "line", style: "divider",
+      from: {x: 32, y: 21.5}, to: {x: 60, y: 21.5}
+    },
+    {
+      kind: "node", shape: "rect", style: "skill-target",
+      x: 32, y: 23, w: 28, h: 3.4, r: 0.7,
+      texts: [
+        {x: 34, y: 25.25, dx: 0, dy: 0, anchor: "start",
+          style: "code", text: "review-python"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "skill",
+      x: 32, y: 28, w: 28, h: 3.4, r: 0.7,
+      texts: [
+        {x: 34, y: 30.25, dx: 0, dy: 0, anchor: "start",
+          style: "text", text: "review-typescript"}
+      ]
+    },
+    {
+      kind: "node", shape: "diamond", style: "decision",
+      cx: 78, cy: 24, rx: 10, ry: 8.2,
+      texts: [
+        {x: 78, y: 21.7, dx: 0, dy: 0, anchor: "middle",
+          style: "heading", text: "Нужен skill"},
+        {x: 78, y: 24.5, dx: 0, dy: 0, anchor: "middle",
+          style: "code", text: "review-python?"},
+        {x: 78, y: 27.2, dx: 0, dy: 0, anchor: "middle",
+          style: "small", text: "точное совпадение"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "selected",
+      x: 91, y: 18.2, w: 27, h: 11.6, r: 1.2,
+      texts: [
+        {x: 104.5, y: 21.5, dx: 0, dy: 0, anchor: "middle",
+          style: "heading", text: "Выбран skill ✓"},
+        {x: 104.5, y: 24.7, dx: 0, dy: 0, anchor: "middle",
+          style: "code", text: "review-python"},
+        {x: 104.5, y: 27.5, dx: 0, dy: 0, anchor: "middle",
+          style: "good", text: "возможность подходит"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "stop",
+      x: 67, y: 36, w: 22, h: 5.5, r: 1,
+      texts: [
+        {x: 78, y: 38.5, dx: 0, dy: 0, anchor: "middle",
+          style: "stop-text", text: "Не делегировать"},
+        {x: 78, y: 40.4, dx: 0, dy: 0, anchor: "middle",
+          style: "small", text: "искать другого агента"}
+      ]
+    },
+    {
+      kind: "node", shape: "rect", style: "post",
+      x: 91, y: 35.5, w: 27, h: 6, r: 1,
+      texts: [
+        {x: 104.5, y: 38.2, dx: 0, dy: 0, anchor: "middle",
+          style: "code", text: "POST /tasks"},
+        {x: 104.5, y: 40.4, dx: 0, dy: 0, anchor: "middle",
+          style: "small", text: "можно делегировать"}
+      ]
+    }
+  ]);
+
+  const origin = Object.freeze({x: 28, y: 22});
+  const scale = 10;
+  const sx = x => origin.x + x * scale;
+  const sy = y => origin.y + y * scale;
+
+  try {
+    const svg = document.getElementById("diagram");
+    const root = document.getElementById("diagram-root");
+    const fallback = document.getElementById("fallback");
+    const ns = "http://www.w3.org/2000/svg";
+    const cfg = data.find(item => item.kind === "config");
+
+    const make = (name, attrs) => {
+      const element = document.createElementNS(ns, name);
+      Object.entries(attrs).forEach(([key, value]) =>
+        element.setAttribute(key, String(value))
+      );
+      return element;
+    };
+
+    const putText = item => {
+      const text = make("text", {
+        x: sx(item.x) + item.dx,
+        y: sy(item.y) + item.dy,
+        "text-anchor": item.anchor,
+        class: item.style
+      });
+      text.textContent = item.text;
+      root.append(text);
+    };
+
+    const putArrow = item => {
+      const points = item.points;
+      root.append(make("polyline", {
+        points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+        class: item.style
+      }));
+
+      const end = points[points.length - cfg.one];
+      const previous = points[points.length - cfg.two];
+      const dx = end.x - previous.x;
+      const dy = end.y - previous.y;
+      const length = Math.hypot(dx, dy);
+      const ux = dx / length;
+      const uy = dy / length;
+      const px = -uy;
+      const py = ux;
+      const left = {
+        x: end.x - ux * cfg.headLength + px * cfg.headHalfWidth,
+        y: end.y - uy * cfg.headLength + py * cfg.headHalfWidth
+      };
+      const right = {
+        x: end.x - ux * cfg.headLength - px * cfg.headHalfWidth,
+        y: end.y - uy * cfg.headLength - py * cfg.headHalfWidth
+      };
+
+      root.append(make("polygon", {
+        points: [
+          `${sx(end.x)},${sy(end.y)}`,
+          `${sx(left.x)},${sy(left.y)}`,
+          `${sx(right.x)},${sy(right.y)}`
+        ].join(" "),
+        class: item.head
+      }));
+
+      if (item.label) {
+        putText({...item.label, style: "arrow-label"});
+      }
+    };
+
+    data.filter(item => item.kind === "arrow").forEach(putArrow);
+
+    data.filter(item => item.kind === "line").forEach(item => {
+      root.append(make("line", {
+        x1: sx(item.from.x),
+        y1: sy(item.from.y),
+        x2: sx(item.to.x),
+        y2: sy(item.to.y),
+        class: item.style
+      }));
+    });
+
+    data.filter(item => item.kind === "node").forEach(item => {
+      if (item.shape === "rect") {
+        root.append(make("rect", {
+          x: sx(item.x),
+          y: sy(item.y),
+          width: sx(item.w) - sx(cfg.zero),
+          height: sy(item.h) - sy(cfg.zero),
+          rx: sx(item.r) - sx(cfg.zero),
+          ry: sy(item.r) - sy(cfg.zero),
+          class: item.style
+        }));
+      }
+
+      if (item.shape === "diamond") {
+        root.append(make("polygon", {
+          points: [
+            `${sx(item.cx)},${sy(item.cy - item.ry)}`,
+            `${sx(item.cx + item.rx)},${sy(item.cy)}`,
+            `${sx(item.cx)},${sy(item.cy + item.ry)}`,
+            `${sx(item.cx - item.rx)},${sy(item.cy)}`
+          ].join(" "),
+          class: item.style
+        }));
+      }
+
+      item.texts.forEach(putText);
+    });
+
+    fallback.hidden = true;
+    svg.hidden = false;
+  } catch (error) {
+    document.getElementById("diagram").hidden = true;
+    document.getElementById("fallback").hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

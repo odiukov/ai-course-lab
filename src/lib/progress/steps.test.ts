@@ -11,6 +11,7 @@ import {
   markStepRead,
   readLessonProgress,
   readLessonReadCounts,
+  readStepIdsInPlan,
   resumeIndex,
 } from "./steps";
 
@@ -203,16 +204,33 @@ describe("resumeStepId и resumeIndex", () => {
 });
 
 describe("readLessonReadCounts", () => {
-  it("считает прочитанные шаги по урокам", () => {
+  it("считает только шаги из актуальных планов уроков", () => {
     const db = freshDb();
     markStepRead(db, SLUG, "001-t", "2026-08-10T09:00:00.000Z");
     markStepRead(db, SLUG, "002-t", "2026-08-10T09:10:00.000Z");
     markStepOpened(db, SLUG, "003-t", "2026-08-10T09:20:00.000Z");
-    markStepRead(db, "02-ml-fundamentals__01-gamma", "001-t", "2026-08-10T09:30:00.000Z");
+    markStepRead(db, SLUG, "099-old", "2026-08-10T09:30:00.000Z");
+    const gamma = "02-ml-fundamentals__01-gamma";
+    markStepRead(db, gamma, "001-t", "2026-08-10T09:40:00.000Z");
 
-    const counts = readLessonReadCounts(db);
+    const counts = readLessonReadCounts(
+      db,
+      new Map<string, readonly Pick<StepMeta, "id">[]>([
+        [SLUG, STEPS],
+        [gamma, [{ id: "001-t" }]],
+      ]),
+    );
     expect(counts.get(SLUG)).toBe(2);
-    expect(counts.get("02-ml-fundamentals__01-gamma")).toBe(1);
+    expect(counts.get(gamma)).toBe(1);
+  });
+});
+
+describe("readStepIdsInPlan", () => {
+  it("убирает прочитанные id от прежней версии плана", () => {
+    expect(readStepIdsInPlan(["001-t", "099-old", "003-t"], STEPS)).toEqual([
+      "001-t",
+      "003-t",
+    ]);
   });
 });
 

@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поток одного примера через сеть XOR</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7fafc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #536176;
+    --border: #aeb9c8;
+    --forward: #087f8c;
+    --forward-fill: #dff7f7;
+    --backward: #a23b72;
+    --backward-fill: #fae7f1;
+    --update: #a85d00;
+    --update-fill: #fff0d5;
+    --neutral-fill: #edf2f7;
+    --node: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #171f2c;
+      --text: #edf3fb;
+      --muted: #b2bfd0;
+      --border: #65738a;
+      --forward: #67d6dc;
+      --forward-fill: #173c42;
+      --backward: #f08aba;
+      --backward-fill: #442539;
+      --update: #ffc36e;
+      --update-fill: #49351d;
+      --neutral-fill: #252f3e;
+      --node: #171f2c;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  h1 {
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--text);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .strong {
+    font-weight: bold;
+  }
+
+  .group {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 1.5px;
+  }
+
+  .box {
+    fill: var(--neutral-fill);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+  }
+
+  .node {
+    fill: var(--node);
+    stroke: var(--forward);
+    stroke-width: 2px;
+  }
+
+  .loss {
+    fill: var(--backward-fill);
+    stroke: var(--backward);
+    stroke-width: 2px;
+  }
+
+  .process-backward {
+    fill: var(--backward-fill);
+    stroke: var(--backward);
+    stroke-width: 1.5px;
+  }
+
+  .process-update {
+    fill: var(--update-fill);
+    stroke: var(--update);
+    stroke-width: 1.5px;
+  }
+
+  .forward {
+    fill: none;
+    stroke: var(--forward);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .backward {
+    fill: none;
+    stroke: var(--backward);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .update {
+    fill: none;
+    stroke: var(--update);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .head-forward {
+    fill: var(--forward);
+  }
+
+  .head-backward {
+    fill: var(--backward);
+  }
+
+  .head-update {
+    fill: var(--update);
+  }
+
+  #fallback {
+    font-size: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <h1>Поток одного примера через сеть XOR</h1>
+  <svg id="diagram" viewBox="0 0 1100 500" width="1100" height="500"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Один пример XOR проходит через сеть 2–2–1</title>
+    <desc id="svg-description">
+      Вход один и ноль проходит через два скрытых sigmoid-нейрона к одному
+      выходу. Предсказание сравнивается с целью один с помощью MSE, после чего
+      выполняются обратный проход, обновление параметров и очистка градиентов.
+    </desc>
+  </svg>
+  <p id="fallback" hidden>
+    Схема должна была показать поток входа [1, 0] через сеть 2–2–1,
+    сравнение выхода с целью [1] по MSE, обратный проход, обновление
+    параметров и очистку градиентов.
+  </p>
+</figure>
+
+<script>
+const diagramData = {
+  units: [0, 1, 2, 0.22, 0.45, 0.65, 1.25],
+  canvas: [110, 50],
+  modelFrame: [16, 4, 56, 32, 1],
+  loader: [2, 14, 11, 15, 1],
+  inputNodes: [[24, 14, 2.8], [24, 29, 2.8]],
+  hiddenNodes: [[45, 12, 3.4], [45, 31, 3.4]],
+  outputNode: [66, 21.5, 3.6],
+  targetBox: [76, 5, 13, 7, 1],
+  lossBox: [82, 17, 18, 11, 1],
+  processBoxes: [
+    [24, 39, 23, 6, 1],
+    [56, 39, 21, 6, 1],
+    [86, 39, 17, 6, 1]
+  ],
+  forwardArrows: [
+    [13, 21.5, 20.7, 15],
+    [13, 21.5, 20.7, 28],
+    [27, 14, 41.5, 12],
+    [27, 14.5, 41.7, 29.5],
+    [27, 28.5, 41.7, 13.5],
+    [27, 29, 41.5, 31],
+    [48.5, 12.5, 62.3, 20.5],
+    [48.5, 30.5, 62.3, 22.5],
+    [69.7, 21.5, 81.5, 21.5],
+    [82.5, 12, 88, 16.5]
+  ],
+  backwardArrows: [
+    [[91, 28], [91, 34], [69, 34], [69, 25.5]],
+    [[62.5, 23.5], [52, 23.5], [48.5, 29.5]],
+    [[62.5, 20], [52, 20], [48.5, 13.5]],
+    [[82, 26], [75, 31], [47, 39]]
+  ],
+  processArrows: [
+    [47, 42, 55.5, 42],
+    [77, 42, 85.5, 42]
+  ],
+  labelPoints: [
+    [7.5, 17.2], [7.5, 20.2], [7.5, 24.3],
+    [24, 7], [24, 14.5], [24, 29.5],
+    [45, 6.5], [45, 12.5], [45, 31.5],
+    [66, 14], [66, 22],
+    [82.5, 8], [82.5, 11],
+    [91, 20.5], [91, 24],
+    [16.5, 12], [30, 9], [51, 8.2], [70.5, 18],
+    [72, 32], [35.5, 41.6], [66.5, 41.6], [94.5, 41.6],
+    [4, 48], [19, 48], [48, 48], [75, 48]
+  ],
+  labels: [
+    "DataLoader", "вход [1, 0]", "цель [1]",
+    "Входной слой", "x₁ = 1", "x₂ = 0",
+    "Скрытый слой", "h₁ · sigmoid", "h₂ · sigmoid",
+    "Выход", "ŷ",
+    "правильный ответ", "[1]",
+    "MSE", "(ŷ − 1)²",
+    "пара «вход и цель»", "прямой проход", "мягкое предсказание",
+    "сравнение", "градиенты идут назад",
+    "backward", "шаг оптимизатора", "zero gradients",
+    "Легенда:", "прямой проход", "обратный проход", "обновление и очистка"
+  ],
+  labelClasses: [
+    "strong", "small", "small",
+    "small", "strong", "strong",
+    "small", "strong", "strong",
+    "small", "strong",
+    "small", "strong",
+    "strong", "small",
+    "small", "small", "small", "small", "small",
+    "strong", "strong", "strong",
+    "strong small", "small", "small", "small"
+  ],
+  labelAnchors: [
+    "middle", "middle", "middle",
+    "middle", "middle", "middle",
+    "middle", "middle", "middle",
+    "middle", "middle",
+    "middle", "middle",
+    "middle", "middle",
+    "start", "middle", "middle", "start", "middle",
+    "middle", "middle", "middle",
+    "start", "start", "start", "start"
+  ],
+  labelOffsets: [
+    [0, 0], [0, 0], [0, 0],
+    [0, 0], [0, 5], [0, 5],
+    [0, 0], [0, 5], [0, 5],
+    [0, 0], [0, 5],
+    [0, 0], [0, 5],
+    [0, 0], [0, 0],
+    [4, 0], [0, 0], [0, 0], [4, 0], [0, 0],
+    [0, 5], [0, 5], [0, 5],
+    [0, 0], [4, 0], [4, 0], [4, 0]
+  ],
+  legendLines: [
+    [16, 47.6, 18, 47.6],
+    [45, 47.6, 47, 47.6],
+    [72, 47.6, 74, 47.6]
+  ],
+  dash: [0.7, 0.55]
+};
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 10, y: 10 };
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+  const [ZERO, ONE, TWO, HEAD, SIDE, GAP, RADIUS] = diagramData.units;
+
+  function element(name, attrs, className) {
+    const node = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (className) node.setAttribute("class", className);
+    svg.appendChild(node);
+    return node;
+  }
+
+  function rect(spec, className) {
+    const [x, y, width, height, radius] = spec;
+    return element("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(width) - sx(ZERO),
+      height: sy(height) - sy(ZERO),
+      rx: sx(radius) - sx(ZERO),
+      ry: sy(radius) - sy(ZERO)
+    }, className);
+  }
+
+  function circle(spec, className) {
+    const [x, y, radius] = spec;
+    return element("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(radius) - sx(ZERO)
+    }, className);
+  }
+
+  function line(spec, className, dashed) {
+    const [x1, y1, x2, y2] = spec;
+    const attrs = {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    };
+    if (dashed) {
+      const [dash, space] = diagramData.dash;
+      attrs["stroke-dasharray"] =
+        `${sx(dash) - sx(ZERO)} ${sy(space) - sy(ZERO)}`;
+    }
+    return element("line", attrs, className);
+  }
+
+  function arrowHead(x1, y1, x2, y2, className) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const bx = x2 - ux * HEAD;
+    const by = y2 - uy * HEAD;
+    const px = -uy * SIDE;
+    const py = ux * SIDE;
+    element("polygon", {
+      points:
+        `${sx(x2)},${sy(y2)} ` +
+        `${sx(bx + px)},${sy(by + py)} ` +
+        `${sx(bx - px)},${sy(by - py)}`
+    }, className);
+  }
+
+  function arrow(spec, lineClass, headClass, dashed) {
+    line(spec, lineClass, dashed);
+    const [x1, y1, x2, y2] = spec;
+    arrowHead(x1, y1, x2, y2, headClass);
+  }
+
+  function polyArrow(points, lineClass, headClass, dashed) {
+    const coordinates = points
+      .map(([x, y]) => `${sx(x)},${sy(y)}`)
+      .join(" ");
+    const attrs = { points: coordinates };
+    if (dashed) {
+      const [dash, space] = diagramData.dash;
+      attrs["stroke-dasharray"] =
+        `${sx(dash) - sx(ZERO)} ${sy(space) - sy(ZERO)}`;
+    }
+    element("polyline", attrs, lineClass);
+    const reversed = [...points].reverse();
+    const [tip, before] = reversed;
+    arrowHead(before[ZERO], before[ONE], tip[ZERO], tip[ONE], headClass);
+  }
+
+  function text(point, value, className, anchor, offset) {
+    const [x, y] = point;
+    const [dx, dy] = offset;
+    const node = element("text", {
+      x: sx(x),
+      y: sy(y),
+      dx,
+      dy,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, className);
+    node.textContent = value;
+  }
+
+  rect(diagramData.modelFrame, "group");
+  rect(diagramData.loader, "box");
+  rect(diagramData.targetBox, "box");
+  rect(diagramData.lossBox, "loss");
+
+  diagramData.inputNodes.forEach(spec => circle(spec, "node"));
+  diagramData.hiddenNodes.forEach(spec => circle(spec, "node"));
+  circle(diagramData.outputNode, "node");
+
+  diagramData.forwardArrows.forEach(spec =>
+    arrow(spec, "forward", "head-forward", false)
+  );
+
+  diagramData.backwardArrows.forEach(points =>
+    polyArrow(points, "backward", "head-backward", true)
+  );
+
+  diagramData.processBoxes.forEach((spec, index) =>
+    rect(spec, index === ZERO ? "process-backward" : "process-update")
+  );
+
+  diagramData.processArrows.forEach(spec =>
+    arrow(spec, "update", "head-update", false)
+  );
+
+  diagramData.legendLines.forEach((spec, index) => {
+    const lineClass =
+      index === ZERO ? "forward" :
+      index === ONE ? "backward" : "update";
+    const headClass =
+      index === ZERO ? "head-forward" :
+      index === ONE ? "head-backward" : "head-update";
+    arrow(spec, lineClass, headClass, index === ONE);
+  });
+
+  diagramData.labelPoints.forEach((point, index) => {
+    text(
+      point,
+      diagramData.labels[index],
+      diagramData.labelClasses[index],
+      diagramData.labelAnchors[index],
+      diagramData.labelOffsets[index]
+    );
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

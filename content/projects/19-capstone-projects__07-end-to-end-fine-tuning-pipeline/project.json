@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "title": "Сквозной конвейер дообучения LLM: от данных до продакшен-сервинга",
+  "summary": "Ты построишь воспроизводимый облачный конвейер, который проводит модель класса 8–14B через очистку данных, SFT, DPO или GRPO, квантизацию, speculative decoding, Kubernetes-сервинг и полноценную оценку. Результатом станут работающий endpoint, сравнительная матрица качества и стоимости, safety-отчёт и model card по Model Openness Framework 2026.",
+  "time": "35 часов",
+  "languages": [
+    "Python",
+    "YAML",
+    "Bash"
+  ],
+  "prerequisites": [
+    "Фаза 2",
+    "Фаза 3",
+    "Фаза 7",
+    "Фаза 10",
+    "Фаза 11",
+    "Фаза 17",
+    "Фаза 18"
+  ],
+  "phases": [
+    "P2",
+    "P3",
+    "P7",
+    "P10",
+    "P11",
+    "P17",
+    "P18"
+  ],
+  "tracks": [
+    "gpt-from-scratch",
+    "training-infrastructure",
+    "evaluation",
+    "distributed-training"
+  ],
+  "brief": {
+    "problem": "В серьёзной AI-команде дообучение — не разовый ноутбук, а воспроизводимая производственная система. Тебе предстоит провести базовую модель Llama 3.3 8B, Qwen3 14B или Gemma 3 12B через полный цикл адаптации на собственных данных: очистку корпуса, supervised fine-tuning, настройку по предпочтениям, квантизацию, speculative decoding, облачный сервинг и измеримую оценку. Проект нельзя свести к локальной демонстрации: SFT выполняется через Axolotl на 8xH100 с ZeRO-3, preference tuning — через TRL на 4xH100, а итоговая модель разворачивается в Kubernetes.\n\nГлавная сложность находится на стыках. Каждый этап должен получать артефакт предыдущего этапа по содержательному хешу, сохранять конфигурацию, seed, версии и происхождение данных, а затем передавать проверяемый результат дальше. Ошибка в дедупликации или split hygiene способна превратить высокий benchmark в утечку; ошибка в конфигурации DPO — ухудшить модель; оптимистичный замер сервинга — скрыть реальную стоимость.\n\nТы должен получить честные сравнения base, SFT-only, SFT+DPO и SFT+GRPO на lm-evaluation-harness, RewardBench-2, MT-Bench-v2, MMLU-Pro и трёх предметных benchmark. Отдельно измеряются безопасность, throughput, tail latency, EAGLE-3 acceptance rate и стоимость миллиона токенов. Финальная проверка проекта проста по форме и трудна по существу: одна команда повторяет весь путь от YAML-конфигурации до endpoint и model card.",
+    "concept": "Конвейер состоит из пяти основных производственных стадий и завершающего контура оценки. Сначала данные проходят дедупликацию MinHash средствами Datatrove, фильтрацию качества в стиле Nemotron-CC и удаление PII через Presidio. Train и validation формируются с явно зафиксированным seed. До обучения корпус сравнивается с тестовыми наборами MMLU-Pro, MT-Bench-v2 и RewardBench-2: найденное пересечение должно остановить дальнейший запуск.\n\nЗатем Axolotl v0.8 выполняет SFT с ZeRO-3, Flash Attention 3, packing последовательностей и cosine schedule в течение двух-трёх эпох на 8xH100. Полученный checkpoint становится входом для одного эпохального запуска DPO или GRPO через TRL 0.15 на 4xH100. Для DPO исследуется beta, а GRPO применяется там, где математика или код дают проверяемую награду. Unsloth служит быстрым одног GPU-контуром итерации, но не заменяет итоговый распределённый прогон.\n\nПосле alignment ты выпускаешь GPTQ-INT4-Marlin, AWQ-INT4 и GGUF-Q4_K_M, фиксируя размер и номинальную производительность каждого варианта. Основной endpoint работает на vLLM 0.7 с EAGLE-3; допустимая альтернатива — SGLang 0.4 со SpecForge. Kubernetes использует NVIDIA device plugin и HPA по queue-wait, W&B хранит историю обучения, Langfuse — наблюдаемость инференса.\n\nГлавный результат — не отдельный checkpoint, а система доказательств: абляции методов, benchmark-дельты, безопасность, стоимость сервинга, лицензии данных, commit SHA и воспроизводимая команда запуска. Локальный оркестратор проверяет форму DAG и манифеста, но готовность подтверждают только настоящие облачные прогоны.",
+    "architecture": "Поток начинается с сырых данных из Hugging Face и внутренних источников. Datatrove, классификатор качества и Presidio выпускают очищенный dataset; его содержательный хеш и статистика отбора записываются в манифест. Отдельный MinHash-шлюз сравнивает train и validation с закрытыми для обучения тестовыми наборами и блокирует загрязнённый запуск.\n\nЧистый dataset поступает в Axolotl SFT на 8xH100. Checkpoint SFT по хешу становится входом для ветки TRL DPO или GRPO на 4xH100. После alignment единый checkpoint преобразуется в GPTQ, AWQ и GGUF. GPTQ-INT4-Marlin обслуживается через vLLM 0.7 с обученными EAGLE-3 draft heads; альтернативный путь использует SGLang и SpecForge. Endpoint разворачивается в Kubernetes и масштабируется по queue-wait.\n\nКонтур оценки сравнивает base, SFT-only, SFT+DPO и SFT+GRPO, а safety-контур применяет Llama Guard 4 и ShieldGemma-2. Итоговый генератор объединяет хеши артефактов, YAML, seeds, commit SHA, лицензии, benchmark-таблицы и serving-метрики в model card MOF 2026. Верхнеуровневый Bash-запуск связывает все стадии в один повторяемый DAG.",
+    "stack": [
+      "Данные: Datatrove для MinHash-дедупликации, Nemotron-CC-style classifier для фильтрации качества и Presidio для удаления PII",
+      "Базовая модель: Llama 3.3 8B, Qwen3 14B или Gemma 3 12B как исходный checkpoint",
+      "SFT: Axolotl v0.8, ZeRO-3, Flash Attention 3 и packed sequences для распределённого обучения на 8xH100",
+      "Preference tuning: TRL 0.15 для DPO или GRPO; Unsloth для быстрых одног GPU-итераций",
+      "Квантизация: GPTQ с Marlin, AWQ и GGUF через llama.cpp для разных вариантов развёртывания",
+      "Сервинг: vLLM 0.7 с EAGLE-3 или SGLang 0.4 со SpecForge для speculative decoding",
+      "Оценка: lm-evaluation-harness, RewardBench-2, MT-Bench-v2 и MMLU-Pro для сравнительной матрицы",
+      "Безопасность: Llama Guard 4 для pass rate и ShieldGemma-2 как выходной фильтр",
+      "Инфраструктура: Kubernetes, NVIDIA device plugin и HPA по метрике queue-wait",
+      "Наблюдаемость: W&B для обучения и Langfuse для инференса"
+    ]
+  },
+  "milestones": [
+    {
+      "id": "m01-data-pipeline",
+      "title": "Подготовь чистый корпус",
+      "task": "Построй облачный data pipeline, который дедуплицирует сырой корпус, фильтрует качество, удаляет PII и формирует воспроизводимые train/validation splits.",
+      "doneWhen": [
+        "Datatrove, фильтр качества и Presidio обработали полный сырой корпус, а для каждого шага сохранены входные, отклонённые и итоговые счётчики.",
+        "Train и validation воспроизводятся из YAML с фиксированным seed и имеют сохранённые содержательные хеши.",
+        "Манифест перечисляет источники и лицензии данных и связывает их с очищенным облачным артефактом."
+      ],
+      "contractTargets": [
+        "stage_data"
+      ],
+      "evidence": "Принеси команду настоящего облачного прогона, ссылку на W&B или хранилище артефактов, лог со статистикой dedup/quality/PII и хеши итоговых train/validation splits."
+    },
+    {
+      "id": "m02-contamination-check",
+      "title": "Закрой утечки benchmark",
+      "task": "Построй обязательный MinHash-контроль, который проверяет splits против MMLU-Pro, MT-Bench-v2 и RewardBench-2 и отклоняет любой найденный overlap.",
+      "doneWhen": [
+        "Чистый корпус имеет нулевой overlap с тестовыми наборами MMLU-Pro, MT-Bench-v2 и RewardBench-2 по сохранённому отчёту.",
+        "CI завершает pipeline ошибкой на отдельном корпусе с 1% контролируемой утечки MMLU-Pro.",
+        "Отчёт contamination check содержит хеш проверенного dataset и результат по каждому benchmark."
+      ],
+      "contractTargets": [
+        "stage_contamination"
+      ],
+      "evidence": "Принеси ссылку на два внешних CI-прогона: зелёный для чистого корпуса и остановленный для копии с 1% утечки, включая команды, dataset hash и MinHash-отчёты."
+    },
+    {
+      "id": "m03-axolotl-sft",
+      "title": "Обучи SFT-checkpoint",
+      "task": "Запусти полный SFT выбранной базовой модели через Axolotl v0.8 на 8xH100 с ZeRO-3, Flash Attention 3 и packing последовательностей.",
+      "doneWhen": [
+        "Axolotl завершил две-три эпохи SFT на 8xH100 с ZeRO-3, Flash Attention 3, packing и cosine schedule.",
+        "W&B содержит YAML, seed, кривые train/validation loss, длительность и сведения о восьми GPU.",
+        "SFT-checkpoint сохранён как хешированный облачный артефакт и связан с точным dataset hash и базовой моделью."
+      ],
+      "contractTargets": [
+        "stage_sft"
+      ],
+      "evidence": "Принеси команду запуска Axolotl, ссылку на реальный W&B run, облачный URI checkpoint, YAML и лог распределённого прогона на 8xH100."
+    },
+    {
+      "id": "m04-preference-tuning",
+      "title": "Сравни DPO и GRPO",
+      "task": "Возьми SFT-checkpoint и выполни одноэпохальные DPO и GRPO-прогоны через TRL 0.15, включая sweep beta для DPO и проверяемую награду для GRPO.",
+      "doneWhen": [
+        "DPO завершён за одну эпоху на 4xH100, sweep beta зафиксирован, а выбранное значение обосновано validation-результатом.",
+        "GRPO завершён от того же SFT-checkpoint с документированной проверяемой наградой для математики или кода.",
+        "Оба checkpoint сохранены с конфигурациями, seeds, хешем исходного SFT-checkpoint и происхождением preference data."
+      ],
+      "contractTargets": [
+        "stage_dpo"
+      ],
+      "evidence": "Принеси команды TRL, ссылки на W&B-прогоны DPO и GRPO, таблицу sweep beta, описание verifiable reward и URI обоих облачных checkpoint."
+    },
+    {
+      "id": "m05-quantization",
+      "title": "Выпусти три кванта",
+      "task": "Преобразуй итоговый alignment-checkpoint в GPTQ-INT4-Marlin, AWQ-INT4 и GGUF-Q4_K_M, сохранив размеры и номинальную производительность.",
+      "doneWhen": [
+        "Созданы и загружаются GPTQ-INT4-Marlin, AWQ-INT4 и GGUF-Q4_K_M из одного alignment-checkpoint.",
+        "Для каждого формата сохранены фактический размер, номинальный throughput, команда конвертации и содержательный хеш.",
+        "GPTQ проверен с целевым serving runtime, AWQ — как отдельный deployment-артефакт, а GGUF — через llama.cpp."
+      ],
+      "contractTargets": [
+        "stage_quantize"
+      ],
+      "evidence": "Принеси команды трёх реальных конвертаций, облачные URI и хеши файлов, вывод загрузки каждым runtime и таблицу измеренных размеров и номинального throughput."
+    },
+    {
+      "id": "m06-speculative-serving",
+      "title": "Разверни быстрый endpoint",
+      "task": "Разверни квантизированную модель в Kubernetes через vLLM 0.7 с EAGLE-3 и измерь эффективность speculative decoding и стоимость обслуживания.",
+      "doneWhen": [
+        "Kubernetes endpoint обслуживает GPTQ-INT4-Marlin через vLLM 0.7 с EAGLE-3 и масштабируется HPA по queue-wait.",
+        "Для batch 1, 8 и 32 измерены tokens/s и tail latency, а acceptance rate отдельно получен на domain data и ShareGPT.",
+        "Рассчитана стоимость миллиона токенов и выполнено сравнение с Anthropic и OpenAI на той же eval."
+      ],
+      "contractTargets": [
+        "stage_serve"
+      ],
+      "evidence": "Принеси адрес настоящего endpoint, Kubernetes-манифесты, вывод HPA, Langfuse-ссылку, команды нагрузочного теста и таблицу throughput, tail latency, acceptance rate и $/1M tokens."
+    },
+    {
+      "id": "m07-eval-matrix",
+      "title": "Собери матрицу качества",
+      "task": "Одинаково оцени base, SFT-only, SFT+DPO и SFT+GRPO через полный набор общих и предметных benchmark.",
+      "doneWhen": [
+        "Base, SFT-only, SFT+DPO и SFT+GRPO оценены одинаковым протоколом на lm-evaluation-harness, RewardBench-2, MT-Bench-v2, MMLU-Pro и трёх предметных benchmark.",
+        "Таблица содержит абсолютные значения, дельты относительно base и checkpoint hash каждой строки.",
+        "Отчёт явно называет победителя между DPO и GRPO на предметных benchmark и величину преимущества."
+      ],
+      "contractTargets": [
+        "stage_eval"
+      ],
+      "evidence": "Принеси команды внешних eval-прогонов, сырые отчёты runner, ссылки на артефакты и итоговую таблицу base/SFT/DPO/GRPO с хешами checkpoint и benchmark-дельтами."
+    },
+    {
+      "id": "m08-safety-eval",
+      "title": "Проверь безопасность",
+      "task": "Измерь Llama Guard 4 pass rate на dev set и подключи ShieldGemma-2 как выходной фильтр к обслуживаемой модели.",
+      "doneWhen": [
+        "Llama Guard 4 pass rate измерен на dev set и связан с точным checkpoint hash.",
+        "ShieldGemma-2 включён в реальный output path endpoint и его действие подтверждено внешним прогоном.",
+        "Safety-отчёт разделяет поведение исходной модели и результат после выходного фильтра."
+      ],
+      "contractTargets": [],
+      "evidence": "Принеси команду внешнего safety-прогона, сырой отчёт Llama Guard 4, рассчитанный pass rate, конфигурацию ShieldGemma-2 и логи реального endpoint до и после фильтра."
+    },
+    {
+      "id": "m09-model-card",
+      "title": "Опубликуй model card",
+      "task": "Собери model card по шаблону MOF 2026 и свяжи его с однокомандным воспроизводимым запуском всего конвейера.",
+      "doneWhen": [
+        "Model card заполнен по MOF 2026 и содержит data, training, eval, bias, safety, license и reproducibility sections.",
+        "Одна команда проходит весь путь от YAML до обслуживаемого endpoint, отчётов и повторно сгенерированной model card.",
+        "Карточка содержит seeds, commit SHA, хеши артефактов и ссылки на реальные облачные доказательства."
+      ],
+      "contractTargets": [
+        "stage_model_card",
+        "run_pipeline"
+      ],
+      "evidence": "Принеси опубликованную model card, ссылку на репозиторий и commit SHA, команду полного внешнего запуска, итоговый манифест артефактов и адрес развёрнутого endpoint."
+    }
+  ],
+  "rubric": [
+    {
+      "id": "eval-delta-vs-base",
+      "weight": 25,
+      "criterion": "Дельта оценки относительно base",
+      "measurement": "Измеренный прирост на целевых задачах: MMLU-Pro, MT-Bench-v2 и task-specific benchmark."
+    },
+    {
+      "id": "pipeline-reproducibility",
+      "weight": 20,
+      "criterion": "Воспроизводимость конвейера",
+      "measurement": "Одна команда повторно выполняет весь конвейер от начала до конца с идентичными seeds."
+    },
+    {
+      "id": "data-hygiene",
+      "weight": 20,
+      "criterion": "Гигиена данных",
+      "measurement": "Доля дедупликации, покрытие очистки PII и зелёная проверка contamination."
+    },
+    {
+      "id": "serving-efficiency",
+      "weight": 20,
+      "criterion": "Эффективность сервинга",
+      "measurement": "Tokens/s при batch 1, 8 и 32, EAGLE-3 acceptance rate и стоимость миллиона токенов."
+    },
+    {
+      "id": "model-card-safety",
+      "weight": 15,
+      "criterion": "Model card и safety eval",
+      "measurement": "Полнота MOF 2026 и Llama Guard 4 pass rate."
+    }
+  ],
+  "slug": "19-capstone-projects__07-end-to-end-fine-tuning-pipeline",
+  "sourcePath": "source/phases/19-capstone-projects/07-end-to-end-fine-tuning-pipeline/docs/en.md",
+  "generatedAt": "2026-08-23T10:29:39.091Z"
+}

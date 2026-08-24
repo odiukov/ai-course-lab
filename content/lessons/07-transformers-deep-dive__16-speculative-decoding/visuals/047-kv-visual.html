@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Откат кеша после отказа</title>
+<style>
+  :root{ --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --pre:#94a3b8; --ok:#15803d; --bad:#b91c1c; --grid:#cbd5e1; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12161c; --fg:#e8eaed; --muted:#9aa4b2; --pre:#64748b; --ok:#4ade80; --bad:#f87171; --grid:#3a4椒; --grid:#3a4452; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);}
+  .wrap{max-width:960px;margin:0 auto;padding:8px 10px 12px;font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;color:var(--muted);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Откат кеша после отказа: меняется только длина</h2>
+  <div id="slot"><div class="fail" id="fb">Лента KV cache: 10 строк префикса, дописаны 5 черновых (итого 15). Отказ на позиции 3: первые 2 черновика зафиксированы, хвост из 3 записей зачёркнут. Итоговая длина — 12.</div></div>
+</div>
+<script>
+(function(){
+try{
+  // ---- данные схемы ----
+  var PREFIX = 10, DRAFT = 5, ACCEPTED = 2, FINAL = PREFIX + ACCEPTED; // 12
+  var cells = [];
+  for (var i = 0; i < PREFIX + DRAFT; i++){
+    cells.push({ i:i, kind: i < PREFIX ? "pre" : (i < FINAL ? "ok" : "bad") });
+  }
+
+  // ---- одна система координат ----
+  var origin = { x: 70, y: 150 }, scale = 34;
+  function sx(x){ return origin.x + x * scale; }
+  function sy(y){ return origin.y - y * scale; }
+
+  var VB_W = 700, VB_H = 250;
+  var PAD = 6, FS = 12, LW = 1.6;
+
+  var S = [];
+  function el(t,a,txt){
+    var s = "<" + t;
+    for (var k in a) s += " " + k + '="' + a[k] + '"';
+    S.push(txt === undefined ? s + "/>" : s + ">" + txt + "</" + t + ">");
+  }
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+  function txt(x,y,anchor,cls,str,extra){
+    var a = { x:x, y:y, "text-anchor":anchor, class:cls, "font-size":FS };
+    if (extra) for (var k in extra) a[k] = extra[k];
+    el("text", a, esc(str));
+  }
+
+  // ---- ячейки ленты ----
+  cells.forEach(function(c){
+    var x0 = sx(c.i), y0 = sy(1), w = sx(c.i+1) - sx(c.i), h = sy(0) - sy(1);
+    el("rect", { x:x0, y:y0, width:w, height:h, rx:3,
+      fill: c.kind === "bad" ? "none" : (c.kind === "ok" ? "var(--ok)" : "var(--pre)"),
+      "fill-opacity": c.kind === "bad" ? 1 : 0.22,
+      stroke: c.kind === "bad" ? "var(--bad)" : (c.kind === "ok" ? "var(--ok)" : "var(--pre)"),
+      "stroke-width": LW });
+    txt(sx(c.i + 0.5), sy(0.5) + FS*0.35, "middle",
+        c.kind === "bad" ? "bad" : "num", String(c.i + 1));
+    if (c.kind === "bad"){
+      el("line", { x1:sx(c.i)+PAD/2, y1:sy(1)+PAD/2, x2:sx(c.i+1)-PAD/2, y2:sy(0)-PAD/2,
+        stroke:"var(--bad)", "stroke-width":LW });
+      el("line", { x1:sx(c.i)+PAD/2, y1:sy(0)-PAD/2, x2:sx(c.i+1)-PAD/2, y2:sy(1)+PAD/2,
+        stroke:"var(--bad)", "stroke-width":LW });
+    }
+  });
+
+  // ---- скобки-диапазоны над лентой ----
+  function span(a,b,yLvl,color,label){
+    var y = sy(yLvl), t = sy(yLvl) + PAD;
+    el("path", { d:"M"+sx(a)+" "+t+" V"+y+" H"+sx(b)+" V"+t,
+      fill:"none", stroke:color, "stroke-width":LW });
+    txt((sx(a)+sx(b))/2, y - PAD, "middle", "lbl", label, { fill:color });
+  }
+  span(0, PREFIX, 1.45, "var(--pre)", "префикс: 10");
+  span(PREFIX, PREFIX + DRAFT, 2.35, "var(--muted)", "черновик: 5 (кеш дошёл до 15)");
+  span(PREFIX, FINAL, 1.45, "var(--ok)", "принято: 2");
+
+  // ---- отказ на позиции 3 черновика ----
+  var fx = sx(PREFIX + ACCEPTED + 0.5);
+  el("line", { x1:fx, y1:sy(-0.9), x2:fx, y2:sy(-0.12),
+    stroke:"var(--bad)", "stroke-width":LW });
+  el("path", { d:"M"+fx+" "+sy(-0.02)+" L"+(fx-PAD)+" "+sy(-0.3)+" L"+(fx+PAD)+" "+sy(-0.3)+" Z",
+    fill:"var(--bad)" });
+  txt(fx, sy(-0.9) - PAD/2, "middle", "lbl", "отказ на позиции 3", { fill:"var(--bad)" });
+
+  // ---- граница длины и подпись хвоста ----
+  el("line", { x1:sx(FINAL), y1:sy(1.25), x2:sx(FINAL), y2:sy(-1.55),
+    stroke:"var(--fg)", "stroke-width":LW, "stroke-dasharray":"5 4" });
+  txt(sx(FINAL) - PAD, sy(-1.55) + FS, "end", "lbl", "длина = 12", { fill:"var(--fg)" });
+  txt(sx(FINAL) + PAD, sy(-1.55) + FS, "start", "lbl",
+      "хвост 13, 14, 15 — не читается", { fill:"var(--bad)" });
+
+  // ---- стрелка «было 15 → стало 12» вдоль низа ----
+  var yA = sy(-2.6);
+  el("line", { x1:sx(PREFIX + DRAFT), y1:yA, x2:sx(FINAL) + PAD, y2:yA,
+    stroke:"var(--muted)", "stroke-width":LW });
+  el("path", { d:"M"+sx(FINAL)+" "+yA+" L"+(sx(FINAL)+PAD*1.4)+" "+(yA-PAD*0.7)+
+    " L"+(sx(FINAL)+PAD*1.4)+" "+(yA+PAD*0.7)+" Z", fill:"var(--muted)" });
+  txt(sx(PREFIX + DRAFT) + PAD, yA - PAD, "start", "lbl",
+      "откат = уменьшить счётчик: 15 → 12", { fill:"var(--muted)" });
+
+  // ---- ось индексов: засечки слева и по краям ----
+  txt(sx(0) - PAD*2, sy(0.5) + FS*0.35, "end", "lbl", "KV cache", { fill:"var(--muted)" });
+  txt(sx(0), sy(0) + FS + PAD, "start", "lbl", "1", { fill:"var(--muted)" });
+  txt(sx(PREFIX + DRAFT), sy(0) + FS + PAD, "end", "lbl", "15", { fill:"var(--muted)" });
+
+  var svg = '<svg viewBox="0 0 ' + VB_W + ' ' + VB_H + '" preserveAspectRatio="xMidYMid meet" ' +
+    'xmlns="http://www.w3.org/2000/svg" role="img" ' +
+    'aria-label="Лента KV cache: 10 строк префикса, 2 принятых черновика, 3 зачёркнутых, длина 12">' +
+    '<style>text{font-family:system-ui,-apple-system,sans-serif;fill:var(--fg)}' +
+    '.num{fill:var(--fg)}.bad{fill:var(--bad)}.lbl{font-weight:500}</style>' +
+    S.join("") + '</svg>';
+  document.getElementById("slot").innerHTML = svg;
+}catch(e){
+  var fb = document.getElementById("fb");
+  if (fb) fb.textContent = "Схема не построилась. Она должна была показать: " +
+    "ленту KV cache из 15 ячеек — 10 строк префикса, 5 дописанных черновиком; " +
+    "отказ на позиции 3 черновика; первые 2 черновика зафиксированы (строки 11–12), " +
+    "хвост 13, 14, 15 зачёркнут; итоговая длина кеша — 12.";
+}
+})();
+</script>
+</body>
+</html>

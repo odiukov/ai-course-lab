@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Как три метода расходуют 28 замеров</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --panel: #f8fafc;
+    --ink: #172033;
+    --muted: #526079;
+    --line: #aab4c5;
+    --grid: #d8dee9;
+    --blue: #2563eb;
+    --teal: #07847b;
+    --violet: #7c3aed;
+    --gold: #c47b00;
+  }
+  body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  figure {
+    margin: unset;
+    border: 1px solid var(--line);
+    background: var(--bg);
+  }
+  h1 {
+    margin: unset;
+    padding: 14px 18px 8px;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--bg);
+  }
+  .panel-bg { fill: var(--panel); }
+  .axis, .tick {
+    stroke: var(--line);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+  .guide {
+    stroke: var(--grid);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  .contour {
+    fill: none;
+    stroke: var(--grid);
+    stroke-width: 1.5px;
+    stroke-dasharray: 5 5;
+    vector-effect: non-scaling-stroke;
+  }
+  text {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+  .panel-title {
+    font-size: 17px;
+    font-weight: bold;
+  }
+  .subtitle, .axis-label, .tick-label, .legend {
+    fill: var(--muted);
+  }
+  .subtitle { font-size: 13px; }
+  .axis-label { font-size: 12px; font-weight: bold; }
+  .tick-label { font-size: 11px; }
+  .legend { font-size: 13px; }
+  .grid-point {
+    fill: var(--blue);
+    stroke: var(--bg);
+    stroke-width: 1px;
+  }
+  .random-point {
+    fill: var(--teal);
+    stroke: var(--bg);
+    stroke-width: 1px;
+  }
+  .bayes-initial {
+    fill: var(--panel);
+    stroke: var(--violet);
+    stroke-width: 2px;
+  }
+  .bayes-later {
+    fill: var(--violet);
+    stroke: var(--bg);
+    stroke-width: 1px;
+  }
+  .maximum {
+    fill: none;
+    stroke: var(--gold);
+    stroke-width: 2.5px;
+  }
+  .fallback {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101522;
+      --panel: #171e2d;
+      --ink: #edf2fb;
+      --muted: #b6c1d5;
+      --line: #59667d;
+      --grid: #344057;
+      --blue: #76a7ff;
+      --teal: #5fd5c9;
+      --violet: #b89aff;
+      --gold: #ffc65c;
+    }
+  }
+</style>
+</head>
+<body>
+<figure>
+  <h1>Как три метода расходуют 28 замеров</h1>
+  <svg id="diagram" viewBox="0 0 1200 430" width="1200" height="430"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Сравнение Grid, Random и Bayesian search при бюджете 28 замеров</title>
+    <desc id="svgDesc">Три одинакових пространства learning_rate и max_depth: регулярная сетка, случайные точки и точки Bayesian search, сгущённые около максимума.</desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+const data = {
+  zero: 0,
+  transform: { origin: { x: 0, y: 0 }, scale: { x: 1, y: 1 } },
+  budget: 28,
+  initialCount: 5,
+  canvas: { width: 1200, height: 430 },
+  domain: { logMin: -3, logMax: 0, depthMin: 2, depthMax: 8 },
+  lrs: [0.001, 0.01, 0.1, 1.0],
+  lrLabels: ["0.001", "0.01", "0.1", "1.0"],
+  depths: [2, 3, 4, 5, 6, 7, 8],
+  optimum: [0.01, 4],
+  panels: [
+    { x: 64, title: "Grid search", subtitle: "сетка 4 × 7 = 28" },
+    { x: 455, title: "Random search", subtitle: "28 независимых точек" },
+    { x: 846, title: "Bayesian search", subtitle: "5 стартовых + выбор по данным" }
+  ],
+  plot: { top: 78, bottom: 318, width: 285, height: 240 },
+  labels: {
+    titleY: 21, subtitleY: 45, yNameY: 66,
+    tickOffset: 8, yTickOffset: 10, xTickY: 337, xNameY: 361,
+    legendY: 402, legendTextOffset: 13
+  },
+  marks: {
+    tick: 5, pointRadius: 4, initialRadius: 5,
+    maximumRadius: 9, contourSizes: [[48, 35], [83, 68], [122, 101]]
+  },
+  legend: {
+    initialX: 105, laterX: 430, maximumX: 745
+  },
+  fallback: { x: 600, y: 210 },
+  random: [
+    [0.0013, 8], [0.0018, 3], [0.0025, 6], [0.0032, 2],
+    [0.0044, 5], [0.0060, 7], [0.0085, 3], [0.0110, 8],
+    [0.0140, 5], [0.0190, 2], [0.0260, 4], [0.0340, 7],
+    [0.0470, 3], [0.0620, 6], [0.0830, 2], [0.1100, 5],
+    [0.1500, 8], [0.2000, 4], [0.2700, 6], [0.3500, 3],
+    [0.4600, 7], [0.5800, 2], [0.7200, 5], [0.9100, 8],
+    [0.0052, 4], [0.0240, 6], [0.1800, 7], [0.6600, 4]
+  ],
+  bayes: [
+    [0.0015, 2], [0.9000, 8], [0.0400, 6], [0.0040, 7], [0.2500, 3],
+    [0.0120, 4], [0.0080, 4], [0.0150, 5], [0.0065, 3], [0.0105, 4],
+    [0.0094, 4], [0.0110, 5], [0.0075, 3], [0.0130, 4], [0.0101, 4],
+    [0.0098, 3], [0.0108, 5], [0.0088, 4], [0.0125, 4], [0.0060, 5],
+    [0.0160, 3], [0.0100, 4], [0.0096, 4], [0.0104, 5], [0.0115, 3],
+    [0.0070, 4], [0.0140, 4], [0.0102, 4]
+  ]
+};
+
+const origin = data.transform.origin;
+const scale = data.transform.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const layer = document.getElementById("drawing");
+  const ns = "http://www.w3.org/2000/svg";
+
+  if (data.random.length !== data.budget || data.bayes.length !== data.budget) {
+    throw new Error("Неверное число замеров");
+  }
+
+  function add(tag, attrs, parent = layer) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name, value]) => node.setAttribute(name, value));
+    parent.appendChild(node);
+    return node;
+  }
+
+  function line(x1, y1, x2, y2, className, parent = layer) {
+    return add("line", {
+      x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: className
+    }, parent);
+  }
+
+  function label(x, y, value, className, anchor, dx = data.zero, dy = data.zero, parent = layer) {
+    const node = add("text", {
+      x: sx(x + dx), y: sy(y + dy), class: className, "text-anchor": anchor
+    }, parent);
+    node.textContent = value;
+    return node;
+  }
+
+  function circle(x, y, radius, className, parent = layer) {
+    return add("circle", {
+      cx: sx(x), cy: sy(y), r: sx(radius) - sx(data.zero), class: className
+    }, parent);
+  }
+
+  function rect(x, y, width, height, className, parent = layer) {
+    return add("rect", {
+      x: sx(x), y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      class: className
+    }, parent);
+  }
+
+  function ellipse(x, y, width, height, className, parent = layer) {
+    return add("ellipse", {
+      cx: sx(x), cy: sy(y),
+      rx: sx(width) - sx(data.zero),
+      ry: sy(height) - sy(data.zero),
+      class: className
+    }, parent);
+  }
+
+  function lrX(lr, panelX) {
+    const fraction = (Math.log10(lr) - data.domain.logMin) /
+      (data.domain.logMax - data.domain.logMin);
+    return panelX + fraction * data.plot.width;
+  }
+
+  function depthY(depth) {
+    const fraction = (depth - data.domain.depthMin) /
+      (data.domain.depthMax - data.domain.depthMin);
+    return data.plot.bottom - fraction * data.plot.height;
+  }
+
+  function drawFrame(panel) {
+    const group = add("g", {}, layer);
+    const right = panel.x + data.plot.width;
+    const optimumX = lrX(data.optimum[0], panel.x);
+    const optimumY = depthY(data.optimum[1]);
+
+    label(panel.x + data.plot.width / data.domain.depthMin,
+      data.labels.titleY, panel.title, "panel-title", "middle",
+      data.zero, data.zero, group);
+    label(panel.x + data.plot.width / data.domain.depthMin,
+      data.labels.subtitleY, panel.subtitle, "subtitle", "middle",
+      data.zero, data.zero, group);
+    label(panel.x, data.labels.yNameY, "max_depth ↑",
+      "axis-label", "start", data.zero, data.zero, group);
+
+    rect(panel.x, data.plot.top, data.plot.width, data.plot.height,
+      "panel-bg", group);
+
+    data.depths.forEach(depth => {
+      const y = depthY(depth);
+      line(panel.x, y, right, y, "guide", group);
+      line(panel.x - data.marks.tick, y, panel.x, y, "tick", group);
+      label(panel.x, y, String(depth), "tick-label", "end",
+        -data.labels.yTickOffset, data.labels.tickOffset / data.domain.depthMin, group);
+    });
+
+    data.lrs.forEach((lr, index) => {
+      const x = lrX(lr, panel.x);
+      line(x, data.plot.top, x, data.plot.bottom, "guide", group);
+      line(x, data.plot.bottom, x, data.plot.bottom + data.marks.tick,
+        "tick", group);
+      label(x, data.labels.xTickY, data.lrLabels[index],
+        "tick-label", "middle", data.zero, data.zero, group);
+    });
+
+    line(panel.x, data.plot.top, panel.x, data.plot.bottom, "axis", group);
+    line(panel.x, data.plot.bottom, right, data.plot.bottom, "axis", group);
+    label(panel.x + data.plot.width / data.domain.depthMin,
+      data.labels.xNameY, "learning_rate · лог. шкала",
+      "axis-label", "middle", data.zero, data.zero, group);
+
+    data.marks.contourSizes.forEach(([width, height]) => {
+      ellipse(optimumX, optimumY, width, height, "contour", group);
+    });
+
+    return group;
+  }
+
+  const groups = data.panels.map(drawFrame);
+
+  data.lrs.forEach(lr => {
+    data.depths.forEach(depth => {
+      circle(lrX(lr, data.panels[0].x), depthY(depth),
+        data.marks.pointRadius, "grid-point", groups[0]);
+    });
+  });
+
+  data.random.forEach(([lr, depth]) => {
+    circle(lrX(lr, data.panels[1].x), depthY(depth),
+      data.marks.pointRadius, "random-point", groups[1]);
+  });
+
+  data.bayes.forEach(([lr, depth], index) => {
+    const initial = index < data.initialCount;
+    circle(lrX(lr, data.panels[2].x), depthY(depth),
+      initial ? data.marks.initialRadius : data.marks.pointRadius,
+      initial ? "bayes-initial" : "bayes-later", groups[2]);
+  });
+
+  data.panels.forEach((panel, index) => {
+    circle(lrX(data.optimum[0], panel.x), depthY(data.optimum[1]),
+      data.marks.maximumRadius, "maximum", groups[index]);
+  });
+
+  circle(data.legend.initialX, data.labels.legendY,
+    data.marks.initialRadius, "bayes-initial");
+  label(data.legend.initialX, data.labels.legendY,
+    "первые 5 точек Bayes", "legend", "start",
+    data.labels.legendTextOffset, data.labels.tickOffset / data.domain.depthMin);
+
+  circle(data.legend.laterX, data.labels.legendY,
+    data.marks.pointRadius, "bayes-later");
+  label(data.legend.laterX, data.labels.legendY,
+    "следующие точки Bayes", "legend", "start",
+    data.labels.legendTextOffset, data.labels.tickOffset / data.domain.depthMin);
+
+  circle(data.legend.maximumX, data.labels.legendY,
+    data.marks.maximumRadius, "maximum");
+  label(data.legend.maximumX, data.labels.legendY,
+    "истинный максимум: lr=0.01, depth=4", "legend", "start",
+    data.labels.legendTextOffset + data.marks.maximumRadius,
+    data.labels.tickOffset / data.domain.depthMin);
+
+} catch (error) {
+  const layer = document.getElementById("drawing");
+  const ns = "http://www.w3.org/2000/svg";
+  layer.replaceChildren();
+  const message = document.createElementNS(ns, "text");
+  message.setAttribute("x", sx(data.fallback.x));
+  message.setAttribute("y", sy(data.fallback.y));
+  message.setAttribute("text-anchor", "middle");
+  message.setAttribute("class", "fallback");
+  message.textContent = "Схема должна была показать сетку 4 × 7, 28 случайных точек и 28 точек Bayes около lr=0.01 и depth=4.";
+  layer.appendChild(message);
+}
+</script>
+</body>
+</html>

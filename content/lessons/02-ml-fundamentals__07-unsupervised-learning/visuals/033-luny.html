@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K-Means и DBSCAN на двух полумесяцах</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: white;
+    --panel: ghostwhite;
+    --ink: midnightblue;
+    --muted: slategray;
+    --grid: lightgray;
+    --blue: royalblue;
+    --red: tomato;
+    --boundary: darkorange;
+    --noise: gray;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: midnightblue;
+      --panel: darkslategray;
+      --ink: white;
+      --muted: lightgray;
+      --grid: slategray;
+      --blue: lightskyblue;
+      --red: salmon;
+      --boundary: gold;
+      --noise: silver;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+  }
+
+  .frame {
+    width: min(100%, 1000px);
+    margin: auto;
+    background: var(--page);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 12px 16px 8px;
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--page);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--grid);
+    stroke-width: 2px;
+  }
+
+  .point {
+    stroke: var(--panel);
+    stroke-width: 1px;
+  }
+
+  .boundary {
+    fill: none;
+    stroke: var(--boundary);
+    stroke-width: 3px;
+  }
+
+  .centroid {
+    stroke: var(--ink);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .subtitle {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .line-label {
+    fill: var(--boundary);
+    stroke: var(--panel);
+    stroke-width: 5px;
+    paint-order: stroke;
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .note {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .fallback {
+    margin: 0;
+    padding: 16px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main class="frame">
+  <h1>200 точек: одна форма, два способа разбиения</h1>
+
+  <svg id="diagram"
+       width="1000"
+       height="440"
+       viewBox="0 0 1000 440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svgTitle svgDescription">
+    <title id="svgTitle">Сравнение K-Means и DBSCAN на двух полумесяцах</title>
+    <desc id="svgDescription">
+      Слева K-Means с K=2 проводит прямую границу через обе дуги.
+      Справа DBSCAN с eps=0.3 и min_samples=5 сохраняет два изогнутых кластера.
+    </desc>
+  </svg>
+
+  <p id="fallback" class="fallback" hidden>
+    Схема должна была показать 200 точек в форме двух переплетённых
+    полумесяцев: K-Means с K=2 разрезает их прямой, а DBSCAN с eps=0.3
+    и min_samples=5 сохраняет обе дуги.
+  </p>
+</main>
+
+<script>
+const data = [
+  1000, 440, 200, 2, 0.3, 5, 42, 100, 0.1, 0.5,
+  12.9898, 78.233, 43758.5453,
+  190, 280, 110, -110,
+  4.5, -1.35, 2.35, -0.85, 1.55,
+  2.15, 1.88, -1.08, -1.31,
+  0.035, 0.075, 4, 8, -1, 1, 0, 2, 3
+];
+
+const [
+  canvasWidth, canvasHeight, sampleCount, clusterGoal, eps, minSamples,
+  seed, halfSamples, noiseAmount, moonDrop,
+  hashA, hashB, hashC,
+  originX, originY, scaleX, scaleY,
+  panelShift, plotLeft, plotRight, plotBottom, plotTop,
+  titleY, subtitleY, noteY, detailY,
+  pointRadius, centroidRadius, lineReach, iterationCount,
+  noiseLabel, one, zero, two, three
+] = data;
+
+const origin = [originX, originY];
+const scale = [scaleX, scaleY];
+
+function sx(x) {
+  return origin[zero] + x * scale[zero];
+}
+
+function sy(y) {
+  return origin[one] + y * scale[one];
+}
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function element(name, attributes, content) {
+    const item = document.createElementNS(ns, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      item.setAttribute(key, String(value));
+    });
+    if (content !== undefined) {
+      item.textContent = content;
+    }
+    return item;
+  }
+
+  function add(parent, name, attributes, content) {
+    const item = element(name, attributes, content);
+    parent.appendChild(item);
+    return item;
+  }
+
+  function radius(value) {
+    return Math.abs(sx(value) - sx(0));
+  }
+
+  function frac(value) {
+    return value - Math.floor(value);
+  }
+
+  function jitter(index, salt) {
+    const wave = Math.sin(
+      (index + one) * hashA + (salt + seed) * hashB
+    );
+    return (
+      (frac(wave * hashC) - moonDrop) *
+      two *
+      noiseAmount
+    );
+  }
+
+  function makeMoons() {
+    const points = [];
+    const trueLabels = [];
+
+    for (let index = zero; index < halfSamples; index += one) {
+      const angle = Math.PI * index / halfSamples;
+      points.push([
+        Math.cos(angle) + jitter(index, zero),
+        Math.sin(angle) + jitter(index, one)
+      ]);
+      trueLabels.push(zero);
+    }
+
+    for (let index = zero; index < halfSamples; index += one) {
+      const angle = Math.PI * index / halfSamples;
+      points.push([
+        one - Math.cos(angle) + jitter(index, two),
+        one - Math.sin(angle) - moonDrop + jitter(index, three)
+      ]);
+      trueLabels.push(one);
+    }
+
+    return {points, trueLabels};
+  }
+
+  function squaredDistance(a, b) {
+    const dx = a[zero] - b[zero];
+    const dy = a[one] - b[one];
+    return dx * dx + dy * dy;
+  }
+
+  function runKMeans(points) {
+    let leftmost = points[zero];
+    let rightmost = points[zero];
+
+    points.forEach(point => {
+      if (point[zero] < leftmost[zero]) {
+        leftmost = point;
+      }
+      if (point[zero] > rightmost[zero]) {
+        rightmost = point;
+      }
+    });
+
+    const centroids = [
+      [...leftmost],
+      [...rightmost]
+    ];
+    const labels = new Array(points.length).fill(zero);
+
+    for (
+      let iteration = zero;
+      iteration < iterationCount;
+      iteration += one
+    ) {
+      points.forEach((point, pointIndex) => {
+        let bestLabel = zero;
+        let bestDistance = Infinity;
+
+        centroids.forEach((centroid, label) => {
+          const distance = squaredDistance(point, centroid);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestLabel = label;
+          }
+        });
+
+        labels[pointIndex] = bestLabel;
+      });
+
+      const sums = Array.from(
+        {length: clusterGoal},
+        () => [zero, zero]
+      );
+      const counts = new Array(clusterGoal).fill(zero);
+
+      points.forEach((point, pointIndex) => {
+        const label = labels[pointIndex];
+        sums[label][zero] += point[zero];
+        sums[label][one] += point[one];
+        counts[label] += one;
+      });
+
+      centroids.forEach((centroid, label) => {
+        if (counts[label] > zero) {
+          centroid[zero] = sums[label][zero] / counts[label];
+          centroid[one] = sums[label][one] / counts[label];
+        }
+      });
+    }
+
+    return {labels, centroids};
+  }
+
+  function runDbscan(points) {
+    const labels = new Array(points.length);
+    const visited = new Array(points.length).fill(false);
+    const epsSquared = eps * eps;
+    let currentCluster = zero;
+
+    function region(pointIndex) {
+      const neighbors = [];
+      points.forEach((candidate, candidateIndex) => {
+        if (
+          squaredDistance(points[pointIndex], candidate) <= epsSquared
+        ) {
+          neighbors.push(candidateIndex);
+        }
+      });
+      return neighbors;
+    }
+
+    points.forEach((point, pointIndex) => {
+      if (visited[pointIndex]) {
+        return;
+      }
+
+      visited[pointIndex] = true;
+      const neighbors = region(pointIndex);
+
+      if (neighbors.length < minSamples) {
+        labels[pointIndex] = noiseLabel;
+        return;
+      }
+
+      labels[pointIndex] = currentCluster;
+      const seeds = [...neighbors];
+      const queued = new Set(seeds);
+
+      for (
+        let seedIndex = zero;
+        seedIndex < seeds.length;
+        seedIndex += one
+      ) {
+        const neighborIndex = seeds[seedIndex];
+
+        if (!visited[neighborIndex]) {
+          visited[neighborIndex] = true;
+          const expanded = region(neighborIndex);
+
+          if (expanded.length >= minSamples) {
+            expanded.forEach(candidateIndex => {
+              if (!queued.has(candidateIndex)) {
+                queued.add(candidateIndex);
+                seeds.push(candidateIndex);
+              }
+            });
+          }
+        }
+
+        if (
+          labels[neighborIndex] === undefined ||
+          labels[neighborIndex] === noiseLabel
+        ) {
+          labels[neighborIndex] = currentCluster;
+        }
+      }
+
+      currentCluster += one;
+    });
+
+    return labels;
+  }
+
+  function drawPanel(group, shift, clipId) {
+    const left = plotLeft + shift;
+    const right = plotRight + shift;
+
+    add(group, "rect", {
+      x: sx(left),
+      y: sy(plotTop),
+      width: sx(right) - sx(left),
+      height: sy(plotBottom) - sy(plotTop),
+      class: "panel"
+    });
+
+    const defs = svg.querySelector("defs");
+    const clip = add(defs, "clipPath", {id: clipId});
+
+    add(clip, "rect", {
+      x: sx(left),
+      y: sy(plotTop),
+      width: sx(right) - sx(left),
+      height: sy(plotBottom) - sy(plotTop)
+    });
+  }
+
+  function drawPoints(group, points, labels, shift, clipId) {
+    const pointLayer = add(group, "g", {
+      "clip-path": "url(#" + clipId + ")"
+    });
+
+    points.forEach((point, index) => {
+      const label = labels[index];
+      let fill = "var(--noise)";
+
+      if (label === zero) {
+        fill = "var(--blue)";
+      } else if (label === one) {
+        fill = "var(--red)";
+      }
+
+      add(pointLayer, "circle", {
+        cx: sx(point[zero] + shift),
+        cy: sy(point[one]),
+        r: radius(pointRadius),
+        fill,
+        class: "point"
+      });
+    });
+  }
+
+  function drawCentroid(group, centroid, shift, clipId) {
+    const layer = add(group, "g", {
+      "clip-path": "url(#" + clipId + ")"
+    });
+    const x = centroid[zero] + shift;
+    const y = centroid[one];
+
+    add(layer, "line", {
+      x1: sx(x - centroidRadius),
+      y1: sy(y - centroidRadius),
+      x2: sx(x + centroidRadius),
+      y2: sy(y + centroidRadius),
+      class: "centroid"
+    });
+
+    add(layer, "line", {
+      x1: sx(x - centroidRadius),
+      y1: sy(y + centroidRadius),
+      x2: sx(x + centroidRadius),
+      y2: sy(y - centroidRadius),
+      class: "centroid"
+    });
+  }
+
+  function drawBoundary(group, centroids, shift, clipId) {
+    const first = centroids[zero];
+    const second = centroids[one];
+    const middleX = (first[zero] + second[zero]) / two;
+    const middleY = (first[one] + second[one]) / two;
+    const dx = second[zero] - first[zero];
+    const dy = second[one] - first[one];
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const tangentX = (zero - dy) / length;
+    const tangentY = dx / length;
+    const dash = radius(pointRadius * two);
+
+    const layer = add(group, "g", {
+      "clip-path": "url(#" + clipId + ")"
+    });
+
+    add(layer, "line", {
+      x1: sx(middleX + shift - tangentX * lineReach),
+      y1: sy(middleY - tangentY * lineReach),
+      x2: sx(middleX + shift + tangentX * lineReach),
+      y2: sy(middleY + tangentY * lineReach),
+      "stroke-dasharray": dash + " " + dash,
+      class: "boundary"
+    });
+
+    add(group, "text", {
+      x: sx(middleX + shift),
+      y: sy(plotTop - pointRadius * two),
+      "text-anchor": "middle",
+      class: "line-label"
+    }, "прямая граница");
+  }
+
+  function drawText(group, x, y, className, text) {
+    add(group, "text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": "middle",
+      class: className
+    }, text);
+  }
+
+  const generated = makeMoons();
+  const points = generated.points;
+  const kmeans = runKMeans(points);
+  const dbscanLabels = runDbscan(points);
+
+  const defs = add(svg, "defs", {});
+  const leftGroup = add(svg, "g", {});
+  const rightGroup = add(svg, "g", {});
+
+  drawPanel(leftGroup, zero, "clipLeft");
+  drawPanel(rightGroup, panelShift, "clipRight");
+
+  drawPoints(leftGroup, points, kmeans.labels, zero, "clipLeft");
+  drawBoundary(leftGroup, kmeans.centroids, zero, "clipLeft");
+  kmeans.centroids.forEach(centroid => {
+    drawCentroid(leftGroup, centroid, zero, "clipLeft");
+  });
+
+  drawPoints(
+    rightGroup,
+    points,
+    dbscanLabels,
+    panelShift,
+    "clipRight"
+  );
+
+  const panelCenter = (plotLeft + plotRight) / two;
+
+  drawText(
+    leftGroup,
+    panelCenter,
+    titleY,
+    "title",
+    "K-Means · K=2"
+  );
+  drawText(
+    leftGroup,
+    panelCenter,
+    subtitleY,
+    "subtitle",
+    "ближайший центроид задаёт цвет"
+  );
+  drawText(
+    leftGroup,
+    panelCenter,
+    noteY,
+    "note",
+    "цвет меняется поперёк обеих дуг"
+  );
+  drawText(
+    leftGroup,
+    panelCenter,
+    detailY,
+    "subtitle",
+    "× центроиды · пунктир — граница"
+  );
+
+  drawText(
+    rightGroup,
+    panelCenter + panelShift,
+    titleY,
+    "title",
+    "DBSCAN"
+  );
+  drawText(
+    rightGroup,
+    panelCenter + panelShift,
+    subtitleY,
+    "subtitle",
+    "eps=0.3 · min_samples=5"
+  );
+  drawText(
+    rightGroup,
+    panelCenter + panelShift,
+    noteY,
+    "note",
+    "цвет сохраняется вдоль каждой дуги"
+  );
+  drawText(
+    rightGroup,
+    panelCenter + panelShift,
+    detailY,
+    "subtitle",
+    "плотная цепочка поворачивает вместе с формой"
+  );
+
+  if (
+    sampleCount !== points.length ||
+    canvasWidth <= zero ||
+    canvasHeight <= zero ||
+    defs.childNodes.length < clusterGoal
+  ) {
+    throw new Error("Некорректные данные схемы");
+  }
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

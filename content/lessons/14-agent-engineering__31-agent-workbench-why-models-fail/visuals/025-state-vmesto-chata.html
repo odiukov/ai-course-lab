@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Почему цикл замыкается на состоянии, а не на чате</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #eef3fa;
+    --state: #e8f2ff;
+    --ink: #182235;
+    --muted: #5d6879;
+    --line: #718096;
+    --accent: #1668dc;
+    --accent-soft: #b9d7ff;
+    --danger: #c2343f;
+    --danger-soft: #ffe8ea;
+    --success: #147a57;
+    --success-soft: #dff5ec;
+    --barrier: #a04c15;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #192231;
+      --panel-soft: #202c3d;
+      --state: #172f4c;
+      --ink: #eef4ff;
+      --muted: #aeb9c9;
+      --line: #8491a5;
+      --accent: #73adff;
+      --accent-soft: #315c8e;
+      --danger: #ff818b;
+      --danger-soft: #45242b;
+      --success: #65d3aa;
+      --success-soft: #173e35;
+      --barrier: #ffad70;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--page);
+    border: 1px solid var(--line);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 14px 18px 10px;
+    font-size: 20px;
+    line-height: normal;
+  }
+
+  .subtitle {
+    margin: 0;
+    padding: 0 18px 12px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 454px;
+    background: var(--page);
+  }
+
+  .panel { fill: var(--panel); stroke: var(--line); }
+  .soft-panel { fill: var(--panel-soft); stroke: var(--line); }
+  .state-panel { fill: var(--state); stroke: var(--accent); }
+  .danger-panel { fill: var(--danger-soft); stroke: var(--danger); }
+  .success-panel { fill: var(--success-soft); stroke: var(--success); }
+  .divider { stroke: var(--line); }
+  .barrier { stroke: var(--barrier); }
+  .flow { stroke: var(--accent); fill: none; }
+  .handoff { stroke: var(--success); fill: none; }
+  .lost { stroke: var(--danger); fill: none; }
+  .arrow-accent { fill: var(--accent); stroke: var(--accent); }
+  .arrow-success { fill: var(--success); stroke: var(--success); }
+  .arrow-danger { fill: var(--danger); stroke: var(--danger); }
+  .ink { fill: var(--ink); }
+  .muted { fill: var(--muted); }
+  .accent-text { fill: var(--accent); }
+  .danger-text { fill: var(--danger); }
+  .success-text { fill: var(--success); }
+  .barrier-text { fill: var(--barrier); }
+  .label { font-size: 14px; }
+  .small { font-size: 12px; }
+  .body { font-size: 15px; }
+  .heading { font-size: 16px; font-weight: bold; }
+  .file { font-size: 14px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .strong { font-weight: bold; }
+  .shape, .edge {
+    vector-effect: non-scaling-stroke;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  #fallback {
+    padding: 18px;
+    border-top: 1px solid var(--line);
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Почему цикл замыкается на состоянии, а не на чате</h1>
+  <p class="subtitle">Перезапуск разделяет сессии, но устойчивое состояние переносит рабочий контекст.</p>
+  <svg id="diagram"
+       viewBox="0 0 1000 430"
+       width="1000"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Передача работы между двумя сессиями агента</title>
+    <desc id="svg-desc">История чата обрывается при перезапуске, а agent_state.json переносит задачу, затронутый файл, блокер и следующее действие новому агенту.</desc>
+  </svg>
+  <div id="fallback" hidden></div>
+</main>
+
+<script>
+const data = [{
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  zero: 0,
+  canvas: { width: 1000, height: 430 },
+  labelPadding: 8,
+  lineWidth: 2,
+  fontSize: 15,
+  dash: [8, 7],
+
+  sessionPanels: [
+    {
+      points: [[35, 38], [445, 38], [445, 210], [35, 210]],
+      className: "panel shape"
+    },
+    {
+      points: [[555, 38], [965, 38], [965, 210], [555, 210]],
+      className: "panel shape"
+    }
+  ],
+
+  cards: [
+    {
+      points: [[55, 88], [205, 88], [205, 187], [55, 187]],
+      className: "soft-panel shape"
+    },
+    {
+      points: [[225, 88], [425, 88], [425, 187], [225, 187]],
+      className: "danger-panel shape"
+    },
+    {
+      points: [[575, 88], [730, 88], [730, 187], [575, 187]],
+      className: "soft-panel shape"
+    },
+    {
+      points: [[750, 88], [945, 88], [945, 187], [750, 187]],
+      className: "success-panel shape"
+    },
+    {
+      points: [[145, 246], [855, 246], [855, 405], [145, 405]],
+      className: "state-panel shape"
+    }
+  ],
+
+  dividers: [
+    [[55, 119], [205, 119]],
+    [[225, 119], [425, 119]],
+    [[575, 119], [730, 119]],
+    [[750, 119], [945, 119]],
+    [[145, 285], [855, 285]],
+    [[145, 315], [855, 315]],
+    [[145, 345], [855, 345]],
+    [[145, 375], [855, 375]]
+  ],
+
+  barrierSegments: [
+    [[500, 32], [500, 226]],
+    [[500, 420], [500, 425]]
+  ],
+
+  arrows: [
+    {
+      line: [[425, 145], [478, 145]],
+      head: [[478, 145], [465, 138], [465, 152]],
+      lineClass: "lost edge",
+      headClass: "arrow-danger shape",
+      dashed: true
+    },
+    {
+      line: [[305, 210], [305, 243]],
+      head: [[305, 243], [298, 230], [312, 230]],
+      lineClass: "handoff edge",
+      headClass: "arrow-success shape",
+      dashed: false
+    },
+    {
+      line: [[695, 243], [695, 210]],
+      head: [[695, 210], [688, 223], [702, 223]],
+      lineClass: "flow edge",
+      headClass: "arrow-accent shape",
+      dashed: false
+    }
+  ],
+
+  crosses: [
+    {
+      lines: [
+        [[484, 137], [496, 153]],
+        [[496, 137], [484, 153]]
+      ],
+      className: "lost edge"
+    }
+  ],
+
+  texts: [
+    { x: 55, y: 66, value: "СЕССИЯ ДО ПЕРЕЗАПУСКА", className: "heading ink", anchor: "start" },
+    { x: 945, y: 66, value: "НОВАЯ СЕССИЯ", className: "heading ink", anchor: "end" },
+    { x: 500, y: 23, value: "ПЕРЕЗАПУСК", className: "small barrier-text strong", anchor: "middle" },
+
+    { x: 130, y: 109, value: "АГЕНТ", className: "small muted strong", anchor: "middle" },
+    { x: 70, y: 143, value: "файл изменён", className: "body ink", anchor: "start" },
+    { x: 70, y: 169, value: "тест запущен", className: "body ink", anchor: "start" },
+
+    { x: 325, y: 109, value: "ИСТОРИЯ ЧАТА", className: "small danger-text strong", anchor: "middle" },
+    { x: 242, y: 140, value: "тест упал", className: "label ink", anchor: "start" },
+    { x: 242, y: 160, value: "причина найдена", className: "label ink", anchor: "start" },
+    { x: 242, y: 180, value: "дальше: условие", className: "label ink", anchor: "start" },
+
+    { x: 452, y: 126, value: "чат обрывается", className: "small danger-text strong", anchor: "middle" },
+
+    { x: 652, y: 109, value: "РЕПОЗИТОРИЙ", className: "small muted strong", anchor: "middle" },
+    { x: 652, y: 139, value: "виден только", className: "label ink", anchor: "middle" },
+    { x: 652, y: 160, value: "изменённый файл", className: "label ink", anchor: "middle" },
+    { x: 652, y: 180, value: "src/validator.ts", className: "file accent-text", anchor: "middle" },
+
+    { x: 847, y: 109, value: "НОВЫЙ АГЕНТ", className: "small success-text strong", anchor: "middle" },
+    { x: 847, y: 141, value: "читает состояние", className: "label ink", anchor: "middle" },
+    { x: 847, y: 165, value: "и продолжает", className: "label ink", anchor: "middle" },
+
+    { x: 282, y: 230, value: "Handoff обновляет", className: "small success-text strong", anchor: "end" },
+    { x: 718, y: 230, value: "следующий проход читает", className: "small accent-text strong", anchor: "start" },
+
+    { x: 500, y: 272, value: "agent_state.json", className: "heading accent-text file", anchor: "middle" },
+
+    { x: 170, y: 306, value: "Текущая задача", className: "label muted strong", anchor: "start" },
+    { x: 385, y: 306, value: "исправить валидацию", className: "body ink", anchor: "start" },
+
+    { x: 170, y: 336, value: "Затронутый файл", className: "label muted strong", anchor: "start" },
+    { x: 385, y: 336, value: "src/validator.ts", className: "file ink", anchor: "start" },
+
+    { x: 170, y: 366, value: "Блокер", className: "label muted strong", anchor: "start" },
+    { x: 385, y: 366, value: "тест падает на граничном случае", className: "body ink", anchor: "start" },
+
+    { x: 170, y: 396, value: "Следующее действие", className: "label muted strong", anchor: "start" },
+    { x: 385, y: 396, value: "поправить одно условие", className: "body ink strong", anchor: "start" },
+
+    { x: 130, y: 225, value: "контекст сессии", className: "small muted", anchor: "middle" },
+    { x: 870, y: 225, value: "продолжение работы", className: "small muted", anchor: "middle" },
+    { x: 500, y: 424, value: "Handoff → State → следующий проход", className: "small accent-text strong", anchor: "middle" }
+  ]
+}];
+
+const [diagramData] = data;
+const origin = diagramData.origin;
+const scale = diagramData.scale;
+const labelPadding = diagramData.labelPadding;
+const lineWidth = diagramData.lineWidth;
+const fontSize = diagramData.fontSize;
+
+function sx(x) {
+  return origin.x + x * scale.x;
+}
+
+function sy(y) {
+  return origin.y + y * scale.y;
+}
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  function element(name, attributes) {
+    const node = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    return node;
+  }
+
+  function polygon(points, className) {
+    const value = points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+    const node = element("polygon", {
+      points: value,
+      class: className,
+      "stroke-width": lineWidth
+    });
+    svg.appendChild(node);
+    return node;
+  }
+
+  function line(points, className, dashed) {
+    const [[x1, y1], [x2, y2]] = points;
+    const attributes = {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className,
+      "stroke-width": lineWidth
+    };
+    if (dashed) {
+      attributes["stroke-dasharray"] = diagramData.dash.join(" ");
+    }
+    const node = element("line", attributes);
+    svg.appendChild(node);
+    return node;
+  }
+
+  function textLabel(item) {
+    const node = element("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      class: item.className,
+      "text-anchor": item.anchor,
+      "font-size": fontSize
+    });
+    node.textContent = item.value;
+    svg.appendChild(node);
+    return node;
+  }
+
+  polygon([
+    [diagramData.zero, diagramData.zero],
+    [diagramData.canvas.width, diagramData.zero],
+    [diagramData.canvas.width, diagramData.canvas.height],
+    [diagramData.zero, diagramData.canvas.height]
+  ], "shape");
+
+  diagramData.sessionPanels.forEach(item => polygon(item.points, item.className));
+  diagramData.cards.forEach(item => polygon(item.points, item.className));
+  diagramData.dividers.forEach(points => line(points, "divider edge", false));
+  diagramData.barrierSegments.forEach(points => line(points, "barrier edge", true));
+
+  diagramData.arrows.forEach(item => {
+    line(item.line, item.lineClass, item.dashed);
+    polygon(item.head, item.headClass);
+  });
+
+  diagramData.crosses.forEach(item => {
+    item.lines.forEach(points => line(points, item.className, false));
+  });
+
+  diagramData.texts.forEach(textLabel);
+
+  svg.dataset.labelPadding = labelPadding;
+  fallback.hidden = true;
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  if (svg) svg.hidden = true;
+  if (fallback) {
+    fallback.hidden = false;
+    fallback.textContent = "Схема должна была показать две сессии по разные стороны перезапуска: чат обрывается, а agent_state.json передаёт задачу, затронутый файл, блокер и следующее действие новому агенту.";
+  }
+}
+</script>
+</body>
+</html>

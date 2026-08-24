@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как порог проводит модель по precision-recall кривой</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5c667a;
+      --grid: #d8deea;
+      --axis: #47536a;
+      --curve: #2764d8;
+      --curve-soft: #dce8ff;
+      --point: #174fae;
+      --baseline: #c23b52;
+      --baseline-soft: #ffe5e9;
+      --guide: #aab5c8;
+      --accent: #117d69;
+      --accent-soft: #dcf5ef;
+      --shadow: rgba(29, 43, 72, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111620;
+        --panel: #191f2b;
+        --ink: #edf2ff;
+        --muted: #b4bed2;
+        --grid: #343d4f;
+        --axis: #aeb9cd;
+        --curve: #76a4ff;
+        --curve-soft: #21375e;
+        --point: #a9c5ff;
+        --baseline: #ff8798;
+        --baseline-soft: #482832;
+        --guide: #566176;
+        --accent: #65d7bd;
+        --accent-soft: #173f38;
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 16px 18px 12px;
+      background: var(--bg);
+    }
+
+    .heading {
+      margin: 0 0 4px;
+      font-size: 22px;
+      line-height: 1.25;
+      font-weight: 750;
+      letter-spacing: -0.015em;
+    }
+
+    .subheading {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      overflow: visible;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      box-shadow: 0 5px 18px var(--shadow);
+    }
+
+    svg[hidden] {
+      display: none;
+    }
+
+    .axis,
+    .tick,
+    .guide,
+    .baseline,
+    .curve,
+    .flow {
+      fill: none;
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 1.5;
+    }
+
+    .grid {
+      stroke: var(--grid);
+      stroke-width: 1;
+      stroke-dasharray: 3 7;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1;
+      stroke-dasharray: 3 5;
+    }
+
+    .baseline {
+      stroke: var(--baseline);
+      stroke-width: 2;
+      stroke-dasharray: 8 7;
+    }
+
+    .curve-area {
+      fill: var(--curve-soft);
+      opacity: 0.62;
+    }
+
+    .curve {
+      stroke: var(--curve);
+      stroke-width: 4;
+    }
+
+    .flow {
+      stroke: var(--accent);
+      stroke-width: 2;
+      stroke-dasharray: 4 5;
+    }
+
+    .axis-arrow {
+      fill: var(--axis);
+    }
+
+    .flow-arrow {
+      fill: var(--accent);
+    }
+
+    .point-halo {
+      fill: var(--panel);
+      stroke: var(--curve);
+      stroke-width: 2;
+    }
+
+    .point-core {
+      fill: var(--point);
+    }
+
+    .callout {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 1.5;
+    }
+
+    .baseline-tag {
+      fill: var(--baseline-soft);
+      stroke: var(--baseline);
+      stroke-width: 1;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+      dominant-baseline: alphabetic;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .axis-label {
+      fill: var(--axis);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .threshold {
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .threshold-note {
+      fill: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .baseline-text {
+      fill: var(--baseline);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .callout-title {
+      fill: var(--accent);
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .callout-text {
+      font-size: 13px;
+    }
+
+    .direction {
+      fill: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 22px;
+      color: var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure">
+    <h1 class="heading">Как порог проводит модель по precision–recall кривой</h1>
+    <p class="subheading">При 5% положительных случайный baseline AUPRC равен 0,05.</p>
+
+    <svg id="chart"
+         viewBox="0 0 960 430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="chart-title chart-desc"
+         hidden>
+      <title id="chart-title">Пороговые точки на precision-recall кривой</title>
+      <desc id="chart-desc">
+        Снижение порога от 0,90 до 0,60 перемещает рабочую точку вправо:
+        recall растёт, а precision обычно снижается. Горизонтальная линия
+        показывает случайный baseline AUPRC 0,05 для 5% положительных.
+      </desc>
+    </svg>
+
+    <p id="fallback" class="fallback">
+      Схема должна была показать PR-кривую: порог снижается от 0,90 до 0,60,
+      рабочая точка движется от высокой precision и низкого recall к более
+      высокому recall, а случайный baseline AUPRC для 5% положительных равен 0,05.
+    </p>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze({
+      canvas: [0, 0, 960, 430],
+      curve: [
+        [0.04, 0.96], [0.10, 0.96], [0.10, 0.90], [0.14, 0.90],
+        [0.14, 0.92], [0.22, 0.92], [0.22, 0.84], [0.34, 0.84],
+        [0.34, 0.78], [0.45, 0.78], [0.45, 0.68], [0.56, 0.68],
+        [0.56, 0.62], [0.66, 0.62], [0.66, 0.51], [0.78, 0.51],
+        [0.78, 0.44], [0.88, 0.44], [0.88, 0.30], [0.96, 0.30],
+        [0.96, 0.18], [1.00, 0.18]
+      ],
+      thresholds: [
+        { point: [0.14, 0.92], label: "порог 0,90", note: "precision высока", offset: [12, 21], anchor: "start" },
+        { point: [0.34, 0.78], label: "порог 0,80", note: "", offset: [-12, 23], anchor: "end" },
+        { point: [0.56, 0.62], label: "порог 0,70", note: "", offset: [12, -13], anchor: "start" },
+        { point: [0.78, 0.44], label: "порог 0,60", note: "recall выше", offset: [12, 22], anchor: "start" }
+      ],
+      xTicks: [0.14, 0.34, 0.56, 0.78],
+      yGuides: [0.25, 0.50, 0.75],
+      baseline: 0.05,
+      axisX: [[0, 0], [1.03, 0]],
+      axisY: [[0, 0], [0, 1.05]],
+      axisXArrow: [[1.03, 0], [0.99, 0.025], [0.99, -0.025]],
+      axisYArrow: [[0, 1.05], [-0.018, 1.00], [0.018, 1.00]],
+      flow: [[0.18, 1.02], [0.43, 0.92], [0.66, 0.73], [0.86, 0.54]],
+      flowArrow: [[0.86, 0.54], [0.815, 0.548], [0.842, 0.595]],
+      panel: [[1.07, 0.94], [1.39, 0.47]],
+      panelText: [
+        [1.10, 0.85, "Снижаем порог"],
+        [1.10, 0.75, "Проверяем больше"],
+        [1.10, 0.67, "переводов"],
+        [1.10, 0.56, "recall растёт,"],
+        [1.10, 0.48, "precision обычно падает"]
+      ],
+      baselineTag: [[0.49, 0.13], [0.98, 0.07]],
+      radius: [0.012, 0.006],
+      labelOffset: 9,
+      lineWidth: 2,
+      fontSize: 15
+    });
+
+    const origin = Object.freeze({ x: 108, y: 326 });
+    const scale = Object.freeze({ x: 590, y: -246 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const node = (name, attrs = {}, content = "") => {
+        const el = document.createElementNS(NS, name);
+        for (const [key, value] of Object.entries(attrs)) {
+          el.setAttribute(key, String(value));
+        }
+        if (content) el.textContent = content;
+        return el;
+      };
+
+      const line = (a, b, className) => node("line", {
+        x1: sx(a[0]),
+        y1: sy(a[1]),
+        x2: sx(b[0]),
+        y2: sy(b[1]),
+        class: className
+      });
+
+      const polygon = (points, className) => node("polygon", {
+        points: points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+        class: className
+      });
+
+      const polylinePath = points => points.map((point, index) =>
+        `${index ? "L" : "M"} ${sx(point[0])} ${sy(point[1])}`
+      ).join(" ");
+
+      const addText = (point, text, className, anchor, dx = 0, dy = 0) => {
+        const el = node("text", {
+          x: sx(point[0]) + dx,
+          y: sy(point[1]) + dy,
+          class: className,
+          "text-anchor": anchor
+        }, text);
+        svg.appendChild(el);
+        return el;
+      };
+
+      for (const y of DATA.yGuides) {
+        svg.appendChild(line([0, y], [1, y], "grid"));
+      }
+
+      for (const x of DATA.xTicks) {
+        svg.appendChild(line([x, 0], [x, 0.018], "tick"));
+      }
+
+      const areaPoints = [
+        ...DATA.curve,
+        [DATA.curve[DATA.curve.length - 1][0], DATA.baseline],
+        [DATA.curve[0][0], DATA.baseline]
+      ];
+
+      svg.appendChild(node("path", {
+        d: `${polylinePath(areaPoints)} Z`,
+        class: "curve-area"
+      }));
+
+      svg.appendChild(line([0, DATA.baseline], [1, DATA.baseline], "baseline"));
+
+      const tagA = DATA.baselineTag[0];
+      const tagB = DATA.baselineTag[1];
+      svg.appendChild(node("rect", {
+        x: sx(tagA[0]),
+        y: sy(tagA[1]),
+        width: sx(tagB[0]) - sx(tagA[0]),
+        height: sy(tagB[1]) - sy(tagA[1]),
+        rx: Math.abs(sx(DATA.radius[0]) - sx(0)),
+        class: "baseline-tag"
+      }));
+
+      addText(
+        [(tagA[0] + tagB[0]) / DATA.lineWidth, DATA.baseline],
+        "случайный baseline · AUPRC = 0,05",
+        "baseline-text",
+        "middle",
+        0,
+        -DATA.labelOffset
+      );
+
+      svg.appendChild(line(DATA.axisX[0], DATA.axisX[1], "axis"));
+      svg.appendChild(line(DATA.axisY[0], DATA.axisY[1], "axis"));
+      svg.appendChild(polygon(DATA.axisXArrow, "axis-arrow"));
+      svg.appendChild(polygon(DATA.axisYArrow, "axis-arrow"));
+
+      svg.appendChild(node("path", {
+        d: polylinePath(DATA.curve),
+        class: "curve"
+      }));
+
+      svg.appendChild(node("path", {
+        d: polylinePath(DATA.flow),
+        class: "flow"
+      }));
+      svg.appendChild(polygon(DATA.flowArrow, "flow-arrow"));
+
+      addText([0, 1.05], "precision", "axis-label", "start", DATA.labelOffset, -DATA.labelOffset);
+      addText([1.03, 0], "recall", "axis-label", "end", 0, DATA.labelOffset * DATA.lineWidth);
+      addText([0.18, 1.02], "порог ниже →", "direction", "start", 0, -DATA.labelOffset);
+
+      for (const item of DATA.thresholds) {
+        const point = item.point;
+        svg.appendChild(line([point[0], 0], point, "guide"));
+
+        svg.appendChild(node("circle", {
+          cx: sx(point[0]),
+          cy: sy(point[1]),
+          r: Math.abs(sx(DATA.radius[0]) - sx(0)),
+          class: "point-halo"
+        }));
+
+        svg.appendChild(node("circle", {
+          cx: sx(point[0]),
+          cy: sy(point[1]),
+          r: Math.abs(sx(DATA.radius[1]) - sx(0)),
+          class: "point-core"
+        }));
+
+        addText(
+          point,
+          item.label,
+          "threshold",
+          item.anchor,
+          item.offset[0],
+          item.offset[1]
+        );
+
+        if (item.note) {
+          addText(
+            point,
+            item.note,
+            "threshold-note",
+            item.anchor,
+            item.offset[0],
+            item.offset[1] + DATA.fontSize
+          );
+        }
+      }
+
+      const panelA = DATA.panel[0];
+      const panelB = DATA.panel[1];
+      svg.appendChild(node("rect", {
+        x: sx(panelA[0]),
+        y: sy(panelA[1]),
+        width: sx(panelB[0]) - sx(panelA[0]),
+        height: sy(panelB[1]) - sy(panelA[1]),
+        rx: Math.abs(sx(DATA.radius[0]) - sx(0)),
+        class: "callout"
+      }));
+
+      for (const [x, y, text] of DATA.panelText) {
+        addText(
+          [x, y],
+          text,
+          text === DATA.panelText[0][2] ? "callout-title" : "callout-text",
+          "start"
+        );
+      }
+
+      addText(
+        [0.50, -0.25],
+        "Порог выбирает рабочую точку на той же кривой — саму модель он не улучшает",
+        "small",
+        "middle"
+      );
+
+      svg.hidden = false;
+      fallback.hidden = true;
+    } catch (error) {
+      const chart = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      if (chart) chart.hidden = true;
+      if (fallback) fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

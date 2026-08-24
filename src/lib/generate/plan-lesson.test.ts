@@ -154,7 +154,8 @@ describe("generateLessonPlan", () => {
       { id: "004-c", type: "code", title: "matmul", exercise_fn: "matmul" },
       { id: "005-t", type: "theory", title: "Сборка" },
       { id: "006-check", type: "check", title: "Проверка" },
-      { id: "007-quiz", type: "quiz", title: "Итог" },
+      { id: "007-t", type: "theory", title: "Интеграция" },
+      { id: "008-quiz", type: "quiz", title: "Итог" },
     ]);
     const run = vi.fn().mockResolvedValue(plan);
 
@@ -181,7 +182,8 @@ describe("generateLessonPlan", () => {
       { id: "004-c", type: "code", title: "matmul", exercise_fn: "matmul" },
       { id: "005-t", type: "theory", title: "Сборка" },
       { id: "006-run", type: "run", title: "Сходимость", run_file: "exercise.py" },
-      { id: "007-quiz", type: "quiz", title: "Итог" },
+      { id: "007-t", type: "theory", title: "Интеграция" },
+      { id: "008-quiz", type: "quiz", title: "Итог" },
     ]);
     const run = vi.fn().mockResolvedValue(plan);
 

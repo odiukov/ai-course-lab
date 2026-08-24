@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>От порогов к ROC-кривой</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #fbfcff;
+      --panel: #f3f7fc;
+      --text: #172033;
+      --muted: #5f6b7d;
+      --axis: #334155;
+      --grid: #d5deea;
+      --random: #7c8798;
+      --curve: #1769aa;
+      --area: #dceeff;
+      --strict: #8b5cf6;
+      --middle: #e07818;
+      --soft: #16836f;
+      --point-ring: #ffffff;
+      --note: #edf4fb;
+      --border: #cad5e3;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #10141c;
+        --panel: #151c27;
+        --text: #eef4ff;
+        --muted: #acb8ca;
+        --axis: #d5deeb;
+        --grid: #344155;
+        --random: #97a4b7;
+        --curve: #62b6ff;
+        --area: #173653;
+        --strict: #b89aff;
+        --middle: #ffad5c;
+        --soft: #5ed6bc;
+        --point-ring: #10141c;
+        --note: #192738;
+        --border: #3b485b;
+      }
+    }
+
+    html,
+    body {
+      background: var(--background);
+      color: var(--text);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      background: var(--background);
+      border: 1px solid var(--border);
+    }
+
+    .diagram-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      max-height: 480px;
+      background: var(--background);
+    }
+
+    .grid-line {
+      stroke: var(--grid);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-line {
+      stroke: var(--axis);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .auc-area {
+      fill: var(--area);
+      stroke: none;
+    }
+
+    .random-line {
+      fill: none;
+      stroke: var(--random);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .roc-line {
+      fill: none;
+      stroke: var(--curve);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .guide-line {
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-label {
+      fill: var(--text);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .curve-label {
+      fill: var(--curve);
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .random-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .threshold-label {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .direction-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .corner-label {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .threshold-point {
+      stroke: var(--point-ring);
+      stroke-width: 3px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .fallback {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    noscript {
+      display: block;
+      color: var(--text);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="figure-title">
+    <div class="diagram-title" id="figure-title">От порогов к ROC-кривой</div>
+    <svg
+      id="roc-diagram"
+      viewBox="0 0 900 440"
+      width="900"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">ROC-кривая одной модели при разных порогах</title>
+      <desc id="svg-description">
+        По горизонтали отложена доля ложных тревог FPR, по вертикали —
+        доля найденных положительных TPR. Показаны диагональ случайной
+        модели с AUC 0.5, ступенчатая кривая хорошей модели с AUC около
+        0.9 и три точки, соответствующие строгому, среднему и мягкому порогам.
+      </desc>
+      <g id="diagram-layer"></g>
+    </svg>
+    <noscript>
+      Схема должна показать ROC-кривую, случайную модель с AUC = 0.5
+      и три положения порога одной хорошей модели.
+    </noscript>
+  </figure>
+
+  <script>
+    const data = {
+      frame: {
+        origin: { x: 150, y: 320 },
+        scale: { x: 580, y: 270 }
+      },
+      plot: {
+        xMin: 0,
+        xMax: 1,
+        yMin: 0,
+        yMax: 1
+      },
+      index: {
+        first: 0,
+        next: 1
+      },
+      grid: [0.25, 0.5, 0.75, 1],
+      curve: [
+        { x: 0, y: 0 },
+        { x: 0.02, y: 0.12 },
+        { x: 0.04, y: 0.42 },
+        { x: 0.07, y: 0.63 },
+        { x: 0.12, y: 0.78 },
+        { x: 0.2, y: 0.86 },
+        { x: 0.32, y: 0.91 },
+        { x: 0.52, y: 0.96 },
+        { x: 0.72, y: 0.985 },
+        { x: 1, y: 1 }
+      ],
+      thresholds: [
+        {
+          x: 0.02,
+          y: 0.12,
+          label: "строгий порог",
+          color: "var(--strict)",
+          dx: 12,
+          dy: 21,
+          anchor: "start",
+          guideX: 0.12,
+          guideY: 0.06
+        },
+        {
+          x: 0.12,
+          y: 0.78,
+          label: "средний порог",
+          color: "var(--middle)",
+          dx: 13,
+          dy: -15,
+          anchor: "start",
+          guideX: 0.22,
+          guideY: 0.84
+        },
+        {
+          x: 0.52,
+          y: 0.96,
+          label: "мягкий порог",
+          color: "var(--soft)",
+          dx: 15,
+          dy: 22,
+          anchor: "start",
+          guideX: 0.65,
+          guideY: 0.9
+        }
+      ],
+      labels: {
+        tpr: {
+          x: 0,
+          y: 1.075,
+          dx: 0,
+          dy: 0,
+          anchor: "start",
+          text: "TPR — доля найденных положительных"
+        },
+        fpr: {
+          x: 0.5,
+          y: -0.14,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "FPR — доля ложных тревог"
+        },
+        random: {
+          x: 0.69,
+          y: 0.61,
+          dx: 10,
+          dy: 19,
+          anchor: "start",
+          text: "случайная модель · AUC = 0.5"
+        },
+        good: {
+          x: 0.56,
+          y: 0.78,
+          dx: 12,
+          dy: 0,
+          anchor: "start",
+          text: "хорошая модель · AUC ≈ 0.9"
+        },
+        corner: {
+          x: 0.035,
+          y: 0.91,
+          dx: 0,
+          dy: 0,
+          anchor: "start",
+          text: "лучший компромисс — ближе сюда"
+        },
+        direction: {
+          x: 0.5,
+          y: -0.315,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "порог снижается → модель чаще говорит «да»"
+        },
+        fallback: {
+          x: 0.5,
+          y: 0.5,
+          dx: 0,
+          dy: 0,
+          anchor: "middle",
+          text: "ROC-кривая: три порога одной модели, AUC = 0.5 и AUC ≈ 0.9"
+        }
+      },
+      style: {
+        dotRadius: 8,
+        dash: "8 8"
+      }
+    };
+
+    const origin = data.frame.origin;
+    const scale = data.frame.scale;
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("roc-diagram");
+      const layer = document.getElementById("diagram-layer");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      if (!svg || !layer) {
+        throw new Error("Не найден контейнер схемы");
+      }
+
+      const make = (name, attributes, className) => {
+        const node = document.createElementNS(namespace, name);
+
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, String(value));
+        }
+
+        if (className) {
+          node.setAttribute("class", className);
+        }
+
+        return node;
+      };
+
+      const line = (x1, y1, x2, y2, className, extra = {}) =>
+        make("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          ...extra
+        }, className);
+
+      const text = (item, className) => {
+        const node = make("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          dx: item.dx,
+          dy: item.dy,
+          "text-anchor": item.anchor,
+          "dominant-baseline": "middle"
+        }, className);
+
+        node.textContent = item.text;
+        return node;
+      };
+
+      for (const value of data.grid) {
+        layer.append(
+          line(
+            value,
+            data.plot.yMin,
+            value,
+            data.plot.yMax,
+            "grid-line"
+          )
+        );
+
+        layer.append(
+          line(
+            data.plot.xMin,
+            value,
+            data.plot.xMax,
+            value,
+            "grid-line"
+          )
+        );
+      }
+
+      layer.append(
+        line(
+          data.plot.xMin,
+          data.plot.yMin,
+          data.plot.xMax,
+          data.plot.yMin,
+          "axis-line"
+        )
+      );
+
+      layer.append(
+        line(
+          data.plot.xMin,
+          data.plot.yMin,
+          data.plot.xMin,
+          data.plot.yMax,
+          "axis-line"
+        )
+      );
+
+      const first = data.curve.at(data.index.first);
+      let previous = first;
+      let curvePath = `M ${sx(first.x)} ${sy(first.y)}`;
+
+      for (const point of data.curve.slice(data.index.next)) {
+        curvePath += ` L ${sx(previous.x)} ${sy(point.y)}`;
+        curvePath += ` L ${sx(point.x)} ${sy(point.y)}`;
+        previous = point;
+      }
+
+      const areaPath =
+        curvePath +
+        ` L ${sx(data.plot.xMax)} ${sy(data.plot.yMin)}` +
+        ` L ${sx(data.plot.xMin)} ${sy(data.plot.yMin)} Z`;
+
+      layer.append(
+        make("path", { d: areaPath }, "auc-area")
+      );
+
+      const randomPath =
+        `M ${sx(data.plot.xMin)} ${sy(data.plot.yMin)}` +
+        ` L ${sx(data.plot.xMax)} ${sy(data.plot.yMax)}`;
+
+      const randomLine = make(
+        "path",
+        {
+          d: randomPath,
+          "stroke-dasharray": data.style.dash
+        },
+        "random-line"
+      );
+
+      layer.append(randomLine);
+      layer.append(make("path", { d: curvePath }, "roc-line"));
+
+      for (const threshold of data.thresholds) {
+        const guide = line(
+          threshold.x,
+          threshold.y,
+          threshold.guideX,
+          threshold.guideY,
+          "guide-line",
+          {
+            stroke: threshold.color,
+            "stroke-dasharray": data.style.dash
+          }
+        );
+
+        const point = make(
+          "circle",
+          {
+            cx: sx(threshold.x),
+            cy: sy(threshold.y),
+            r: data.style.dotRadius,
+            fill: threshold.color
+          },
+          "threshold-point"
+        );
+
+        const label = text(
+          {
+            x: threshold.x,
+            y: threshold.y,
+            dx: threshold.dx,
+            dy: threshold.dy,
+            anchor: threshold.anchor,
+            text: threshold.label
+          },
+          "threshold-label"
+        );
+
+        layer.append(guide, point, label);
+      }
+
+      layer.append(
+        text(data.labels.tpr, "axis-label"),
+        text(data.labels.fpr, "axis-label"),
+        text(data.labels.random, "random-label"),
+        text(data.labels.good, "curve-label"),
+        text(data.labels.corner, "corner-label"),
+        text(data.labels.direction, "direction-label")
+      );
+    } catch (error) {
+      const layer = document.getElementById("diagram-layer");
+
+      if (layer) {
+        layer.replaceChildren();
+
+        const namespace = "http://www.w3.org/2000/svg";
+        const fallback = document.createElementNS(namespace, "text");
+        const item = data.labels.fallback;
+
+        fallback.setAttribute("x", String(sx(item.x)));
+        fallback.setAttribute("y", String(sy(item.y)));
+        fallback.setAttribute("dx", String(item.dx));
+        fallback.setAttribute("dy", String(item.dy));
+        fallback.setAttribute("text-anchor", item.anchor);
+        fallback.setAttribute("dominant-baseline", "middle");
+        fallback.setAttribute("class", "fallback");
+        fallback.textContent = item.text;
+        layer.append(fallback);
+      }
+    }
+  </script>
+</body>
+</html>

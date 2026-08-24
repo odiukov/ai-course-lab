@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Схема слоя с LoRA</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1f2430; --muted:#5b6472;
+    --frozen-fill:#e5e7eb; --frozen-stroke:#9ca3af; --frozen-text:#374151;
+    --train-fill:#dbeafe; --train-stroke:#2563eb; --train-text:#12356b;
+    --line:#4b5563; --io-fill:#ffffff; --io-stroke:#4b5563;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#13131b; --fg:#e8ebf2; --muted:#a2acbd;
+      --frozen-fill:#2a2a34; --frozen-stroke:#6b7280; --frozen-text:#d3d7de;
+      --train-fill:#16324f; --train-stroke:#60a5fa; --train-text:#cfe4ff;
+      --line:#98a2b3; --io-fill:#1b1b25; --io-stroke:#98a2b3;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{padding:10px 12px 14px;}
+  h3{margin:0 0 6px;font-size:15px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .box-frozen{fill:var(--frozen-fill);stroke:var(--frozen-stroke);stroke-width:1.5;}
+  .box-train{fill:var(--train-fill);stroke:var(--train-stroke);stroke-width:1.5;}
+  .box-io{fill:var(--io-fill);stroke:var(--io-stroke);stroke-width:1.5;}
+  .edge{fill:none;stroke:var(--line);stroke-width:2;}
+  .headfill{fill:var(--line);}
+  .t{fill:var(--fg);font-size:13px;}
+  .t-frozen{fill:var(--frozen-text);}
+  .t-train{fill:var(--train-text);}
+  .t-dim{fill:var(--muted);font-size:12px;}
+  .t-big{font-size:17px;font-weight:600;}
+  .t-note{fill:var(--muted);font-size:12px;}
+  .fallback{color:var(--fg);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h3>Слой с LoRA: одна и та же <em>x</em> идёт двумя дорогами</h3>
+  <div id="mount"></div>
+</div>
+<script>
+(function(){
+  var mount = document.getElementById('mount');
+  try{
+    /* ---- данные схемы (координаты в единицах схемы) ---- */
+    var BOXES = [
+      {cls:'box-io',     x0:0.0, y0:-0.55, x1:1.6,  y1:0.55,
+       lines:[{t:'x', y:-0.1, c:'t t-big'}]},
+      {cls:'box-frozen', x0:4.5, y0:1.10,  x1:9.5,  y1:2.90,
+       lines:[{t:'W — заморожена', y:2.22, c:'t t-frozen'},
+              {t:'4096 × 4096',    y:1.60, c:'t-dim'}]},
+      {cls:'box-train',  x0:4.0, y0:-2.90, x1:6.4,  y1:-1.10,
+       lines:[{t:'A', y:-1.78, c:'t t-train t-big'},
+              {t:'16 × 4096', y:-2.42, c:'t-dim'}]},
+      {cls:'box-train',  x0:7.6, y0:-2.90, x1:10.0, y1:-1.10,
+       lines:[{t:'B', y:-1.78, c:'t t-train t-big'},
+              {t:'4096 × 16', y:-2.42, c:'t-dim'}]},
+      {cls:'box-io',     x0:14.2,y0:-0.55, x1:15.8, y1:0.55,
+       lines:[{t:'y', y:-0.1, c:'t t-big'}]}
+    ];
+    var PLUS = {cx:12.2, cy:0, r:0.55};
+    var ARROWS = [
+      {pts:[[1.6,0],[2.6,0],[2.6,2],[4.5,2]],        dir:[1,0]},
+      {pts:[[2.6,0],[2.6,-2],[4.0,-2]],              dir:[1,0]},
+      {pts:[[6.4,-2],[7.6,-2]],                      dir:[1,0]},
+      {pts:[[9.5,2],[12.2,2],[12.2,0.60]],           dir:[0,-1]},
+      {pts:[[10.0,-2],[12.2,-2],[12.2,-0.60]],       dir:[0,1]},
+      {pts:[[12.75,0],[14.2,0]],                     dir:[1,0]}
+    ];
+    var LABELS = [
+      {t:'4096', x:2.05,  y:0,     side:'above', c:'t-dim'},
+      {t:'4096', x:10.55, y:2,     side:'above', c:'t-dim'},
+      {t:'16',   x:7.0,   y:-2,    side:'above', c:'t-dim'},
+      {t:'4096', x:11.05, y:-2,    side:'above', c:'t-dim'},
+      {t:'вход', x:0.8,   y:-0.55, side:'below', c:'t-note'},
+      {t:'выход',x:15.0,  y:-0.55, side:'below', c:'t-note'},
+      {t:'Серый — заморожен, градиенты не идут. Синий — обучаются только A и B.',
+       x:0, y:-3.5, side:'right', c:'t-note'},
+      {t:'y = Wx + BAx', x:15.8, y:-3.5, side:'left', c:'t'}
+    ];
+
+    /* ---- единственный перевод координат ---- */
+    var origin = {x:60, y:210};
+    var scale  = 50;
+    function sx(v){ return origin.x + v * scale; }
+    function sy(v){ return origin.y - v * scale; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){ var e=document.createElementNS(NS,n);
+      for(var k in a){ e.setAttribute(k, a[k]); } return e; }
+    function P(p){ return sx(p[0]) + ',' + sy(p[1]); }
+
+    var svg = el('svg', {viewBox:'30 45 850 355',
+      preserveAspectRatio:'xMidYMid meet', role:'img',
+      'aria-label':'Вход x идёт в замороженную W и параллельно в A и B; выходы складываются в y'});
+
+    /* фон */
+    svg.appendChild(el('rect',{x:30,y:45,width:850,height:355,fill:'var(--bg)'}));
+
+    /* стрелки */
+    ARROWS.forEach(function(a){
+      svg.appendChild(el('polyline',{class:'edge', points:a.pts.map(P).join(' ')}));
+      var tip = a.pts[a.pts.length-1], dx=a.dir[0], dy=a.dir[1];
+      var L=0.30, H=0.16;
+      var bx = tip[0]-dx*L, by = tip[1]-dy*L, px=-dy, py=dx;
+      svg.appendChild(el('polygon',{class:'headfill', points:[
+        P(tip), P([bx+px*H, by+py*H]), P([bx-px*H, by-py*H])].join(' ')}));
+    });
+
+    /* блоки */
+    BOXES.forEach(function(b){
+      svg.appendChild(el('rect',{class:b.cls, rx:6,
+        x:sx(b.x0), y:sy(b.y1),
+        width: sx(b.x1)-sx(b.x0), height: sy(b.y0)-sy(b.y1)}));
+      var cx = (b.x0 + b.x1) / 2;
+      b.lines.forEach(function(l){
+        var t = el('text',{class:l.c, x:sx(cx), y:sy(l.y), 'text-anchor':'middle'});
+        t.textContent = l.t; svg.appendChild(t);
+      });
+    });
+
+    /* узел сложения */
+    svg.appendChild(el('circle',{class:'box-io',
+      cx:sx(PLUS.cx), cy:sy(PLUS.cy), r: sx(PLUS.r) - sx(0)}));
+    var plusT = el('text',{class:'t t-big', x:sx(PLUS.cx), y:sy(PLUS.cy-0.18),
+      'text-anchor':'middle'});
+    plusT.textContent = '+'; svg.appendChild(plusT);
+
+    /* подписи: свой якорь и свой отступ у каждой */
+    var OFF = 9, OFF_BELOW = 16, OFF_SIDE = 10;
+    LABELS.forEach(function(l){
+      var px = sx(l.x), py = sy(l.y), anchor = 'middle';
+      if(l.side === 'above'){ py -= OFF; }
+      else if(l.side === 'below'){ py += OFF_BELOW; }
+      else if(l.side === 'left'){ px -= 0; py += 0; anchor = 'end'; }
+      else if(l.side === 'right'){ px += 0; py += 0; anchor = 'start'; }
+      var t = el('text',{class:l.c, x:px, y:py, 'text-anchor':anchor});
+      t.textContent = l.t; svg.appendChild(t);
+    });
+
+    mount.appendChild(svg);
+  }catch(err){
+    mount.innerHTML = '<p class="fallback">Схема не отрисовалась. Она должна показывать: ' +
+      'вход <b>x</b> раздваивается. Верхняя ветка — замороженная матрица <b>W</b> (4096 × 4096), ' +
+      'её выход длиной 4096. Нижняя ветка — <b>A</b> (16 × 4096) сжимает вход до 16 чисел, ' +
+      'затем <b>B</b> (4096 × 16) разворачивает 16 обратно в 4096. Обе ветки сходятся в узле «+» ' +
+      'и дают выход <b>y</b>: y = Wx + BAx. Обучаются только A и B.</p>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как BPE, WordPiece и Unigram строят vocabulary</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f5f7fb;
+    --surface: #ffffff;
+    --surface-soft: #f8fafc;
+    --text: #172033;
+    --muted: #657086;
+    --border: #d8deea;
+    --arrow: #8792a8;
+    --bpe: #2563eb;
+    --bpe-soft: #eaf1ff;
+    --wordpiece: #7c3aed;
+    --wordpiece-soft: #f1eaff;
+    --unigram: #d55b16;
+    --unigram-soft: #fff0e5;
+    --result: #14805e;
+    --result-soft: #e7f7f1;
+    --danger: #c64242;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  }
+
+  body {
+    padding: 12px 16px 14px;
+  }
+
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+
+  .frame {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(32, 45, 70, 0.08);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--surface);
+    font-family: inherit;
+    shape-rendering: geometricPrecision;
+  }
+
+  .panel {
+    fill: var(--surface-soft);
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .box {
+    fill: var(--surface);
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .corpus-box {
+    fill: var(--surface);
+  }
+
+  .result-box {
+    fill: var(--result-soft);
+    stroke: var(--result);
+  }
+
+  .bpe .stage-box,
+  .bpe .rule-box,
+  .bpe .action-box {
+    fill: var(--bpe-soft);
+    stroke: var(--bpe);
+  }
+
+  .wordpiece .stage-box,
+  .wordpiece .rule-box,
+  .wordpiece .action-box {
+    fill: var(--wordpiece-soft);
+    stroke: var(--wordpiece);
+  }
+
+  .unigram .stage-box,
+  .unigram .rule-box,
+  .unigram .action-box {
+    fill: var(--unigram-soft);
+    stroke: var(--unigram);
+  }
+
+  .lane-dot.bpe-dot { fill: var(--bpe); }
+  .lane-dot.wordpiece-dot { fill: var(--wordpiece); }
+  .lane-dot.unigram-dot { fill: var(--unigram); }
+
+  .lane-title {
+    fill: var(--text);
+    font-size: 18px;
+    font-weight: 750;
+  }
+
+  .badge {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .bpe .badge { fill: var(--bpe); }
+  .wordpiece .badge { fill: var(--wordpiece); }
+  .unigram .badge { fill: var(--unigram); }
+
+  .label {
+    fill: var(--text);
+    font-size: 14px;
+  }
+
+  .label-strong {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .formula {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tokens {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.03em;
+  }
+
+  .result-label {
+    fill: var(--result);
+    font-size: 13px;
+    font-weight: 750;
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .remove-mark {
+    fill: none;
+    stroke: var(--danger);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .summary-line {
+    stroke: var(--border);
+    stroke-width: 1.5;
+  }
+
+  .summary {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .summary-add { fill: var(--result); }
+  .summary-remove { fill: var(--danger); }
+
+  #fallback {
+    display: none;
+    margin: 0;
+    padding: 24px;
+    color: var(--text);
+    background: var(--surface);
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0d1220;
+      --surface: #151c2d;
+      --surface-soft: #111827;
+      --text: #edf2ff;
+      --muted: #aab5cb;
+      --border: #344059;
+      --arrow: #8e9ab2;
+      --bpe: #75a7ff;
+      --bpe-soft: #192b4b;
+      --wordpiece: #bd98ff;
+      --wordpiece-soft: #30204c;
+      --unigram: #ff9a5c;
+      --unigram-soft: #48291d;
+      --result: #63d6ad;
+      --result-soft: #173d35;
+      --danger: #ff8585;
+    }
+
+    .frame {
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Как BPE, WordPiece и Unigram строят vocabulary</h1>
+  <div class="frame">
+    <svg id="diagram" viewBox="0 0 1080 440" width="1080" height="440"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Три маршрута построения vocabulary</title>
+      <desc id="svg-description">BPE и WordPiece добавляют токены, используя разные критерии выбора пары. Unigram начинает с большого vocabulary и удаляет наименее полезные токены.</desc>
+    </svg>
+    <p id="fallback">Схема должна была показать три параллельных маршрута: BPE сливает самую частую соседнюю пару; WordPiece выбирает пару с максимальным score count(AB) / (count(A) × count(B)); Unigram начинает с большого vocabulary и удаляет наименее полезные токены.</p>
+  </div>
+</main>
+
+<script>
+const data = Object.freeze({
+  panel: { x: 12, width: 1056, height: 124, radius: 14 },
+  dot: { x: 25, radius: 5 },
+  boxes: [
+    { x: 30, width: 160, kind: "corpus-box" },
+    { x: 230, width: 170, kind: "stage-box" },
+    { x: 440, width: 285, kind: "rule-box" },
+    { x: 765, width: 135, kind: "action-box" },
+    { x: 940, width: 110, kind: "result-box" }
+  ],
+  boxHeight: 68,
+  boxRadius: 10,
+  links: [
+    { from: 190, to: 230 },
+    { from: 400, to: 440 },
+    { from: 725, to: 765 },
+    { from: 900, to: 940 }
+  ],
+  arrowHead: { length: 8, rise: 5 },
+  textCenter: 0.5,
+  lanes: [
+    {
+      className: "bpe",
+      dotClass: "bpe-dot",
+      panelY: 8,
+      titleY: 31,
+      cardY: 48,
+      arrowY: 82,
+      title: "BPE",
+      badge: "ДОБАВЛЕНИЕ · ПО ЧАСТОТЕ",
+      content: [
+        [
+          { text: "одинаковый корпус", offset: 22, className: "label-strong" },
+          { text: "A B · A C · A B", offset: 47, className: "tokens" }
+        ],
+        [
+          { text: "маленький vocabulary", offset: 22, className: "label-strong" },
+          { text: "базовые единицы", offset: 47, className: "label" }
+        ],
+        [
+          { text: "найти самую частую", offset: 22, className: "label-strong" },
+          { text: "соседнюю пару", offset: 47, className: "label" }
+        ],
+        [
+          { text: "склеить пару", offset: 22, className: "label-strong" },
+          { text: "добавить токен", offset: 47, className: "label" }
+        ],
+        [
+          { text: "итоговый", offset: 18, className: "result-label" },
+          { text: "vocabulary", offset: 39, className: "result-label" },
+          { text: "растёт", offset: 57, className: "result-label" }
+        ]
+      ]
+    },
+    {
+      className: "wordpiece",
+      dotClass: "wordpiece-dot",
+      panelY: 143,
+      titleY: 166,
+      cardY: 183,
+      arrowY: 217,
+      title: "WordPiece",
+      badge: "ДОБАВЛЕНИЕ · ПО SCORE",
+      content: [
+        [
+          { text: "одинаковый корпус", offset: 22, className: "label-strong" },
+          { text: "A B · A C · A B", offset: 47, className: "tokens" }
+        ],
+        [
+          { text: "маленький vocabulary", offset: 22, className: "label-strong" },
+          { text: "базовые единицы", offset: 47, className: "label" }
+        ],
+        [
+          { text: "выбрать максимальный score", offset: 21, className: "label-strong" },
+          { text: "count(AB) / (count(A) × count(B))", offset: 48, className: "formula" }
+        ],
+        [
+          { text: "склеить пару", offset: 22, className: "label-strong" },
+          { text: "добавить токен", offset: 47, className: "label" }
+        ],
+        [
+          { text: "итоговый", offset: 18, className: "result-label" },
+          { text: "vocabulary", offset: 39, className: "result-label" },
+          { text: "растёт", offset: 57, className: "result-label" }
+        ]
+      ]
+    },
+    {
+      className: "unigram",
+      dotClass: "unigram-dot",
+      panelY: 278,
+      titleY: 301,
+      cardY: 318,
+      arrowY: 352,
+      title: "Unigram",
+      badge: "УДАЛЕНИЕ · ПО ПОЛЕЗНОСТИ",
+      content: [
+        [
+          { text: "одинаковый корпус", offset: 22, className: "label-strong" },
+          { text: "A B · A C · A B", offset: 47, className: "tokens" }
+        ],
+        [
+          { text: "большой vocabulary", offset: 22, className: "label-strong" },
+          { text: "A · B · AB · BA · …", offset: 47, className: "tokens" }
+        ],
+        [
+          { text: "оценить, как разбиения", offset: 22, className: "label-strong" },
+          { text: "объясняют корпус", offset: 47, className: "label" }
+        ],
+        [
+          { text: "удалять", offset: 22, className: "label-strong" },
+          { text: "наименее полезные", offset: 47, className: "label" }
+        ],
+        [
+          { text: "итоговый", offset: 18, className: "result-label" },
+          { text: "vocabulary", offset: 39, className: "result-label" },
+          { text: "сжимается", offset: 57, className: "result-label" }
+        ]
+      ],
+      removeMark: {
+        x1: 856, y1: 359,
+        x2: 873, y2: 342
+      }
+    }
+  ],
+  titleX: 38,
+  badgeX: 1048,
+  boxTextAnchor: "middle",
+  summary: {
+    lineX1: 30,
+    lineX2: 1050,
+    lineY: 415,
+    y: 433,
+    addX: 30,
+    removeX: 596,
+    addText: "BPE и WordPiece: vocabulary растёт через добавление",
+    removeText: "Unigram: vocabulary сокращается через удаление"
+  }
+});
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const add = (tag, attributes, parent = svg) => {
+    const element = document.createElementNS(namespace, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      element.setAttribute(name, value);
+    });
+    parent.appendChild(element);
+    return element;
+  };
+
+  const addText = (parent, text, x, y, className, anchor) => {
+    const element = add("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor
+    }, parent);
+    element.textContent = text;
+    return element;
+  };
+
+  const drawArrow = (parent, link, y) => {
+    add("line", {
+      x1: sx(link.from),
+      y1: sy(y),
+      x2: sx(link.to),
+      y2: sy(y),
+      class: "arrow"
+    }, parent);
+
+    add("polyline", {
+      points: [
+        `${sx(link.to - data.arrowHead.length)},${sy(y - data.arrowHead.rise)}`,
+        `${sx(link.to)},${sy(y)}`,
+        `${sx(link.to - data.arrowHead.length)},${sy(y + data.arrowHead.rise)}`
+      ].join(" "),
+      class: "arrow"
+    }, parent);
+  };
+
+  data.lanes.forEach(lane => {
+    const group = add("g", { class: lane.className });
+
+    add("rect", {
+      x: sx(data.panel.x),
+      y: sy(lane.panelY),
+      width: sx(data.panel.width),
+      height: sy(data.panel.height),
+      rx: sx(data.panel.radius),
+      class: "panel"
+    }, group);
+
+    add("circle", {
+      cx: sx(data.dot.x),
+      cy: sy(lane.titleY - data.dot.radius),
+      r: sx(data.dot.radius),
+      class: `lane-dot ${lane.dotClass}`
+    }, group);
+
+    addText(
+      group,
+      lane.title,
+      data.titleX,
+      lane.titleY,
+      "lane-title",
+      "start"
+    );
+
+    addText(
+      group,
+      lane.badge,
+      data.badgeX,
+      lane.titleY,
+      "badge",
+      "end"
+    );
+
+    data.boxes.forEach((box, boxIndex) => {
+      add("rect", {
+        x: sx(box.x),
+        y: sy(lane.cardY),
+        width: sx(box.width),
+        height: sy(data.boxHeight),
+        rx: sx(data.boxRadius),
+        class: `box ${box.kind}`
+      }, group);
+
+      const centerX = box.x + box.width * data.textCenter;
+      lane.content[boxIndex].forEach(line => {
+        addText(
+          group,
+          line.text,
+          centerX,
+          lane.cardY + line.offset,
+          line.className,
+          data.boxTextAnchor
+        );
+      });
+    });
+
+    data.links.forEach(link => drawArrow(group, link, lane.arrowY));
+
+    if (lane.removeMark) {
+      add("line", {
+        x1: sx(lane.removeMark.x1),
+        y1: sy(lane.removeMark.y1),
+        x2: sx(lane.removeMark.x2),
+        y2: sy(lane.removeMark.y2),
+        class: "remove-mark"
+      }, group);
+    }
+  });
+
+  add("line", {
+    x1: sx(data.summary.lineX1),
+    y1: sy(data.summary.lineY),
+    x2: sx(data.summary.lineX2),
+    y2: sy(data.summary.lineY),
+    class: "summary-line"
+  });
+
+  addText(
+    svg,
+    data.summary.addText,
+    data.summary.addX,
+    data.summary.y,
+    "summary summary-add",
+    "start"
+  );
+
+  addText(
+    svg,
+    data.summary.removeText,
+    data.summary.removeX,
+    data.summary.y,
+    "summary summary-remove",
+    "start"
+  );
+
+  fallback.style.display = "none";
+} catch (error) {
+  document.getElementById("diagram").style.display = "none";
+  document.getElementById("fallback").style.display = "block";
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Замкнутый путь команды и результата</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --panel-strong: #eef4ff;
+    --text: #172033;
+    --muted: #536079;
+    --line: #45658f;
+    --accent: #2463d4;
+    --accent-soft: #dce9ff;
+    --record: #fff4d8;
+    --record-line: #a86b00;
+    --gate: #e8f7ee;
+    --gate-line: #278052;
+    --ok: #237a4b;
+    --fail: #b63d3d;
+    --unknown: #687386;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #192231;
+      --panel-strong: #1d2b40;
+      --text: #edf3ff;
+      --muted: #b6c2d8;
+      --line: #8da7ca;
+      --accent: #77a9ff;
+      --accent-soft: #233c63;
+      --record: #3a3020;
+      --record-line: #e5b85c;
+      --gate: #1d372d;
+      --gate-line: #70c999;
+      --ok: #70c999;
+      --fail: #ff9292;
+      --unknown: #aeb9ca;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--text);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .diagram-title {
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    color: var(--text);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 455px;
+    background: var(--page);
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .node-primary {
+    fill: var(--panel-strong);
+    stroke: var(--accent);
+  }
+
+  .node-record {
+    fill: var(--record);
+    stroke: var(--record-line);
+  }
+
+  .node-gate {
+    fill: var(--gate);
+    stroke: var(--gate-line);
+  }
+
+  .flow,
+  .feedback,
+  .gate-flow {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow {
+    stroke: var(--accent);
+    stroke-width: 3px;
+  }
+
+  .feedback {
+    stroke: var(--record-line);
+    stroke-width: 3px;
+  }
+
+  .gate-flow {
+    stroke: var(--gate-line);
+    stroke-width: 3px;
+  }
+
+  .arrow-flow {
+    fill: var(--accent);
+  }
+
+  .arrow-feedback {
+    fill: var(--record-line);
+  }
+
+  .arrow-gate {
+    fill: var(--gate-line);
+  }
+
+  text {
+    font-family: inherit;
+    fill: var(--text);
+  }
+
+  .node-title {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .node-copy {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .field {
+    font-size: 14px;
+  }
+
+  .edge-label {
+    font-size: 12px;
+    font-weight: bold;
+    fill: var(--muted);
+  }
+
+  .loop-label {
+    font-size: 14px;
+    font-weight: bold;
+    fill: var(--record-line);
+  }
+
+  .outcome {
+    fill: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .outcome-ok {
+    stroke: var(--ok);
+  }
+
+  .outcome-fail {
+    stroke: var(--fail);
+  }
+
+  .outcome-unknown {
+    stroke: var(--unknown);
+  }
+
+  .outcome-text {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .ok-text {
+    fill: var(--ok);
+  }
+
+  .fail-text {
+    fill: var(--fail);
+  }
+
+  .unknown-text {
+    fill: var(--unknown);
+  }
+
+  .fallback {
+    font-size: 16px;
+    color: var(--text);
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<div class="diagram-title">Замкнутый путь команды и её результата</div>
+
+<svg id="diagram"
+     width="1240"
+     height="455"
+     viewBox="0 0 1240 455"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Замкнутый путь команды и её результата</title>
+  <desc id="svg-desc">Команда проходит от цикла агента через раннер и отдельный процесс. Фактический результат сохраняется в feedback_record.jsonl, возвращается агенту и отдельно поступает в гейт проверки.</desc>
+  <g id="drawing"></g>
+</svg>
+
+<div id="fallback" class="fallback" hidden>
+  Схема должна была показать петлю: Agent Loop → run_with_feedback.py →
+  subprocess → stdout, stderr, exit code и duration →
+  feedback_record.jsonl → обратно к агенту; от записи также идёт отдельная
+  стрелка к Verification Gate.
+</div>
+
+<script>
+const DATA = Object.freeze({
+  zero: 0,
+  corner: 12,
+  originHint: { x: 0, y: 0 },
+  scaleHint: { x: 1, y: 1 },
+
+  nodes: [
+    {
+      x: 45, y: 100, w: 155, h: 78,
+      className: "node node-primary",
+      texts: [
+        { x: 122, y: 125, value: "Agent Loop", className: "node-title", anchor: "middle" },
+        { x: 122, y: 151, value: "следующее решение", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 260, y: 100, w: 215, h: 78,
+      className: "node",
+      texts: [
+        { x: 367, y: 125, value: "run_with_feedback.py", className: "node-title", anchor: "middle" },
+        { x: 367, y: 151, value: "запускает и захватывает", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 535, y: 100, w: 185, h: 78,
+      className: "node",
+      texts: [
+        { x: 627, y: 125, value: "subprocess", className: "node-title", anchor: "middle" },
+        { x: 627, y: 151, value: "отдельный процесс", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 780, y: 65, w: 190, h: 150,
+      className: "node",
+      texts: [
+        { x: 875, y: 88, value: "Фактический исход", className: "node-title", anchor: "middle" },
+        { x: 797, y: 119, value: "stdout: «3 failed»", className: "field", anchor: "start" },
+        { x: 797, y: 145, value: "stderr", className: "field", anchor: "start" },
+        { x: 797, y: 171, value: "exit code: 1", className: "field", anchor: "start" },
+        { x: 797, y: 197, value: "duration", className: "field", anchor: "start" }
+      ]
+    },
+    {
+      x: 1025, y: 85, w: 185, h: 110,
+      className: "node node-record",
+      texts: [
+        { x: 1117, y: 112, value: "feedback_record", className: "node-title", anchor: "middle" },
+        { x: 1117, y: 136, value: ".jsonl", className: "node-title", anchor: "middle" },
+        { x: 1117, y: 169, value: "один запуск — одна запись", className: "node-copy", anchor: "middle" }
+      ]
+    },
+    {
+      x: 845, y: 260, w: 190, h: 75,
+      className: "node node-gate",
+      texts: [
+        { x: 940, y: 286, value: "Verification Gate", className: "node-title", anchor: "middle" },
+        { x: 940, y: 312, value: "достаточно ли фактов?", className: "node-copy", anchor: "middle" }
+      ]
+    }
+  ],
+
+  arrows: [
+    {
+      points: [[200, 139], [260, 139]],
+      head: [[260, 139], [247, 131], [247, 147]],
+      lineClass: "flow",
+      headClass: "arrow-flow"
+    },
+    {
+      points: [[475, 139], [535, 139]],
+      head: [[535, 139], [522, 131], [522, 147]],
+      lineClass: "flow",
+      headClass: "arrow-flow"
+    },
+    {
+      points: [[720, 139], [780, 139]],
+      head: [[780, 139], [767, 131], [767, 147]],
+      lineClass: "flow",
+      headClass: "arrow-flow"
+    },
+    {
+      points: [[970, 139], [1025, 139]],
+      head: [[1025, 139], [1012, 131], [1012, 147]],
+      lineClass: "flow",
+      headClass: "arrow-flow"
+    },
+    {
+      points: [[1118, 195], [1118, 370], [122, 370], [122, 178]],
+      head: [[122, 178], [114, 191], [130, 191]],
+      lineClass: "feedback",
+      headClass: "arrow-feedback"
+    },
+    {
+      points: [[1070, 195], [1070, 230], [940, 230], [940, 260]],
+      head: [[940, 260], [932, 247], [948, 247]],
+      lineClass: "gate-flow",
+      headClass: "arrow-gate"
+    }
+  ],
+
+  edgeLabels: [
+    { x: 207, y: 122, value: "команда", anchor: "start", className: "edge-label" },
+    { x: 482, y: 122, value: "точный argv", anchor: "start", className: "edge-label" },
+    { x: 727, y: 122, value: "запуск", anchor: "start", className: "edge-label" },
+    { x: 977, y: 122, value: "запись", anchor: "start", className: "edge-label" },
+    { x: 1102, y: 352, value: "фактический результат возвращён", anchor: "end", className: "loop-label" },
+    { x: 1058, y: 218, value: "независимая проверка", anchor: "end", className: "edge-label" }
+  ],
+
+  outcomes: [
+    {
+      x: 45, y: 395, w: 270, h: 42,
+      className: "outcome outcome-ok",
+      text: { x: 180, y: 416, value: "exit code 0 → перейти дальше", anchor: "middle", className: "outcome-text ok-text" }
+    },
+    {
+      x: 335, y: 395, w: 450, h: 42,
+      className: "outcome outcome-fail",
+      text: { x: 560, y: 416, value: "exit code 1 + «3 failed» → исправить и повторить", anchor: "middle", className: "outcome-text fail-text" }
+    },
+    {
+      x: 805, y: 395, w: 405, h: 42,
+      className: "outcome outcome-unknown",
+      text: { x: 1007, y: 416, value: "exit_code: null → подтверждение не вернулось", anchor: "middle", className: "outcome-text unknown-text" }
+    }
+  ]
+});
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+
+  const element = (name, attributes, parent) => {
+    const node = document.createElementNS(SVG_NS, name);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    parent.appendChild(node);
+    return node;
+  };
+
+  const addText = (parent, item) => {
+    const text = element("text", {
+      x: sx(item.x),
+      y: sy(item.y),
+      class: item.className,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle"
+    }, parent);
+    text.textContent = item.value;
+    return text;
+  };
+
+  const addRect = (parent, item) => element("rect", {
+    x: sx(item.x),
+    y: sy(item.y),
+    width: sx(item.x + item.w) - sx(item.x),
+    height: sy(item.y + item.h) - sy(item.y),
+    rx: sx(DATA.corner) - sx(DATA.zero),
+    ry: sy(DATA.corner) - sy(DATA.zero),
+    class: item.className
+  }, parent);
+
+  const pathData = points => points.map((point, position) => {
+    const [x, y] = point;
+    return `${position ? "L" : "M"} ${sx(x)} ${sy(y)}`;
+  }).join(" ");
+
+  const polygonData = points => points.map(point => {
+    const [x, y] = point;
+    return `${sx(x)},${sy(y)}`;
+  }).join(" ");
+
+  DATA.arrows.forEach(item => {
+    element("path", {
+      d: pathData(item.points),
+      class: item.lineClass
+    }, drawing);
+
+    element("polygon", {
+      points: polygonData(item.head),
+      class: item.headClass
+    }, drawing);
+  });
+
+  DATA.nodes.forEach(item => {
+    const group = element("g", {}, drawing);
+    addRect(group, item);
+    item.texts.forEach(text => addText(group, text));
+  });
+
+  DATA.edgeLabels.forEach(item => addText(drawing, item));
+
+  DATA.outcomes.forEach(item => {
+    const group = element("g", {}, drawing);
+    addRect(group, item);
+    addText(group, item.text);
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Путь документа через BERTopic</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel-strong: #eef4ff;
+      --ink: #172033;
+      --muted: #596579;
+      --line: #94a3b8;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --cluster: #0f766e;
+      --cluster-soft: #ccfbf1;
+      --noise: #b45309;
+      --noise-soft: #ffedd5;
+      --word: #6d28d9;
+      --word-soft: #ede9fe;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1320;
+        --panel: #151e2d;
+        --panel-strong: #17243a;
+        --ink: #edf3ff;
+        --muted: #b6c0d1;
+        --line: #65738a;
+        --accent: #79a8ff;
+        --accent-soft: #203b68;
+        --cluster: #5eead4;
+        --cluster-soft: #173f3d;
+        --noise: #fdba74;
+        --noise-soft: #53301d;
+        --word: #c4b5fd;
+        --word-soft: #382b63;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 12px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      max-width: 1200px;
+      margin: auto;
+      overflow: hidden;
+      background: var(--bg);
+      border: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 10px 18px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      background: var(--bg);
+    }
+
+    .card {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .input-card,
+    .embedding-card,
+    .umap-card {
+      fill: var(--panel-strong);
+    }
+
+    .topic-card {
+      fill: var(--panel);
+      stroke: var(--word);
+    }
+
+    .band {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .separator,
+    .arrow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--accent);
+      stroke: var(--accent);
+      stroke-width: 1px;
+    }
+
+    .region {
+      fill: var(--cluster-soft);
+      stroke: var(--cluster);
+      stroke-width: 2px;
+    }
+
+    .vector-dot {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+      stroke-width: 2px;
+    }
+
+    .cloud-dot {
+      fill: var(--cluster);
+      stroke: var(--panel);
+      stroke-width: 2px;
+    }
+
+    .focus-dot {
+      fill: var(--accent);
+      stroke: var(--panel);
+      stroke-width: 2px;
+    }
+
+    .noise-dot {
+      fill: var(--noise);
+      stroke: var(--panel);
+      stroke-width: 2px;
+    }
+
+    .cluster-badge {
+      fill: var(--cluster-soft);
+      stroke: var(--cluster);
+      stroke-width: 2px;
+    }
+
+    .noise-badge {
+      fill: var(--noise-soft);
+      stroke: var(--noise);
+      stroke-width: 2px;
+    }
+
+    .word-chip {
+      fill: var(--word-soft);
+      stroke: var(--word);
+      stroke-width: 1px;
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+    }
+
+    .stage-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .arrow-label {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .quote {
+      font-size: 15px;
+    }
+
+    .number {
+      fill: var(--cluster);
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    .noise-text {
+      fill: var(--noise);
+      font-weight: bold;
+    }
+
+    .word-text {
+      fill: var(--word);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .summary {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 17px;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Путь документа через BERTopic</h1>
+    <svg id="diagram" viewBox="0 0 1200 430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-label="Текст преобразуется в эмбеддинг из 384 чисел, UMAP-вектор из 5 чисел, кластер HDBSCAN или шум с меткой минус один, а затем кластер описывается десятью словами по class-based TF-IDF."></svg>
+  </main>
+
+  <script>
+    const data = {
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      zero: 0,
+      canvas: { x1: 0, y1: 0, x2: 1200, y2: 430 },
+      radius: { dot: 7, small: 6, focus: 8 },
+      cards: [
+        { box: [20, 76, 220, 312], cls: "card input-card" },
+        { box: [258, 76, 438, 312], cls: "card embedding-card" },
+        { box: [476, 76, 642, 312], cls: "card umap-card" },
+        { box: [680, 76, 880, 312], cls: "card" },
+        { box: [918, 76, 1180, 312], cls: "card topic-card" }
+      ],
+      band: [20, 338, 1180, 410],
+      separators: [
+        [[20, 132], [220, 132]],
+        [[258, 132], [438, 132]],
+        [[476, 132], [642, 132]],
+        [[680, 132], [880, 132]],
+        [[918, 132], [1180, 132]]
+      ],
+      arrows: [
+        {
+          shaft: [[220, 194], [250, 194]],
+          head: [[250, 186], [258, 194], [250, 202]]
+        },
+        {
+          shaft: [[438, 194], [468, 194]],
+          head: [[468, 186], [476, 194], [468, 202]]
+        },
+        {
+          shaft: [[642, 194], [672, 194]],
+          head: [[672, 186], [680, 194], [672, 202]]
+        },
+        {
+          shaft: [[880, 194], [910, 194]],
+          head: [[910, 186], [918, 194], [910, 202]]
+        }
+      ],
+      embeddingDots: [
+        [286, 164], [316, 164], [346, 164], [376, 164], [406, 164],
+        [286, 194], [316, 194], [346, 194], [376, 194], [406, 194],
+        [286, 224], [316, 224], [346, 224], [376, 224], [406, 224]
+      ],
+      umapDots: [
+        [500, 194], [529, 194], [558, 194], [587, 194], [616, 194]
+      ],
+      clusterRegion: [
+        [704, 166], [726, 145], [770, 141], [811, 157],
+        [826, 189], [810, 221], [769, 233], [724, 220],
+        [703, 194]
+      ],
+      cloudDots: [
+        [724, 178], [747, 161], [775, 168], [801, 181],
+        [735, 204], [766, 212], [798, 205]
+      ],
+      focusDot: [769, 186],
+      noiseDot: [844, 232],
+      clusterBadge: [807, 246, 864, 282],
+      noiseBadge: [807, 287, 864, 306],
+      wordChips: [
+        { box: [936, 151, 1043, 177], at: [989, 169], text: "гол" },
+        { box: [1055, 151, 1162, 177], at: [1108, 169], text: "матч" },
+        { box: [936, 184, 1043, 210], at: [989, 202], text: "команда" },
+        { box: [1055, 184, 1162, 210], at: [1108, 202], text: "игрок" },
+        { box: [936, 217, 1043, 243], at: [989, 235], text: "победа" },
+        { box: [1055, 217, 1162, 243], at: [1108, 235], text: "капитан" },
+        { box: [936, 250, 1043, 276], at: [989, 268], text: "форвард" },
+        { box: [1055, 250, 1162, 276], at: [1108, 268], text: "передача" },
+        { box: [936, 283, 1043, 305], at: [989, 299], text: "мяч" },
+        { box: [1055, 283, 1162, 305], at: [1108, 299], text: "турнир" }
+      ],
+      labels: [
+        { at: [20, 108], dx: 16, dy: 0, anchor: "start", cls: "stage-title", text: "Текст" },
+        { at: [20, 158], dx: 16, dy: 0, anchor: "start", cls: "quote", text: "«Форвард забил" },
+        { at: [20, 183], dx: 16, dy: 0, anchor: "start", cls: "quote", text: "победный гол после" },
+        { at: [20, 208], dx: 16, dy: 0, anchor: "start", cls: "quote", text: "передачи капитана»" },
+        { at: [120, 280], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "обычная строка" },
+
+        { at: [348, 106], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "Sentence transformer" },
+        { at: [348, 126], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "embedding" },
+        { at: [348, 258], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "единое описание смысла" },
+        { at: [348, 282], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "384 числа" },
+
+        { at: [559, 106], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "UMAP" },
+        { at: [559, 126], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "сжатие соседства" },
+        { at: [559, 258], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "компактное положение" },
+        { at: [559, 282], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "5 чисел" },
+
+        { at: [780, 106], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "HDBSCAN" },
+        { at: [780, 126], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "плотность соседей" },
+        { at: [835, 270], dx: 0, dy: 0, anchor: "middle", cls: "number", text: "2" },
+        { at: [788, 271], dx: 0, dy: 0, anchor: "end", cls: "small", text: "кластер" },
+        { at: [835, 302], dx: 0, dy: 0, anchor: "middle", cls: "noise-text", text: "-1" },
+        { at: [791, 302], dx: 0, dy: 0, anchor: "end", cls: "small", text: "или шум" },
+
+        { at: [1049, 105], dx: 0, dy: 0, anchor: "middle", cls: "stage-title", text: "class-based TF-IDF" },
+        { at: [1049, 126], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "10 слов темы" },
+
+        { at: [220, 194], dx: 5, dy: -19, anchor: "start", cls: "arrow-label", text: "кодирует" },
+        { at: [438, 194], dx: 5, dy: -19, anchor: "start", cls: "arrow-label", text: "сжимает" },
+        { at: [642, 194], dx: 5, dy: -19, anchor: "start", cls: "arrow-label", text: "ищет плотность" },
+        { at: [880, 194], dx: 5, dy: -19, anchor: "start", cls: "arrow-label", text: "описывает кластер" },
+
+        { at: [600, 367], dx: 0, dy: 0, anchor: "middle", cls: "summary", text: "Документ → один кластер 2 или выброс -1" },
+        { at: [600, 394], dx: 0, dy: 0, anchor: "middle", cls: "small", text: "class-based TF-IDF → 10 слов, которые делают номер кластера понятным" }
+      ],
+      fallback: [
+        { at: [600, 174], text: "Текст → embedding из 384 чисел → UMAP-вектор из 5 чисел" },
+        { at: [600, 214], text: "→ кластер HDBSCAN или -1" },
+        { at: [600, 254], text: "→ 10 слов темы по class-based TF-IDF" }
+      ]
+    };
+
+    const origin = data.origin;
+    const scale = data.scale;
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function make(name, attributes, parent) {
+      const element = document.createElementNS(namespace, name);
+      Object.entries(attributes).forEach(([key, value]) => {
+        element.setAttribute(key, String(value));
+      });
+      (parent || svg).appendChild(element);
+      return element;
+    }
+
+    function drawRect(box, cls) {
+      const [x1, y1, x2, y2] = box;
+      return make("rect", {
+        x: sx(x1),
+        y: sy(y1),
+        width: sx(x2) - sx(x1),
+        height: sy(y2) - sy(y1),
+        class: cls
+      });
+    }
+
+    function drawLine(points, cls) {
+      const [start, end] = points;
+      const [x1, y1] = start;
+      const [x2, y2] = end;
+      return make("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: cls
+      });
+    }
+
+    function drawPath(points, cls, closed) {
+      const commands = points.map((point, index) => {
+        const [x, y] = point;
+        return `${index === data.zero ? "M" : "L"} ${sx(x)} ${sy(y)}`;
+      });
+      if (closed) commands.push("Z");
+      return make("path", { d: commands.join(" "), class: cls });
+    }
+
+    function drawCircle(point, radius, cls) {
+      const [x, y] = point;
+      return make("circle", {
+        cx: sx(x),
+        cy: sy(y),
+        r: sx(radius) - sx(data.zero),
+        class: cls
+      });
+    }
+
+    function drawText(label, fallbackClass) {
+      const [x, y] = label.at;
+      const element = make("text", {
+        x: sx(x),
+        y: sy(y),
+        dx: label.dx,
+        dy: label.dy,
+        "text-anchor": label.anchor,
+        class: label.cls || fallbackClass
+      });
+      element.textContent = label.text;
+      return element;
+    }
+
+    try {
+      drawRect(
+        [data.canvas.x1, data.canvas.y1, data.canvas.x2, data.canvas.y2],
+        "background"
+      ).setAttribute("fill", "var(--bg)");
+
+      drawRect(data.band, "band");
+      data.cards.forEach(card => drawRect(card.box, card.cls));
+      data.separators.forEach(points => drawLine(points, "separator"));
+
+      data.arrows.forEach(arrow => {
+        drawLine(arrow.shaft, "arrow");
+        drawPath(arrow.head, "arrow-head", true);
+      });
+
+      data.embeddingDots.forEach(point => {
+        drawCircle(point, data.radius.small, "vector-dot");
+      });
+
+      data.umapDots.forEach(point => {
+        drawCircle(point, data.radius.dot, "vector-dot");
+      });
+
+      drawPath(data.clusterRegion, "region", true);
+      data.cloudDots.forEach(point => {
+        drawCircle(point, data.radius.small, "cloud-dot");
+      });
+      drawCircle(data.focusDot, data.radius.focus, "focus-dot");
+      drawCircle(data.noiseDot, data.radius.focus, "noise-dot");
+
+      drawRect(data.clusterBadge, "cluster-badge");
+      drawRect(data.noiseBadge, "noise-badge");
+
+      data.wordChips.forEach(word => {
+        drawRect(word.box, "word-chip");
+        drawText({
+          at: word.at,
+          dx: data.zero,
+          dy: data.zero,
+          anchor: "middle",
+          cls: "word-text",
+          text: word.text
+        });
+      });
+
+      data.labels.forEach(label => drawText(label, "small"));
+    } catch (error) {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+      drawRect(
+        [data.canvas.x1, data.canvas.y1, data.canvas.x2, data.canvas.y2],
+        "background"
+      ).setAttribute("fill", "var(--bg)");
+
+      data.fallback.forEach(label => {
+        drawText({
+          at: label.at,
+          dx: data.zero,
+          dy: data.zero,
+          anchor: "middle",
+          cls: "fallback",
+          text: label.text
+        });
+      });
+    }
+  </script>
+</body>
+</html>

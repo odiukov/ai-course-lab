@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>L2 и L1 под одинаковыми линиями потерь</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #647087;
+    --axis: #8792a8;
+    --divider: #d9deea;
+    --contour: #7b86a0;
+    --contour-best: #e05272;
+    --l2: #3478c9;
+    --l2-fill: #3478c922;
+    --l1: #9b63cf;
+    --l1-fill: #9b63cf22;
+    --minimum: #e39a24;
+    --point-ring: #ffffff;
+    --fallback: #7b2435;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #171e2b;
+      --text: #edf1f8;
+      --muted: #aab4c7;
+      --axis: #78859d;
+      --divider: #343e50;
+      --contour: #8794ad;
+      --contour-best: #ff7895;
+      --l2: #68a9f2;
+      --l2-fill: #68a9f226;
+      --l1: #c18bf0;
+      --l1-fill: #c18bf026;
+      --minimum: #f5b94f;
+      --point-ring: #171e2b;
+      --fallback: #ff9caf;
+    }
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    margin: auto;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  figure {
+    margin: auto;
+    max-width: 960px;
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: auto;
+    padding: 10px 12px;
+    font-size: 20px;
+    line-height: 1.25;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--bg);
+  }
+
+  .panel-bg {
+    fill: var(--panel);
+  }
+
+  .divider {
+    stroke: var(--divider);
+    stroke-width: 2;
+  }
+
+  .axis {
+    stroke: var(--axis);
+    stroke-width: 1.5;
+  }
+
+  .axis-label,
+  .note {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .panel-title {
+    fill: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .formula {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .formula-l2 {
+    fill: var(--l2);
+  }
+
+  .formula-l1 {
+    fill: var(--l1);
+  }
+
+  .contour {
+    fill: none;
+    stroke: var(--contour);
+    stroke-width: 1.5;
+  }
+
+  .tangent-contour {
+    fill: none;
+    stroke: var(--contour-best);
+    stroke-width: 3;
+  }
+
+  .l2-region {
+    fill: var(--l2-fill);
+    stroke: var(--l2);
+    stroke-width: 3;
+  }
+
+  .l1-region {
+    fill: var(--l1-fill);
+    stroke: var(--l1);
+    stroke-width: 3;
+    stroke-linejoin: round;
+  }
+
+  .minimum-mark {
+    stroke: var(--minimum);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .minimum-label {
+    fill: var(--minimum);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .solution {
+    fill: var(--contour-best);
+    stroke: var(--point-ring);
+    stroke-width: 3;
+  }
+
+  .solution-label {
+    fill: var(--contour-best);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  #fallback {
+    box-sizing: border-box;
+    padding: 20px;
+    min-height: 180px;
+    color: var(--fallback);
+    background: var(--panel);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  [hidden] {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Одинаковые линии потерь — разные допустимые области</h1>
+
+  <svg id="canvas"
+       viewBox="0 0 960 450"
+       width="960"
+       height="450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">
+      Слева эллиптическая линия потерь касается гладкой границы круга L2.
+      Справа те же линии потерь касаются вершины ромба L1 на оси.
+    </desc>
+    <g id="diagram"></g>
+  </svg>
+
+  <div id="fallback" hidden>
+    Схема должна была показать две панели с одинаковыми эллиптическими
+    линиями потерь: слева касание круга L2 на гладкой границе, справа
+    касание ромба L1 в углу на оси.
+  </div>
+</figure>
+
+<script>
+const diagram = {
+  math: {
+    zero: 0,
+    one: 1,
+    two: 2,
+    four: 4,
+    fullTurn: 2,
+    searchSteps: 900,
+    tolerance: 0.006
+  },
+  panels: [
+    {
+      key: "l2",
+      cx: -3.72,
+      title: "L₂: круг",
+      titleClass: "formula-l2",
+      regionClass: "l2-region",
+      formula: "‖w‖₂ ≤ 1",
+      formulaClass: "formula-l2",
+      formulaAt: { x: -0.38, y: -0.55 },
+      formulaOffset: { x: 0, y: 0 },
+      formulaAnchor: "middle",
+      contactText: "гладкое касание",
+      contactOffset: { x: -14, y: 30 },
+      contactAnchor: "end"
+    },
+    {
+      key: "l1",
+      cx: 3.72,
+      title: "L₁: ромб",
+      titleClass: "formula-l1",
+      regionClass: "l1-region",
+      formula: "|w₁| + |w₂| ≤ 1",
+      formulaClass: "formula-l1",
+      formulaAt: { x: -0.48, y: 0.2 },
+      formulaOffset: { x: 0, y: 0 },
+      formulaAnchor: "middle",
+      contactText: "угол на оси",
+      contactOffset: { x: 14, y: 30 },
+      contactAnchor: "start"
+    }
+  ],
+  panelBox: {
+    left: -2.78,
+    right: 2.78,
+    top: 3.25,
+    bottom: -2.75
+  },
+  axes: {
+    xMin: -2.38,
+    xMax: 2.38,
+    yMin: -1.82,
+    yMax: 2.52,
+    xLabel: {
+      text: "w₁",
+      at: { x: 2.38, y: 0 },
+      dx: -4,
+      dy: -9,
+      anchor: "end"
+    },
+    yLabel: {
+      text: "w₂",
+      at: { x: 0, y: 2.52 },
+      dx: 10,
+      dy: 14,
+      anchor: "start"
+    }
+  },
+  loss: {
+    center: { x: 1.45, y: 1 },
+    semiaxes: { x: 0.75, y: 1.35 },
+    fixedLevels: [0.4, 0.67, 1.22, 1.52]
+  },
+  constraint: {
+    radius: 1,
+    diamond: [
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+      { x: 0, y: -1 }
+    ]
+  },
+  marks: {
+    minimumHalfSize: 0.09,
+    solutionRadius: 0.075
+  },
+  labels: {
+    panelTitle: {
+      at: { x: 0, y: 3.03 },
+      dx: 0,
+      dy: 0,
+      anchor: "middle"
+    },
+    minimum: {
+      text: "свободный минимум",
+      at: { x: 1.45, y: 1 },
+      dx: -12,
+      dy: -16,
+      anchor: "end"
+    }
+  },
+  separator: {
+    x: 0,
+    top: 3.18,
+    bottom: -2.58
+  }
+};
+
+const origin = Object.freeze({ x: 480, y: 245 });
+const scale = 62;
+
+const sx = x => origin.x + scale * x;
+const sy = y => origin.y - scale * y;
+
+try {
+  const svg = document.getElementById("canvas");
+  const root = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const NS = "http://www.w3.org/2000/svg";
+
+  function make(tag, attributes, parent = root) {
+    const node = document.createElementNS(NS, tag);
+    Object.entries(attributes).forEach(([name, value]) => {
+      node.setAttribute(name, String(value));
+    });
+    parent.appendChild(node);
+    return node;
+  }
+
+  function addText(parent, panel, item, className) {
+    const node = make("text", {
+      x: sx(panel.cx + item.at.x) + item.dx,
+      y: sy(item.at.y) + item.dy,
+      "text-anchor": item.anchor,
+      class: className
+    }, parent);
+    node.textContent = item.text;
+    return node;
+  }
+
+  function localLoss(point) {
+    const dx = (point.x - diagram.loss.center.x) /
+      diagram.loss.semiaxes.x;
+    const dy = (point.y - diagram.loss.center.y) /
+      diagram.loss.semiaxes.y;
+    return dx * dx + dy * dy;
+  }
+
+  function findCircleContact() {
+    let best = {
+      point: { x: diagram.math.zero, y: diagram.math.zero },
+      value: Infinity
+    };
+
+    Array.from({ length: diagram.math.searchSteps }).forEach((unused, index) => {
+      const angle = diagram.math.fullTurn * Math.PI * index /
+        diagram.math.searchSteps;
+      const point = {
+        x: diagram.constraint.radius * Math.cos(angle),
+        y: diagram.constraint.radius * Math.sin(angle)
+      };
+      const value = localLoss(point);
+
+      if (value < best.value) {
+        best = { point, value };
+      }
+    });
+
+    return {
+      point: best.point,
+      radius: Math.sqrt(best.value)
+    };
+  }
+
+  const l2Touch = findCircleContact();
+  const l1Point = diagram.constraint.diamond[diagram.math.zero];
+  const l1Touch = {
+    point: l1Point,
+    radius: Math.sqrt(localLoss(l1Point))
+  };
+
+  const panels = diagram.panels.map(panel => ({
+    ...panel,
+    touch: panel.key === "l2" ? l2Touch : l1Touch
+  }));
+
+  const rawLevels = [
+    ...diagram.loss.fixedLevels,
+    l2Touch.radius,
+    l1Touch.radius
+  ].sort((a, b) => a - b);
+
+  const levels = rawLevels.filter((level, index, source) =>
+    index === diagram.math.zero ||
+    Math.abs(level - source[index - diagram.math.one]) >
+      diagram.math.tolerance
+  );
+
+  const defs = make("defs", {}, root);
+
+  panels.forEach(panel => {
+    const clip = make("clipPath", {
+      id: `clip-${panel.key}`
+    }, defs);
+
+    make("rect", {
+      x: sx(panel.cx + diagram.panelBox.left),
+      y: sy(diagram.panelBox.top),
+      width:
+        sx(panel.cx + diagram.panelBox.right) -
+        sx(panel.cx + diagram.panelBox.left),
+      height:
+        sy(diagram.panelBox.bottom) -
+        sy(diagram.panelBox.top)
+    }, clip);
+  });
+
+  panels.forEach(panel => {
+    make("rect", {
+      x: sx(panel.cx + diagram.panelBox.left),
+      y: sy(diagram.panelBox.top),
+      width:
+        sx(panel.cx + diagram.panelBox.right) -
+        sx(panel.cx + diagram.panelBox.left),
+      height:
+        sy(diagram.panelBox.bottom) -
+        sy(diagram.panelBox.top),
+      class: "panel-bg"
+    });
+  });
+
+  make("line", {
+    x1: sx(diagram.separator.x),
+    y1: sy(diagram.separator.top),
+    x2: sx(diagram.separator.x),
+    y2: sy(diagram.separator.bottom),
+    class: "divider"
+  });
+
+  panels.forEach(panel => {
+    const group = make("g", {
+      "aria-label": panel.title
+    });
+
+    make("line", {
+      x1: sx(panel.cx + diagram.axes.xMin),
+      y1: sy(diagram.math.zero),
+      x2: sx(panel.cx + diagram.axes.xMax),
+      y2: sy(diagram.math.zero),
+      class: "axis"
+    }, group);
+
+    make("line", {
+      x1: sx(panel.cx + diagram.math.zero),
+      y1: sy(diagram.axes.yMin),
+      x2: sx(panel.cx + diagram.math.zero),
+      y2: sy(diagram.axes.yMax),
+      class: "axis"
+    }, group);
+
+    if (panel.key === "l2") {
+      make("circle", {
+        cx: sx(panel.cx + diagram.math.zero),
+        cy: sy(diagram.math.zero),
+        r: Math.abs(
+          sx(panel.cx + diagram.constraint.radius) -
+          sx(panel.cx + diagram.math.zero)
+        ),
+        class: panel.regionClass
+      }, group);
+    } else {
+      const points = diagram.constraint.diamond
+        .map(point =>
+          `${sx(panel.cx + point.x)},${sy(point.y)}`
+        )
+        .join(" ");
+
+      make("polygon", {
+        points,
+        class: panel.regionClass
+      }, group);
+    }
+
+    const contourGroup = make("g", {
+      "clip-path": `url(#clip-${panel.key})`
+    }, group);
+
+    levels.forEach(level => {
+      const isTangent =
+        Math.abs(level - panel.touch.radius) <
+        diagram.math.tolerance;
+
+      make("ellipse", {
+        cx: sx(panel.cx + diagram.loss.center.x),
+        cy: sy(diagram.loss.center.y),
+        rx: Math.abs(
+          sx(
+            panel.cx +
+            diagram.loss.center.x +
+            diagram.loss.semiaxes.x * level
+          ) -
+          sx(panel.cx + diagram.loss.center.x)
+        ),
+        ry: Math.abs(
+          sy(
+            diagram.loss.center.y +
+            diagram.loss.semiaxes.y * level
+          ) -
+          sy(diagram.loss.center.y)
+        ),
+        class: isTangent ? "tangent-contour" : "contour"
+      }, contourGroup);
+    });
+
+    const half = diagram.marks.minimumHalfSize;
+
+    make("line", {
+      x1: sx(panel.cx + diagram.loss.center.x - half),
+      y1: sy(diagram.loss.center.y - half),
+      x2: sx(panel.cx + diagram.loss.center.x + half),
+      y2: sy(diagram.loss.center.y + half),
+      class: "minimum-mark"
+    }, group);
+
+    make("line", {
+      x1: sx(panel.cx + diagram.loss.center.x - half),
+      y1: sy(diagram.loss.center.y + half),
+      x2: sx(panel.cx + diagram.loss.center.x + half),
+      y2: sy(diagram.loss.center.y - half),
+      class: "minimum-mark"
+    }, group);
+
+    make("circle", {
+      cx: sx(panel.cx + panel.touch.point.x),
+      cy: sy(panel.touch.point.y),
+      r: Math.abs(
+        sx(panel.cx + panel.touch.point.x +
+          diagram.marks.solutionRadius) -
+        sx(panel.cx + panel.touch.point.x)
+      ),
+      class: "solution"
+    }, group);
+
+    addText(group, panel, {
+      text: panel.title,
+      at: diagram.labels.panelTitle.at,
+      dx: diagram.labels.panelTitle.dx,
+      dy: diagram.labels.panelTitle.dy,
+      anchor: diagram.labels.panelTitle.anchor
+    }, `panel-title ${panel.titleClass}`);
+
+    addText(group, panel, diagram.labels.minimum, "minimum-label");
+
+    addText(group, panel, {
+      text: panel.formula,
+      at: panel.formulaAt,
+      dx: panel.formulaOffset.x,
+      dy: panel.formulaOffset.y,
+      anchor: panel.formulaAnchor
+    }, `formula ${panel.formulaClass}`);
+
+    addText(group, panel, diagram.axes.xLabel, "axis-label");
+    addText(group, panel, diagram.axes.yLabel, "axis-label");
+
+    addText(group, panel, {
+      text: panel.contactText,
+      at: panel.touch.point,
+      dx: panel.contactOffset.x,
+      dy: panel.contactOffset.y,
+      anchor: panel.contactAnchor
+    }, "solution-label");
+  });
+
+  fallback.hidden = true;
+  svg.hidden = false;
+} catch (error) {
+  document.getElementById("canvas").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

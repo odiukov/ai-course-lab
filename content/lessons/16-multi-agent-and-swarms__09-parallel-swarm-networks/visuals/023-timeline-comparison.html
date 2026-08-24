@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sequential, fixed и swarm на одной временной шкале</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fc;
+      --ink: #182033;
+      --muted: #667085;
+      --axis: #c8ceda;
+      --idle: #9ba5b6;
+      --finish: #172033;
+      --panel: #ffffff;
+      --border: #d7dce6;
+      --long-a: #3568d4;
+      --long-b: #527ee0;
+      --long-c: #6c91e8;
+      --long-d: #86a5ed;
+      --short-a: #e7772f;
+      --short-b: #ef914f;
+      --short-c: #f3aa70;
+      --short-d: #f6c091;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111521;
+        --ink: #eef2ff;
+        --muted: #aab4c7;
+        --axis: #394358;
+        --idle: #7d899d;
+        --finish: #f4f6ff;
+        --panel: #171d2b;
+        --border: #465168;
+        --long-a: #5f8df0;
+        --long-b: #77a0f3;
+        --long-c: #91b2f5;
+        --long-d: #abc4f7;
+        --short-a: #f08a45;
+        --short-b: #f5a261;
+        --short-c: #f7b77e;
+        --short-d: #f9c99c;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 12px 18px 4px;
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--panel);
+    }
+
+    .set-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .mode-title {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+
+    .lane-label {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 1.25;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .idle {
+      stroke: var(--idle);
+      stroke-width: 2;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .task {
+      stroke: var(--panel);
+      stroke-width: 1.25;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .long-a { fill: var(--long-a); }
+    .long-b { fill: var(--long-b); }
+    .long-c { fill: var(--long-c); }
+    .long-d { fill: var(--long-d); }
+    .short-a { fill: var(--short-a); }
+    .short-b { fill: var(--short-b); }
+    .short-c { fill: var(--short-c); }
+    .short-d { fill: var(--short-d); }
+
+    .finish-line {
+      stroke: var(--finish);
+      stroke-width: 2.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .finish-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sequential, fixed и swarm на одной временной шкале</h1>
+    <svg id="diagram"
+         viewBox="0 0 1080 470"
+         width="1080"
+         height="470"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Сравнение трёх способов выполнения одинаковых задач</title>
+      <desc id="svg-desc">Последовательное выполнение занимает 40,4 секунды, неудачное жёсткое назначение — 40 секунд, а рой — примерно 10,1 секунды.</desc>
+    </svg>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze([
+      {
+        axisEnd: 40.4,
+        zero: 0,
+        labelPad: 5,
+        corner: 0.22,
+        dash: [0.32, 0.28],
+        legend: {
+          x: 0,
+          y: 18,
+          text: "Одинаковый набор: четыре задачи по 10 с + четыре задачи по 0,1 с"
+        },
+        modes: [
+          {
+            key: "sequential",
+            title: "SEQUENTIAL — все задачи по очереди",
+            titleX: -12,
+            titleY: 52,
+            rows: [
+              { name: "одна линия", y: 80 }
+            ],
+            rectHeight: 24,
+            finish: 40.4,
+            finishTop: 64,
+            finishBottom: 96,
+            finishLabelY: 112,
+            finishText: "сумма 40,4 с",
+            finishAnchor: "end"
+          },
+          {
+            key: "fixed",
+            title: "FIXED ASSIGNMENT — задачи закреплены заранее",
+            titleX: -12,
+            titleY: 142,
+            rows: [
+              { name: "воркер А", y: 172 },
+              { name: "воркер Б", y: 201 },
+              { name: "воркер В", y: 230 },
+              { name: "воркер Г", y: 259 }
+            ],
+            rectHeight: 20,
+            finish: 40,
+            finishTop: 157,
+            finishBottom: 273,
+            finishLabelY: 289,
+            finishText: "финиш 40 с",
+            finishAnchor: "end"
+          },
+          {
+            key: "swarm",
+            title: "SWARM — следующую задачу берёт свободный воркер",
+            titleX: -12,
+            titleY: 327,
+            rows: [
+              { name: "воркер А", y: 356 },
+              { name: "воркер Б", y: 382 },
+              { name: "воркер В", y: 408 },
+              { name: "воркер Г", y: 434 }
+            ],
+            rectHeight: 18,
+            finish: 10.1,
+            finishTop: 344,
+            finishBottom: 445,
+            finishLabelY: 461,
+            finishText: "финиш ≈ 10,1 с",
+            finishAnchor: "start"
+          }
+        ],
+        fixedIdle: [
+          { lane: "воркер Б", start: 0.2, end: 40 },
+          { lane: "воркер В", start: 0.1, end: 40 },
+          { lane: "воркер Г", start: 0.1, end: 40 }
+        ],
+        idleNote: {
+          x: 25,
+          y: 307,
+          text: "штрихи справа — потерянная возможность поработать"
+        }
+      },
+      [
+        {
+          name: "долгая задача А",
+          duration: 10,
+          css: "long-a",
+          sequential: { lane: "одна линия", start: 0 },
+          fixed: { lane: "воркер А", start: 0 },
+          swarm: { lane: "воркер А", start: 0 }
+        },
+        {
+          name: "долгая задача Б",
+          duration: 10,
+          css: "long-b",
+          sequential: { lane: "одна линия", start: 10 },
+          fixed: { lane: "воркер А", start: 10 },
+          swarm: { lane: "воркер Б", start: 0 }
+        },
+        {
+          name: "долгая задача В",
+          duration: 10,
+          css: "long-c",
+          sequential: { lane: "одна линия", start: 20 },
+          fixed: { lane: "воркер А", start: 20 },
+          swarm: { lane: "воркер В", start: 0 }
+        },
+        {
+          name: "долгая задача Г",
+          duration: 10,
+          css: "long-d",
+          sequential: { lane: "одна линия", start: 30 },
+          fixed: { lane: "воркер А", start: 30 },
+          swarm: { lane: "воркер Г", start: 0 }
+        },
+        {
+          name: "короткая задача А",
+          duration: 0.1,
+          css: "short-a",
+          sequential: { lane: "одна линия", start: 40 },
+          fixed: { lane: "воркер Б", start: 0 },
+          swarm: { lane: "воркер А", start: 10 }
+        },
+        {
+          name: "короткая задача Б",
+          duration: 0.1,
+          css: "short-b",
+          sequential: { lane: "одна линия", start: 40.1 },
+          fixed: { lane: "воркер Б", start: 0.1 },
+          swarm: { lane: "воркер Б", start: 10 }
+        },
+        {
+          name: "короткая задача В",
+          duration: 0.1,
+          css: "short-c",
+          sequential: { lane: "одна линия", start: 40.2 },
+          fixed: { lane: "воркер В", start: 0 },
+          swarm: { lane: "воркер В", start: 10 }
+        },
+        {
+          name: "короткая задача Г",
+          duration: 0.1,
+          css: "short-d",
+          sequential: { lane: "одна линия", start: 40.3 },
+          fixed: { lane: "воркер Г", start: 0 },
+          swarm: { lane: "воркер Г", start: 10 }
+        }
+      ]
+    ]);
+
+    const origin = Object.freeze({ x: 250, y: 0 });
+    const scale = Object.freeze({ x: 19, y: 1 });
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale.y;
+    }
+
+    const [config, tasks] = diagramData;
+    const svg = document.getElementById("diagram");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function make(tag, attributes, content) {
+      const node = document.createElementNS(namespace, tag);
+      for (const [name, value] of Object.entries(attributes)) {
+        node.setAttribute(name, value);
+      }
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+      return node;
+    }
+
+    function addText(x, y, content, cssClass, anchor) {
+      const node = make("text", {
+        x: sx(x),
+        y: sy(y),
+        class: cssClass,
+        "text-anchor": anchor
+      }, content);
+      svg.appendChild(node);
+      return node;
+    }
+
+    function findRow(mode, laneName) {
+      const row = mode.rows.find(candidate => candidate.name === laneName);
+      if (!row) {
+        throw new Error("Не найдена линия воркера");
+      }
+      return row;
+    }
+
+    function addLine(x1, y1, x2, y2, cssClass, dash) {
+      const attributes = {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: cssClass
+      };
+      if (dash) {
+        attributes["stroke-dasharray"] = dash
+          .map(value => sx(value) - sx(config.zero))
+          .join(" ");
+      }
+      const node = make("line", attributes);
+      svg.appendChild(node);
+      return node;
+    }
+
+    function addTask(task, mode) {
+      const placement = task[mode.key];
+      const row = findRow(mode, placement.lane);
+      const top = row.y - mode.rectHeight / scale.x;
+      const bottom = top + mode.rectHeight / scale.x;
+      const end = placement.start + task.duration;
+      const node = make("rect", {
+        x: sx(placement.start),
+        y: sy(top),
+        width: sx(end) - sx(placement.start),
+        height: sy(bottom) - sy(top),
+        rx: sx(config.corner) - sx(config.zero),
+        class: "task " + task.css,
+        "aria-label": task.name
+      });
+      svg.appendChild(node);
+    }
+
+    function drawMode(mode) {
+      addText(
+        mode.titleX,
+        mode.titleY,
+        mode.title,
+        "mode-title",
+        "start"
+      );
+
+      for (const row of mode.rows) {
+        addLine(
+          config.zero,
+          row.y,
+          config.axisEnd,
+          row.y,
+          "axis"
+        );
+        addText(
+          -1,
+          row.y + config.labelPad,
+          row.name,
+          "lane-label",
+          "end"
+        );
+      }
+
+      if (mode.key === "fixed") {
+        for (const interval of config.fixedIdle) {
+          const row = findRow(mode, interval.lane);
+          addLine(
+            interval.start,
+            row.y,
+            interval.end,
+            row.y,
+            "idle",
+            config.dash
+          );
+        }
+      }
+
+      for (const task of tasks) {
+        addTask(task, mode);
+      }
+
+      addLine(
+        mode.finish,
+        mode.finishTop,
+        mode.finish,
+        mode.finishBottom,
+        "finish-line"
+      );
+
+      addText(
+        mode.finish,
+        mode.finishLabelY,
+        mode.finishText,
+        "finish-label",
+        mode.finishAnchor
+      );
+    }
+
+    try {
+      addText(
+        config.legend.x,
+        config.legend.y,
+        config.legend.text,
+        "set-label",
+        "start"
+      );
+
+      for (const mode of config.modes) {
+        drawMode(mode);
+      }
+
+      addText(
+        config.idleNote.x,
+        config.idleNote.y,
+        config.idleNote.text,
+        "note",
+        "middle"
+      );
+    } catch (error) {
+      while (svg.lastChild && !svg.lastChild.matches("title, desc")) {
+        svg.removeChild(svg.lastChild);
+      }
+      addText(
+        -10,
+        92,
+        "Схема должна была показать: последовательно — 40,4 с; fixed — 40 с; swarm — примерно 10,1 с.",
+        "fallback",
+        "start"
+      );
+    }
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@ describe("renderPrompt — write-step", () => {
       source_excerpt: "текст урока",
       neighbours: "следующий шаг",
       covered: "- 1. Зачем это нужно",
+      exercise_code: "(для теоретического шага нет отдельного шва)",
       clarifications: "- «Что такое строка матрицы?» (шаг: Матрица)",
     });
     expect(out).toContain("Транспонирование");
@@ -31,6 +32,7 @@ describe("renderPrompt — write-step", () => {
         source_excerpt: "текст урока",
         neighbours: "следующий шаг",
         covered: "- 1. Зачем это нужно",
+        exercise_code: "(для теоретического шага нет отдельного шва)",
       }),
     ).toThrow(/clarifications/);
   });

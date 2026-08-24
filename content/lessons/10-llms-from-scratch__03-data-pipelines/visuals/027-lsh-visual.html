@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Путь документа через MinHash и LSH</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f6f8fc;
+  --panel:#ffffff;
+  --panel-soft:#edf3fb;
+  --ink:#172033;
+  --muted:#5d687c;
+  --line:#9aabc1;
+  --accent:#245fce;
+  --accent-soft:#dce8ff;
+  --teal:#087f75;
+  --teal-soft:#d8f3ef;
+  --orange:#b65309;
+  --orange-soft:#ffead7;
+  --violet:#7246b8;
+  --violet-soft:#eee4ff;
+  --good:#176b3a;
+  --good-soft:#dff3e7;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#10151f;
+    --panel:#182130;
+    --panel-soft:#202c3d;
+    --ink:#eef3fb;
+    --muted:#b2bfd0;
+    --line:#607086;
+    --accent:#8eb4ff;
+    --accent-soft:#243d68;
+    --teal:#69d7ca;
+    --teal-soft:#173f3d;
+    --orange:#ffb16f;
+    --orange-soft:#4a2c1a;
+    --violet:#c3a3ff;
+    --violet-soft:#382754;
+    --good:#83d9a2;
+    --good-soft:#1d412d;
+  }
+}
+html,body{margin:unset;background:var(--bg);color:var(--ink)}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.figure{
+  width:100%;
+  max-width:1200px;
+  margin:auto;
+  background:var(--bg);
+  border:1px solid var(--line);
+  box-sizing:border-box;
+}
+h1{
+  margin:unset;
+  padding:12px 18px;
+  font-size:20px;
+  line-height:normal;
+  text-align:center;
+  font-weight:bold;
+  border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+svg{display:block;width:100%;height:auto;background:var(--bg)}
+.stage{fill:var(--panel);stroke:var(--line);stroke-width:2}
+.divider,.thin{stroke:var(--line);stroke-width:1}
+.flow{stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+.arrowhead{fill:var(--accent)}
+.title{fill:var(--ink);font-size:15px;font-weight:bold}
+.subtitle{fill:var(--muted);font-size:12px}
+.label{fill:var(--ink);font-size:12px}
+.small{fill:var(--muted);font-size:10px}
+.note{fill:var(--muted);font-size:11px}
+.emphasis{fill:var(--accent);font-size:13px;font-weight:bold}
+.page{fill:var(--panel-soft);stroke:var(--accent);stroke-width:2}
+.shingle{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1}
+.hash{stroke:var(--panel);stroke-width:1}
+.bucket{fill:var(--orange-soft);stroke:var(--orange);stroke-width:2}
+.docdot{fill:var(--panel-soft);stroke:var(--violet);stroke-width:2}
+.pair{fill:var(--violet-soft);stroke:var(--violet);stroke-width:2}
+.set-a{fill:var(--accent-soft);stroke:var(--accent);stroke-width:2}
+.set-b{fill:var(--teal-soft);stroke:var(--teal);stroke-width:2}
+.verdict{fill:var(--good-soft);stroke:var(--good);stroke-width:2}
+.callout{fill:var(--panel-soft);stroke:var(--line);stroke-width:1}
+.callout-line{stroke:var(--teal);stroke-width:4;stroke-linecap:round}
+.fallback{fill:var(--ink);font-size:15px}
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Путь документа: MinHash → LSH → точная проверка</h1>
+  <svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Документ превращается в пятисловные шинглы, подпись из 128 хешей, 16 полос по 8 строк, пары-кандидаты и проходит точную проверку Jaccard с порогом 0.8"></svg>
+</main>
+<script>
+const DATA=[{
+  origin:{x:0,y:0},scale:1,canvas:{w:1200,h:440},
+  card:{y:92,h:238,r:12,rule:158},
+  stages:[
+    {type:"doc",x:10,w:150,title:"Документ",sub:"исходный текст",note:"один файл"},
+    {type:"shingles",x:187,w:175,title:"Шинглинг",sub:"5-словные шинглы",note:"множество фрагментов"},
+    {type:"minhash",x:389,w:160,title:"MinHash",sub:"подпись: 128 хешей",note:"фиксированная длина"},
+    {type:"bands",x:576,w:180,title:"LSH",sub:"разбиение подписи",note:"полоса → адрес корзины"},
+    {type:"pairs",x:783,w:165,title:"Пары-кандидаты",sub:"совпала полоса",note:"кандидат, не вердикт"},
+    {type:"verify",x:975,w:215,title:"Точный Jaccard",sub:"проверка исходных множеств",note:"решение после проверки"}
+  ],
+  arrows:[
+    {x1:164,x2:183,y:211},{x1:366,x2:385,y:211},
+    {x1:553,x2:572,y:211},{x1:760,x2:779,y:211},
+    {x1:952,x2:971,y:211}
+  ],
+  arrow:{head:7,wing:6},
+  doc:{x:54,y:174,w:62,h:82,fold:15,lines:[202,218,234,247],captionY:282},
+  shingles:{
+    x:199,w:151,h:27,ys:[174,211,248],
+    texts:[
+      "сайт пишет о росте рынка",
+      "пишет о росте рынка сегодня",
+      "о росте рынка сегодня утром"
+    ]
+  },
+  sig:{x:420,y:176,cols:6,rows:6,cw:16,ch:16,r:3,
+       colors:["var(--accent)","var(--teal)","var(--violet)"],ellipsis:{x:500,y:280}},
+  bands:{x:600,y:172,w:58,h:128,count:16,rows:8,
+         colors:["var(--accent-soft)","var(--teal-soft)","var(--violet-soft)","var(--orange-soft)"],
+         labels:[{x:676,y:212,text:"16 полос"},{x:676,y:236,text:"по 8 строк"}]},
+  pairs:{a:{x:829,y:190},b:{x:902,y:190},r:22,
+         bucket:{x:813,y:232,w:105,h:43,r:9},lineY:232},
+  verify:{a:{x:1052,y:211},b:{x:1098,y:211},r:35,
+          formula:{x:1082,y:273},pill:{x:1014,y:289,w:137,h:28,r:9}},
+  callout:{x:10,y:352,w:1180,h:68,r:12,lineX:34,y1:370,y2:404,
+           tx:55,firstY:378,secondY:402},
+  fallback:{x:600,y:220,text:"Документ → 5-словные шинглы → 128 хешей → 16 полос по 8 строк → кандидаты → Jaccard ≥ 0.8"}
+}];
+
+const [D]=DATA;
+const origin=D.origin;
+const scale=D.scale;
+function sx(x){return origin.x+x*scale}
+function sy(y){return origin.y+y*scale}
+const x0=sx(0),y0=sy(0);
+const svg=document.getElementById("diagram");
+const ns=svg.namespaceURI;
+
+function add(tag,attrs,text){
+  const n=document.createElementNS(ns,tag);
+  Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));
+  if(text!==undefined)n.textContent=text;
+  svg.appendChild(n);
+  return n;
+}
+function rect(x,y,w,h,r,cls){
+  return add("rect",{x:sx(x),y:sy(y),width:sx(w)-x0,height:sy(h)-y0,
+    rx:sx(r)-x0,ry:sy(r)-y0,class:cls});
+}
+function line(x1,y1,x2,y2,cls){
+  return add("line",{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls});
+}
+function text(x,y,value,cls,anchor){
+  return add("text",{x:sx(x),y:sy(y),class:cls,"text-anchor":anchor},value);
+}
+function circle(x,y,r,cls){
+  return add("circle",{cx:sx(x),cy:sy(y),r:sx(r)-x0,class:cls});
+}
+
+try{
+  D.arrows.forEach(a=>{
+    line(a.x1,a.y,a.x2,a.y,"flow");
+    add("polygon",{class:"arrowhead",points:[
+      `${sx(a.x2)},${sy(a.y)}`,
+      `${sx(a.x2-D.arrow.head)},${sy(a.y-D.arrow.wing)}`,
+      `${sx(a.x2-D.arrow.head)},${sy(a.y+D.arrow.wing)}`
+    ].join(" ")});
+  });
+
+  D.stages.forEach(s=>{
+    rect(s.x,D.card.y,s.w,D.card.h,D.card.r,"stage");
+    line(s.x,D.card.rule,s.x+s.w,D.card.rule,"divider");
+    text(s.x+s.w/D.scale/D.scale/D.scale/D.scale/2,D.card.y+29,s.title,"title","middle");
+    text(s.x+s.w/D.scale/D.scale/D.scale/D.scale/2,D.card.y+51,s.sub,"subtitle","middle");
+    text(s.x+s.w/D.scale/D.scale/D.scale/D.scale/2,D.card.y+D.card.h-16,s.note,"note","middle");
+  });
+
+  const p=D.doc;
+  rect(p.x,p.y,p.w,p.h,D.sig.r,"page");
+  add("polyline",{class:"thin",fill:"none",points:[
+    `${sx(p.x+p.w-p.fold)},${sy(p.y)}`,
+    `${sx(p.x+p.w-p.fold)},${sy(p.y+p.fold)}`,
+    `${sx(p.x+p.w)},${sy(p.y+p.fold)}`
+  ].join(" ")});
+  p.lines.forEach((y,i)=>{
+    const end=i===p.lines.length-1?p.x+p.w-p.fold:p.x+p.w-10;
+    line(p.x+10,y,end,y,"thin");
+  });
+  text(p.x+p.w/2,p.captionY,"новостная статья","label","middle");
+
+  const sh=D.shingles;
+  sh.ys.forEach((y,i)=>{
+    rect(sh.x,y,sh.w,sh.h,D.sig.r,"shingle");
+    text(sh.x+8,y+18,sh.texts[i],"small","start");
+  });
+
+  const sg=D.sig;
+  Array.from({length:sg.rows}).forEach((_,r)=>{
+    Array.from({length:sg.cols}).forEach((__,c)=>{
+      const color=sg.colors[(r+c)%sg.colors.length];
+      const n=rect(sg.x+c*sg.cw,sg.y+r*sg.ch,sg.cw-2,sg.ch-2,sg.r,"hash");
+      n.setAttribute("fill",color);
+    });
+  });
+  text(sg.ellipsis.x,sg.ellipsis.y,"…","emphasis","middle");
+
+  const bd=D.bands;
+  const bandH=bd.h/bd.count;
+  Array.from({length:bd.count}).forEach((_,b)=>{
+    const band=rect(bd.x,bd.y+b*bandH,bd.w,bandH,x0,"thin");
+    band.setAttribute("fill",bd.colors[b%bd.colors.length]);
+    Array.from({length:bd.rows}).forEach((__,r)=>{
+      line(bd.x,bd.y+b*bandH+r*bandH/bd.rows,
+           bd.x+bd.w,bd.y+b*bandH+r*bandH/bd.rows,"thin");
+    });
+  });
+  bd.labels.forEach(l=>text(l.x,l.y,l.text,"emphasis","start"));
+
+  const pc=D.pairs;
+  circle(pc.a.x,pc.a.y,pc.r,"docdot");
+  circle(pc.b.x,pc.b.y,pc.r,"docdot");
+  text(pc.a.x,pc.a.y+5,"A","title","middle");
+  text(pc.b.x,pc.b.y+5,"B","title","middle");
+  line(pc.a.x,pc.a.y+pc.r,pc.a.x+15,pc.lineY,"thin");
+  line(pc.b.x,pc.b.y+pc.r,pc.b.x-15,pc.lineY,"thin");
+  rect(pc.bucket.x,pc.bucket.y,pc.bucket.w,pc.bucket.h,pc.bucket.r,"bucket");
+  text(pc.bucket.x+pc.bucket.w/2,pc.bucket.y+18,"общая корзина","small","middle");
+  text(pc.bucket.x+pc.bucket.w/2,pc.bucket.y+35,"пара A ↔ B","label","middle");
+
+  const v=D.verify;
+  circle(v.a.x,v.a.y,v.r,"set-a");
+  circle(v.b.x,v.b.y,v.r,"set-b");
+  text(v.a.x-v.r/2,v.a.y+5,"A","title","middle");
+  text(v.b.x+v.r/2,v.b.y+5,"B","title","middle");
+  text(v.formula.x,v.formula.y,"|A ∩ B| / |A ∪ B| ≥ 0.8","emphasis","middle");
+  rect(v.pill.x,v.pill.y,v.pill.w,v.pill.h,v.pill.r,"verdict");
+  text(v.pill.x+v.pill.w/2,v.pill.y+19,"почти-дубликат","label","middle");
+
+  const c=D.callout;
+  rect(c.x,c.y,c.w,c.h,c.r,"callout");
+  line(c.lineX,c.y1,c.lineX,c.y2,"callout-line");
+  text(c.tx,c.firstY,"LSH быстро сокращает число сравнений.","title","start");
+  text(c.tx,c.secondY,"Общая корзина даёт кандидата; решение принимает точный Jaccard.","label","start");
+}catch(error){
+  svg.replaceChildren();
+  text(D.fallback.x,D.fallback.y,D.fallback.text,"fallback","middle");
+}
+</script>
+</body>
+</html>

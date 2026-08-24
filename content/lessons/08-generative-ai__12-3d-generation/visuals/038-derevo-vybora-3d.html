@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дерево выбора 3D-пайплайна</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f3ea;
+    --panel: #fffdf8;
+    --ink: #20252b;
+    --muted: #626b73;
+    --line: #78838d;
+    --root-fill: #e7edf1;
+    --root-stroke: #667683;
+    --input-fill: #fff3d6;
+    --input-stroke: #b77b19;
+    --pbr-fill: #dff0ff;
+    --pbr-stroke: #397cae;
+    --splat-fill: #e7defd;
+    --splat-stroke: #7557b5;
+    --nerf-fill: #ddf4e7;
+    --nerf-stroke: #33835a;
+    --target-fill: #ffe3df;
+    --target-stroke: #ae554d;
+    --accent: #d45b3f;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--bg);
+  }
+
+  .backdrop {
+    fill: var(--bg);
+  }
+
+  .stage {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .edge {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow {
+    fill: var(--line);
+  }
+
+  .node rect {
+    fill: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .node.root rect {
+    fill: var(--root-fill);
+    stroke: var(--root-stroke);
+  }
+
+  .node.input rect {
+    fill: var(--input-fill);
+    stroke: var(--input-stroke);
+  }
+
+  .node.pbr rect {
+    fill: var(--pbr-fill);
+    stroke: var(--pbr-stroke);
+  }
+
+  .node.splat rect {
+    fill: var(--splat-fill);
+    stroke: var(--splat-stroke);
+  }
+
+  .node.nerf rect {
+    fill: var(--nerf-fill);
+    stroke: var(--nerf-stroke);
+  }
+
+  .node.target rect {
+    fill: var(--target-fill);
+    stroke: var(--target-stroke);
+  }
+
+  .node-title {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .node-note {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+    paint-order: stroke fill;
+    stroke: var(--bg);
+    stroke-width: 5px;
+    stroke-linejoin: round;
+  }
+
+  .dynamic-note {
+    fill: var(--accent);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15191d;
+      --panel: #20262b;
+      --ink: #f0f3f5;
+      --muted: #b5bec5;
+      --line: #87939d;
+      --root-fill: #28333b;
+      --root-stroke: #8ca0ae;
+      --input-fill: #3b3020;
+      --input-stroke: #d7a34b;
+      --pbr-fill: #20384a;
+      --pbr-stroke: #68a9d5;
+      --splat-fill: #302846;
+      --splat-stroke: #a58bdd;
+      --nerf-fill: #203a2d;
+      --nerf-stroke: #69b88b;
+      --target-fill: #452a2a;
+      --target-stroke: #d18077;
+      --accent: #ff9278;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="diagram-title">Дерево выбора 3D-пайплайна</h1>
+</header>
+
+<svg id="diagram"
+     viewBox="0 0 1200 420"
+     width="1200"
+     height="420"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="diagram-title diagram-description">
+  <desc id="diagram-description">
+    Схема ведёт от текста, одной картинки или примерно 50 фотографий
+    через PBR-меш, Gaussian Splat или NeRF к игре, VR или рендеру.
+  </desc>
+  <g id="drawing"></g>
+</svg>
+
+<script>
+const diagramData = Object.freeze([{
+  metric: {
+    origin: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    zero: 0,
+    radius: 12,
+    arrowLength: 10,
+    arrowWing: 5
+  },
+  frame: { x: 0, y: 0, w: 1200, h: 420 },
+  stages: [
+    { text: "ПЕРВЫЙ ВОПРОС", x: 118, y: 24, anchor: "middle" },
+    { text: "ЧТО ЕСТЬ НА ВХОДЕ", x: 380, y: 24, anchor: "middle" },
+    { text: "КАКОЙ НУЖЕН ВЫХОД", x: 728, y: 24, anchor: "middle" },
+    { text: "КУДА ПОЙДЁТ РЕЗУЛЬТАТ", x: 1072, y: 24, anchor: "middle" }
+  ],
+  nodes: [
+    {
+      id: "start", kind: "root",
+      x: 35, y: 174, w: 165, h: 70,
+      lines: [
+        { text: "Что у тебя", dy: -9, className: "node-title" },
+        { text: "есть на входе?", dy: 13, className: "node-title" }
+      ]
+    },
+    {
+      id: "text", kind: "input",
+      x: 270, y: 42, w: 220, h: 72,
+      lines: [
+        { text: "Текст", dy: -10, className: "node-title" },
+        { text: "«деревянный сундук»", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "image", kind: "input",
+      x: 270, y: 174, w: 220, h: 72,
+      lines: [
+        { text: "Одна картинка", dy: -10, className: "node-title" },
+        { text: "Hunyuan3D · TripoSR · InstantMesh", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "photos", kind: "input",
+      x: 270, y: 306, w: 220, h: 72,
+      lines: [
+        { text: "Около 50 фотографий", dy: -10, className: "node-title" },
+        { text: "реальный предмет или комната", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "pbr", kind: "pbr",
+      x: 625, y: 50, w: 205, h: 72,
+      lines: [
+        { text: "PBR-меш", dy: -10, className: "node-title" },
+        { text: "Meshy · Rodin", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "splat", kind: "splat",
+      x: 625, y: 205, w: 205, h: 72,
+      lines: [
+        { text: "Gaussian Splat", dy: -10, className: "node-title" },
+        { text: "3DGS · точное сохранение вида", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "nerf", kind: "nerf",
+      x: 625, y: 330, w: 205, h: 72,
+      lines: [
+        { text: "NeRF", dy: -10, className: "node-title" },
+        { text: "нейрорендер новых ракурсов", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "game", kind: "target",
+      x: 990, y: 55, w: 165, h: 62,
+      lines: [
+        { text: "Игра", dy: -8, className: "node-title" },
+        { text: "Unity · Unreal", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "vr", kind: "target",
+      x: 990, y: 210, w: 165, h: 62,
+      lines: [
+        { text: "VR", dy: -8, className: "node-title" },
+        { text: "свободный обзор", dy: 14, className: "node-note" }
+      ]
+    },
+    {
+      id: "render", kind: "target",
+      x: 990, y: 335, w: 165, h: 62,
+      lines: [
+        { text: "Рендер", dy: -8, className: "node-title" },
+        { text: "витрина · новые ракурсы", dy: 14, className: "node-note" }
+      ]
+    }
+  ],
+  edges: [
+    {
+      points: [
+        { x: 200, y: 198 },
+        { x: 230, y: 198 },
+        { x: 230, y: 78 },
+        { x: 270, y: 78 }
+      ]
+    },
+    {
+      points: [
+        { x: 200, y: 209 },
+        { x: 270, y: 210 }
+      ]
+    },
+    {
+      points: [
+        { x: 200, y: 220 },
+        { x: 230, y: 220 },
+        { x: 230, y: 342 },
+        { x: 270, y: 342 }
+      ]
+    },
+    {
+      points: [
+        { x: 490, y: 70 },
+        { x: 625, y: 72 }
+      ],
+      label: {
+        text: "Meshy или Rodin",
+        x: 505, y: 59, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 490, y: 198 },
+        { x: 550, y: 198 },
+        { x: 550, y: 100 },
+        { x: 625, y: 100 }
+      ],
+      label: {
+        text: "image-to-3D",
+        x: 505, y: 218, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 490, y: 330 },
+        { x: 555, y: 330 },
+        { x: 555, y: 232 },
+        { x: 625, y: 232 }
+      ],
+      label: {
+        text: "неподвижная сцена",
+        x: 505, y: 318, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 490, y: 354 },
+        { x: 625, y: 356 }
+      ],
+      label: {
+        text: "нейрорендер",
+        x: 505, y: 375, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 830, y: 86 },
+        { x: 990, y: 86 }
+      ],
+      label: {
+        text: "редактируемый ресурс",
+        x: 850, y: 74, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 830, y: 241 },
+        { x: 990, y: 241 }
+      ],
+      label: {
+        text: "фотореализм",
+        x: 850, y: 229, anchor: "start"
+      }
+    },
+    {
+      points: [
+        { x: 830, y: 366 },
+        { x: 990, y: 366 }
+      ],
+      label: {
+        text: "готовые ракурсы",
+        x: 850, y: 354, anchor: "start"
+      }
+    }
+  ],
+  dynamicNote: {
+    text: "Если сцена движется во времени → 4D Gaussian Splatting",
+    x: 380, y: 407, anchor: "middle"
+  },
+  fallback: {
+    text: "Схема: текст, одна картинка или около 50 фотографий → PBR-меш, Gaussian Splat или NeRF → игра, VR или рендер.",
+    x: 600, y: 210, anchor: "middle"
+  }
+}]);
+
+const [data] = diagramData;
+const origin = Object.freeze(data.metric.origin);
+const scale = Object.freeze(data.metric.scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const namespace = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+  const make = (name, attributes = {}) => {
+    const element = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      element.setAttribute(key, value);
+    }
+    return element;
+  };
+  const widthPx = value => Math.abs(sx(value) - sx(data.metric.zero));
+  const heightPx = value => Math.abs(sy(value) - sy(data.metric.zero));
+  const pointString = point => `${sx(point.x)},${sy(point.y)}`;
+  const pathString = points =>
+    points.map((point, position) =>
+      `${position === points.keys().next().value ? "M" : "L"} ${sx(point.x)} ${sy(point.y)}`
+    ).join(" ");
+
+  drawing.appendChild(make("rect", {
+    class: "backdrop",
+    x: sx(data.frame.x),
+    y: sy(data.frame.y),
+    width: widthPx(data.frame.w),
+    height: heightPx(data.frame.h)
+  }));
+
+  for (const stage of data.stages) {
+    const text = make("text", {
+      class: "stage",
+      x: sx(stage.x),
+      y: sy(stage.y),
+      "text-anchor": stage.anchor
+    });
+    text.textContent = stage.text;
+    drawing.appendChild(text);
+  }
+
+  const edgeLayer = make("g");
+  const labelLayer = make("g");
+  const nodeLayer = make("g");
+  drawing.append(edgeLayer, labelLayer, nodeLayer);
+
+  for (const edge of data.edges) {
+    const route = make("path", {
+      class: "edge",
+      d: pathString(edge.points)
+    });
+    edgeLayer.appendChild(route);
+
+    const reversed = [...edge.points].reverse();
+    const [tip, previous] = reversed;
+    const deltaX = tip.x - previous.x;
+    const deltaY = tip.y - previous.y;
+    const length = Math.hypot(deltaX, deltaY);
+    const unitX = deltaX / length;
+    const unitY = deltaY / length;
+    const base = {
+      x: tip.x - unitX * data.metric.arrowLength,
+      y: tip.y - unitY * data.metric.arrowLength
+    };
+    const left = {
+      x: base.x - unitY * data.metric.arrowWing,
+      y: base.y + unitX * data.metric.arrowWing
+    };
+    const right = {
+      x: base.x + unitY * data.metric.arrowWing,
+      y: base.y - unitX * data.metric.arrowWing
+    };
+
+    edgeLayer.appendChild(make("polygon", {
+      class: "arrow",
+      points: [tip, left, right].map(pointString).join(" ")
+    }));
+
+    if (edge.label) {
+      const label = make("text", {
+        class: "edge-label",
+        x: sx(edge.label.x),
+        y: sy(edge.label.y),
+        "text-anchor": edge.label.anchor
+      });
+      label.textContent = edge.label.text;
+      labelLayer.appendChild(label);
+    }
+  }
+
+  for (const node of data.nodes) {
+    const group = make("g", { class: `node ${node.kind}` });
+    group.appendChild(make("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: widthPx(node.w),
+      height: heightPx(node.h),
+      rx: widthPx(data.metric.radius),
+      ry: heightPx(data.metric.radius)
+    }));
+
+    const centerX = node.x + node.w / scale.x / (scale.x + scale.x);
+    const centerY = node.y + node.h / scale.y / (scale.y + scale.y);
+
+    for (const line of node.lines) {
+      const text = make("text", {
+        class: line.className,
+        x: sx(centerX),
+        y: sy(centerY + line.dy),
+        "text-anchor": "middle"
+      });
+      text.textContent = line.text;
+      group.appendChild(text);
+    }
+
+    nodeLayer.appendChild(group);
+  }
+
+  const dynamicNote = make("text", {
+    class: "dynamic-note",
+    x: sx(data.dynamicNote.x),
+    y: sy(data.dynamicNote.y),
+    "text-anchor": data.dynamicNote.anchor
+  });
+  dynamicNote.textContent = data.dynamicNote.text;
+  drawing.appendChild(dynamicNote);
+} catch (error) {
+  const namespace = "http://www.w3.org/2000/svg";
+  const drawing = document.getElementById("drawing");
+  drawing.replaceChildren();
+
+  const background = document.createElementNS(namespace, "rect");
+  background.setAttribute("class", "backdrop");
+  background.setAttribute("x", sx(data.frame.x));
+  background.setAttribute("y", sy(data.frame.y));
+  background.setAttribute("width", Math.abs(sx(data.frame.w) - sx(data.metric.zero)));
+  background.setAttribute("height", Math.abs(sy(data.frame.h) - sy(data.metric.zero)));
+
+  const message = document.createElementNS(namespace, "text");
+  message.setAttribute("class", "fallback");
+  message.setAttribute("x", sx(data.fallback.x));
+  message.setAttribute("y", sy(data.fallback.y));
+  message.setAttribute("text-anchor", data.fallback.anchor);
+  message.textContent = data.fallback.text;
+
+  drawing.append(background, message);
+}
+</script>
+</body>
+</html>

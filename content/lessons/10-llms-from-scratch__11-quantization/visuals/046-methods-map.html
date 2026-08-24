@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Наивный PTQ, GPTQ и AWQ</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --panel-soft: #f1f3f9;
+    --text: #172033;
+    --muted: #687188;
+    --line: #cbd1de;
+    --ptq: #d97706;
+    --ptq-soft: #fff2d8;
+    --gptq: #6750c7;
+    --gptq-soft: #eeeaff;
+    --awq: #16845b;
+    --awq-soft: #e1f6ed;
+    --weight: #7b8499;
+    --quiet-weight: #bcc2cf;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 12px 16px 14px;
+    background: var(--bg);
+  }
+
+  h2 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 452px;
+    overflow: visible;
+  }
+
+  .lane {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .card {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 1.5;
+  }
+
+  .chip-ptq { fill: var(--ptq-soft); stroke: var(--ptq); }
+  .chip-gptq { fill: var(--gptq-soft); stroke: var(--gptq); }
+  .chip-awq { fill: var(--awq-soft); stroke: var(--awq); }
+
+  .process-ptq { fill: var(--ptq-soft); stroke: var(--ptq); }
+  .process-gptq { fill: var(--gptq-soft); stroke: var(--gptq); }
+  .process-awq { fill: var(--awq-soft); stroke: var(--awq); }
+
+  .chip-ptq, .chip-gptq, .chip-awq,
+  .process-ptq, .process-gptq, .process-awq {
+    stroke-width: 1.5;
+  }
+
+  .arrow-ptq { stroke: var(--ptq); fill: var(--ptq); }
+  .arrow-gptq { stroke: var(--gptq); fill: var(--gptq); }
+  .arrow-awq { stroke: var(--awq); fill: var(--awq); }
+
+  .arrow-line {
+    fill: none;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+  }
+
+  .label {
+    fill: var(--text);
+    font-size: 13px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .method {
+    fill: var(--text);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .strong {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .column-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .footer-label {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .weight { fill: var(--weight); }
+  .quiet-weight { fill: var(--quiet-weight); }
+  .ptq-weight { fill: var(--ptq); }
+  .gptq-weight { fill: var(--gptq); }
+  .awq-weight { fill: var(--awq); }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  #fallback {
+    margin: 8px 0 0;
+    padding: 12px 16px;
+    border: 1.5px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111521;
+      --panel: #181e2c;
+      --panel-soft: #22293a;
+      --text: #f0f3fa;
+      --muted: #aeb6c9;
+      --line: #3b455b;
+      --ptq: #f2a83b;
+      --ptq-soft: #382b18;
+      --gptq: #aa99ff;
+      --gptq-soft: #292442;
+      --awq: #57d5a2;
+      --awq-soft: #18382f;
+      --weight: #aeb6c9;
+      --quiet-weight: #626c82;
+    }
+  }
+</style>
+</head>
+<body>
+<figure class="figure" aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Одна битность — разные правила допустимой ошибки</h2>
+  <svg id="diagram"
+       viewBox="0 0 1200 452"
+       width="1200"
+       height="452"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Три параллельных пути квантизации FP16-весов в INT4: наивный PTQ, GPTQ и AWQ"></svg>
+  <p id="fallback" hidden>
+    Схема должна показать три пути от FP16 к INT4: общий scale без калибровки,
+    GPTQ с информацией второго порядка и AWQ с масштабированием salient-весов.
+  </p>
+</figure>
+
+<script>
+const DATA = [{
+  origin: [24, 14],
+  scale: [1, 1],
+  zero: 0,
+  radius: 10,
+  head: [11, 6],
+  columns: [
+    [229, 11, "Одинаковые FP16-веса"],
+    [517, 11, "Как распределяется ошибка"],
+    [805, 11, "Одинаковая битность INT4"]
+  ],
+  weightBox: [126, 62],
+  bars: [
+    [15, 31, 11, 23],
+    [35, 36, 11, 18],
+    [55, 28, 11, 26],
+    [75, 39, 11, 15],
+    [95, 33, 11, 21]
+  ],
+  lanes: [
+    {
+      y: 34,
+      tone: "ptq",
+      method: ["Наивный PTQ", "быстрый базовый путь"],
+      input: [190, 25],
+      firstArrow: [326, 56, 374, 56, 350, 36, "общий scale"],
+      process: [386, 15, 310, 82],
+      processText: [
+        [541, 35, "Общий scale", "strong"],
+        [541, 56, "Округление всех весов", "label"],
+        [541, 76, "Чувствительность не проверяется", "small"]
+      ],
+      secondArrow: [706, 56, 754, 56, 730, 36, "без калибровки"],
+      output: [766, 25],
+      outputRoles: ["ptq-weight", "quiet-weight", "ptq-weight", "quiet-weight", "ptq-weight"],
+      summary: [
+        [916, 37, "Риск:", "strong"],
+        [916, 58, "чувствительный вес может", "label"],
+        [916, 78, "ошибиться так же", "label"]
+      ]
+    },
+    {
+      y: 160,
+      tone: "gptq",
+      method: ["GPTQ", "по реакции выхода"],
+      input: [190, 25],
+      firstArrow: [326, 56, 374, 56, 350, 36, "калибровка"],
+      process: [386, 15, 310, 82],
+      processText: [
+        [541, 35, "Информация второго порядка", "strong"],
+        [541, 56, "Оценка реакции выхода", "label"],
+        [541, 76, "Компенсация через другие веса", "small"]
+      ],
+      secondArrow: [706, 56, 754, 56, 730, 36, "осторожнее"],
+      output: [766, 25],
+      outputRoles: ["gptq-weight", "quiet-weight", "gptq-weight", "weight", "quiet-weight"],
+      summary: [
+        [916, 37, "Правило:", "strong"],
+        [916, 58, "бережём сильную реакцию", "label"],
+        [916, 78, "и перераспределяем ошибку", "label"]
+      ]
+    },
+    {
+      y: 286,
+      tone: "awq",
+      method: ["AWQ", "защита salient-весов"],
+      input: [190, 25],
+      firstArrow: [326, 56, 374, 56, 350, 36, "активации"],
+      process: [386, 15, 310, 82],
+      processText: [
+        [541, 35, "Крупные активации → salient-веса", "strong"],
+        [541, 56, "Масштабирование защищает их", "label"],
+        [541, 76, "Затем округление в INT4", "small"]
+      ],
+      secondArrow: [706, 56, 754, 56, 730, 36, "масштабирование"],
+      output: [766, 25],
+      outputRoles: ["quiet-weight", "awq-weight", "quiet-weight", "weight", "awq-weight"],
+      summary: [
+        [916, 37, "Правило:", "strong"],
+        [916, 58, "бережём пути с крупными", "label"],
+        [916, 78, "активациями", "label"]
+      ]
+    }
+  ],
+  lane: [0, 1128, 112],
+  chip: [14, 14, 155, 84],
+  methodText: [91, 40, 64],
+  footer: [
+    [292, 421, 844, 421],
+    [564, 439, "FP16 → разные карты ошибки → INT4"]
+  ]
+}];
+
+const [d] = DATA;
+const [originX, originY] = d.origin;
+const [scaleX, scaleY] = d.scale;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+  const fragment = document.createDocumentFragment();
+
+  const make = (tag, attributes, className) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      node.setAttribute(name, value);
+    }
+    if (className) node.setAttribute("class", className);
+    return node;
+  };
+
+  const rect = (x, y, width, height, className, radius = d.radius) =>
+    make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      rx: sx(radius) - sx(d.zero),
+      ry: sy(radius) - sy(d.zero)
+    }, className);
+
+  const line = (x1, y1, x2, y2, className) =>
+    make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2)
+    }, className);
+
+  const text = (x, y, value, className, anchor = "middle") => {
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, className);
+    node.textContent = value;
+    return node;
+  };
+
+  const polygon = (points, className) =>
+    make("polygon", {
+      points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")
+    }, className);
+
+  const arrow = (values, tone, baseY) => {
+    const [x1, y1, x2, y2, labelX, labelY, label] = values;
+    const [headX, headY] = d.head;
+    fragment.append(
+      line(x1, baseY + y1, x2, baseY + y2, `arrow-line arrow-${tone}`),
+      polygon([
+        [x2, baseY + y2],
+        [x2 - headX, baseY + y2 - headY],
+        [x2 - headX, baseY + y2 + headY]
+      ], `arrow-${tone}`),
+      text(labelX, baseY + labelY, label, "small")
+    );
+  };
+
+  const weightCard = (x, y, label, roles) => {
+    const [boxWidth, boxHeight] = d.weightBox;
+    fragment.append(rect(x, y, boxWidth, boxHeight, "card"));
+    fragment.append(text(x + boxWidth / scaleX / (scaleX + scaleX), y + d.bars[0][0], label, "strong"));
+
+    for (const [index, bar] of d.bars.entries()) {
+      const [barX, barY, barWidth, barHeight] = bar;
+      fragment.append(
+        rect(
+          x + barX,
+          y + barY,
+          barWidth,
+          barHeight,
+          roles[index],
+          d.zero
+        )
+      );
+    }
+  };
+
+  for (const [x, y, value] of d.columns) {
+    fragment.append(text(x, y, value, "column-label"));
+  }
+
+  const [laneX, laneWidth, laneHeight] = d.lane;
+  const [chipX, chipY, chipWidth, chipHeight] = d.chip;
+  const [methodX, methodTitleY, methodNoteY] = d.methodText;
+
+  for (const lane of d.lanes) {
+    const baseY = lane.y;
+
+    fragment.append(
+      rect(laneX, baseY, laneWidth, laneHeight, "lane"),
+      rect(
+        chipX,
+        baseY + chipY,
+        chipWidth,
+        chipHeight,
+        `chip-${lane.tone}`
+      ),
+      text(methodX, baseY + methodTitleY, lane.method[0], "method"),
+      text(methodX, baseY + methodNoteY, lane.method[1], "small")
+    );
+
+    weightCard(
+      lane.input[0],
+      baseY + lane.input[1],
+      "FP16",
+      d.bars.map(() => "weight")
+    );
+
+    arrow(lane.firstArrow, lane.tone, baseY);
+
+    const [processX, processY, processWidth, processHeight] = lane.process;
+    fragment.append(
+      rect(
+        processX,
+        baseY + processY,
+        processWidth,
+        processHeight,
+        `process-${lane.tone}`
+      )
+    );
+
+    for (const [x, y, value, className] of lane.processText) {
+      fragment.append(text(x, baseY + y, value, className));
+    }
+
+    arrow(lane.secondArrow, lane.tone, baseY);
+
+    weightCard(
+      lane.output[0],
+      baseY + lane.output[1],
+      "INT4",
+      lane.outputRoles
+    );
+
+    for (const [x, y, value, className] of lane.summary) {
+      fragment.append(text(x, baseY + y, value, className, "start"));
+    }
+  }
+
+  const [[dividerX1, dividerY1, dividerX2, dividerY2], [footerX, footerY, footerText]] = d.footer;
+  fragment.append(
+    line(dividerX1, dividerY1, dividerX2, dividerY2, "divider"),
+    text(footerX, footerY, footerText, "footer-label")
+  );
+
+  svg.replaceChildren(fragment);
+  fallback.hidden = true;
+} catch (error) {
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

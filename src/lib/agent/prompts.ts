@@ -4,6 +4,9 @@ import path from "node:path";
 export type PromptName =
   | "plan-lesson"
   | "plan-lab"
+  | "derive-lab"
+  | "plan-project"
+  | "write-project-contracts"
   | "write-step"
   | "explain"
   | "review-code"

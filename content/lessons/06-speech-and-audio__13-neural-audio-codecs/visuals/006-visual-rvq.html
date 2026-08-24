@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Каскад RVQ</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1c22; --muted:#5c6270;
+    --line:#3a3f4b; --acc:#1f6feb; --acc2:#b3520a; --box:#f2f4f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161b; --fg:#e8eaf0; --muted:#9aa2b1;
+      --line:#aab2c0; --acc:#6ea8fe; --acc2:#f0a860; --box:#1e222a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);}
+  text{fill:var(--fg);font-family:inherit;}
+  .lbl{font-size:12px;}
+  .sub{font-size:11px;fill:var(--muted);}
+  .box{fill:var(--box);stroke:var(--line);stroke-width:1.5;}
+  .ln{stroke:var(--line);stroke-width:1.5;fill:none;}
+  .res{stroke:var(--acc2);stroke-width:1.5;fill:none;}
+  .acc{fill:var(--acc);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Каскад RVQ: каждая ступень квантует остаток предыдущей</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var stages = [
+      {i:0, code:417, resIn:'x',  resOut:'r₁'},
+      {i:1, code:88,  resIn:'r₁', resOut:'r₂'},
+      {i:2, code:'…', resIn:'r₂', resOut:'r₃'}
+    ];
+    var CODES = 1024, DIM = 128;
+
+    // ---- единственная система координат ----
+    var ORIGIN = {x:70, y:150};
+    var SCALE  = 34;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y - y * SCALE; }
+
+    // пиксельные литералы: отступы подписей, толщины, шрифты
+    var PAD = 6, PAD2 = 12, ARR = 6;
+
+    var VB_W = 760, VB_H = 300;
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,cls,anchor,dx,dy){
+      var t=el('text',{x:x+(dx||0), y:y+(dy||0), class:cls||'lbl',
+        'text-anchor':anchor||'middle'});
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+    // стрелка: концы и наконечник — через sx/sy
+    function arrow(x1,y1,x2,y2,cls){
+      var ax=sx(x1), ay=sy(y1), bx=sx(x2), by=sy(y2);
+      svg.appendChild(el('line',{x1:ax,y1:ay,x2:bx,y2:by,class:cls}));
+      var a=Math.atan2(by-ay,bx-ax);
+      var p=[bx+','+by,
+             (bx-ARR*Math.cos(a-0.4))+','+(by-ARR*Math.sin(a-0.4)),
+             (bx-ARR*Math.cos(a+0.4))+','+(by-ARR*Math.sin(a+0.4))].join(' ');
+      svg.appendChild(el('polygon',{points:p,
+        fill:'currentColor', class:cls==='res'?'':'', style:
+        cls==='res'?'fill:var(--acc2)':'fill:var(--line)'}));
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet', role:'img',
+      'aria-label':'Каскад из трёх ступеней RVQ по 1024 кода'});
+
+    // геометрия в единицах данных
+    var STEP = 5.6;          // шаг между ступенями по x
+    var BW = 2.6, BH = 1.5;  // полуразмеры блока codebook
+    var YQ = 1.9;            // высота ряда codebook'ов
+    var YOUT = -1.9;         // ряд номеров кодов
+
+    // магистраль остатка: от входа до выхода
+    var xIn = 0, xEnd = STEP*stages.length + 0.4;
+
+    // вход
+    arrow(xIn, 0, 0.9, 0, 'ln');
+    txt(sx(xIn), sy(0), 'x', 'lbl', 'middle', 0, -PAD2);
+    txt(sx(xIn), sy(0), DIM+' чисел', 'sub', 'middle', 0, PAD2+PAD);
+
+    stages.forEach(function(s,k){
+      var cx = 1.5 + k*STEP;        // центр узла вычитания на магистрали
+      var bx = cx;                  // центр блока codebook
+
+      // блок codebook
+      var bxl = sx(bx-BW), bxt = sy(YQ+BH/2);
+      svg.appendChild(el('rect',{x:bxl, y:bxt,
+        width:sx(bx+BW)-bxl, height:sy(YQ-BH/2)-bxt, rx:6, class:'box'}));
+      txt(sx(bx), sy(YQ), 'codebook '+s.i, 'lbl', 'middle', 0, -PAD/2);
+      txt(sx(bx), sy(YQ), CODES+' кодов', 'sub', 'middle', 0, PAD2);
+
+      // вход в codebook (снизу вверх)
+      arrow(cx, 0.35, cx, YQ-BH/2-0.1, 'ln');
+      // выбранный код вниз, к вычитанию
+      arrow(cx+0.8, YQ-BH/2-0.1, cx+0.8, 0.35, 'ln');
+
+      // узел вычитания на магистрали
+      svg.appendChild(el('circle',{cx:sx(cx+0.8), cy:sy(0),
+        r:sx(0.32)-sx(0), class:'acc'}));
+      txt(sx(cx+0.8), sy(0), '−', 'lbl', 'middle', 0, -PAD2-PAD/2);
+
+      // магистраль до узла и дальше (остаток)
+      var next = (k+1<stages.length) ? (1.5+(k+1)*STEP) : xEnd;
+      arrow(cx+0.8+0.32, 0, next-0.15, 0, 'res');
+      // подпись остатка — у хвоста стрелки, ниже линии
+      txt(sx(cx+0.8+0.9), sy(0), s.resOut, 'lbl', 'start', 0, PAD2+PAD);
+
+      // номер кода вниз
+      arrow(bx-0.9, -0.35, bx-0.9, YOUT+0.45, 'ln');
+      txt(sx(bx-0.9), sy(YOUT), '№'+s.code, 'lbl', 'middle', 0, PAD);
+      txt(sx(bx-0.9), sy(YOUT), '10 бит', 'sub', 'middle', 0, PAD+PAD2+PAD/2);
+    });
+
+    // подпись магистрали слева от первого узла
+    txt(sx(1.5+0.8-1.4), sy(0), 'остаток', 'sub', 'end', -PAD, -PAD);
+
+    // итог справа
+    txt(sx(xEnd), sy(0), 'дальше', 'lbl', 'end', -PAD, -PAD2);
+    txt(sx(xEnd), sy(0), 'ещё 5 ступеней', 'sub', 'end', -PAD, PAD2+PAD/2);
+
+    // легенда снизу
+    txt(sx(0), sy(YOUT-1.25), 'Хранится 8 номеров на кадр — по 10 бит, '
+      + '1024 варианта на ступень.', 'sub', 'start', 0, 0);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fallback">Схема должна показывать каскад RVQ: '
+      + 'вектор кадра x (128 чисел) идёт в codebook 0 (1024 кода), тот выбирает '
+      + 'ближайшую заготовку (№417); разность x минус заготовка — остаток r₁ — '
+      + 'уходит в codebook 1 (1024 кода, №88), его остаток r₂ — в codebook 2, '
+      + 'и так далее. От кадра остаётся 8 номеров по 10 бит.</p>';
+  }
+})();
+</script>
+</body>
+</html>

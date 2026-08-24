@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Размер KV cache при N=131072</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666666;
+    --axis: #444444;
+    --grid: #dddddd;
+    --full: #4a7fb5;
+    --swa: #3f9a6a;
+    --diff: #c25b4a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --fg: #e8e8e8;
+      --muted: #a0a4ab;
+      --axis: #8b9099;
+      --grid: #2c313a;
+      --full: #6fa8dc;
+      --swa: #5fc48d;
+      --diff: #e8806c;
+    }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 8px 4px 12px; background: var(--bg); }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+  p.sub { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+  svg { display: block; width: 100%; height: auto; max-height: 460px; background: var(--bg); }
+  .fallback { font-size: 13px; line-height: 1.5; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Размер KV cache при N = 131 072 токена</h2>
+  <p class="sub">Одна строка конфига — разброс на два порядка. Шкала логарифмическая.</p>
+  <div id="mount"></div>
+</div>
+<script>
+(function () {
+  var mount = document.getElementById("mount");
+  try {
+    // ---- данные схемы ----
+    var DATA = [
+      { key: "full", label: "Полный attention",  note: "все 131 072 токена", gb: 40,    color: "var(--full)", text: "40 ГБ" },
+      { key: "swa",  label: "SWA, окно 1024",    note: "последние 1024",     gb: 0.3125, color: "var(--swa)",  text: "≈ 320 МБ" },
+      { key: "diff", label: "Differential",      note: "две карты attention", gb: 80,   color: "var(--diff)", text: "80 ГБ" }
+    ];
+    var TICKS = [
+      { gb: 0.3125, text: "320 МБ" },
+      { gb: 1,      text: "1 ГБ" },
+      { gb: 10,     text: "10 ГБ" },
+      { gb: 40,     text: "40 ГБ" },
+      { gb: 80,     text: "80 ГБ" }
+    ];
+
+    // ---- холст (литералы: только viewBox) ----
+    var W = 760, H = 420;
+
+    // ---- одна пара origin/scale, дальше не меняется ----
+    // мир: x — индекс столбика (0..3), y — log10(ГБ), сдвинутый так, что 0 = 0.1 ГБ
+    var ORIGIN = { x: 210, y: 330 };
+    var SCALE  = { x: 150, y: 88 };
+    function sx(x) { return ORIGIN.x + x * SCALE.x; }
+    function sy(y) { return ORIGIN.y - y * SCALE.y; }
+    function lg(gb) { return Math.log(gb) / Math.LN10 + 1; } // мир-Y из гигабайт
+
+    // ---- отступы подписей в пикселях (разрешённые литералы) ----
+    var PAD = 8, PAD_BIG = 14, FS = 13, FS_SM = 11, LW = 1.2;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a) {
+      var e = document.createElementNS(NS, n);
+      for (var k in a) e.setAttribute(k, a[k]);
+      return e;
+    }
+    function txt(x, y, s, anchor, cls, size) {
+      var t = el("text", { x: x, y: y, "text-anchor": anchor, "font-size": size || FS, fill: cls });
+      t.appendChild(document.createTextNode(s));
+      return t;
+    }
+
+    var svg = el("svg", {
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": "Столбики размера KV cache: полный attention 40 ГБ, SWA с окном 1024 около 320 МБ, differential 80 ГБ"
+    });
+
+    var yBase = lg(0.1);          // низ столбиков
+    var yTop  = lg(80) + 0.45;    // верх осей с запасом под подписи
+
+    // ---- сетка и засечки шкалы ----
+    TICKS.forEach(function (t) {
+      var y = sy(lg(t.gb));
+      svg.appendChild(el("line", {
+        x1: sx(-0.55), y1: y, x2: sx(2.9), y2: y,
+        stroke: "var(--grid)", "stroke-width": LW, "stroke-dasharray": "4 4"
+      }));
+      svg.appendChild(txt(sx(-0.55) - PAD, y + 4, t.text, "end", "var(--muted)", FS_SM));
+    });
+
+    // ---- ось Y ----
+    svg.appendChild(el("line", {
+      x1: sx(-0.55), y1: sy(yBase), x2: sx(-0.55), y2: sy(yTop),
+      stroke: "var(--axis)", "stroke-width": LW
+    }));
+    // ---- ось X ----
+    svg.appendChild(el("line", {
+      x1: sx(-0.55), y1: sy(yBase), x2: sx(2.9), y2: sy(yBase),
+      stroke: "var(--axis)", "stroke-width": LW
+    }));
+
+    // ---- столбики ----
+    var half = 0.28;
+    DATA.forEach(function (d, i) {
+      var yv = lg(d.gb);
+      var x0 = sx(i - half), x1 = sx(i + half);
+      var yT = sy(yv), yB = sy(yBase);
+      svg.appendChild(el("rect", {
+        x: x0, y: yT, width: x1 - x0, height: yB - yT,
+        fill: d.color, opacity: "0.85"
+      }));
+      // значение — над столбиком
+      svg.appendChild(txt(sx(i), yT - PAD, d.text, "middle", "var(--fg)", FS));
+      // имя конфига — под осью
+      svg.appendChild(txt(sx(i), sy(yBase) + PAD_BIG + 4, d.label, "middle", "var(--fg)", FS));
+      // пояснение — ещё ниже, чтобы не наезжало
+      svg.appendChild(txt(sx(i), sy(yBase) + PAD_BIG + PAD_BIG + 8, d.note, "middle", "var(--muted)", FS_SM));
+    });
+
+    // ---- стрелка отношения 128:1 между SWA и полным ----
+    var xArr = sx(0.62);
+    var yHi = sy(lg(40)), yLo = sy(lg(0.3125));
+    var head = 6;
+    svg.appendChild(el("line", {
+      x1: xArr, y1: yHi, x2: xArr, y2: yLo,
+      stroke: "var(--muted)", "stroke-width": LW
+    }));
+    svg.appendChild(el("polygon", {
+      points: [xArr, yLo, xArr - head, yLo - head * 1.6, xArr + head, yLo - head * 1.6].join(" "),
+      fill: "var(--muted)"
+    }));
+    svg.appendChild(el("polygon", {
+      points: [xArr, yHi, xArr - head, yHi + head * 1.6, xArr + head, yHi + head * 1.6].join(" "),
+      fill: "var(--muted)"
+    }));
+    // подпись сбоку от середины стрелки, слева
+    svg.appendChild(txt(xArr - PAD, (yHi + yLo) / 2 - 2, "в 128 раз", "end", "var(--fg)", FS_SM));
+    svg.appendChild(txt(xArr - PAD, (yHi + yLo) / 2 + 12, "131072 : 1024", "end", "var(--muted)", FS_SM));
+
+    // ---- стрелка удвоения между полным и differential ----
+    var xArr2 = sx(1.62);
+    var y40 = sy(lg(40)), y80 = sy(lg(80));
+    svg.appendChild(el("line", {
+      x1: xArr2, y1: y40, x2: xArr2, y2: y80,
+      stroke: "var(--muted)", "stroke-width": LW
+    }));
+    svg.appendChild(el("polygon", {
+      points: [xArr2, y80, xArr2 - head, y80 + head * 1.6, xArr2 + head, y80 + head * 1.6].join(" "),
+      fill: "var(--muted)"
+    }));
+    svg.appendChild(txt(xArr2 - PAD, y40 + 14, "×2", "end", "var(--fg)", FS_SM));
+
+    // ---- итоговый разброс: от SWA до differential ----
+    var xSpan = sx(2.55);
+    svg.appendChild(el("line", {
+      x1: xSpan, y1: sy(lg(0.3125)), x2: xSpan, y2: sy(lg(80)),
+      stroke: "var(--muted)", "stroke-width": LW, "stroke-dasharray": "3 3"
+    }));
+    svg.appendChild(txt(xSpan + PAD, sy(lg(80)) + PAD, "разброс", "start", "var(--fg)", FS_SM));
+    svg.appendChild(txt(xSpan + PAD, sy(lg(80)) + PAD + 15, "> 200 раз", "start", "var(--fg)", FS_SM));
+    svg.appendChild(txt(xSpan + PAD, sy(lg(80)) + PAD + 30, "два порядка", "start", "var(--muted)", FS_SM));
+
+    mount.appendChild(svg);
+  } catch (e) {
+    mount.innerHTML =
+      '<div class="fallback">Схема должна была показать три столбика размера KV cache при N = 131 072: ' +
+      'полный attention — около 40 ГБ; SWA с окном 1024 — примерно 320 МБ (в 128 раз меньше, отношение 131072:1024); ' +
+      'differential — 80 ГБ (удвоение полного). Разброс между SWA и differential — больше двухсот раз.</div>';
+  }
+})();
+</script>
+</body>
+</html>

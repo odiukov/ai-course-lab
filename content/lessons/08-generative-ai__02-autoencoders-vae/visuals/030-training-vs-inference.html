@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Два маршрута VAE</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #657187;
+      --border: #cbd5e1;
+      --train: #2563eb;
+      --train-soft: #e8f0ff;
+      --generate: #07865b;
+      --generate-soft: #e5f8f0;
+      --loss: #b45309;
+      --loss-soft: #fff4df;
+      --shared: #6d28d9;
+      --shared-soft: #f1eaff;
+      --guide: #8793a8;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #0e1420;
+        --panel: #151d2b;
+        --ink: #edf2ff;
+        --muted: #aab6ca;
+        --border: #43506a;
+        --train: #75a7ff;
+        --train-soft: #1b3158;
+        --generate: #55d6a6;
+        --generate-soft: #143e34;
+        --loss: #ffbd67;
+        --loss-soft: #4a3217;
+        --shared: #c19cff;
+        --shared-soft: #352451;
+        --guide: #8290a8;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 12px;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 12px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 21px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+      background: var(--panel);
+    }
+
+    .box {
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .box.train {
+      fill: var(--train-soft);
+      stroke: var(--train);
+    }
+
+    .box.generate {
+      fill: var(--generate-soft);
+      stroke: var(--generate);
+    }
+
+    .box.loss {
+      fill: var(--loss-soft);
+      stroke: var(--loss);
+    }
+
+    .box.shared {
+      fill: var(--shared-soft);
+      stroke: var(--shared);
+    }
+
+    .node {
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node.train {
+      fill: var(--train-soft);
+      stroke: var(--train);
+    }
+
+    .node.generate {
+      fill: var(--generate-soft);
+      stroke: var(--generate);
+    }
+
+    .route-line,
+    .guide-line {
+      fill: none;
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .route-line.train {
+      stroke: var(--train);
+    }
+
+    .route-line.generate {
+      stroke: var(--generate);
+    }
+
+    .guide-line {
+      stroke: var(--guide);
+    }
+
+    .arrow-head.train {
+      fill: var(--train);
+    }
+
+    .arrow-head.generate {
+      fill: var(--generate);
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .route-title {
+      font-size: 17px;
+      font-weight: 750;
+      letter-spacing: 0.02em;
+    }
+
+    .route-title.train {
+      fill: var(--train);
+    }
+
+    .route-title.generate {
+      fill: var(--generate);
+    }
+
+    .loss-text {
+      fill: var(--loss);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .shared-text {
+      fill: var(--shared);
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    #fallback {
+      margin: 8px 0 0;
+      padding: 12px;
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.45;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Обучающий и генеративный маршруты VAE</h1>
+    <svg id="diagram" viewBox="0 0 1100 500" width="1100" height="500"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-label="Сверху обучение VAE с кодировщиком, восстановлением и KL; снизу генерация из нормального приора через тот же декодировщик">
+    </svg>
+    <p id="fallback" hidden>
+      Схема должна показать два маршрута: при обучении x проходит через
+      кодировщик, μ и log σ², латентный код z и декодировщик; при генерации
+      z берётся из N(0, I) и поступает сразу в тот же декодировщик.
+    </p>
+  </figure>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const data = Object.freeze([
+        { type: "metrics", zero: 0, dash: [0.16, 0.13] },
+
+        { type: "box", role: "train", x: 2.4, y: 2.15, w: 2.6, h: 1.6, r: 0.18 },
+        { type: "box", role: "train", x: 6.0, y: 1.9, w: 2.8, h: 1.15, r: 0.16 },
+        { type: "box", role: "train", x: 6.0, y: 3.45, w: 2.8, h: 1.15, r: 0.16 },
+        { type: "box", role: "loss", x: 6.0, y: 5.05, w: 4.4, h: 1.25, r: 0.18 },
+        { type: "box", role: "loss", x: 17.0, y: 5.05, w: 3.4, h: 1.25, r: 0.18 },
+        { type: "box", role: "generate", x: 7.0, y: 7.85, w: 3.55, h: 1.5, r: 0.18 },
+        { type: "box", role: "shared", x: 13.0, y: 1.65, w: 3.0, h: 7.75, r: 0.22 },
+
+        { type: "circle", role: "train", x: 1.0, y: 2.95, r: 0.42 },
+        { type: "circle", role: "train", x: 10.55, y: 2.95, r: 0.42 },
+        { type: "circle", role: "train", x: 18.55, y: 2.95, r: 0.42 },
+        { type: "circle", role: "generate", x: 18.55, y: 8.6, r: 0.42 },
+
+        { type: "guide", points: [[1.0, 2.53], [1.0, 1.1], [20.0, 1.1], [20.0, 5.05]] },
+        { type: "guide", points: [[18.55, 3.37], [18.55, 5.05]] },
+        { type: "guide", points: [[8.8, 2.47], [9.35, 2.47], [9.35, 5.05]] },
+        { type: "guide", points: [[8.8, 4.02], [9.35, 4.02]] },
+
+        {
+          type: "arrow", role: "train",
+          points: [[1.42, 2.95], [2.4, 2.95]],
+          head: [[2.4, 2.95], [2.13, 2.79], [2.13, 3.11]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[5.0, 2.72], [5.48, 2.72], [5.48, 2.47], [6.0, 2.47]],
+          head: [[6.0, 2.47], [5.73, 2.31], [5.73, 2.63]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[5.0, 3.18], [5.48, 3.18], [5.48, 4.02], [6.0, 4.02]],
+          head: [[6.0, 4.02], [5.73, 3.86], [5.73, 4.18]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[8.8, 2.47], [10.16, 2.82]],
+          head: [[10.16, 2.82], [9.86, 2.59], [9.79, 2.91]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[8.8, 4.02], [10.19, 3.19]],
+          head: [[10.19, 3.19], [9.84, 3.21], [10.0, 3.5]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[10.97, 2.95], [13.0, 2.95]],
+          head: [[13.0, 2.95], [12.72, 2.79], [12.72, 3.11]]
+        },
+        {
+          type: "arrow", role: "train",
+          points: [[16.0, 2.95], [18.13, 2.95]],
+          head: [[18.13, 2.95], [17.85, 2.79], [17.85, 3.11]]
+        },
+        {
+          type: "arrow", role: "generate",
+          points: [[10.55, 8.6], [13.0, 8.6]],
+          head: [[13.0, 8.6], [12.72, 8.44], [12.72, 8.76]]
+        },
+        {
+          type: "arrow", role: "generate",
+          points: [[16.0, 8.6], [18.13, 8.6]],
+          head: [[18.13, 8.6], [17.85, 8.44], [17.85, 8.76]]
+        },
+
+        { type: "text", value: "ОБУЧЕНИЕ", className: "route-title train", x: 0.35, y: 0.55, dx: 0, dy: 0, anchor: "start" },
+        { type: "text", value: "реальный x", className: "small", x: 1.0, y: 3.72, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "x", className: "label", x: 1.0, y: 3.06, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "кодировщик", className: "label", x: 3.7, y: 2.83, dx: 0, dy: -2, anchor: "middle" },
+        { type: "text", value: "q(z | x)", className: "small", x: 3.7, y: 3.3, dx: 0, dy: 2, anchor: "middle" },
+        { type: "text", value: "μ", className: "label", x: 7.4, y: 2.58, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "log σ²", className: "label", x: 7.4, y: 4.13, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "z", className: "label", x: 10.55, y: 3.06, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "выбор кода", className: "small", x: 10.55, y: 3.72, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "x̂", className: "label", x: 18.55, y: 3.06, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "восстановление", className: "small", x: 18.55, y: 3.72, dx: 0, dy: 0, anchor: "middle" },
+
+        { type: "text", value: "KL-штраф", className: "loss-text", x: 8.2, y: 5.55, dx: 0, dy: -2, anchor: "middle" },
+        { type: "text", value: "q(z | x) → N(0, I)", className: "small", x: 8.2, y: 5.98, dx: 0, dy: 2, anchor: "middle" },
+        { type: "text", value: "ошибка восстановления", className: "loss-text", x: 18.7, y: 5.55, dx: 0, dy: -2, anchor: "middle" },
+        { type: "text", value: "сравнить x и x̂", className: "small", x: 18.7, y: 5.98, dx: 0, dy: 2, anchor: "middle" },
+
+        { type: "text", value: "ТОТ ЖЕ", className: "shared-text", x: 14.5, y: 5.08, dx: 0, dy: -3, anchor: "middle" },
+        { type: "text", value: "ДЕКОДИРОВЩИК", className: "shared-text", x: 14.5, y: 5.5, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "общие обученные", className: "small", x: 14.5, y: 5.98, dx: 0, dy: 1, anchor: "middle" },
+        { type: "text", value: "параметры", className: "small", x: 14.5, y: 6.35, dx: 0, dy: 2, anchor: "middle" },
+
+        { type: "text", value: "ГЕНЕРАЦИЯ", className: "route-title generate", x: 0.35, y: 7.05, dx: 0, dy: 0, anchor: "start" },
+        { type: "text", value: "нет входного x", className: "label", x: 0.5, y: 8.25, dx: 0, dy: -2, anchor: "start" },
+        { type: "text", value: "кодировщик не участвует", className: "small", x: 0.5, y: 8.7, dx: 0, dy: 2, anchor: "start" },
+        { type: "text", value: "z из N(0, I)", className: "label", x: 8.775, y: 8.47, dx: 0, dy: -2, anchor: "middle" },
+        { type: "text", value: "стандартный приор", className: "small", x: 8.775, y: 8.91, dx: 0, dy: 2, anchor: "middle" },
+        { type: "text", value: "x", className: "label", x: 18.55, y: 8.71, dx: 0, dy: 0, anchor: "middle" },
+        { type: "text", value: "новый объект", className: "small", x: 18.55, y: 9.37, dx: 0, dy: 0, anchor: "middle" }
+      ]);
+
+      const origin = Object.freeze({ x: 50, y: 20 });
+      const scale = 47;
+
+      const sx = x => origin.x + x * scale;
+      const sy = y => origin.y + y * scale;
+
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const metrics = data.find(item => item.type === "metrics");
+      const zero = metrics.zero;
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const element = (name, attributes) => {
+        const node = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, String(value));
+        }
+        return node;
+      };
+
+      const pathData = points => {
+        let first = true;
+        let value = "";
+        for (const point of points) {
+          value += `${first ? "M" : "L"} ${sx(point[zero])} ${sy(point[metrics.dash.length - metrics.dash.length + metrics.dash.length / metrics.dash.length])} `;
+          first = false;
+        }
+        return value.trim();
+      };
+
+      try {
+        const generated = element("g", { "aria-hidden": "true" });
+        const dash = `${sx(metrics.dash[zero]) - sx(zero)} ${sy(metrics.dash[metrics.dash.length / metrics.dash.length]) - sy(zero)}`;
+
+        for (const item of data.filter(entry => entry.type === "guide")) {
+          generated.append(element("path", {
+            d: pathData(item.points),
+            class: "guide-line",
+            "stroke-dasharray": dash
+          }));
+        }
+
+        for (const item of data.filter(entry => entry.type === "box")) {
+          generated.append(element("rect", {
+            x: sx(item.x),
+            y: sy(item.y),
+            width: sx(item.x + item.w) - sx(item.x),
+            height: sy(item.y + item.h) - sy(item.y),
+            rx: sx(item.r) - sx(zero),
+            ry: sy(item.r) - sy(zero),
+            class: `box ${item.role}`
+          }));
+        }
+
+        for (const item of data.filter(entry => entry.type === "circle")) {
+          generated.append(element("circle", {
+            cx: sx(item.x),
+            cy: sy(item.y),
+            r: sx(item.r) - sx(zero),
+            class: `node ${item.role}`
+          }));
+        }
+
+        for (const item of data.filter(entry => entry.type === "arrow")) {
+          generated.append(element("path", {
+            d: pathData(item.points),
+            class: `route-line ${item.role}`
+          }));
+
+          generated.append(element("polygon", {
+            points: item.head.map(point => `${sx(point[zero])},${sy(point[metrics.dash.length / metrics.dash.length])}`).join(" "),
+            class: `arrow-head ${item.role}`
+          }));
+        }
+
+        for (const item of data.filter(entry => entry.type === "text")) {
+          const text = element("text", {
+            x: sx(item.x),
+            y: sy(item.y),
+            dx: item.dx,
+            dy: item.dy,
+            "text-anchor": item.anchor,
+            class: item.className
+          });
+          text.textContent = item.value;
+          generated.append(text);
+        }
+
+        svg.append(generated);
+      } catch (error) {
+        svg.replaceChildren();
+        fallback.hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>

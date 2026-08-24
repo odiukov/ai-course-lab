@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Граница гарантии LoRA + DP-SGD</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --ink: #172033;
+    --muted: #536176;
+    --line: #8b98aa;
+    --base: #e9edf3;
+    --base-strong: #d8dee8;
+    --dp-area: #e8f5ff;
+    --dp-line: #1677b8;
+    --data: #dff5eb;
+    --data-line: #238260;
+    --adapter: #eee7ff;
+    --adapter-line: #7251b5;
+    --warning: #fff0dc;
+    --warning-line: #bd6a18;
+    --white: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #edf3fb;
+      --muted: #aebbd0;
+      --line: #748297;
+      --base: #252e3c;
+      --base-strong: #303b4c;
+      --dp-area: #102d42;
+      --dp-line: #62b9ed;
+      --data: #14382f;
+      --data-line: #62c9a5;
+      --adapter: #2d2545;
+      --adapter-line: #b49aef;
+      --warning: #402b17;
+      --warning-line: #efa65f;
+      --white: #111722;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .figure-title {
+    margin: 0;
+    padding: 14px 18px 8px;
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+  }
+
+  .dp-frame {
+    fill: var(--dp-area);
+    stroke: var(--dp-line);
+    stroke-width: 2px;
+  }
+
+  .data-box {
+    fill: var(--data);
+    stroke: var(--data-line);
+    stroke-width: 2px;
+  }
+
+  .adapter-box {
+    fill: var(--adapter);
+    stroke: var(--adapter-line);
+    stroke-width: 2px;
+  }
+
+  .base-box {
+    fill: var(--base);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .freeze-box {
+    fill: var(--base-strong);
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .warning-box {
+    fill: var(--warning);
+    stroke: var(--warning-line);
+    stroke-width: 1px;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--dp-line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .base-mark {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .data-mark {
+    fill: none;
+    stroke: var(--data-line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .adapter-mark {
+    fill: none;
+    stroke: var(--adapter-line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .dp-label {
+    fill: var(--dp-line);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .warning-label {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    margin: 12px 18px 18px;
+    padding: 14px;
+    color: var(--ink);
+    background: var(--warning);
+    border: 1px solid var(--warning-line);
+    border-radius: 8px;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure class="figure">
+  <h2 class="figure-title">Где проходит граница гарантии LoRA + DP-SGD</h2>
+  <svg id="diagram"
+       viewBox="0 0 960 440"
+       width="960"
+       height="440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Граница гарантии LoRA и DP-SGD</title>
+    <desc id="svg-desc">Рамка приватности охватывает данные дообучения и LoRA-адаптер, но не замороженную базовую модель на 7 миллиардов параметров.</desc>
+  </svg>
+  <p id="fallback" class="fallback" hidden>
+    Схема должна была показать замороженную базовую модель на 7 млрд параметров
+    вне границы гарантии и небольшой LoRA-адаптер вместе с данными дообучения
+    внутри рамки DP.
+  </p>
+</figure>
+
+<script>
+const data = {
+  origin: { x: 18, y: 10 },
+  scale: { x: 1, y: 1 },
+  style: {
+    radius: 12,
+    smallRadius: 8,
+    dash: [9, 7]
+  },
+  boxes: {
+    dp:       { left: 365, top: 15,  right: 910, bottom: 225, kind: "dp-frame" },
+    dataset:  { left: 425, top: 63,  right: 850, bottom: 122, kind: "data-box" },
+    adapter:  { left: 485, top: 157, right: 790, bottom: 211, kind: "adapter-box" },
+    base:     { left: 55,  top: 255, right: 890, bottom: 374, kind: "base-box" },
+    freeze:   { left: 80,  top: 282, right: 265, bottom: 340, kind: "freeze-box" },
+    prior:    { left: 300, top: 329, right: 850, bottom: 358, kind: "warning-box" },
+    boundary: { left: 150, top: 390, right: 815, bottom: 420, kind: "warning-box" }
+  },
+  texts: [
+    { x: 390, y: 42,  value: "ГРАНИЦА ГАРАНТИИ DP", anchor: "start", className: "dp-label" },
+    { x: 637, y: 87,  value: "Данные DP-дообучения", anchor: "middle", className: "label" },
+    { x: 637, y: 108, value: "включая личный медицинский текст", anchor: "middle", className: "small" },
+    { x: 688, y: 145, value: "DP-SGD", anchor: "start", className: "dp-label" },
+    { x: 637, y: 181, value: "Небольшой LoRA-адаптер", anchor: "middle", className: "label" },
+    { x: 637, y: 201, value: "обучаемые параметры", anchor: "middle", className: "small" },
+    { x: 680, y: 243, value: "подключён к основе", anchor: "start", className: "small" },
+    { x: 490, y: 285, value: "Базовая модель · 7 млрд параметров", anchor: "middle", className: "label" },
+    { x: 490, y: 307, value: "создана раньше и не изменяется при DP-дообучении", anchor: "middle", className: "small" },
+    { x: 170, y: 307, value: "ЗАМОРОЖЕНА", anchor: "middle", className: "label" },
+    { x: 170, y: 328, value: "веса не меняются", anchor: "middle", className: "small" },
+    { x: 575, y: 349, value: "Телефон из прежнего датасета мог остаться здесь", anchor: "middle", className: "warning-label" },
+    { x: 482, y: 410, value: "DP защищает участие данных в дообучении — не прошлое базовой модели", anchor: "middle", className: "warning-label" }
+  ],
+  lines: [
+    { from: { x: 637, y: 123 }, to: { x: 637, y: 152 }, className: "connector" },
+    { from: { x: 637, y: 211 }, to: { x: 637, y: 250 }, className: "connector" },
+    { from: { x: 115, y: 294 }, to: { x: 115, y: 328 }, className: "base-mark" },
+    { from: { x: 98,  y: 311 }, to: { x: 132, y: 311 }, className: "base-mark" },
+    { from: { x: 103, y: 299 }, to: { x: 127, y: 323 }, className: "base-mark" },
+    { from: { x: 127, y: 299 }, to: { x: 103, y: 323 }, className: "base-mark" },
+    { from: { x: 453, y: 80 },  to: { x: 479, y: 80 }, className: "data-mark" },
+    { from: { x: 453, y: 92 },  to: { x: 479, y: 92 }, className: "data-mark" },
+    { from: { x: 453, y: 104 }, to: { x: 479, y: 104 }, className: "data-mark" }
+  ],
+  arrows: [
+    {
+      points: [
+        { x: 637, y: 157 },
+        { x: 629, y: 146 },
+        { x: 645, y: 146 }
+      ],
+      className: "connector"
+    },
+    {
+      points: [
+        { x: 637, y: 255 },
+        { x: 629, y: 244 },
+        { x: 645, y: 244 }
+      ],
+      className: "connector"
+    }
+  ],
+  adapterIcon: [
+    [
+      { x: 512, y: 174 },
+      { x: 530, y: 166 },
+      { x: 548, y: 174 },
+      { x: 530, y: 182 }
+    ],
+    [
+      { x: 512, y: 185 },
+      { x: 530, y: 193 },
+      { x: 548, y: 185 }
+    ],
+    [
+      { x: 512, y: 196 },
+      { x: 530, y: 204 },
+      { x: 548, y: 196 }
+    ]
+  ]
+};
+
+const origin = data.origin;
+const scale = data.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const append = (tag, attributes, textValue) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attributes)) {
+      node.setAttribute(name, String(value));
+    }
+    if (textValue !== undefined) node.textContent = textValue;
+    svg.appendChild(node);
+    return node;
+  };
+
+  for (const box of Object.values(data.boxes)) {
+    const node = append("rect", {
+      x: sx(box.left),
+      y: sy(box.top),
+      width: sx(box.right) - sx(box.left),
+      height: sy(box.bottom) - sy(box.top),
+      rx: sx(data.style.radius) - sx(0),
+      ry: sy(data.style.radius) - sy(0),
+      class: box.kind
+    });
+    if (box.kind === "dp-frame") {
+      node.setAttribute("stroke-dasharray", data.style.dash.join(" "));
+    }
+    if (box.kind === "warning-box") {
+      node.setAttribute("rx", sx(data.style.smallRadius) - sx(0));
+      node.setAttribute("ry", sy(data.style.smallRadius) - sy(0));
+    }
+  }
+
+  for (const line of data.lines) {
+    append("line", {
+      x1: sx(line.from.x),
+      y1: sy(line.from.y),
+      x2: sx(line.to.x),
+      y2: sy(line.to.y),
+      class: line.className
+    });
+  }
+
+  for (const arrow of data.arrows) {
+    append("polygon", {
+      points: arrow.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: arrow.className,
+      fill: "var(--dp-line)"
+    });
+  }
+
+  for (const segment of data.adapterIcon) {
+    append("polyline", {
+      points: segment.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: "adapter-mark"
+    });
+  }
+
+  for (const label of data.texts) {
+    append("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      "text-anchor": label.anchor,
+      class: label.className
+    }, label.value);
+  }
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

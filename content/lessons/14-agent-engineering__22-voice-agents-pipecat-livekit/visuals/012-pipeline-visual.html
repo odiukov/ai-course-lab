@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Пайплайн из пяти процессоров</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: whitesmoke;
+      --canvas: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --border: lightsteelblue;
+      --connector: royalblue;
+      --downstream: royalblue;
+      --upstream: crimson;
+      --card: aliceblue;
+      --vad: mediumseagreen;
+      --stt: dodgerblue;
+      --llm: mediumpurple;
+      --tts: darkorange;
+      --transport: teal;
+      --fallback: mistyrose;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: black;
+        --canvas: #111827;
+        --ink: whitesmoke;
+        --muted: lightsteelblue;
+        --border: slategray;
+        --connector: lightskyblue;
+        --downstream: lightskyblue;
+        --upstream: salmon;
+        --card: #1f2937;
+        --vad: lightgreen;
+        --stt: deepskyblue;
+        --llm: violet;
+        --tts: orange;
+        --transport: turquoise;
+        --fallback: darkred;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1000px;
+      margin: auto;
+    }
+
+    h1 {
+      margin: auto;
+      font-size: 22px;
+      text-align: center;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--canvas);
+      border: 1px solid var(--border);
+      font-family: inherit;
+    }
+
+    .canvas-bg {
+      fill: var(--canvas);
+    }
+
+    .card-body {
+      fill: var(--card);
+      stroke: var(--border);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .accent-vad {
+      fill: var(--vad);
+    }
+
+    .accent-stt {
+      fill: var(--stt);
+    }
+
+    .accent-llm {
+      fill: var(--llm);
+    }
+
+    .accent-tts {
+      fill: var(--tts);
+    }
+
+    .accent-transport {
+      fill: var(--transport);
+    }
+
+    .card-title {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .card-detail {
+      fill: var(--muted);
+      font-size: 14px;
+      dominant-baseline: middle;
+    }
+
+    .connector-line {
+      fill: none;
+      stroke: var(--connector);
+      stroke-width: 3;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .connector-head {
+      fill: var(--connector);
+    }
+
+    .frame-label {
+      fill: var(--muted);
+      font-size: 13px;
+      dominant-baseline: middle;
+    }
+
+    .downstream-line {
+      fill: none;
+      stroke: var(--downstream);
+      stroke-width: 3;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .downstream-head {
+      fill: var(--downstream);
+    }
+
+    .upstream-line,
+    .cancel-symbol {
+      fill: none;
+      stroke: var(--upstream);
+      stroke-width: 3;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .upstream-head {
+      fill: var(--upstream);
+    }
+
+    .direction-down {
+      fill: var(--downstream);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .direction-up,
+    .cancel-label {
+      fill: var(--upstream);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .note-title {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .note-line {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .frame-word {
+      fill: var(--connector);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      background: var(--fallback);
+      color: var(--ink);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Один Frame проходит пять процессоров</h1>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1000 440"
+      width="1000"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Вертикальная цепочка VAD Silero, STT, LLM, TTS и транспорта.
+        Полезные кадры идут вниз по DOWNSTREAM, а кадр отмены возвращается
+        вверх по UPSTREAM.
+      </desc>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна показывать цепочку VAD (Silero) → STT → LLM → TTS →
+      транспорт: кадры идут вниз по DOWNSTREAM, а отмена возвращается вверх
+      по UPSTREAM.
+    </p>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze([
+      {
+        kind: "bounds",
+        x: 0,
+        y: 0,
+        width: 1000,
+        height: 440
+      },
+      {
+        kind: "card",
+        role: "vad",
+        x: 290,
+        y: 52,
+        width: 420,
+        height: 54,
+        radius: 12,
+        accentWidth: 10,
+        titleX: 318,
+        titleY: 72,
+        detailX: 318,
+        detailY: 91,
+        title: "VAD · Silero",
+        detail: "звук → границы реплики"
+      },
+      {
+        kind: "card",
+        role: "stt",
+        x: 290,
+        y: 123,
+        width: 420,
+        height: 54,
+        radius: 12,
+        accentWidth: 10,
+        titleX: 318,
+        titleY: 143,
+        detailX: 318,
+        detailY: 162,
+        title: "STT",
+        detail: "аудиофрагмент → текст"
+      },
+      {
+        kind: "card",
+        role: "llm",
+        x: 290,
+        y: 194,
+        width: 420,
+        height: 54,
+        radius: 12,
+        accentWidth: 10,
+        titleX: 318,
+        titleY: 214,
+        detailX: 318,
+        detailY: 233,
+        title: "LLM",
+        detail: "текст в контексте → текст ответа"
+      },
+      {
+        kind: "card",
+        role: "tts",
+        x: 290,
+        y: 265,
+        width: 420,
+        height: 54,
+        radius: 12,
+        accentWidth: 10,
+        titleX: 318,
+        titleY: 285,
+        detailX: 318,
+        detailY: 304,
+        title: "TTS",
+        detail: "ответ → звуковые фрагменты"
+      },
+      {
+        kind: "card",
+        role: "transport",
+        x: 290,
+        y: 336,
+        width: 420,
+        height: 54,
+        radius: 12,
+        accentWidth: 10,
+        titleX: 318,
+        titleY: 356,
+        detailX: 318,
+        detailY: 375,
+        title: "Транспорт",
+        detail: "звук → собеседник и выбранный канал"
+      },
+      {
+        kind: "connector",
+        x: 500,
+        fromY: 106,
+        lineEndY: 116,
+        head: [
+          { x: 492, y: 113 },
+          { x: 500, y: 123 },
+          { x: 508, y: 113 }
+        ],
+        labelX: 730,
+        labelY: 115,
+        label: "аудиокадр реплики"
+      },
+      {
+        kind: "connector",
+        x: 500,
+        fromY: 177,
+        lineEndY: 187,
+        head: [
+          { x: 492, y: 184 },
+          { x: 500, y: 194 },
+          { x: 508, y: 184 }
+        ],
+        labelX: 730,
+        labelY: 186,
+        label: "текстовый кадр"
+      },
+      {
+        kind: "connector",
+        x: 500,
+        fromY: 248,
+        lineEndY: 258,
+        head: [
+          { x: 492, y: 255 },
+          { x: 500, y: 265 },
+          { x: 508, y: 255 }
+        ],
+        labelX: 730,
+        labelY: 257,
+        label: "кадр ответа"
+      },
+      {
+        kind: "connector",
+        x: 500,
+        fromY: 319,
+        lineEndY: 329,
+        head: [
+          { x: 492, y: 326 },
+          { x: 500, y: 336 },
+          { x: 508, y: 326 }
+        ],
+        labelX: 730,
+        labelY: 328,
+        label: "аудиокадр ответа"
+      },
+      {
+        kind: "downstream",
+        x: 140,
+        fromY: 52,
+        toY: 394,
+        head: [
+          { x: 130, y: 393 },
+          { x: 140, y: 407 },
+          { x: 150, y: 393 }
+        ],
+        labelX: 140,
+        labelY: 30,
+        label: "DOWNSTREAM"
+      },
+      {
+        kind: "upstream",
+        x: 860,
+        fromY: 390,
+        toY: 48,
+        head: [
+          { x: 850, y: 49 },
+          { x: 860, y: 35 },
+          { x: 870, y: 49 }
+        ],
+        labelX: 860,
+        labelY: 422,
+        label: "UPSTREAM · отмена"
+      },
+      {
+        kind: "cancel",
+        centerX: 860,
+        centerY: 380,
+        radius: 17,
+        first: [
+          { x: 852, y: 372 },
+          { x: 868, y: 388 }
+        ],
+        second: [
+          { x: 868, y: 372 },
+          { x: 852, y: 388 }
+        ],
+        labelX: 885,
+        labelY: 380,
+        label: "кадр отмены"
+      },
+      {
+        kind: "note",
+        titleX: 30,
+        titleY: 191,
+        lines: [
+          { x: 30, y: 217, className: "frame-word", text: "Frame" },
+          { x: 30, y: 241, className: "note-line", text: "меняет форму," },
+          { x: 30, y: 265, className: "note-line", text: "но остаётся одним" },
+          { x: 30, y: 289, className: "note-line", text: "сообщением" }
+        ],
+        title: "На каждом стыке"
+      }
+    ]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = svg.namespaceURI;
+
+      const element = (name, className) => {
+        const node = document.createElementNS(namespace, name);
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const setTextPosition = (node, x, y, anchor) => {
+        node.setAttribute("x", sx(x));
+        node.setAttribute("y", sy(y));
+        node.setAttribute("text-anchor", anchor);
+      };
+
+      const setLine = (node, x1, y1, x2, y2) => {
+        node.setAttribute("x1", sx(x1));
+        node.setAttribute("y1", sy(y1));
+        node.setAttribute("x2", sx(x2));
+        node.setAttribute("y2", sy(y2));
+      };
+
+      const setPolygon = (node, points) => {
+        node.setAttribute(
+          "points",
+          points.map((point) => `${sx(point.x)},${sy(point.y)}`).join(" ")
+        );
+      };
+
+      const bounds = diagramData.find((item) => item.kind === "bounds");
+      const background = element("rect", "canvas-bg");
+      background.setAttribute("x", sx(0));
+      background.setAttribute("y", sy(0));
+      background.setAttribute("width", sx(bounds.width) - sx(0));
+      background.setAttribute("height", sy(bounds.height) - sy(0));
+      svg.append(background);
+
+      const lanes = element("g", "direction-lanes");
+      const connectors = element("g", "frame-connectors");
+      const cards = element("g", "processor-cards");
+      const annotations = element("g", "annotations");
+
+      diagramData
+        .filter((item) => item.kind === "downstream")
+        .forEach((item) => {
+          const line = element("line", "downstream-line");
+          setLine(line, item.x, item.fromY, item.x, item.toY);
+
+          const head = element("polygon", "downstream-head");
+          setPolygon(head, item.head);
+
+          const label = element("text", "direction-down");
+          setTextPosition(label, item.labelX, item.labelY, "middle");
+          label.textContent = item.label;
+
+          lanes.append(line, head, label);
+        });
+
+      diagramData
+        .filter((item) => item.kind === "upstream")
+        .forEach((item) => {
+          const line = element("line", "upstream-line");
+          setLine(line, item.x, item.fromY, item.x, item.toY);
+
+          const head = element("polygon", "upstream-head");
+          setPolygon(head, item.head);
+
+          const label = element("text", "direction-up");
+          setTextPosition(label, item.labelX, item.labelY, "middle");
+          label.textContent = item.label;
+
+          lanes.append(line, head, label);
+        });
+
+      diagramData
+        .filter((item) => item.kind === "connector")
+        .forEach((item) => {
+          const line = element("line", "connector-line");
+          setLine(line, item.x, item.fromY, item.x, item.lineEndY);
+
+          const head = element("polygon", "connector-head");
+          setPolygon(head, item.head);
+
+          const label = element("text", "frame-label");
+          setTextPosition(label, item.labelX, item.labelY, "start");
+          label.textContent = item.label;
+
+          connectors.append(line, head, label);
+        });
+
+      diagramData
+        .filter((item) => item.kind === "card")
+        .forEach((item) => {
+          const group = element("g", `processor processor-${item.role}`);
+
+          const body = element("rect", "card-body");
+          body.setAttribute("x", sx(item.x));
+          body.setAttribute("y", sy(item.y));
+          body.setAttribute("width", sx(item.x + item.width) - sx(item.x));
+          body.setAttribute("height", sy(item.y + item.height) - sy(item.y));
+          body.setAttribute("rx", sx(item.radius) - sx(0));
+          body.setAttribute("ry", sy(item.radius) - sy(0));
+
+          const accent = element("rect", `accent-${item.role}`);
+          accent.setAttribute("x", sx(item.x));
+          accent.setAttribute("y", sy(item.y));
+          accent.setAttribute(
+            "width",
+            sx(item.x + item.accentWidth) - sx(item.x)
+          );
+          accent.setAttribute(
+            "height",
+            sy(item.y + item.height) - sy(item.y)
+          );
+          accent.setAttribute("rx", sx(item.radius) - sx(0));
+          accent.setAttribute("ry", sy(item.radius) - sy(0));
+
+          const title = element("text", "card-title");
+          setTextPosition(title, item.titleX, item.titleY, "start");
+          title.textContent = item.title;
+
+          const detail = element("text", "card-detail");
+          setTextPosition(detail, item.detailX, item.detailY, "start");
+          detail.textContent = item.detail;
+
+          group.append(body, accent, title, detail);
+          cards.append(group);
+        });
+
+      diagramData
+        .filter((item) => item.kind === "cancel")
+        .forEach((item) => {
+          const circle = element("circle", "cancel-symbol");
+          circle.setAttribute("cx", sx(item.centerX));
+          circle.setAttribute("cy", sy(item.centerY));
+          circle.setAttribute("r", sx(item.radius) - sx(0));
+
+          const first = element("line", "cancel-symbol");
+          setLine(
+            first,
+            item.first[0].x,
+            item.first[0].y,
+            item.first[1].x,
+            item.first[1].y
+          );
+
+          const second = element("line", "cancel-symbol");
+          setLine(
+            second,
+            item.second[0].x,
+            item.second[0].y,
+            item.second[1].x,
+            item.second[1].y
+          );
+
+          const label = element("text", "cancel-label");
+          setTextPosition(label, item.labelX, item.labelY, "start");
+          label.setAttribute("dominant-baseline", "middle");
+          label.textContent = item.label;
+
+          annotations.append(circle, first, second, label);
+        });
+
+      diagramData
+        .filter((item) => item.kind === "note")
+        .forEach((item) => {
+          const title = element("text", "note-title");
+          setTextPosition(title, item.titleX, item.titleY, "start");
+          title.textContent = item.title;
+          annotations.append(title);
+
+          item.lines.forEach((lineData) => {
+            const line = element("text", lineData.className);
+            setTextPosition(line, lineData.x, lineData.y, "start");
+            line.textContent = lineData.text;
+            annotations.append(line);
+          });
+        });
+
+      svg.append(lanes, connectors, cards, annotations);
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

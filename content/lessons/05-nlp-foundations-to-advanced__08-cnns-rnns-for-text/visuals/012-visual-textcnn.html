@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Путь данных через TextCNN</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5d687d;
+    --line: #8b96aa;
+    --embed: #dce8ff;
+    --embed-strong: #8db3ff;
+    --conv: #e8ddff;
+    --conv-strong: #825cc5;
+    --pool: #d9f4e8;
+    --pool-strong: #23815e;
+    --result: #ffe8bc;
+    --result-strong: #b46600;
+    --accent: #356dcc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #182131;
+      --ink: #edf3ff;
+      --muted: #aebbd0;
+      --line: #71809a;
+      --embed: #213d6b;
+      --embed-strong: #75a7ff;
+      --conv: #3d2d5c;
+      --conv-strong: #bd96ff;
+      --pool: #193f35;
+      --pool-strong: #65d6aa;
+      --result: #503817;
+      --result-strong: #ffc66d;
+      --accent: #80adff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  figure {
+    margin: 0;
+    padding: 12px 14px 10px;
+    background: var(--bg);
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.25;
+    font-weight: 750;
+    text-align: center;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .ink { fill: var(--ink); }
+  .muted { fill: var(--muted); }
+  .label { font-size: 15px; font-weight: 650; }
+  .small { font-size: 13px; }
+  .tiny { font-size: 12px; }
+  .big { font-size: 18px; font-weight: 800; }
+  .wire {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .arrow {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .arrowhead { fill: var(--accent); }
+  .token {
+    fill: var(--panel);
+    stroke: var(--embed-strong);
+    stroke-width: 2;
+  }
+  .embed-cell {
+    fill: var(--embed);
+    stroke: var(--embed-strong);
+    stroke-width: 1;
+  }
+  .embed-hot { fill: var(--embed-strong); }
+  .conv-box {
+    fill: var(--conv);
+    stroke: var(--conv-strong);
+    stroke-width: 2;
+  }
+  .map-cell {
+    fill: var(--panel);
+    stroke: var(--conv-strong);
+    stroke-width: 1;
+  }
+  .map-hot { fill: var(--conv-strong); }
+  .pool-box {
+    fill: var(--pool);
+    stroke: var(--pool-strong);
+    stroke-width: 2;
+  }
+  .output-dot {
+    fill: var(--pool-strong);
+    stroke: var(--panel);
+    stroke-width: 2;
+  }
+  .concat-box {
+    fill: var(--result);
+    stroke: var(--result-strong);
+    stroke-width: 2;
+  }
+  .separator {
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Путь данных через TextCNN</h1>
+  <svg id="diagram" viewBox="0 0 1180 440" role="img"
+       aria-label="Последовательность embeddings проходит через параллельные свёртки ширины 2, 3 и 4, глобальный max-pooling и объединяется в вектор из 192 чисел"
+       preserveAspectRatio="xMidYMid meet">
+    <desc>Три параллельные ветки TextCNN содержат по 64 фильтра. После глобального max-pooling каждая отдаёт 64 числа, которые склеиваются в вектор из 192 чисел.</desc>
+  </svg>
+  <noscript>Схема должна показать embeddings, три параллельные Conv1D ширины 2, 3 и 4, global max-pooling и итоговый вектор из 192 чисел.</noscript>
+</figure>
+<script>
+(() => {
+  const data = {
+    zero: 0,
+    canvas: [1180, 440],
+    phrase: { x: 26, y: 27 },
+    sectionLabels: [
+      { x: 26, y: 54, text: "слова → embeddings", anchor: "start" },
+      { x: 425, y: 54, text: "параллельные Conv1D", anchor: "start" },
+      { x: 775, y: 54, text: "global max-pooling", anchor: "start" },
+      { x: 1014, y: 54, text: "склейка", anchor: "start" }
+    ],
+    tokens: [
+      { word: "фильм", x1: 26, x2: 76 },
+      { word: "совсем", x1: 80, x2: 140 },
+      { word: "не", x1: 144, x2: 178 },
+      { word: "стоит", x1: 182, x2: 232 },
+      { word: "потраченного", x1: 236, x2: 332 },
+      { word: "времени", x1: 336, x2: 400 }
+    ],
+    tokenBox: { y1: 66, y2: 98, r: 8 },
+    embedding: {
+      y: [108, 117, 126, 135, 144],
+      bottom: 153,
+      halfWidth: 9,
+      hot: [
+        [117, 126], [108, 135], [126, 144],
+        [117, 144], [108, 126], [135, 144]
+      ],
+      label: { x: 213, y: 174, text: "по одному числовому представлению на токен" }
+    },
+    inputBus: {
+      shaft: [[410, 110], [410, 349]],
+      arrows: [
+        { points: [[400, 130], [425, 130]], head: [[425, 130], [416, 125], [416, 135]] },
+        { points: [[400, 130], [410, 130], [410, 236], [425, 236]], head: [[425, 236], [416, 231], [416, 241]] },
+        { points: [[400, 130], [410, 130], [410, 342], [425, 342]], head: [[425, 342], [416, 337], [416, 347]] }
+      ]
+    },
+    lanes: [
+      {
+        width: "2", y: 130,
+        title: "Conv1D · ширина 2 · 64 фильтра",
+        conv: { x1: 430, x2: 610, y1: 91, y2: 145, r: 10 },
+        windowBars: [[448, 470], [476, 498]],
+        map: { x1: 638, x2: 744, y1: 106, y2: 136 },
+        mapCells: [[644, 659], [662, 677], [680, 695], [698, 713], [716, 731]],
+        hot: [698, 713],
+        pool: { x1: 778, x2: 912, y1: 96, y2: 145, r: 10 },
+        out: { x: 945, y: 121 },
+        note: { x: 691, y: 153, text: "карты признаков" }
+      },
+      {
+        width: "3", y: 236,
+        title: "Conv1D · ширина 3 · 64 фильтра",
+        conv: { x1: 430, x2: 610, y1: 197, y2: 251, r: 10 },
+        windowBars: [[448, 470], [476, 498], [504, 526]],
+        map: { x1: 638, x2: 744, y1: 212, y2: 242 },
+        mapCells: [[644, 661], [664, 681], [684, 701], [704, 721]],
+        hot: [664, 681],
+        pool: { x1: 778, x2: 912, y1: 202, y2: 251, r: 10 },
+        out: { x: 945, y: 227 },
+        note: { x: 691, y: 259, text: "поиск сильнейшего отклика" }
+      },
+      {
+        width: "4", y: 342,
+        title: "Conv1D · ширина 4 · 64 фильтра",
+        conv: { x1: 430, x2: 610, y1: 303, y2: 357, r: 10 },
+        windowBars: [[448, 470], [476, 498], [504, 526], [532, 554]],
+        map: { x1: 638, x2: 744, y1: 318, y2: 348 },
+        mapCells: [[644, 663], [666, 685], [688, 707]],
+        hot: [688, 707],
+        pool: { x1: 778, x2: 912, y1: 308, y2: 357, r: 10 },
+        out: { x: 945, y: 333 },
+        note: { x: 691, y: 365, text: "одно число от каждого фильтра" }
+      }
+    ],
+    laneArrows: [
+      { points: [[610, 121], [638, 121]], head: [[638, 121], [629, 116], [629, 126]] },
+      { points: [[744, 121], [778, 121]], head: [[778, 121], [769, 116], [769, 126]] },
+      { points: [[912, 121], [945, 121]], head: [[945, 121], [936, 116], [936, 126]] },
+      { points: [[610, 227], [638, 227]], head: [[638, 227], [629, 222], [629, 232]] },
+      { points: [[744, 227], [778, 227]], head: [[778, 227], [769, 222], [769, 232]] },
+      { points: [[912, 227], [945, 227]], head: [[945, 227], [936, 222], [936, 232]] },
+      { points: [[610, 333], [638, 333]], head: [[638, 333], [629, 328], [629, 338]] },
+      { points: [[744, 333], [778, 333]], head: [[778, 333], [769, 328], [769, 338]] },
+      { points: [[912, 333], [945, 333]], head: [[945, 333], [936, 328], [936, 338]] }
+    ],
+    concat: { x1: 1014, x2: 1152, y1: 92, y2: 362, r: 12 },
+    concatParts: [[1040, 145], [1040, 251], [1040, 357]],
+    concatArrows: [
+      { points: [[945, 121], [986, 121], [986, 145], [1014, 145]], head: [[1014, 145], [1005, 140], [1005, 150]] },
+      { points: [[945, 227], [986, 227], [986, 227], [1014, 227]], head: [[1014, 227], [1005, 222], [1005, 232]] },
+      { points: [[945, 333], [986, 333], [986, 309], [1014, 309]], head: [[1014, 309], [1005, 304], [1005, 314]] }
+    ],
+    separators: [
+      [[1028, 181], [1138, 181]],
+      [[1028, 273], [1138, 273]]
+    ],
+    footer: {
+      line: [[26, 390], [1152, 390]],
+      labels: [
+        { x: 26, y: 416, text: "окна по 2, 3 и 4 токена", anchor: "start" },
+        { x: 590, y: 416, text: "каждая ветка: 64 сильнейших признака", anchor: "middle" },
+        { x: 1152, y: 416, text: "итог: 192 числа", anchor: "end" }
+      ]
+    }
+  };
+
+  const origin = { x: 0, y: 0 };
+  const scale = 1;
+  const sx = x => origin.x + x * scale;
+  const sy = y => origin.y + y * scale;
+
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs = {}, textValue) => {
+    const node = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+    if (textValue !== undefined) node.textContent = textValue;
+    return node;
+  };
+
+  const add = node => svg.appendChild(node);
+
+  const text = (item, classes = "ink label") => add(make("text", {
+    x: sx(item.x),
+    y: sy(item.y),
+    "text-anchor": item.anchor || "middle",
+    "dominant-baseline": "middle",
+    class: classes
+  }, item.text));
+
+  const rect = (box, classes) => add(make("rect", {
+    x: sx(box.x1),
+    y: sy(box.y1),
+    width: sx(box.x2) - sx(box.x1),
+    height: sy(box.y2) - sy(box.y1),
+    rx: sx(box.r || data.zero) - sx(data.zero),
+    class: classes
+  }));
+
+  const line = (points, classes = "wire") => add(make("polyline", {
+    points: points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+    class: classes
+  }));
+
+  const arrow = item => {
+    line(item.points, "arrow");
+    add(make("polygon", {
+      points: item.head.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: "arrowhead"
+    }));
+  };
+
+  try {
+    text({ ...data.phrase, text: "«фильм совсем не стоит потраченного времени»", anchor: "start" }, "ink big");
+    data.sectionLabels.forEach(item => text(item, "muted small"));
+
+    data.tokens.forEach((token, tokenIndex) => {
+      rect({
+        x1: token.x1,
+        x2: token.x2,
+        y1: data.tokenBox.y1,
+        y2: data.tokenBox.y2,
+        r: data.tokenBox.r
+      }, "token");
+
+      text({
+        x: (token.x1 + token.x2) / scale / (scale + scale),
+        y: (data.tokenBox.y1 + data.tokenBox.y2) / scale / (scale + scale),
+        text: token.word
+      }, "ink tiny");
+
+      const center = (token.x1 + token.x2) / scale / (scale + scale);
+      data.embedding.y.forEach((top, rowIndex) => {
+        const cell = {
+          x1: center - data.embedding.halfWidth,
+          x2: center + data.embedding.halfWidth,
+          y1: top,
+          y2: rowIndex === data.embedding.y.length - scale ? data.embedding.bottom : data.embedding.y[rowIndex + scale]
+        };
+        const isHot = data.embedding.hot[tokenIndex].includes(top);
+        rect(cell, isHot ? "embed-cell embed-hot" : "embed-cell");
+      });
+    });
+
+    text(data.embedding.label, "muted tiny");
+    line(data.inputBus.shaft, "wire");
+    data.inputBus.arrows.forEach(arrow);
+
+    data.lanes.forEach(lane => {
+      rect(lane.conv, "conv-box");
+      text({
+        x: (lane.conv.x1 + lane.conv.x2) / scale / (scale + scale),
+        y: lane.conv.y1 - data.tokenBox.r,
+        text: lane.title
+      }, "ink small");
+
+      lane.windowBars.forEach(bar => rect({
+        x1: bar[0],
+        x2: bar[1],
+        y1: lane.y - data.tokenBox.r,
+        y2: lane.y + data.tokenBox.r,
+        r: data.tokenBox.r
+      }, "map-cell"));
+
+      rect(lane.map, "conv-box");
+      lane.mapCells.forEach(cell => rect({
+        x1: cell[0],
+        x2: cell[1],
+        y1: lane.map.y1 + data.tokenBox.r,
+        y2: lane.map.y2 - data.tokenBox.r,
+        r: data.zero
+      }, cell[0] === lane.hot[0] ? "map-cell map-hot" : "map-cell"));
+
+      rect(lane.pool, "pool-box");
+      text({
+        x: (lane.pool.x1 + lane.pool.x2) / scale / (scale + scale),
+        y: lane.y - data.tokenBox.r,
+        text: "global max-pooling"
+      }, "ink small");
+      text({
+        x: (lane.pool.x1 + lane.pool.x2) / scale / (scale + scale),
+        y: lane.y + data.tokenBox.r,
+        text: "максимум"
+      }, "muted tiny");
+
+      add(make("circle", {
+        cx: sx(lane.out.x),
+        cy: sy(lane.out.y),
+        r: sx(data.tokenBox.r) - sx(data.zero),
+        class: "output-dot"
+      }));
+      text({
+        x: lane.out.x,
+        y: lane.out.y + data.tokenBox.r + data.tokenBox.r,
+        text: "64 числа"
+      }, "ink tiny");
+      text(lane.note, "muted tiny");
+    });
+
+    data.laneArrows.forEach(arrow);
+    data.concatArrows.forEach(arrow);
+    rect(data.concat, "concat-box");
+    data.separators.forEach(points => line(points, "separator"));
+
+    text({ x: 1083, y: 118, text: "64 числа" }, "ink small");
+    text({ x: 1083, y: 210, text: "64 числа" }, "ink small");
+    text({ x: 1083, y: 302, text: "64 числа" }, "ink small");
+    text({ x: 1083, y: 337, text: "вектор" }, "muted small");
+    text({ x: 1083, y: 355, text: "192 числа" }, "ink big");
+
+    line(data.footer.line, "separator");
+    data.footer.labels.forEach(item => text(item, "muted small"));
+  } catch (error) {
+    while (svg.lastChild && svg.lastChild.nodeName !== "desc") svg.removeChild(svg.lastChild);
+    add(make("text", {
+      x: sx(590),
+      y: sy(205),
+      "text-anchor": "middle",
+      class: "fallback"
+    }, "Embeddings → Conv1D ширины 2, 3 и 4 → global max-pooling → вектор из 192 чисел"));
+  }
+})();
+</script>
+</body>
+</html>

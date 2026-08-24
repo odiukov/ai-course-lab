@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Пять уровней против пяти участков задержки</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f8fafc;
+  --text:#172033;
+  --muted:#526176;
+  --grid:#cbd5e1;
+  --cell:#eef2f7;
+  --compute:#fff1f0;
+  --compute-line:#c2413b;
+  --prepared:#176b87;
+  --stream:#7863c6;
+  --snapshot:#b64b72;
+  --warm:#28784d;
+  --tier:#9a6418;
+  --bonus:#c45b20;
+  --bar-text:#ffffff;
+  --note:#ffffff;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#111722;
+    --text:#eef4ff;
+    --muted:#aab7c9;
+    --grid:#425069;
+    --cell:#1a2332;
+    --compute:#2d2023;
+    --compute-line:#f08b83;
+    --prepared:#2586a5;
+    --stream:#7e6ad0;
+    --snapshot:#bd527b;
+    --warm:#30885b;
+    --tier:#a97224;
+    --bonus:#df7438;
+    --bar-text:#ffffff;
+    --note:#161d28;
+  }
+}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+h1{
+  font-size:20px;
+}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  background:var(--bg);
+  font-family:inherit;
+}
+text{fill:var(--text)}
+.small{font-size:11px}
+.label{font-size:13px}
+.phase{font-size:12px;font-weight:bold}
+.total{font-size:15px;font-weight:bold}
+.bar-label{font-size:12px;font-weight:bold;fill:var(--bar-text)}
+.muted{fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1px}
+.grid-strong{stroke:var(--grid);stroke-width:1.5px}
+.cell{fill:var(--cell)}
+.compute-cell{fill:var(--compute)}
+.phase-box{fill:var(--cell);stroke:var(--grid);stroke-width:1px}
+.compute-head{fill:var(--compute);stroke:var(--compute-line);stroke-width:1.5px}
+.prepared{fill:var(--prepared);stroke:var(--prepared);stroke-width:1.5px}
+.stream{fill:var(--stream);stroke:var(--stream);stroke-width:1.5px}
+.snapshot{fill:var(--snapshot);stroke:var(--snapshot);stroke-width:1.5px}
+.warm{fill:var(--warm);stroke:var(--warm);stroke-width:1.5px}
+.tier{fill:var(--tier);stroke:var(--tier);stroke-width:1.5px}
+.partial{fill:var(--bg);stroke:var(--prepared);stroke-width:2px}
+.partial-label{font-size:11px;font-weight:bold;fill:var(--prepared)}
+.compute-line{stroke:var(--compute-line);stroke-width:2px;fill:none}
+.compute-text{font-size:11px;font-weight:bold;fill:var(--compute-line)}
+.bonus-line{stroke:var(--bonus);stroke-width:2px;fill:none}
+.bonus-box{fill:var(--note);stroke:var(--bonus);stroke-width:1.5px}
+.bonus-title{font-size:13px;font-weight:bold;fill:var(--bonus)}
+.fallback{font-size:14px;color:var(--text)}
+</style>
+</head>
+<body>
+<h1>Пять уровней против пяти участков задержки</h1>
+<svg id="diagram" width="1200" height="454" viewBox="0 0 1200 454"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="svg-title svg-desc">
+  <title id="svg-title">Карта воздействия пяти уровней защиты на холодный старт длительностью 328 секунд</title>
+  <desc id="svg-desc">Строки мер пересекают затрагиваемые ими фазы. Живая миграция вынесена в отдельную бонусную ветку.</desc>
+  <g id="plot"></g>
+</svg>
+<p id="fallback" class="fallback" hidden>Схема должна была показать, как подготовленный образ, стриминг, GPU-снапшот, тёплый пул и путь NVMe → DRAM → HBM воздействуют на пять участков базового пути в 328 с, а живая миграция обходит холодный старт отдельной бонусной веткой.</p>
+<script>
+const data=[{
+  zero:0,
+  origin:{x:18,y:8},
+  scale:{x:10,y:9.4},
+  radius:.65,
+  dash:1,
+  gap:.55,
+  arrow:{length:1.1,half:.55},
+  heading:{x:29,y:2.4,text:"Базовый путь до первого токена — 328 с"},
+  phases:[
+    {x:29,w:16,lines:["Выделение ноды","50 с"],compute:false},
+    {x:45,w:16,lines:["Скачивание образа","180 с"],compute:false},
+    {x:61,w:16,lines:["Веса в HBM","75 с"],compute:false},
+    {x:77,w:16,lines:["Инициализация","движка"],compute:false},
+    {x:93,w:22,lines:["Первое","вычисление"],compute:true}
+  ],
+  header:{y:4.2,h:5.8,lineY:6.75,gap:1.55},
+  matrix:{x:29,y:12,w:86,h:19.8},
+  rows:[
+    {
+      y:12,h:3.96,label:["1. Подготовленный образ"],
+      segments:[
+        {x:45.55,w:14.9,text:"образ уже здесь",kind:"prepared"},
+        {x:61.45,w:9.5,text:"часть весов",kind:"partial"}
+      ]
+    },
+    {
+      y:15.96,h:3.96,label:["2. Стриминг модели"],
+      segments:[
+        {x:61.45,w:15.1,text:"слои → ранний старт",kind:"stream",dashed:true}
+      ]
+    },
+    {
+      y:19.92,h:3.96,label:["3. GPU-снапшот"],
+      segments:[
+        {x:61.45,w:31.1,text:"веса + готовый движок",kind:"snapshot"}
+      ]
+    },
+    {
+      y:23.88,h:3.96,label:["4. Тёплый пул"],
+      segments:[
+        {x:29.45,w:63.1,text:"нода • контейнер • веса • движок готовы",kind:"warm"}
+      ]
+    },
+    {
+      y:27.84,h:3.96,label:["5. Многоуровневая загрузка"],
+      segments:[
+        {x:61.45,w:15.1,text:"NVMe → DRAM → HBM",kind:"tier",dashed:true}
+      ]
+    }
+  ],
+  label:{x:27.1,centerShift:2.35},
+  legend:[
+    {x:29,y:34.05,w:1.45,h:1.45,textX:31.15,textY:35.2,text:"готово до запроса",kind:"warm"},
+    {x:55.5,y:34.05,w:1.45,h:1.45,textX:57.65,textY:35.2,text:"сокращено или перекрыто",kind:"partial"}
+  ],
+  remain:{
+    fromX:104,fromY:31.8,toY:33.85,
+    x:93,y:33.85,w:22,h:2.65,
+    textX:104,textY:35.62,text:"остаётся: первое вычисление"
+  },
+  divider:{x1:1,y:38.25,x2:115},
+  bonus:{
+    title:{x:1,y:41.05,text:"Бонус: живая миграция"},
+    boxes:[
+      {x:29,y:41.7,w:17,h:3.65,lines:["Сбой или","вытеснение"]},
+      {x:61,y:41.7,w:24,h:3.65,lines:["Приёмник: модель","уже загружена"]},
+      {x:93,y:41.7,w:22,h:3.65,lines:["Ответ","продолжается"]}
+    ],
+    arrows:[
+      {x1:46,y:43.52,x2:61,labelX:47,labelY:41.15,label:"только входные токены"},
+      {x1:85,y:43.52,x2:93,labelX:85.4,labelY:41.15,label:"без холодного старта"}
+    ],
+    note:{x:73,y:46.3,text:"KV-кэш пересчитывается на месте"}
+  }
+}];
+const [d]=data;
+const origin=d.origin;
+const scale=d.scale;
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const ns="http://www.w3.org/2000/svg";
+  const root=document.getElementById("plot");
+  const add=(tag,attrs,textValue)=>{
+    const node=document.createElementNS(ns,tag);
+    Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,value));
+    if(textValue) node.textContent=textValue;
+    root.appendChild(node);
+    return node;
+  };
+  const rect=(x,y,w,h,cls,rx=d.radius)=>add("rect",{
+    x:sx(x),y:sy(y),
+    width:sx(w)-sx(d.zero),
+    height:sy(h)-sy(d.zero),
+    rx:sx(rx)-sx(d.zero),
+    class:cls
+  });
+  const line=(x1,y1,x2,y2,cls)=>add("line",{
+    x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),class:cls
+  });
+  const text=(x,y,value,cls,anchor="start")=>add("text",{
+    x:sx(x),y:sy(y),class:cls,"text-anchor":anchor
+  },value);
+  const lines=(x,y,items,cls,anchor,gap)=>{
+    items.forEach((item,index)=>text(x,y+index*gap,item,cls,anchor));
+  };
+  const arrow=(item,cls)=>{
+    const a=d.arrow;
+    line(item.x1,item.y,item.x2-a.length,item.y,cls);
+    add("polygon",{
+      points:[
+        [sx(item.x2),sy(item.y)],
+        [sx(item.x2-a.length),sy(item.y-a.half)],
+        [sx(item.x2-a.length),sy(item.y+a.half)]
+      ].map(point=>point.join(",")).join(" "),
+      class:cls
+    });
+  };
+
+  text(d.heading.x,d.heading.y,d.heading.text,"total","start");
+
+  d.phases.forEach(phase=>{
+    rect(
+      phase.x,d.header.y,phase.w,d.header.h,
+      phase.compute?"compute-head":"phase-box"
+    );
+    lines(
+      phase.x+phase.w/phase.lines.length,
+      d.header.lineY,
+      phase.lines,
+      phase.compute?"phase compute-text":"phase",
+      "middle",
+      d.header.gap
+    );
+  });
+
+  d.rows.forEach(row=>{
+    d.phases.forEach(phase=>{
+      rect(
+        phase.x,row.y,phase.w,row.h,
+        phase.compute?"compute-cell":"cell",
+        d.zero
+      );
+    });
+  });
+
+  d.phases.forEach(phase=>{
+    line(phase.x,d.matrix.y,phase.x,d.matrix.y+d.matrix.h,"grid");
+  });
+  line(
+    d.phases[d.phases.length-dashLength()].x+
+    d.phases[d.phases.length-dashLength()].w,
+    d.matrix.y,
+    d.phases[d.phases.length-dashLength()].x+
+    d.phases[d.phases.length-dashLength()].w,
+    d.matrix.y+d.matrix.h,
+    "grid"
+  );
+
+  d.rows.forEach(row=>{
+    line(d.matrix.x,row.y,d.matrix.x+d.matrix.w,row.y,"grid");
+    lines(
+      d.label.x,
+      row.y+d.label.centerShift,
+      row.label,
+      "label",
+      "end",
+      d.header.gap
+    );
+    row.segments.forEach(segment=>{
+      const bar=rect(
+        segment.x,
+        row.y+d.radius,
+        segment.w,
+        row.h-d.radius-d.radius,
+        segment.kind
+      );
+      if(segment.dashed){
+        bar.setAttribute(
+          "stroke-dasharray",
+          [
+            sx(d.dash)-sx(d.zero),
+            sx(d.gap)-sx(d.zero)
+          ].join(" ")
+        );
+      }
+      text(
+        segment.x+segment.w/segment.text.length,
+        row.y+d.label.centerShift,
+        segment.text,
+        segment.kind==="partial"?"partial-label":"bar-label",
+        "middle"
+      );
+    });
+  });
+  line(
+    d.matrix.x,
+    d.matrix.y+d.matrix.h,
+    d.matrix.x+d.matrix.w,
+    d.matrix.y+d.matrix.h,
+    "grid-strong"
+  );
+
+  d.legend.forEach(item=>{
+    rect(item.x,item.y,item.w,item.h,item.kind,d.radius);
+    text(item.textX,item.textY,item.text,"small muted","start");
+  });
+
+  line(
+    d.remain.fromX,d.remain.fromY,
+    d.remain.fromX,d.remain.toY,
+    "compute-line"
+  );
+  rect(
+    d.remain.x,d.remain.y,d.remain.w,d.remain.h,
+    "compute-head",d.radius
+  );
+  text(
+    d.remain.textX,d.remain.textY,d.remain.text,
+    "compute-text","middle"
+  );
+
+  line(
+    d.divider.x1,d.divider.y,
+    d.divider.x2,d.divider.y,
+    "grid"
+  );
+  text(
+    d.bonus.title.x,d.bonus.title.y,
+    d.bonus.title.text,"bonus-title","start"
+  );
+
+  d.bonus.boxes.forEach(box=>{
+    rect(box.x,box.y,box.w,box.h,"bonus-box");
+    lines(
+      box.x+box.w/box.lines.length,
+      box.y+d.header.gap,
+      box.lines,
+      "small",
+      "middle",
+      d.header.gap
+    );
+  });
+
+  d.bonus.arrows.forEach(item=>{
+    arrow(item,"bonus-line");
+    text(
+      item.labelX,item.labelY,item.label,
+      "small muted","start"
+    );
+  });
+  text(
+    d.bonus.note.x,d.bonus.note.y,d.bonus.note.text,
+    "small muted","middle"
+  );
+
+  function dashLength(){
+    return d.dash;
+  }
+}catch(error){
+  document.getElementById("diagram").setAttribute("hidden","");
+  document.getElementById("fallback").removeAttribute("hidden");
+}
+</script>
+</body>
+</html>

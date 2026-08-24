@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Одна итерация reflow</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59657b;
+    --frame: #c9d0de;
+    --block: #edf1f8;
+    --block-stroke: #73809a;
+    --first: #d25568;
+    --second: #167e70;
+    --direct: #5872c7;
+    --pair: #7256aa;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    background: var(--panel);
+  }
+
+  figcaption {
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 500px;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  .frame,
+  .divider,
+  .block,
+  .cycle-arrow,
+  .trajectory,
+  .guide,
+  .sample,
+  .node {
+    vector-effect: non-scaling-stroke;
+  }
+
+  .frame {
+    fill: var(--panel);
+    stroke: var(--frame);
+    stroke-width: 1.5px;
+  }
+
+  .divider {
+    stroke: var(--frame);
+    stroke-width: 1.5px;
+  }
+
+  .block {
+    fill: var(--block);
+    stroke: var(--block-stroke);
+    stroke-width: 2px;
+  }
+
+  .cycle-arrow {
+    fill: none;
+    stroke: var(--pair);
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+  }
+
+  .arrow-head {
+    fill: var(--pair);
+  }
+
+  .guide {
+    fill: none;
+    stroke: var(--direct);
+    stroke-width: 2px;
+  }
+
+  .first {
+    fill: none;
+    stroke: var(--first);
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .second {
+    fill: none;
+    stroke: var(--second);
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .node {
+    fill: var(--panel);
+    stroke: var(--ink);
+    stroke-width: 2.5px;
+  }
+
+  .block-label {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .section-label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .pair-label {
+    fill: var(--pair);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .point-label {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend-label {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10141c;
+      --panel: #171d28;
+      --ink: #edf1f8;
+      --muted: #b0bacb;
+      --frame: #3c4658;
+      --block: #222b39;
+      --block-stroke: #7f8ca3;
+      --first: #ef7888;
+      --second: #48c5b1;
+      --direct: #91a8ff;
+      --pair: #b89ae8;
+    }
+  }
+</style>
+</head>
+<body>
+<figure>
+  <figcaption id="diagram-title">Одна итерация reflow</figcaption>
+  <svg
+    id="diagram"
+    viewBox="0 0 1000 500"
+    width="1000"
+    height="500"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-title diagram-description">
+    <desc id="diagram-description">
+      Цикл получения согласованной пары первой моделью и сравнение её изогнутой
+      траектории с более прямой траекторией второй модели.
+    </desc>
+    <g id="diagram-layer"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = Object.freeze({
+  canvas: { left: 0, top: 0, right: 100, bottom: 50 },
+  divider: { x: 61, top: 3, bottom: 48 },
+  line: { thin: 1.5, normal: 2, strong: 2.5, path: 4 },
+  font: { small: 13, normal: 14, fallback: 15, section: 16, title: 18 },
+  labelPaddingPx: 8,
+  dash: "8 6",
+  blocks: [
+    {
+      box: { left: 4, top: 15, right: 20, bottom: 24 },
+      labels: [{ x: 12, y: 19.8, text: "случайный x₁" }]
+    },
+    {
+      box: { left: 22, top: 4, right: 42, bottom: 14 },
+      labels: [
+        { x: 32, y: 8.3, text: "интегрирование" },
+        { x: 32, y: 11.4, text: "v₁" }
+      ]
+    },
+    {
+      box: { left: 45, top: 15, right: 58, bottom: 24 },
+      labels: [{ x: 51.5, y: 19.8, text: "полученный x₀" }]
+    },
+    {
+      box: { left: 22, top: 29, right: 43, bottom: 40 },
+      labels: [
+        { x: 32.5, y: 33.6, text: "обучение v₂" },
+        { x: 32.5, y: 36.8, text: "на новой паре" }
+      ]
+    }
+  ],
+  arrows: [
+    {
+      from: { x: 18, y: 15 },
+      to: { x: 24, y: 13 },
+      head: [
+        { x: 24, y: 13 },
+        { x: 22.2, y: 12.7 },
+        { x: 22.9, y: 14.3 }
+      ]
+    },
+    {
+      from: { x: 40, y: 13 },
+      to: { x: 46, y: 15.8 },
+      head: [
+        { x: 46, y: 15.8 },
+        { x: 44.2, y: 15.8 },
+        { x: 44.9, y: 14.3 }
+      ]
+    },
+    {
+      from: { x: 49, y: 24 },
+      to: { x: 40.5, y: 30 },
+      head: [
+        { x: 40.5, y: 30 },
+        { x: 41.4, y: 28.2 },
+        { x: 42.3, y: 29.5 }
+      ]
+    },
+    {
+      from: { x: 22, y: 34.5 },
+      to: { x: 14.5, y: 24 },
+      head: [
+        { x: 14.5, y: 24 },
+        { x: 16.2, y: 24.8 },
+        { x: 15, y: 25.8 }
+      ]
+    }
+  ],
+  pairLabels: [
+    { x: 31.5, y: 20.1, text: "согласованная" },
+    { x: 31.5, y: 22.9, text: "пара (x₁, x₀)" }
+  ],
+  processTitle: { x: 31, y: 46, text: "первая модель задаёт новую пару" },
+  pathTitle: { x: 80.5, y: 5, text: "Форма пути" },
+  start: { x: 67, y: 34 },
+  finish: { x: 94, y: 10 },
+  startLabel: { x: 65.8, y: 36.8, text: "тот же x₁", anchor: "start" },
+  finishLabel: { x: 95.2, y: 8.7, text: "тот же x₀", anchor: "end" },
+  direct: {
+    from: { x: 67, y: 34 },
+    to: { x: 94, y: 10 }
+  },
+  firstPath: {
+    from: { x: 67, y: 34 },
+    controlA: { x: 68, y: 12 },
+    controlB: { x: 86, y: 39 },
+    to: { x: 94, y: 10 }
+  },
+  secondPath: {
+    from: { x: 67, y: 34 },
+    controlA: { x: 75, y: 27.2 },
+    controlB: { x: 85, y: 17.6 },
+    to: { x: 94, y: 10 }
+  },
+  legend: [
+    {
+      kind: "first",
+      from: { x: 65, y: 41.2 },
+      to: { x: 69, y: 41.2 },
+      label: { x: 70.3, y: 41.7, text: "траектория первой модели v₁" }
+    },
+    {
+      kind: "guide",
+      from: { x: 65, y: 44.4 },
+      to: { x: 69, y: 44.4 },
+      label: { x: 70.3, y: 44.9, text: "прямой отрезок между концами" }
+    },
+    {
+      kind: "second",
+      from: { x: 65, y: 47.6 },
+      to: { x: 69, y: 47.6 },
+      label: { x: 70.3, y: 48.1, text: "более прямой путь второй модели v₂" }
+    }
+  ],
+  fallback: [
+    { x: 50, y: 22, text: "Схема: x₁ проходит через v₁ и даёт x₀;" },
+    { x: 50, y: 25, text: "на этой паре обучается v₂ с более прямым путём." }
+  ]
+});
+
+const ORIGIN = Object.freeze({ x: 0, y: 0 });
+const SCALE = Object.freeze({ x: 10, y: 10 });
+
+const sx = x => ORIGIN.x + x * SCALE.x;
+const sy = y => ORIGIN.y + y * SCALE.y;
+
+try {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("diagram-layer");
+
+  const make = (name, attributes, className, textValue) => {
+    const node = document.createElementNS(SVG_NS, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      node.setAttribute(key, String(value));
+    });
+    if (className) node.setAttribute("class", className);
+    if (textValue) node.textContent = textValue;
+    root.appendChild(node);
+    return node;
+  };
+
+  const rect = (box, className) => make("rect", {
+    x: sx(box.left),
+    y: sy(box.top),
+    width: sx(box.right) - sx(box.left),
+    height: sy(box.bottom) - sy(box.top)
+  }, className);
+
+  const line = (from, to, className) => make("line", {
+    x1: sx(from.x),
+    y1: sy(from.y),
+    x2: sx(to.x),
+    y2: sy(to.y)
+  }, className);
+
+  const text = (label, className, anchor = "middle") => make("text", {
+    x: sx(label.x),
+    y: sy(label.y),
+    "text-anchor": label.anchor || anchor,
+    "dominant-baseline": "middle"
+  }, className, label.text);
+
+  const polygon = (points, className) => make("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+  }, className);
+
+  const cubic = (pathData, className) => make("path", {
+    d: [
+      "M", sx(pathData.from.x), sy(pathData.from.y),
+      "C", sx(pathData.controlA.x), sy(pathData.controlA.y),
+      sx(pathData.controlB.x), sy(pathData.controlB.y),
+      sx(pathData.to.x), sy(pathData.to.y)
+    ].join(" ")
+  }, className);
+
+  rect(DATA.canvas, "frame");
+
+  line(
+    { x: DATA.divider.x, y: DATA.divider.top },
+    { x: DATA.divider.x, y: DATA.divider.bottom },
+    "divider"
+  );
+
+  DATA.blocks.forEach(block => {
+    rect(block.box, "block");
+    block.labels.forEach(label => text(label, "block-label"));
+  });
+
+  DATA.arrows.forEach(arrow => {
+    line(arrow.from, arrow.to, "cycle-arrow");
+    polygon(arrow.head, "arrow-head");
+  });
+
+  DATA.pairLabels.forEach(label => text(label, "pair-label"));
+  text(DATA.processTitle, "pair-label");
+  text(DATA.pathTitle, "section-label");
+
+  const guide = line(DATA.direct.from, DATA.direct.to, "guide");
+  guide.setAttribute("stroke-dasharray", DATA.dash);
+
+  cubic(DATA.firstPath, "trajectory first");
+  cubic(DATA.secondPath, "trajectory second");
+
+  make("circle", {
+    cx: sx(DATA.start.x),
+    cy: sy(DATA.start.y),
+    r: sx(0.62) - sx(0)
+  }, "node");
+
+  make("circle", {
+    cx: sx(DATA.finish.x),
+    cy: sy(DATA.finish.y),
+    r: sx(0.62) - sx(0)
+  }, "node");
+
+  text(DATA.startLabel, "point-label");
+  text(DATA.finishLabel, "point-label");
+
+  DATA.legend.forEach(item => {
+    const sample = line(item.from, item.to, `sample ${item.kind}`);
+    if (item.kind === "guide") {
+      sample.setAttribute("stroke-dasharray", DATA.dash);
+    }
+    text(item.label, "legend-label", "start");
+  });
+} catch (error) {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("diagram-layer");
+
+  while (root.firstChild) root.removeChild(root.firstChild);
+
+  DATA.fallback.forEach(label => {
+    const node = document.createElementNS(SVG_NS, "text");
+    node.setAttribute("x", String(sx(label.x)));
+    node.setAttribute("y", String(sy(label.y)));
+    node.setAttribute("text-anchor", "middle");
+    node.setAttribute("dominant-baseline", "middle");
+    node.setAttribute("class", "fallback");
+    node.textContent = label.text;
+    root.appendChild(node);
+  });
+}
+</script>
+</body>
+</html>

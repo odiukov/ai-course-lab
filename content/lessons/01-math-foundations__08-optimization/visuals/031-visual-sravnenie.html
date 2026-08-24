@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Три оптимизатора на долине Розенброка</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#6b727c; --grid:#c9d1d9;
+    --gd:#c2410c; --mom:#1d4ed8; --adam:#047857; --min:#111827;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1216; --fg:#e6edf3; --muted:#9aa4b0; --grid:#39414b;
+      --gd:#fb923c; --mom:#7aa2ff; --adam:#34d399; --min:#e6edf3;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 10px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{padding:10px;font-size:13px;color:var(--muted);}
+  text{font-family:inherit;fill:var(--fg);}
+  .mut{fill:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Три оптимизатора из точки (−1, 1): 5000 шагов на долине Розенброка</h2>
+  <div id="slot"></div>
+</div>
+<script>
+(function(){
+  var slot = document.getElementById('slot');
+  try{
+    // ---- данные схемы ----
+    var W = 900, H = 500;              // холст (литерал)
+    var PAD = 8;                       // отступ подписи от якоря (литерал)
+    var FS = 13;                       // размер шрифта (литерал)
+    var LW = 2;                        // толщина линий (литерал)
+
+    var origin = {px: 250, py: 400};   // где на холсте лежит (0,0)
+    var scale  = 190;                  // пикселей на единицу x и y
+
+    function sx(x){ return origin.px + x * scale; }
+    function sy(y){ return origin.py - y * scale; }
+
+    var xTicks = [-1, 0, 1];
+    var yTicks = [0, 1, 2];
+    var xAxis  = {from:-1.6, to: 1.8};
+    var yAxis  = {from:-0.35, to: 2.1};
+
+    var start = {x:-1, y:1};
+    var minPt = {x: 1, y: 1};
+
+    function rosen(x,y){ var a=1-x, b=y-x*x; return a*a + 100*b*b; }
+    function grad(x,y){
+      return [ -2*(1-x) - 400*x*(y-x*x), 200*(y-x*x) ];
+    }
+    function clampPt(p){
+      return { x: Math.min(Math.max(p.x, xAxis.from), xAxis.to),
+               y: Math.min(Math.max(p.y, yAxis.from), yAxis.to) };
+    }
+
+    var STEPS = 5000;
+
+    function runGD(lr){
+      var x=start.x, y=start.y, out=[{x:x,y:y}];
+      for(var i=0;i<STEPS;i++){ var g=grad(x,y); x-=lr*g[0]; y-=lr*g[1]; out.push({x:x,y:y}); }
+      return out;
+    }
+    function runMom(lr,beta){
+      var x=start.x, y=start.y, vx=0, vy=0, out=[{x:x,y:y}];
+      for(var i=0;i<STEPS;i++){
+        var g=grad(x,y); vx=beta*vx+g[0]; vy=beta*vy+g[1];
+        x-=lr*vx; y-=lr*vy; out.push({x:x,y:y});
+      }
+      return out;
+    }
+    function runAdam(lr){
+      var x=start.x, y=start.y, m=[0,0], v=[0,0], b1=0.9, b2=0.999, eps=1e-8;
+      var out=[{x:x,y:y}];
+      for(var i=1;i<=STEPS;i++){
+        var g=grad(x,y), p=[x,y];
+        for(var k=0;k<2;k++){
+          m[k]=b1*m[k]+(1-b1)*g[k];
+          v[k]=b2*v[k]+(1-b2)*g[k]*g[k];
+          p[k]-=lr*(m[k]/(1-Math.pow(b1,i)))/(Math.sqrt(v[k]/(1-Math.pow(b2,i)))+eps);
+        }
+        x=p[0]; y=p[1]; out.push({x:x,y:y});
+      }
+      return out;
+    }
+
+    var tracks = [
+      {name:'GD, lr=0.0005',            key:'gd',   color:'var(--gd)',   path:runGD(0.0005)},
+      {name:'SGD+момент, lr=0.0001, β=0.9', key:'mom', color:'var(--mom)', path:runMom(0.0001,0.9)},
+      {name:'Adam, lr=0.01',            key:'adam', color:'var(--adam)', path:runAdam(0.01)}
+    ];
+
+    // ---- построение SVG ----
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('viewBox','0 0 '+W+' '+H);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+
+    function add(tag,attrs,txt){
+      var e=document.createElementNS(ns,tag);
+      for(var k in attrs) e.setAttribute(k,attrs[k]);
+      if(txt!=null) e.textContent=txt;
+      svg.appendChild(e); return e;
+    }
+    function poly(pts,color,width,op){
+      var d=pts.map(function(p,i){ return (i?'L':'M')+sx(p.x).toFixed(1)+' '+sy(p.y).toFixed(1); }).join(' ');
+      add('path',{d:d,fill:'none',stroke:color,'stroke-width':width,'stroke-linejoin':'round',
+                  'stroke-linecap':'round',opacity:(op==null?1:op)});
+    }
+
+    // линии уровня (marching squares по сетке в координатах данных)
+    var levels=[3,20,80,250,700];
+    var NX=160, NY=120;
+    levels.forEach(function(L){
+      var segs=[];
+      for(var i=0;i<NX;i++) for(var j=0;j<NY;j++){
+        var x0=xAxis.from+(xAxis.to-xAxis.from)*i/NX, x1=xAxis.from+(xAxis.to-xAxis.from)*(i+1)/NX;
+        var y0=yAxis.from+(yAxis.to-yAxis.from)*j/NY, y1=yAxis.from+(yAxis.to-yAxis.from)*(j+1)/NY;
+        var c=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(function(p){return rosen(p[0],p[1])-L;});
+        var pts=[];
+        for(var e=0;e<4;e++){
+          var a=c[e], b=c[(e+1)%4];
+          if((a>0)!==(b>0)){
+            var t=a/(a-b);
+            var A=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]][e], B=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]][(e+1)%4];
+            pts.push({x:A[0]+t*(B[0]-A[0]), y:A[1]+t*(B[1]-A[1])});
+          }
+        }
+        if(pts.length===2) segs.push(pts);
+      }
+      segs.forEach(function(s){ poly(s,'var(--grid)',1,0.75); });
+    });
+
+    // оси
+    poly([{x:xAxis.from,y:0},{x:xAxis.to,y:0}],'var(--muted)',1.2);
+    poly([{x:0,y:yAxis.from},{x:0,y:yAxis.to}],'var(--muted)',1.2);
+    var TICK = 0.04; // в единицах данных
+    xTicks.forEach(function(t){
+      poly([{x:t,y:-TICK},{x:t,y:TICK}],'var(--muted)',1.2);
+      add('text',{x:sx(t),y:sy(0)+PAD+FS,'text-anchor':'middle','font-size':FS,'class':'mut'},String(t));
+    });
+    yTicks.forEach(function(t){
+      if(t===0) return;
+      poly([{x:-TICK,y:t},{x:TICK,y:t}],'var(--muted)',1.2);
+      add('text',{x:sx(0)-PAD,y:sy(t)+FS/3,'text-anchor':'end','font-size':FS,'class':'mut'},String(t));
+    });
+
+    // траектории
+    tracks.forEach(function(t){ poly(t.path,t.color,LW,0.95); });
+
+    // старт и минимум
+    add('circle',{cx:sx(start.x),cy:sy(start.y),r:4,fill:'var(--fg)'});
+    add('text',{x:sx(start.x),y:sy(start.y)-PAD,'text-anchor':'middle','font-size':FS},'старт (−1, 1)');
+    add('circle',{cx:sx(minPt.x),cy:sy(minPt.y),r:4,fill:'none',stroke:'var(--min)','stroke-width':LW});
+    add('text',{x:sx(minPt.x)+PAD,y:sy(minPt.y)+FS/3,'text-anchor':'start','font-size':FS},'минимум (1, 1)');
+
+    // конечные точки с потерями
+    var side=[{dx:0,dy:-1,anch:'middle'},{dx:1,dy:0,anch:'start'},{dx:0,dy:1,anch:'middle'}];
+    tracks.forEach(function(t,i){
+      var e=t.path[t.path.length-1], p=clampPt(e), s=side[i];
+      add('circle',{cx:sx(p.x),cy:sy(p.y),r:3.5,fill:t.color});
+      var loss=rosen(e.x,e.y);
+      var txt=(loss<0.01? loss.toExponential(1) : loss.toFixed(2));
+      add('text',{x:sx(p.x)+s.dx*PAD, y:sy(p.y)+s.dy*(PAD+FS*0.6)+FS/3,
+                  'text-anchor':s.anch,'font-size':FS,fill:t.color},'потеря '+txt);
+    });
+
+    // легенда — строкой под схемой
+    var ly = 1.85, lx = -1.55;
+    tracks.forEach(function(t,i){
+      var y = ly - i*0.16;
+      poly([{x:lx,y:y},{x:lx+0.14,y:y}],t.color,LW+1);
+      add('text',{x:sx(lx+0.14)+PAD,y:sy(y)+FS/3,'text-anchor':'start','font-size':FS,fill:t.color},t.name);
+    });
+
+    slot.appendChild(svg);
+  }catch(err){
+    slot.innerHTML='<div class="fail">Схема должна показывать три траектории из точки (−1, 1) '+
+      'на линиях уровня функции Розенброка за 5000 шагов: обычный спуск (lr=0.0005) зигзагом '+
+      'застревает в начале изгиба долины, SGD с моментом (lr=0.0001, β=0.9) идёт гладко вдоль дна '+
+      'и проскакивает поворот, Adam (lr=0.01) уходит дальше всех к минимуму (1, 1). '+
+      'У каждой траектории подписана итоговая потеря.</div>';
+  }
+})();
+</script>
+</body>
+</html>

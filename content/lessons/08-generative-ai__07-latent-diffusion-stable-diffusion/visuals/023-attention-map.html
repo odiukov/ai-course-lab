@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как участки латента читают токены промпта</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-soft: #eef2f7;
+      --ink: #172033;
+      --muted: #667085;
+      --grid: #9aa6b5;
+      --border: #cbd3df;
+      --sky: #2774c9;
+      --sky-soft: #dcecff;
+      --cat: #d06a16;
+      --cat-soft: #ffead7;
+      --token: #f2f4f8;
+      --accent: #6b5bd2;
+      --fallback: #9b2c2c;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121722;
+        --panel: #1b2230;
+        --panel-soft: #242d3d;
+        --ink: #edf2f7;
+        --muted: #a9b4c4;
+        --grid: #647187;
+        --border: #3b4659;
+        --sky: #72b6ff;
+        --sky-soft: #183958;
+        --cat: #ffad66;
+        --cat-soft: #54321d;
+        --token: #242d3d;
+        --accent: #b3a7ff;
+        --fallback: #ff9b9b;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .frame {
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .title {
+      padding: 12px 18px 8px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--bg);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+    }
+
+    .section-label {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .small {
+      font-size: 13px;
+      fill: var(--muted);
+    }
+
+    .tiny {
+      font-size: 12px;
+      fill: var(--muted);
+    }
+
+    .cell-label {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .formula {
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .grid-line,
+    .leader,
+    .flow,
+    .weight-line,
+    .sample-line {
+      fill: none;
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .grid-line {
+      stroke: var(--grid);
+      stroke-width: 1.2px;
+    }
+
+    .leader {
+      stroke: var(--muted);
+      stroke-width: 1.2px;
+      stroke-dasharray: 4 4;
+    }
+
+    .flow {
+      stroke: var(--accent);
+      stroke-width: 2.2px;
+    }
+
+    .token-box {
+      fill: var(--token);
+      stroke: var(--border);
+      stroke-width: 1.2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .token-node {
+      fill: var(--panel);
+      stroke: var(--accent);
+      stroke-width: 1.7px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sky-cell,
+    .sky-result {
+      fill: var(--sky-soft);
+      stroke: var(--sky);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .cat-cell,
+    .cat-result {
+      fill: var(--cat-soft);
+      stroke: var(--cat);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .note-box {
+      fill: var(--panel);
+      stroke: var(--border);
+      stroke-width: 1.2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .sky-text {
+      fill: var(--sky);
+    }
+
+    .cat-text {
+      fill: var(--cat);
+    }
+
+    .accent-text {
+      fill: var(--accent);
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <div class="title">Как участки латента читают токены промпта</div>
+    <svg id="diagram"
+         viewBox="0 0 1200 470"
+         width="1200"
+         height="470"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Cross-attention между позициями латента и текстовыми токенами</title>
+      <desc id="svg-desc">Сетка латентных позиций образует запросы Q. Семьдесят семь текстовых токенов образуют ключи K и значения V. Толщина связей показывает веса softmax.</desc>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = [{
+      zero: 0,
+      origin: { x: 0, y: 0 },
+      scale: { x: 10, y: 10 },
+      canvas: { width: 120, height: 47 },
+      font: { normal: 15, small: 13, tiny: 12, section: 17 },
+      line: { grid: 1.2, normal: 1.7, selected: 2, flow: 2.2 },
+      grid: {
+        x: [5, 10, 15, 20, 25, 30, 35],
+        y: [10, 16, 22, 28, 34],
+        left: 5,
+        right: 35,
+        top: 10,
+        bottom: 34
+      },
+      headings: [
+        { x: 5, y: 5.2, text: "Латентные позиции", anchor: "start", cls: "section-label" },
+        { x: 5, y: 7.5, text: "каждая позиция создаёт свой запрос Q", anchor: "start", cls: "small" },
+        { x: 49, y: 5.2, text: "Один промпт · 77 текстовых токенов", anchor: "start", cls: "section-label" },
+        { x: 49, y: 7.5, text: "одинаковые K и V доступны всем участкам", anchor: "start", cls: "small" },
+        { x: 82.5, y: 8.1, text: "K", anchor: "middle", cls: "formula accent-text" },
+        { x: 89.5, y: 8.1, text: "V", anchor: "middle", cls: "formula accent-text" },
+        { x: 99, y: 5.2, text: "Локальная подсказка", anchor: "start", cls: "section-label" },
+        { x: 99, y: 7.5, text: "взвешенная смесь значений V", anchor: "start", cls: "small" }
+      ],
+      selected: [
+        {
+          kind: "sky",
+          x: 25,
+          y: 10,
+          w: 5,
+          h: 6,
+          qx: 27.5,
+          qy: 13,
+          label: "небо",
+          qlabel: "Q неба"
+        },
+        {
+          kind: "cat",
+          x: 15,
+          y: 22,
+          w: 5,
+          h: 6,
+          qx: 17.5,
+          qy: 25,
+          label: "кот",
+          qlabel: "Q кота"
+        }
+      ],
+      tokens: [
+        { text: "рыжий", x: 49, y: 10, w: 29, h: 4, cy: 12, kx: 82.5, vx: 89.5 },
+        { text: "кот", x: 49, y: 15, w: 29, h: 4, cy: 17, kx: 82.5, vx: 89.5 },
+        { text: "под", x: 49, y: 20, w: 29, h: 4, cy: 22, kx: 82.5, vx: 89.5 },
+        { text: "звёздным", x: 49, y: 25, w: 29, h: 4, cy: 27, kx: 82.5, vx: 89.5 },
+        { text: "небом", x: 49, y: 30, w: 29, h: 4, cy: 32, kx: 82.5, vx: 89.5 },
+        { text: "… остальные токены …", x: 49, y: 35, w: 29, h: 4, cy: 37, kx: 82.5, vx: 89.5 }
+      ],
+      connections: [
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 12, width: 1.1 },
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 17, width: 1.3 },
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 22, width: 0.8 },
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 27, width: 5.8 },
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 32, width: 7.2 },
+        { kind: "sky", x1: 27.5, y1: 13, x2: 82.5, y2: 37, width: 0.7 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 12, width: 5.6 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 17, width: 7.2 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 22, width: 1.2 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 27, width: 0.9 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 32, width: 1.1 },
+        { kind: "cat", x1: 17.5, y1: 25, x2: 82.5, y2: 37, width: 0.7 }
+      ],
+      results: [
+        {
+          kind: "sky",
+          x: 99,
+          y: 10,
+          w: 17,
+          h: 8,
+          title: "участок неба",
+          detail: "сильнее: «звёздным», «небом»",
+          titleY: 12.8,
+          detailY: 15.3,
+          lineY: 14,
+          arrow: [[94, 14], [98.2, 14], [97.2, 13.3], [98.2, 14], [97.2, 14.7]]
+        },
+        {
+          kind: "cat",
+          x: 99,
+          y: 24,
+          w: 17,
+          h: 8,
+          title: "участок кота",
+          detail: "сильнее: «рыжий», «кот»",
+          titleY: 26.8,
+          detailY: 29.3,
+          lineY: 28,
+          arrow: [[94, 28], [98.2, 28], [97.2, 27.3], [98.2, 28], [97.2, 28.7]]
+        }
+      ],
+      notes: [
+        {
+          x: 5,
+          y: 37,
+          w: 30,
+          h: 4,
+          textX: 20,
+          textY: 39.5,
+          text: "Q различаются по позиции",
+          anchor: "middle"
+        },
+        {
+          x: 49,
+          y: 41.5,
+          w: 43,
+          h: 3.7,
+          textX: 70.5,
+          textY: 44,
+          text: "K сравнивает запрос с токеном · V передаёт текстовый признак",
+          anchor: "middle"
+        }
+      ],
+      leaders: [
+        { x1: 17.5, y1: 28.2, x2: 17.5, y2: 37 },
+        { x1: 27.5, y1: 16.2, x2: 27.5, y2: 37 }
+      ],
+      legend: {
+        y: 44,
+        thin: { x1: 5, x2: 10, width: 1 },
+        thick: { x1: 15, x2: 20, width: 7 },
+        labels: [
+          { x: 10.8, y: 44.5, text: "меньший вес softmax", anchor: "start" },
+          { x: 20.8, y: 44.5, text: "больший вес", anchor: "start" }
+        ]
+      },
+      fallback: {
+        x: 5,
+        y: 12,
+        text: "Схема должна показать: позиции латента — Q, 77 текстовых токенов — K и V, толщина линий — веса softmax."
+      }
+    }];
+
+    const [D] = DATA;
+    const origin = { x: D.origin.x, y: D.origin.y };
+    const scale = { x: D.scale.x, y: D.scale.y };
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const NS = "http://www.w3.org/2000/svg";
+
+    function node(name, attrs, textValue) {
+      const item = document.createElementNS(NS, name);
+      Object.entries(attrs).forEach(([key, value]) => item.setAttribute(key, value));
+      if (textValue !== undefined) item.textContent = textValue;
+      return item;
+    }
+
+    function line(parent, item, cls, color) {
+      parent.appendChild(node("line", {
+        x1: sx(item.x1),
+        y1: sy(item.y1),
+        x2: sx(item.x2),
+        y2: sy(item.y2),
+        class: cls,
+        stroke: color || "currentColor",
+        "stroke-width": item.width || D.line.normal
+      }));
+    }
+
+    function rect(parent, item, cls) {
+      parent.appendChild(node("rect", {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(D.zero),
+        height: sy(item.y + item.h) - sy(D.zero),
+        rx: sx(0.7) - sx(D.zero),
+        class: cls
+      }));
+    }
+
+    function label(parent, item) {
+      parent.appendChild(node("text", {
+        x: sx(item.x),
+        y: sy(item.y),
+        "text-anchor": item.anchor,
+        class: item.cls || ""
+      }, item.text));
+    }
+
+    try {
+      const layers = {
+        links: node("g", { "aria-label": "Веса внимания" }),
+        grid: node("g", { "aria-label": "Запросы латентных позиций" }),
+        tokens: node("g", { "aria-label": "Текстовые ключи и значения" }),
+        flow: node("g", { "aria-label": "Взвешенные смеси значений" }),
+        labels: node("g", { "aria-label": "Подписи" })
+      };
+
+      Object.values(layers).forEach(layer => svg.appendChild(layer));
+
+      D.connections.forEach(connection => {
+        line(
+          layers.links,
+          connection,
+          "weight-line",
+          connection.kind === "sky" ? "var(--sky)" : "var(--cat)"
+        );
+      });
+
+      D.grid.x.forEach(x => {
+        line(layers.grid, {
+          x1: x,
+          y1: D.grid.top,
+          x2: x,
+          y2: D.grid.bottom,
+          width: D.line.grid
+        }, "grid-line");
+      });
+
+      D.grid.y.forEach(y => {
+        line(layers.grid, {
+          x1: D.grid.left,
+          y1: y,
+          x2: D.grid.right,
+          y2: y,
+          width: D.line.grid
+        }, "grid-line");
+      });
+
+      D.selected.forEach(item => {
+        rect(layers.grid, item, item.kind === "sky" ? "sky-cell" : "cat-cell");
+        layers.labels.appendChild(node("text", {
+          x: sx(item.qx),
+          y: sy(item.qy - 0.35),
+          "text-anchor": "middle",
+          class: "cell-label " + (item.kind === "sky" ? "sky-text" : "cat-text")
+        }, item.label));
+        layers.labels.appendChild(node("text", {
+          x: sx(item.qx),
+          y: sy(item.qy + 1.45),
+          "text-anchor": "middle",
+          class: "tiny"
+        }, item.qlabel));
+      });
+
+      D.tokens.forEach(token => {
+        rect(layers.tokens, token, "token-box");
+
+        layers.tokens.appendChild(node("text", {
+          x: sx(token.x + 1.5),
+          y: sy(token.cy + 0.5),
+          "text-anchor": "start"
+        }, token.text));
+
+        layers.tokens.appendChild(node("circle", {
+          cx: sx(token.kx),
+          cy: sy(token.cy),
+          r: sx(1.25) - sx(D.zero),
+          class: "token-node"
+        }));
+
+        layers.tokens.appendChild(node("circle", {
+          cx: sx(token.vx),
+          cy: sy(token.cy),
+          r: sx(1.25) - sx(D.zero),
+          class: "token-node"
+        }));
+
+        layers.tokens.appendChild(node("text", {
+          x: sx(token.kx),
+          y: sy(token.cy + 0.45),
+          "text-anchor": "middle",
+          class: "tiny accent-text"
+        }, "K"));
+
+        layers.tokens.appendChild(node("text", {
+          x: sx(token.vx),
+          y: sy(token.cy + 0.45),
+          "text-anchor": "middle",
+          class: "tiny accent-text"
+        }, "V"));
+      });
+
+      D.results.forEach(result => {
+        rect(layers.flow, result, result.kind === "sky" ? "sky-result" : "cat-result");
+
+        line(layers.flow, {
+          x1: result.arrow[0][0],
+          y1: result.arrow[0][1],
+          x2: result.arrow[1][0],
+          y2: result.arrow[1][1],
+          width: D.line.flow
+        }, "flow");
+
+        layers.flow.appendChild(node("polyline", {
+          points: result.arrow.slice(2).map(point =>
+            sx(point[0]) + "," + sy(point[1])
+          ).join(" "),
+          class: "flow"
+        }));
+
+        layers.labels.appendChild(node("text", {
+          x: sx(result.x + 1.2),
+          y: sy(result.titleY),
+          "text-anchor": "start",
+          class: "formula " + (result.kind === "sky" ? "sky-text" : "cat-text")
+        }, result.title));
+
+        layers.labels.appendChild(node("text", {
+          x: sx(result.x + 1.2),
+          y: sy(result.detailY),
+          "text-anchor": "start",
+          class: "tiny"
+        }, result.detail));
+
+        layers.labels.appendChild(node("text", {
+          x: sx(94),
+          y: sy(result.lineY - 1.1),
+          "text-anchor": "middle",
+          class: "tiny"
+        }, "Σ softmax · V"));
+      });
+
+      D.leaders.forEach(item => line(layers.labels, {
+        ...item,
+        width: D.line.grid
+      }, "leader"));
+
+      D.notes.forEach(note => {
+        rect(layers.labels, note, "note-box");
+        label(layers.labels, {
+          x: note.textX,
+          y: note.textY,
+          text: note.text,
+          anchor: note.anchor,
+          cls: "small"
+        });
+      });
+
+      line(layers.labels, {
+        x1: D.legend.thin.x1,
+        y1: D.legend.y,
+        x2: D.legend.thin.x2,
+        y2: D.legend.y,
+        width: D.legend.thin.width
+      }, "sample-line", "var(--accent)");
+
+      line(layers.labels, {
+        x1: D.legend.thick.x1,
+        y1: D.legend.y,
+        x2: D.legend.thick.x2,
+        y2: D.legend.y,
+        width: D.legend.thick.width
+      }, "sample-line", "var(--accent)");
+
+      D.legend.labels.forEach(item => label(layers.labels, {
+        ...item,
+        cls: "tiny"
+      }));
+
+      D.headings.forEach(item => label(layers.labels, item));
+    } catch (error) {
+      Array.from(svg.children).forEach(child => {
+        if (child.tagName !== "title" && child.tagName !== "desc") child.remove();
+      });
+
+      svg.appendChild(node("text", {
+        x: sx(D.fallback.x),
+        y: sy(D.fallback.y),
+        "text-anchor": "start",
+        class: "fallback"
+      }, D.fallback.text));
+    }
+  </script>
+</body>
+</html>

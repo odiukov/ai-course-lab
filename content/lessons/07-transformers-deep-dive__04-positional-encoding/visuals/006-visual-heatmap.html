@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Тепловая карта PE</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5a5a6a; --grid:#c8c8d4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14161c; --fg:#e8e8f0; --muted:#a0a0b4; --grid:#3a3d४8; --grid:#3a3d48; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:8px 4px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;color:var(--muted);line-height:1.5;padding:8px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Тепловая карта PE: 50 позиций × 128 измерений</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные схемы ----------
+    var N_POS = 50;        // позиций (строк)
+    var D_MODEL = 128;     // измерений (столбцов)
+    var N_PAIR = 64;       // пар sin/cos, i = 0..63
+    var MARK_ROWS = [7,8]; // позиции, которые ведём пальцем
+
+    // ---------- одна система координат ----------
+    // x — измерение 0..128, y — позиция 0..50
+    var ORIGIN = {x:96, y:64};
+    var SCALE  = {x:4.6, y:6.4};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle','font-size':11,fill:'currentColor'});
+      if(cls)t.setAttribute('class',cls);
+      t.textContent=s;return t;
+    }
+
+    var VB_W=760, VB_H=440;
+    var svg=el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,preserveAspectRatio:'xMidYMid meet',
+      role:'img','aria-label':'Тепловая карта позиционного кодирования'});
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    // ---------- цвет: −1 тёмно-синий, 0 белый, +1 тёмно-красный ----------
+    function color(v){
+      var a=Math.abs(v), l=Math.round(255-155*a);
+      return v<0 ? 'rgb('+l+','+l+',255)' : 'rgb(255,'+l+','+l+')';
+    }
+
+    // ---------- сама матрица PE ----------
+    var grid=el('g',{});
+    var cw=sx(1)-sx(0), ch=sy(1)-sy(0);
+    for(var pos=0;pos<N_POS;pos++){
+      for(var d=0;d<D_MODEL;d++){
+        var i=Math.floor(d/2);
+        var ang=pos/Math.pow(10000, 2*i/D_MODEL);
+        var v=(d%2===0)?Math.sin(ang):Math.cos(ang);
+        grid.appendChild(el('rect',{
+          x:sx(d), y:sy(pos), width:cw+0.4, height:ch+0.4,
+          fill:color(v), 'shape-rendering':'crispEdges'}));
+      }
+    }
+    svg.appendChild(grid);
+    svg.appendChild(el('rect',{x:sx(0),y:sy(0),width:sx(D_MODEL)-sx(0),
+      height:sy(N_POS)-sy(0),fill:'none',stroke:'var(--grid)','stroke-width':1}));
+
+    // ---------- ось позиций (слева) ----------
+    var ax=el('g',{color:'var(--muted)'});
+    ax.appendChild(el('line',{x1:sx(0),y1:sy(0),x2:sx(0),y2:sy(N_POS),
+      stroke:'var(--grid)','stroke-width':1}));
+    [0,10,20,30,40,50].forEach(function(p){
+      ax.appendChild(el('line',{x1:sx(-2),y1:sy(p),x2:sx(0),y2:sy(p),
+        stroke:'var(--grid)','stroke-width':1}));
+      ax.appendChild(txt(sx(-3), sy(p)+4, String(p), 'end'));
+    });
+    var tl=txt(sx(-3), sy(N_POS/2), '', 'middle');
+    tl.setAttribute('transform','rotate(-90 '+sx(-3)+' '+sy(N_POS/2)+')');
+    tl.setAttribute('y', sy(N_POS/2)-38);
+    tl.textContent='позиция pos';
+    ax.appendChild(tl);
+
+    // ---------- ось измерений (снизу) ----------
+    [0,32,64,96,128].forEach(function(d){
+      ax.appendChild(el('line',{x1:sx(d),y1:sy(N_POS),x2:sx(d),y2:sy(N_POS+1),
+        stroke:'var(--grid)','stroke-width':1}));
+      ax.appendChild(txt(sx(d), sy(N_POS+3.2), String(d), 'middle'));
+    });
+    ax.appendChild(txt(sx(D_MODEL/2), sy(N_POS+6), 'измерение d_model = 128', 'middle'));
+    svg.appendChild(ax);
+
+    // ---------- подписи краёв: слева ВЫШЕ карты, справа тоже сверху, но по краям ----------
+    var top=el('g',{color:'var(--fg)'});
+    top.appendChild(txt(sx(0), sy(-3.4), 'i = 0: узкие частые полоски', 'start'));
+    top.appendChild(txt(sx(D_MODEL), sy(-3.4), 'i = 63: широкие плавные заливки', 'end'));
+    top.appendChild(el('line',{x1:sx(2),y1:sy(-2.6),x2:sx(20),y2:sy(-2.6),
+      stroke:'var(--muted)','stroke-width':1}));
+    top.appendChild(el('line',{x1:sx(108),y1:sy(-2.6),x2:sx(126),y2:sy(-2.6),
+      stroke:'var(--muted)','stroke-width':1}));
+    svg.appendChild(top);
+
+    // ---------- строки 7 и 8: одна подпись выше, другая ниже ----------
+    var mk=el('g',{color:'var(--fg)'});
+    MARK_ROWS.forEach(function(p,k){
+      var yc=sy(p)+ch/2;
+      mk.appendChild(el('line',{x1:sx(0),y1:yc,x2:sx(D_MODEL),y2:yc,
+        stroke:'var(--fg)','stroke-width':1,'stroke-dasharray':'3 3'}));
+      mk.appendChild(el('line',{x1:sx(D_MODEL),y1:yc,x2:sx(D_MODEL+4),y2:yc,
+        stroke:'var(--fg)','stroke-width':1}));
+      mk.appendChild(txt(sx(D_MODEL+5.5), yc + (k===0 ? -3 : 9),
+        'pos = '+p, 'start'));
+    });
+    svg.appendChild(mk);
+
+    // ---------- шкала цвета ----------
+    var lg=el('g',{color:'var(--muted)'});
+    var bx0=sx(D_MODEL/2-20), bx1=sx(D_MODEL/2+20), by=sy(N_POS+9);
+    var bh=sy(1.6)-sy(0);
+    for(var s=0;s<=40;s++){
+      var v2=-1+2*s/40;
+      lg.appendChild(el('rect',{x:bx0+(bx1-bx0)*s/41,y:by,
+        width:(bx1-bx0)/40+0.6,height:bh,fill:color(v2)}));
+    }
+    lg.appendChild(el('rect',{x:bx0,y:by,width:bx1-bx0,height:bh,
+      fill:'none',stroke:'var(--grid)','stroke-width':1}));
+    lg.appendChild(txt(bx0-6, by+bh-1, '−1', 'end'));
+    lg.appendChild(txt(bx1+6, by+bh-1, '+1', 'start'));
+    lg.appendChild(txt(sx(D_MODEL/2), sy(N_POS+13.4), '0 — белый', 'middle'));
+    svg.appendChild(lg);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<p class="fallback">Схема должна была показать матрицу PE '+
+      'для 50 позиций и 128 измерений тепловой картой: строка — позиция, '+
+      'столбец — измерение, цвет от −1 (тёмно-синий) через 0 (белый) до +1 '+
+      '(тёмно-красный). Слева, при i = 0, полоски узкие и частые: цвет меняется '+
+      'от строки к строке. Справа, при i = 63, — широкие плавные заливки, '+
+      'соседние строки неразличимы. Строки pos = 7 и pos = 8 различаются слева '+
+      'и почти совпадают справа.</p>';
+  }
+})();
+</script>
+</body>
+</html>

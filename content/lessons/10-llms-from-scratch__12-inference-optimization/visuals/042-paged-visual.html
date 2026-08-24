@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Таблица страниц PagedAttention</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page-bg: #f7f9fc;
+      --panel-bg: #ffffff;
+      --header-bg: #e9eef6;
+      --logical-bg: #f3f6fa;
+      --text: #172033;
+      --muted: #526078;
+      --line: #9aa8bd;
+      --guide: #d3dae6;
+      --a: #2563b8;
+      --a-soft: #dbeafe;
+      --b: #087f5b;
+      --b-soft: #d7f5e8;
+      --on-accent: #ffffff;
+      --fallback: #9b2c2c;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page-bg: #111722;
+        --panel-bg: #192231;
+        --header-bg: #253247;
+        --logical-bg: #202b3d;
+        --text: #eef3fb;
+        --muted: #b5c0d2;
+        --line: #738198;
+        --guide: #445168;
+        --a: #69a7ff;
+        --a-soft: #203f68;
+        --b: #51d5a5;
+        --b-soft: #174b3d;
+        --on-accent: #101722;
+        --fallback: #ff9b9b;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page-bg);
+      color: var(--text);
+    }
+
+    body {
+      margin: unset;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      background: var(--page-bg);
+    }
+
+    figcaption {
+      color: var(--text);
+      font-size: 20px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--page-bg);
+    }
+
+    svg text {
+      fill: var(--text);
+      font-size: 14px;
+    }
+
+    .panel-title {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .section-title {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .header-label {
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .cell-label {
+      font-size: 14px;
+    }
+
+    .page-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .note {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <figcaption id="diagram-title">
+      Таблица страниц: логический порядок → физическая память GPU
+    </figcaption>
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 440"
+      width="1200"
+      height="440"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <desc id="diagram-description">
+        Две таблицы страниц отображают логические блоки по 16 токенов на
+        несмежные физические страницы GPU.
+      </desc>
+    </svg>
+  </figure>
+
+  <script>
+    const data = [
+      {
+        layout: {
+          zero: 0,
+          canvasW: 1200,
+          canvasH: 440,
+          panelX: 16,
+          panelW: 1168,
+          panelH: 180,
+          panelTops: [28, 208],
+          inner: 18,
+          titleBaseline: 25,
+          tableX: 34,
+          tableW: 606,
+          tableOffsetY: 38,
+          headerH: 30,
+          rowH: 38,
+          columns: [0, 214, 378, 606],
+          textPad: 10,
+          baselineAdjust: 5,
+          poolX: 720,
+          poolEnd: 1120,
+          poolTitleX: 920,
+          pageMin: 1,
+          pageMax: 12,
+          pageStep: 30,
+          pageW: 62,
+          pageInsetY: 4,
+          arrowTailPad: 8,
+          arrowHeadLength: 10,
+          arrowHeadHalf: 5,
+          footerY: 418,
+          footerX: 600,
+          stroke: 1.4
+        }
+      },
+      {
+        request: "Запрос A",
+        accent: "var(--a)",
+        soft: "var(--a-soft)",
+        mappings: [
+          { logical: 0, tokens: "0–15", physical: 3 },
+          { logical: 1, tokens: "16–31", physical: 7 },
+          { logical: 2, tokens: "32–47", physical: 12 }
+        ]
+      },
+      {
+        request: "Запрос B",
+        accent: "var(--b)",
+        soft: "var(--b-soft)",
+        mappings: [
+          { logical: 0, tokens: "0–15", physical: 1 },
+          { logical: 1, tokens: "16–31", physical: 4 },
+          { logical: 2, tokens: "32–47", physical: 9 }
+        ]
+      }
+    ];
+
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 1, y: 1 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [meta, ...requests] = data;
+      const layout = meta.layout;
+      const svg = document.getElementById("diagram");
+      const svgNS = "http://www.w3.org/2000/svg";
+
+      function element(name, attributes, parent = svg) {
+        const node = document.createElementNS(svgNS, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        parent.appendChild(node);
+        return node;
+      }
+
+      function group(parent = svg) {
+        return element("g", {}, parent);
+      }
+
+      function rect(parent, x, y, width, height, fill, stroke, strokeWidth) {
+        return element("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(layout.zero),
+          height: sy(y + height) - sy(layout.zero),
+          fill,
+          stroke,
+          "stroke-width": strokeWidth
+        }, parent);
+      }
+
+      function line(parent, x1, y1, x2, y2, stroke, strokeWidth) {
+        return element("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          stroke,
+          "stroke-width": strokeWidth
+        }, parent);
+      }
+
+      function text(parent, x, y, value, className, anchor = "start") {
+        const node = element("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor,
+          class: className
+        }, parent);
+        node.textContent = value;
+        return node;
+      }
+
+      function arrow(parent, x1, y1, x2, y2, color) {
+        line(parent, x1, y1, x2, y2, color, layout.stroke);
+        const backX = x2 - layout.arrowHeadLength;
+        element("polygon", {
+          points: [
+            `${sx(x2)},${sy(y2)}`,
+            `${sx(backX)},${sy(y2 - layout.arrowHeadHalf)}`,
+            `${sx(backX)},${sy(y2 + layout.arrowHeadHalf)}`
+          ].join(" "),
+          fill: color
+        }, parent);
+      }
+
+      function tableHeader(parent, top) {
+        const x = layout.tableX;
+        const columns = layout.columns;
+
+        rect(
+          parent,
+          x,
+          top,
+          layout.tableW,
+          layout.headerH,
+          "var(--header-bg)",
+          "var(--line)",
+          layout.stroke
+        );
+
+        columns.slice(1, -1).forEach(column => {
+          line(
+            parent,
+            x + column,
+            top,
+            x + column,
+            top + layout.headerH,
+            "var(--line)",
+            layout.stroke
+          );
+        });
+
+        const headerY = top + layout.headerH / 2 + layout.baselineAdjust;
+        text(
+          parent,
+          x + (columns[0] + columns[1]) / 2,
+          headerY,
+          "Логическая страница",
+          "header-label",
+          "middle"
+        );
+        text(
+          parent,
+          x + (columns[1] + columns[2]) / 2,
+          headerY,
+          "Токены",
+          "header-label",
+          "middle"
+        );
+        text(
+          parent,
+          x + (columns[2] + columns[3]) / 2,
+          headerY,
+          "Физическая страница",
+          "header-label",
+          "middle"
+        );
+      }
+
+      requests.forEach((request, requestIndex) => {
+        const panel = group();
+        const panelTop = layout.panelTops[requestIndex];
+        const tableTop = panelTop + layout.tableOffsetY;
+        const columns = layout.columns;
+
+        rect(
+          panel,
+          layout.panelX,
+          panelTop,
+          layout.panelW,
+          layout.panelH,
+          "var(--panel-bg)",
+          "var(--line)",
+          layout.stroke
+        );
+
+        rect(
+          panel,
+          layout.panelX,
+          panelTop,
+          layout.inner / 2,
+          layout.panelH,
+          request.accent,
+          request.accent,
+          layout.stroke
+        );
+
+        text(
+          panel,
+          layout.panelX + layout.inner,
+          panelTop + layout.titleBaseline,
+          request.request,
+          "panel-title",
+          "start"
+        );
+
+        text(
+          panel,
+          layout.poolTitleX,
+          panelTop + layout.titleBaseline,
+          "Физические страницы GPU — места в пуле",
+          "section-title",
+          "middle"
+        );
+
+        tableHeader(panel, tableTop);
+
+        request.mappings.forEach((mapping, rowIndex) => {
+          const rowTop =
+            tableTop + layout.headerH + rowIndex * layout.rowH;
+          const rowCenter = rowTop + layout.rowH / 2;
+          const labelY = rowCenter + layout.baselineAdjust;
+          const pageX =
+            layout.poolX +
+            (mapping.physical - layout.pageMin) * layout.pageStep;
+
+          rect(
+            panel,
+            layout.tableX,
+            rowTop,
+            layout.tableW,
+            layout.rowH,
+            "var(--logical-bg)",
+            "var(--line)",
+            layout.stroke
+          );
+
+          columns.slice(1, -1).forEach(column => {
+            line(
+              panel,
+              layout.tableX + column,
+              rowTop,
+              layout.tableX + column,
+              rowTop + layout.rowH,
+              "var(--line)",
+              layout.stroke
+            );
+          });
+
+          text(
+            panel,
+            layout.tableX + (columns[0] + columns[1]) / 2,
+            labelY,
+            String(mapping.logical),
+            "cell-label",
+            "middle"
+          );
+
+          text(
+            panel,
+            layout.tableX + (columns[1] + columns[2]) / 2,
+            labelY,
+            mapping.tokens,
+            "cell-label",
+            "middle"
+          );
+
+          text(
+            panel,
+            layout.tableX + (columns[2] + columns[3]) / 2,
+            labelY,
+            String(mapping.physical),
+            "cell-label",
+            "middle"
+          );
+
+          line(
+            panel,
+            layout.poolX,
+            rowCenter,
+            layout.poolEnd,
+            rowCenter,
+            "var(--guide)",
+            layout.stroke
+          );
+
+          arrow(
+            panel,
+            layout.tableX + layout.tableW + layout.arrowTailPad,
+            rowCenter,
+            pageX,
+            rowCenter,
+            request.accent
+          );
+
+          rect(
+            panel,
+            pageX,
+            rowTop + layout.pageInsetY,
+            layout.pageW,
+            layout.rowH - layout.pageInsetY - layout.pageInsetY,
+            request.soft,
+            request.accent,
+            layout.stroke
+          );
+
+          text(
+            panel,
+            pageX + layout.pageW / 2,
+            labelY,
+            `стр. ${mapping.physical}`,
+            "page-label",
+            "middle"
+          );
+        });
+      });
+
+      text(
+        svg,
+        layout.footerX,
+        layout.footerY,
+        "Каждая логическая страница содержит 16 токенов; таблица сохраняет порядок, даже когда физические страницы не смежны.",
+        "note",
+        "middle"
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const svgNS = "http://www.w3.org/2000/svg";
+      const [meta] = data;
+      const layout = meta.layout;
+
+      while (svg.firstChild) {
+        svg.removeChild(svg.firstChild);
+      }
+
+      const fallback = document.createElementNS(svgNS, "text");
+      fallback.setAttribute("x", String(sx(layout.canvasW / 2)));
+      fallback.setAttribute("y", String(sy(layout.canvasH / 2)));
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("class", "fallback");
+      fallback.textContent =
+        "Схема: запрос A — страницы 0, 1, 2 → 3, 7, 12; запрос B — страницы 0, 1, 2 → 1, 4, 9.";
+      svg.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

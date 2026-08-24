@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Дерево менеджеров и воркеров</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --border: #d9deea;
+      --text: #182033;
+      --muted: #5d667a;
+      --line: #78839a;
+      --manager-fill: #e8e1ff;
+      --manager-stroke: #7159c7;
+      --manager-text: #35276b;
+      --worker-fill: #dff5e8;
+      --worker-stroke: #398866;
+      --worker-text: #174d39;
+      --summary-fill: #f1f3f8;
+      --summary-line: #cbd1de;
+      --fallback-fill: #fff1d7;
+      --fallback-stroke: #b97513;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --panel: #181e2c;
+        --border: #323b50;
+        --text: #edf0f7;
+        --muted: #aeb7ca;
+        --line: #8f9ab2;
+        --manager-fill: #302852;
+        --manager-stroke: #a995f2;
+        --manager-text: #f0ebff;
+        --worker-fill: #173c31;
+        --worker-stroke: #62c39a;
+        --worker-text: #e1fff2;
+        --summary-fill: #202737;
+        --summary-line: #3c465b;
+        --fallback-fill: #493718;
+        --fallback-stroke: #e6a94d;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1040px;
+      margin: auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .figure-header {
+      padding: 14px 20px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .subtitle {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 410px;
+      background: var(--panel);
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .node {
+      stroke-width: 2px;
+    }
+
+    .node-manager {
+      fill: var(--manager-fill);
+      stroke: var(--manager-stroke);
+    }
+
+    .node-worker {
+      fill: var(--worker-fill);
+      stroke: var(--worker-stroke);
+    }
+
+    .node-title {
+      font-size: 17px;
+      font-weight: bold;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .manager-title {
+      fill: var(--manager-text);
+    }
+
+    .worker-title {
+      fill: var(--worker-text);
+    }
+
+    .node-note {
+      font-size: 12px;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .manager-note {
+      fill: var(--manager-text);
+    }
+
+    .worker-note {
+      fill: var(--worker-text);
+    }
+
+    .legend-swatch {
+      stroke-width: 2px;
+    }
+
+    .legend-text {
+      fill: var(--muted);
+      font-size: 13px;
+      text-anchor: start;
+      dominant-baseline: middle;
+    }
+
+    .section-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+      text-anchor: start;
+      dominant-baseline: middle;
+    }
+
+    .summary-bg {
+      fill: var(--summary-fill);
+      stroke: var(--summary-line);
+      stroke-width: 1px;
+    }
+
+    .summary-rule {
+      stroke: var(--summary-line);
+      stroke-width: 1px;
+    }
+
+    .summary-value {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: bold;
+      dominant-baseline: middle;
+    }
+
+    .summary-note {
+      fill: var(--muted);
+      font-size: 12px;
+      dominant-baseline: middle;
+    }
+
+    .equation {
+      fill: var(--manager-text);
+      font-size: 18px;
+      font-weight: bold;
+      text-anchor: start;
+      dominant-baseline: middle;
+    }
+
+    .fallback-box {
+      fill: var(--fallback-fill);
+      stroke: var(--fallback-stroke);
+      stroke-width: 2px;
+    }
+
+    .fallback-text {
+      fill: var(--text);
+      font-size: 16px;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure" aria-labelledby="diagram-heading">
+    <header class="figure-header">
+      <h1 id="diagram-heading">Как устроено дерево менеджеров и воркеров</h1>
+      <p class="subtitle">
+        8 вызовов модели: 3 внутренних узла координируют работу 5 листьев
+      </p>
+    </header>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1040 410"
+      width="1040"
+      height="410"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-heading diagram-description"
+    >
+      <desc id="diagram-description">
+        Верхний менеджер связан с двумя под-менеджерами. Под-менеджер A
+        управляет воркерами W1, W2 и W3, а под-менеджер B — воркерами W4 и
+        W5. Внутренние узлы и листья выделены разными цветами.
+      </desc>
+      <g id="stage"></g>
+    </svg>
+  </main>
+
+  <script>
+    const data = [
+      {
+        role: "config",
+        origin: [54, 18],
+        scale: [1.4, 0.94],
+        zero: 0,
+        radius: 8,
+        swatchRadius: 4,
+        legendManager: [10, 18, 26, 34],
+        legendManagerText: [34, 26],
+        legendWorker: [10, 43, 26, 59],
+        legendWorkerText: [34, 51],
+        summaryLabel: [10, 302],
+        summaryBox: [10, 316, 634, 382],
+        separators: [
+          [[152, 326], [152, 371]],
+          [[298, 326], [298, 371]],
+          [[454, 326], [454, 371]]
+        ],
+        fallbackBox: [70, 105, 570, 245],
+        fallbackLines: [
+          [320, 145, "Схема должна показать дерево из 8 узлов:"],
+          [320, 177, "1 менеджер, 2 под-менеджера и 5 воркеров-листьев."],
+          [320, 209, "Внутренние узлы и листья выделены разными цветами."]
+        ]
+      },
+      {
+        role: "node",
+        id: "manager",
+        type: "manager",
+        box: [286, 16, 414, 74],
+        titleAt: [350, 38],
+        noteAt: [350, 59],
+        title: "Менеджер",
+        note: "корень дерева"
+      },
+      {
+        role: "node",
+        id: "sub-a",
+        type: "manager",
+        box: [84, 116, 266, 178],
+        titleAt: [175, 139],
+        noteAt: [175, 162],
+        title: "Под-менеджер A",
+        note: "внутренний узел"
+      },
+      {
+        role: "node",
+        id: "sub-b",
+        type: "manager",
+        box: [434, 116, 616, 178],
+        titleAt: [525, 139],
+        noteAt: [525, 162],
+        title: "Под-менеджер B",
+        note: "внутренний узел"
+      },
+      {
+        role: "node",
+        id: "w1",
+        type: "worker",
+        box: [14, 230, 104, 282],
+        titleAt: [59, 247],
+        noteAt: [59, 268],
+        title: "W1",
+        note: "воркер"
+      },
+      {
+        role: "node",
+        id: "w2",
+        type: "worker",
+        box: [120, 230, 210, 282],
+        titleAt: [165, 247],
+        noteAt: [165, 268],
+        title: "W2",
+        note: "воркер"
+      },
+      {
+        role: "node",
+        id: "w3",
+        type: "worker",
+        box: [226, 230, 316, 282],
+        titleAt: [271, 247],
+        noteAt: [271, 268],
+        title: "W3",
+        note: "воркер"
+      },
+      {
+        role: "node",
+        id: "w4",
+        type: "worker",
+        box: [438, 230, 528, 282],
+        titleAt: [483, 247],
+        noteAt: [483, 268],
+        title: "W4",
+        note: "воркер"
+      },
+      {
+        role: "node",
+        id: "w5",
+        type: "worker",
+        box: [544, 230, 634, 282],
+        titleAt: [589, 247],
+        noteAt: [589, 268],
+        title: "W5",
+        note: "воркер"
+      },
+      {
+        role: "edge",
+        points: [[350, 74], [350, 94], [175, 94], [175, 116]]
+      },
+      {
+        role: "edge",
+        points: [[350, 74], [350, 94], [525, 94], [525, 116]]
+      },
+      {
+        role: "edge",
+        points: [[175, 178], [175, 204], [59, 204], [59, 230]]
+      },
+      {
+        role: "edge",
+        points: [[175, 178], [175, 204], [165, 204], [165, 230]]
+      },
+      {
+        role: "edge",
+        points: [[175, 178], [175, 204], [271, 204], [271, 230]]
+      },
+      {
+        role: "edge",
+        points: [[525, 178], [525, 204], [483, 204], [483, 230]]
+      },
+      {
+        role: "edge",
+        points: [[525, 178], [525, 204], [589, 204], [589, 230]]
+      },
+      {
+        role: "summary",
+        valueAt: [24, 338],
+        noteAt: [24, 361],
+        value: "8 узлов",
+        note: "отдельных вызовов модели",
+        anchor: "start"
+      },
+      {
+        role: "summary",
+        valueAt: [170, 338],
+        noteAt: [170, 361],
+        value: "5 работают",
+        note: "листьев-воркеров",
+        anchor: "start"
+      },
+      {
+        role: "summary",
+        valueAt: [316, 338],
+        noteAt: [316, 361],
+        value: "3 управляют",
+        note: "внутренних узла",
+        anchor: "start"
+      },
+      {
+        role: "equation",
+        at: [472, 349],
+        text: "3 / 8 = 37,5% ≈ 40%"
+      }
+    ];
+
+    const [config, ...items] = data;
+    const [originX, originY] = config.origin;
+    const [scaleX, scaleY] = config.scale;
+    const origin = { x: originX, y: originY };
+    const scale = { x: scaleX, y: scaleY };
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const namespace = "http://www.w3.org/2000/svg";
+    const stage = document.getElementById("stage");
+
+    function element(name, className) {
+      const item = document.createElementNS(namespace, name);
+      if (className) item.setAttribute("class", className);
+      return item;
+    }
+
+    function addRect(parent, box, className, radius) {
+      const [left, top, right, bottom] = box;
+      const rect = element("rect", className);
+      rect.setAttribute("x", sx(left));
+      rect.setAttribute("y", sy(top));
+      rect.setAttribute("width", sx(right) - sx(left));
+      rect.setAttribute("height", sy(bottom) - sy(top));
+      rect.setAttribute("rx", sx(radius) - sx(config.zero));
+      rect.setAttribute("ry", sy(radius) - sy(config.zero));
+      parent.appendChild(rect);
+      return rect;
+    }
+
+    function addText(parent, at, value, className, anchor) {
+      const [x, y] = at;
+      const text = element("text", className);
+      text.setAttribute("x", sx(x));
+      text.setAttribute("y", sy(y));
+      if (anchor) text.setAttribute("text-anchor", anchor);
+      text.textContent = value;
+      parent.appendChild(text);
+      return text;
+    }
+
+    function addLine(parent, points, className) {
+      const line = element("polyline", className);
+      line.setAttribute(
+        "points",
+        points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")
+      );
+      parent.appendChild(line);
+      return line;
+    }
+
+    function drawLegend(parent) {
+      addRect(
+        parent,
+        config.legendManager,
+        "legend-swatch node-manager",
+        config.swatchRadius
+      );
+      addText(
+        parent,
+        config.legendManagerText,
+        "3 внутренних узла",
+        "legend-text",
+        "start"
+      );
+      addRect(
+        parent,
+        config.legendWorker,
+        "legend-swatch node-worker",
+        config.swatchRadius
+      );
+      addText(
+        parent,
+        config.legendWorkerText,
+        "5 листьев-воркеров",
+        "legend-text",
+        "start"
+      );
+    }
+
+    function drawNode(parent, item) {
+      const manager = item.type === "manager";
+      const nodeClass = manager
+        ? "node node-manager"
+        : "node node-worker";
+      const titleClass = manager
+        ? "node-title manager-title"
+        : "node-title worker-title";
+      const noteClass = manager
+        ? "node-note manager-note"
+        : "node-note worker-note";
+
+      const group = element("g");
+      group.setAttribute(
+        "aria-label",
+        `${item.title}: ${item.note}`
+      );
+      addRect(group, item.box, nodeClass, config.radius);
+      addText(group, item.titleAt, item.title, titleClass, "middle");
+      addText(group, item.noteAt, item.note, noteClass, "middle");
+      parent.appendChild(group);
+    }
+
+    function drawSummary(parent) {
+      addText(
+        parent,
+        config.summaryLabel,
+        "Цена структуры",
+        "section-label",
+        "start"
+      );
+      addRect(
+        parent,
+        config.summaryBox,
+        "summary-bg",
+        config.radius
+      );
+
+      for (const separator of config.separators) {
+        addLine(parent, separator, "summary-rule");
+      }
+
+      for (const item of items) {
+        if (item.role === "summary") {
+          addText(
+            parent,
+            item.valueAt,
+            item.value,
+            "summary-value",
+            item.anchor
+          );
+          addText(
+            parent,
+            item.noteAt,
+            item.note,
+            "summary-note",
+            item.anchor
+          );
+        }
+
+        if (item.role === "equation") {
+          addText(
+            parent,
+            item.at,
+            item.text,
+            "equation",
+            "start"
+          );
+        }
+      }
+    }
+
+    function drawFallback() {
+      stage.replaceChildren();
+      addRect(
+        stage,
+        config.fallbackBox,
+        "fallback-box",
+        config.radius
+      );
+
+      for (const [x, y, message] of config.fallbackLines) {
+        addText(
+          stage,
+          [x, y],
+          message,
+          "fallback-text",
+          "middle"
+        );
+      }
+    }
+
+    try {
+      drawLegend(stage);
+
+      for (const item of items) {
+        if (item.role === "edge") {
+          addLine(stage, item.points, "connector");
+        }
+      }
+
+      for (const item of items) {
+        if (item.role === "node") {
+          drawNode(stage, item);
+        }
+      }
+
+      drawSummary(stage);
+    } catch (error) {
+      drawFallback();
+    }
+  </script>
+</body>
+</html>

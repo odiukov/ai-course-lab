@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как документная частота меняет вес слова</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f9fc;
+      --surface: #ffffff;
+      --surface-soft: #eef3f8;
+      --ink: #172033;
+      --muted: #627086;
+      --line: #c9d3df;
+      --rare: #087f73;
+      --rare-soft: #d9f2ed;
+      --middle: #b45f06;
+      --middle-soft: #fff0d8;
+      --common: #596579;
+      --common-soft: #e7ebf0;
+      --empty: #a9b4c2;
+      --arrow: #40546f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--bg);
+      font-family: inherit;
+    }
+
+    text {
+      fill: var(--ink);
+    }
+
+    .panel {
+      fill: var(--surface);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .accent-rare {
+      fill: var(--rare);
+    }
+
+    .accent-middle {
+      fill: var(--middle);
+    }
+
+    .accent-common {
+      fill: var(--common);
+    }
+
+    .formula-box {
+      stroke-width: 2px;
+    }
+
+    .formula-box.rare {
+      fill: var(--rare-soft);
+      stroke: var(--rare);
+    }
+
+    .formula-box.middle {
+      fill: var(--middle-soft);
+      stroke: var(--middle);
+    }
+
+    .formula-box.common {
+      fill: var(--common-soft);
+      stroke: var(--common);
+    }
+
+    .doc {
+      stroke-width: 2px;
+    }
+
+    .doc.absent {
+      fill: var(--surface-soft);
+      stroke: var(--line);
+    }
+
+    .doc.present.rare {
+      fill: var(--rare-soft);
+      stroke: var(--rare);
+    }
+
+    .doc.present.middle {
+      fill: var(--middle-soft);
+      stroke: var(--middle);
+    }
+
+    .doc.present.common {
+      fill: var(--common-soft);
+      stroke: var(--common);
+    }
+
+    .token.rare {
+      fill: var(--rare);
+    }
+
+    .token.middle {
+      fill: var(--middle);
+    }
+
+    .token.common {
+      fill: var(--common);
+    }
+
+    .absence {
+      stroke: var(--empty);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .corpus-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .legend {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .word {
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .df {
+      fill: var(--muted);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .presence {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .formula {
+      font-size: 19px;
+      font-weight: bold;
+    }
+
+    .idf-caption {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .trend {
+      stroke: var(--arrow);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head,
+    .trend-node {
+      fill: var(--arrow);
+    }
+
+    .trend-label {
+      fill: var(--arrow);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    #fallback {
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 16px;
+      border: 2px solid var(--line);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111722;
+        --surface: #192231;
+        --surface-soft: #222d3d;
+        --ink: #edf3fa;
+        --muted: #afbdd0;
+        --line: #3b495d;
+        --rare: #55d7c5;
+        --rare-soft: #173d3a;
+        --middle: #ffc06a;
+        --middle-soft: #49351e;
+        --common: #b6c2d2;
+        --common-soft: #303a49;
+        --empty: #718097;
+        --arrow: #a9c2e4;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1 id="diagram-heading">Как документная частота меняет вес слова</h1>
+
+  <svg
+    id="diagram"
+    viewBox="0 0 1100 420"
+    width="1100"
+    height="420"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-labelledby="diagram-heading diagram-description"
+  >
+    <desc id="diagram-description">
+      Три слова встречаются в разном числе документов одного корпуса.
+      Чем выше документная частота, тем ниже IDF.
+    </desc>
+  </svg>
+
+  <p id="fallback" hidden>
+    Корпус содержит 5 документов. При df = 1 получаем log(5/1) = 1.61,
+    при df = 3 — log(5/3) = 0.51, а при df = 5 — log(5/5) = 0.
+  </p>
+
+  <script>
+    const data = [{
+      origin: { x: 25, y: 7 },
+      scale: { x: 10.5, y: 10 },
+      corner: { x: 1.1, y: 1.1 },
+      top: {
+        corpus: { x: 1.5, y: 2.3, text: "Один корпус: 5 документов", anchor: "start" },
+        legend: { x: 98.5, y: 2.3, text: "● слово есть   — слова нет", anchor: "end" }
+      },
+      panels: [
+        {
+          key: "rare",
+          tone: "rare",
+          x1: 1,
+          x2: 32.5,
+          y1: 4.2,
+          y2: 31.4,
+          accentY2: 5.1,
+          word: "«десерт»",
+          df: "df = 1",
+          presence: "есть только в 1 документе",
+          formula: "log(5/1) = 1.61",
+          caption: "голый IDF: 1.61"
+        },
+        {
+          key: "middle",
+          tone: "middle",
+          x1: 34.25,
+          x2: 65.75,
+          y1: 4.2,
+          y2: 31.4,
+          accentY2: 5.1,
+          word: "«отзыв»",
+          df: "df = 3",
+          presence: "есть в 3 документах",
+          formula: "log(5/3) = 0.51",
+          caption: "голый IDF: 0.51"
+        },
+        {
+          key: "common",
+          tone: "common",
+          x1: 67.5,
+          x2: 99,
+          y1: 4.2,
+          y2: 31.4,
+          accentY2: 5.1,
+          word: "«вкусно»",
+          df: "df = 5",
+          presence: "есть во всех 5 документах",
+          formula: "log(5/5) = 0",
+          caption: "голый IDF: 0"
+        }
+      ],
+      panelLayout: {
+        centerOffset: 15.75,
+        wordY: 8.4,
+        dfY: 11.5,
+        docY1: 13.5,
+        docY2: 18.8,
+        tokenY: 16.15,
+        presenceY: 21.5,
+        formulaX1: 2,
+        formulaX2: 29.5,
+        formulaY1: 23.1,
+        formulaY2: 29.8,
+        formulaY: 26.25,
+        captionY: 28.8
+      },
+      documents: [
+        {
+          x1: 2.2, x2: 6.4, tokenX: 4.3,
+          dashX1: 3.4, dashX2: 5.2,
+          present: { rare: true, middle: true, common: true }
+        },
+        {
+          x1: 7.5, x2: 11.7, tokenX: 9.6,
+          dashX1: 8.7, dashX2: 10.5,
+          present: { rare: false, middle: true, common: true }
+        },
+        {
+          x1: 12.8, x2: 17, tokenX: 14.9,
+          dashX1: 14, dashX2: 15.8,
+          present: { rare: false, middle: true, common: true }
+        },
+        {
+          x1: 18.1, x2: 22.3, tokenX: 20.2,
+          dashX1: 19.3, dashX2: 21.1,
+          present: { rare: false, middle: false, common: true }
+        },
+        {
+          x1: 23.4, x2: 27.6, tokenX: 25.5,
+          dashX1: 24.6, dashX2: 26.4,
+          present: { rare: false, middle: false, common: true }
+        }
+      ],
+      tokenRadius: { x: 0.58, y: 0.58 },
+      trend: {
+        line: { x1: 7, y1: 34.5, x2: 93, y2: 34.5 },
+        head: [
+          { x: 93, y: 34.5 },
+          { x: 89.9, y: 32.9 },
+          { x: 89.9, y: 36.1 }
+        ],
+        nodes: [
+          { x: 16.75, y: 34.5 },
+          { x: 50, y: 34.5 },
+          { x: 83.25, y: 34.5 }
+        ],
+        nodeRadius: { x: 0.52, y: 0.52 },
+        label: {
+          x: 50,
+          y: 39.1,
+          text: "df растёт: слово входит в новые документы → IDF падает",
+          anchor: "middle"
+        }
+      },
+      fallback:
+        "Корпус из 5 документов: df = 1 даёт log(5/1) = 1.61; " +
+        "df = 3 даёт log(5/3) = 0.51; df = 5 даёт log(5/5) = 0."
+    }];
+
+    const [{ origin, scale, corner, top, panels, panelLayout,
+      documents, tokenRadius, trend, fallback }] = data;
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const fallbackNode = document.getElementById("fallback");
+      const ns = "http://www.w3.org/2000/svg";
+      const fragment = document.createDocumentFragment();
+
+      const make = (name, attrs, content) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attrs).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (content !== undefined) node.textContent = content;
+        return node;
+      };
+
+      const roundedRect = (box, className) => make("rect", {
+        x: sx(box.x1),
+        y: sy(box.y1),
+        width: sx(box.x2) - sx(box.x1),
+        height: sy(box.y2) - sy(box.y1),
+        rx: sx(box.x1 + corner.x) - sx(box.x1),
+        ry: sy(box.y1 + corner.y) - sy(box.y1),
+        class: className
+      });
+
+      const line = (segment, className) => make("line", {
+        x1: sx(segment.x1),
+        y1: sy(segment.y1),
+        x2: sx(segment.x2),
+        y2: sy(segment.y2),
+        class: className
+      });
+
+      const text = (label, className) => make("text", {
+        x: sx(label.x),
+        y: sy(label.y),
+        "text-anchor": label.anchor,
+        class: className
+      }, label.text);
+
+      const ellipse = (point, radius, className) => make("ellipse", {
+        cx: sx(point.x),
+        cy: sy(point.y),
+        rx: sx(point.x + radius.x) - sx(point.x),
+        ry: sy(point.y + radius.y) - sy(point.y),
+        class: className
+      });
+
+      fragment.append(
+        text(top.corpus, "corpus-label"),
+        text(top.legend, "legend")
+      );
+
+      panels.forEach(panel => {
+        const centerX = panel.x1 + panelLayout.centerOffset;
+
+        fragment.append(
+          roundedRect(panel, "panel"),
+          make("rect", {
+            x: sx(panel.x1),
+            y: sy(panel.y1),
+            width: sx(panel.x2) - sx(panel.x1),
+            height: sy(panel.accentY2) - sy(panel.y1),
+            class: `accent-${panel.tone}`
+          }),
+          text({
+            x: centerX,
+            y: panelLayout.wordY,
+            text: panel.word,
+            anchor: "middle"
+          }, "word"),
+          text({
+            x: centerX,
+            y: panelLayout.dfY,
+            text: panel.df,
+            anchor: "middle"
+          }, "df")
+        );
+
+        documents.forEach(documentItem => {
+          const present = documentItem.present[panel.key];
+          const docBox = {
+            x1: panel.x1 + documentItem.x1,
+            x2: panel.x1 + documentItem.x2,
+            y1: panelLayout.docY1,
+            y2: panelLayout.docY2
+          };
+
+          fragment.append(
+            roundedRect(
+              docBox,
+              present ? `doc present ${panel.tone}` : "doc absent"
+            )
+          );
+
+          if (present) {
+            fragment.append(ellipse({
+              x: panel.x1 + documentItem.tokenX,
+              y: panelLayout.tokenY
+            }, tokenRadius, `token ${panel.tone}`));
+          } else {
+            fragment.append(line({
+              x1: panel.x1 + documentItem.dashX1,
+              y1: panelLayout.tokenY,
+              x2: panel.x1 + documentItem.dashX2,
+              y2: panelLayout.tokenY
+            }, "absence"));
+          }
+        });
+
+        const formulaBox = {
+          x1: panel.x1 + panelLayout.formulaX1,
+          x2: panel.x1 + panelLayout.formulaX2,
+          y1: panelLayout.formulaY1,
+          y2: panelLayout.formulaY2
+        };
+
+        fragment.append(
+          text({
+            x: centerX,
+            y: panelLayout.presenceY,
+            text: panel.presence,
+            anchor: "middle"
+          }, "presence"),
+          roundedRect(formulaBox, `formula-box ${panel.tone}`),
+          text({
+            x: centerX,
+            y: panelLayout.formulaY,
+            text: panel.formula,
+            anchor: "middle"
+          }, "formula"),
+          text({
+            x: centerX,
+            y: panelLayout.captionY,
+            text: panel.caption,
+            anchor: "middle"
+          }, "idf-caption")
+        );
+      });
+
+      fragment.append(line(trend.line, "trend"));
+
+      trend.nodes.forEach(point => {
+        fragment.append(ellipse(point, trend.nodeRadius, "trend-node"));
+      });
+
+      fragment.append(
+        make("polygon", {
+          points: trend.head.map(point =>
+            `${sx(point.x)},${sy(point.y)}`
+          ).join(" "),
+          class: "arrow-head"
+        }),
+        text(trend.label, "trend-label")
+      );
+
+      svg.append(fragment);
+      fallbackNode.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallbackNode = document.getElementById("fallback");
+      svg.hidden = true;
+      fallbackNode.textContent = fallback;
+      fallbackNode.hidden = false;
+    }
+  </script>
+</body>
+</html>

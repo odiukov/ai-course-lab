@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как общий пул связывает участников</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --pool: #e8f1ff;
+      --pool-chip: #ffffff;
+      --agent: #f7f9fc;
+      --selected: #e8f8f0;
+      --selector: #f3edff;
+      --metric: #fff4d8;
+      --ink: #172033;
+      --muted: #5b667a;
+      --line: #65728a;
+      --border: #9aa7ba;
+      --blue: #2869c7;
+      --green: #18825b;
+      --purple: #7650b7;
+      --amber: #9a6810;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2c;
+        --pool: #172d4b;
+        --pool-chip: #223b5e;
+        --agent: #202938;
+        --selected: #173b31;
+        --selector: #302545;
+        --metric: #3d321c;
+        --ink: #edf2fb;
+        --muted: #b7c1d2;
+        --line: #96a4ba;
+        --border: #64738a;
+        --blue: #76adff;
+        --green: #67d7aa;
+        --purple: #c4a0ff;
+        --amber: #f0c96f;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    figure {
+      margin: unset;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    figcaption {
+      box-sizing: border-box;
+      padding: 14px 20px 8px;
+      color: var(--ink);
+      font-size: 20px;
+      font-weight: bold;
+      line-height: 1.25;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--panel);
+    }
+
+    .box,
+    .chip,
+    .rule,
+    .flow,
+    .decision {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .box,
+    .chip {
+      stroke-width: 2px;
+    }
+
+    .pool-box {
+      fill: var(--pool);
+      stroke: var(--blue);
+    }
+
+    .message-chip {
+      fill: var(--pool-chip);
+      stroke: var(--border);
+    }
+
+    .agent-box {
+      fill: var(--agent);
+      stroke: var(--border);
+    }
+
+    .agent-selected {
+      fill: var(--selected);
+      stroke: var(--green);
+    }
+
+    .selector-box {
+      fill: var(--selector);
+      stroke: var(--purple);
+    }
+
+    .metric-box {
+      fill: var(--metric);
+      stroke: var(--amber);
+    }
+
+    .rule {
+      stroke: var(--border);
+      stroke-width: 1px;
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .decision {
+      fill: none;
+      stroke: var(--purple);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .flow-head {
+      fill: var(--line);
+    }
+
+    .decision-head {
+      fill: var(--purple);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    .pool-title {
+      fill: var(--blue);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .message {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .agent-name,
+    .selector-title {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .agent-detail,
+    .selector-detail,
+    .flow-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .selected-detail {
+      fill: var(--green);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .selector-title,
+    .selector-decision {
+      fill: var(--purple);
+    }
+
+    .selector-decision {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .decision-label {
+      fill: var(--purple);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .metric-text {
+      fill: var(--amber);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="figure-title">
+    <figcaption id="figure-title">Как общий пул связывает участников</figcaption>
+    <svg
+      viewBox="0 0 1120 450"
+      width="1120"
+      height="450"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="figure-title diagram-desc"
+    >
+      <desc id="diagram-desc">
+        Общий пул с сообщениями m1, m2 и m3 доступен четырём равноправным
+        агентам и отдельному селектору. Селектор после каждого сообщения
+        выбирает следующего говорящего, в примере — агента C.
+      </desc>
+      <g id="diagram"></g>
+    </svg>
+  </figure>
+
+  <script>
+    const data = {
+      zero: 0,
+      pool: { x: 105, y: 22, w: 730, h: 103, rx: 16 },
+      poolTitle: { x: 470, y: 48 },
+      poolRule: { x1: 130, y1: 65, x2: 810, y2: 65 },
+      messages: [
+        { x: 185, y: 78, w: 110, h: 32, rx: 10, tx: 240, ty: 94, label: "m1" },
+        { x: 338, y: 78, w: 110, h: 32, rx: 10, tx: 393, ty: 94, label: "m2" },
+        { x: 491, y: 78, w: 110, h: 32, rx: 10, tx: 546, ty: 94, label: "m3" },
+        { x: 644, y: 78, w: 110, h: 32, rx: 10, tx: 699, ty: 94, label: "…" }
+      ],
+      bus: [
+        [{ x: 470, y: 125 }, { x: 470, y: 162 }],
+        [{ x: 145, y: 162 }, { x: 975, y: 162 }]
+      ],
+      flowLabel: { x: 825, y: 146 },
+      agents: [
+        {
+          x: 70, y: 205, w: 150, h: 95, rx: 14, cx: 145,
+          nameY: 237, detailY: 268, name: "Агент A",
+          detail: "видит m1 · m2 · m3", selected: false
+        },
+        {
+          x: 250, y: 205, w: 150, h: 95, rx: 14, cx: 325,
+          nameY: 237, detailY: 268, name: "Агент B",
+          detail: "видит m1 · m2 · m3", selected: false
+        },
+        {
+          x: 430, y: 205, w: 150, h: 95, rx: 14, cx: 505,
+          nameY: 232, detailY: 258, statusY: 283, name: "Агент C",
+          detail: "видит m1 · m2 · m3", status: "отвечает сейчас",
+          selected: true
+        },
+        {
+          x: 610, y: 205, w: 150, h: 95, rx: 14, cx: 685,
+          nameY: 237, detailY: 268, name: "Агент D",
+          detail: "видит m1 · m2 · m3", selected: false
+        }
+      ],
+      selector: {
+        x: 860, y: 205, w: 230, h: 125, rx: 14, cx: 975,
+        titleY: 234, detailY: 260, ruleY: 278, decisionY: 306
+      },
+      readLines: [
+        [{ x: 145, y: 162 }, { x: 145, y: 195 }],
+        [{ x: 325, y: 162 }, { x: 325, y: 195 }],
+        [{ x: 505, y: 162 }, { x: 505, y: 195 }],
+        [{ x: 685, y: 162 }, { x: 685, y: 195 }],
+        [{ x: 975, y: 162 }, { x: 975, y: 195 }]
+      ],
+      downHeads: [
+        [{ x: 139, y: 195 }, { x: 151, y: 195 }, { x: 145, y: 205 }],
+        [{ x: 319, y: 195 }, { x: 331, y: 195 }, { x: 325, y: 205 }],
+        [{ x: 499, y: 195 }, { x: 511, y: 195 }, { x: 505, y: 205 }],
+        [{ x: 679, y: 195 }, { x: 691, y: 195 }, { x: 685, y: 205 }],
+        [{ x: 969, y: 195 }, { x: 981, y: 195 }, { x: 975, y: 205 }]
+      ],
+      decisionLine: [
+        { x: 975, y: 330 },
+        { x: 975, y: 365 },
+        { x: 505, y: 365 },
+        { x: 505, y: 310 }
+      ],
+      upHead: [
+        { x: 499, y: 310 },
+        { x: 511, y: 310 },
+        { x: 505, y: 300 }
+      ],
+      decisionLabel: { x: 740, y: 384 },
+      metric: { x: 180, y: 398, w: 760, h: 40, rx: 12, tx: 560, ty: 418 },
+      fallback: { x: 560, y: 220 }
+    };
+
+    const origin = { x: 0, y: 0 };
+    const scale = 1;
+
+    const labelPadding = 10;
+    const lineThickness = 2;
+    const bodyFontSize = 16;
+    const smallFontSize = 14;
+    const titleFontSize = 17;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const root = document.getElementById("diagram");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, textValue) => {
+        const element = document.createElementNS(namespace, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, value);
+        });
+        if (textValue !== undefined) {
+          element.textContent = textValue;
+        }
+        return element;
+      };
+
+      const addRect = (rect, classes) => {
+        const element = make("rect", {
+          x: sx(rect.x),
+          y: sy(rect.y),
+          width: sx(rect.x + rect.w) - sx(rect.x),
+          height: sy(rect.y + rect.h) - sy(rect.y),
+          rx: sx(rect.x + rect.rx) - sx(rect.x),
+          class: classes
+        });
+        root.appendChild(element);
+        return element;
+      };
+
+      const addText = (point, value, classes, anchor = "middle") => {
+        const element = make("text", {
+          x: sx(point.x),
+          y: sy(point.y),
+          "text-anchor": anchor,
+          "dominant-baseline": "middle",
+          class: classes
+        }, value);
+        root.appendChild(element);
+        return element;
+      };
+
+      const addLine = (points, classes) => {
+        const value = points
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ");
+        const element = make("polyline", {
+          points: value,
+          class: classes
+        });
+        root.appendChild(element);
+        return element;
+      };
+
+      const addHead = (points, classes) => {
+        const value = points
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ");
+        const element = make("polygon", {
+          points: value,
+          class: classes
+        });
+        root.appendChild(element);
+        return element;
+      };
+
+      addRect(data.pool, "box pool-box");
+      addText(data.poolTitle, "ОБЩИЙ ПУЛ СООБЩЕНИЙ", "pool-title");
+
+      root.appendChild(make("line", {
+        x1: sx(data.poolRule.x1),
+        y1: sy(data.poolRule.y1),
+        x2: sx(data.poolRule.x2),
+        y2: sy(data.poolRule.y2),
+        class: "rule"
+      }));
+
+      data.messages.forEach(message => {
+        addRect(message, "chip message-chip");
+        addText(
+          { x: message.tx, y: message.ty },
+          message.label,
+          "message"
+        );
+      });
+
+      data.bus.forEach(points => addLine(points, "flow"));
+      addText(
+        data.flowLabel,
+        "одна история доступна всем",
+        "flow-label",
+        "end"
+      );
+
+      data.readLines.forEach(points => addLine(points, "flow"));
+      data.downHeads.forEach(points => addHead(points, "flow-head"));
+
+      data.agents.forEach(agent => {
+        addRect(
+          agent,
+          agent.selected ? "box agent-box agent-selected" : "box agent-box"
+        );
+        addText(
+          { x: agent.cx, y: agent.nameY },
+          agent.name,
+          "agent-name"
+        );
+        addText(
+          { x: agent.cx, y: agent.detailY },
+          agent.detail,
+          "agent-detail"
+        );
+        if (agent.selected) {
+          addText(
+            { x: agent.cx, y: agent.statusY },
+            agent.status,
+            "selected-detail"
+          );
+        }
+      });
+
+      addRect(data.selector, "box selector-box");
+      addText(
+        { x: data.selector.cx, y: data.selector.titleY },
+        "Селектор",
+        "selector-title"
+      );
+      addText(
+        { x: data.selector.cx, y: data.selector.detailY },
+        "после каждого сообщения",
+        "selector-detail"
+      );
+
+      root.appendChild(make("line", {
+        x1: sx(data.selector.x + labelPadding),
+        y1: sy(data.selector.ruleY),
+        x2: sx(data.selector.x + data.selector.w - labelPadding),
+        y2: sy(data.selector.ruleY),
+        class: "rule"
+      }));
+
+      addText(
+        { x: data.selector.cx, y: data.selector.decisionY },
+        "следующим говорит C",
+        "selector-decision"
+      );
+
+      addLine(data.decisionLine, "decision");
+      addHead(data.upHead, "decision-head");
+      addText(
+        data.decisionLabel,
+        "решение селектора",
+        "decision-label"
+      );
+
+      addRect(data.metric, "box metric-box");
+      addText(
+        { x: data.metric.tx, y: data.metric.ty },
+        "10 сообщений × 4 агента = 40 агентских прочтений",
+        "metric-text"
+      );
+
+      root.setAttribute("data-line-thickness", String(lineThickness));
+      root.setAttribute("data-body-font-size", String(bodyFontSize));
+      root.setAttribute("data-small-font-size", String(smallFontSize));
+      root.setAttribute("data-title-font-size", String(titleFontSize));
+    } catch (error) {
+      const root = document.getElementById("diagram");
+      while (root.firstChild) {
+        root.removeChild(root.firstChild);
+      }
+      const fallback = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "text"
+      );
+      fallback.setAttribute("x", sx(data.fallback.x));
+      fallback.setAttribute("y", sy(data.fallback.y));
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("class", "fallback");
+      fallback.textContent =
+        "Один общий пул читают четыре агента и селектор; следующим выбран агент C.";
+      root.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

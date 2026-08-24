@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Cosine annealing плавно уменьшает размер шага</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef1f7;
+      --panel: #ffffff;
+      --panel-border: #cbd3e2;
+      --text: #172033;
+      --muted: #526078;
+      --axis: #64718a;
+      --grid: #dce2ed;
+      --curve: #635bff;
+      --curve-fill: #eeedff;
+      --point: #ef6c45;
+      --point-ring: #ffffff;
+      --formula: #4338ca;
+      --error: #a23b28;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --panel: #181e2c;
+        --panel-border: #364056;
+        --text: #edf1fa;
+        --muted: #aeb8cc;
+        --axis: #9ca8bf;
+        --grid: #30394c;
+        --curve: #9d98ff;
+        --curve-fill: #27264a;
+        --point: #ff9878;
+        --point-ring: #181e2c;
+        --formula: #bbb8ff;
+        --error: #ffad97;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: auto;
+      background: var(--page);
+      color: var(--text);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    }
+
+    figure {
+      width: 100%;
+      max-width: 820px;
+      margin: auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+    }
+
+    h1 {
+      margin: unset;
+      padding: 20px 24px 8px;
+      color: var(--text);
+      font-size: 24px;
+      font-weight: bold;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+    }
+
+    svg text {
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      font-size: 16px;
+      fill: var(--text);
+    }
+
+    .area {
+      fill: var(--curve-fill);
+      stroke: none;
+    }
+
+    .grid {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis,
+    .tick {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .curve {
+      fill: none;
+      stroke: var(--curve);
+      stroke-width: 4px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .halo {
+      fill: var(--point-ring);
+      stroke: none;
+    }
+
+    .point {
+      fill: var(--point);
+      stroke: var(--point-ring);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .tick-label {
+      fill: var(--muted);
+    }
+
+    .x-tick-label {
+      dominant-baseline: hanging;
+    }
+
+    .y-tick-label {
+      dominant-baseline: middle;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-weight: bold;
+    }
+
+    .formula {
+      fill: var(--formula);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .point-label {
+      fill: var(--text);
+      font-weight: bold;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .fallback {
+      margin: unset;
+      padding: 24px;
+      color: var(--error);
+      background: var(--panel);
+      font-size: 16px;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <h1 id="diagram-title">Cosine annealing плавно уменьшает размер шага</h1>
+
+    <svg
+      id="diagram"
+      width="820"
+      height="380"
+      viewBox="0 0 820 380"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title svg-description"
+    >
+      <desc id="svg-description">
+        График множителя learning rate по формуле половина произведения
+        единицы плюс косинус пи на отношение текущей эпохи к общему числу
+        эпох. Кривая плавно убывает от единицы до нуля.
+      </desc>
+      <g id="plot"></g>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна показать плавное уменьшение множителя learning rate:
+      от 1 при t=0 через 0.5 при t=T/2 до 0 при t=T.
+    </p>
+  </figure>
+
+  <script>
+    const data = Object.freeze([
+      Object.freeze([
+        Object.freeze([0, 1, "t=0: множитель 1"]),
+        Object.freeze([5, null, ""]),
+        Object.freeze([10, null, ""]),
+        Object.freeze([15, null, ""]),
+        Object.freeze([20, null, ""]),
+        Object.freeze([25, null, ""]),
+        Object.freeze([30, null, ""]),
+        Object.freeze([35, null, ""]),
+        Object.freeze([40, null, ""]),
+        Object.freeze([45, null, ""]),
+        Object.freeze([50, 0.5, "t=T/2: множитель 0.5"]),
+        Object.freeze([55, null, ""]),
+        Object.freeze([60, null, ""]),
+        Object.freeze([65, null, ""]),
+        Object.freeze([70, null, ""]),
+        Object.freeze([75, null, ""]),
+        Object.freeze([80, null, ""]),
+        Object.freeze([85, null, ""]),
+        Object.freeze([90, null, ""]),
+        Object.freeze([95, null, ""]),
+        Object.freeze([100, 0, "t=T: множитель 0"]),
+      ]),
+      Object.freeze([1.18, -0.035, -2.2, 0.018, 0.034]),
+    ]);
+
+    const origin = Object.freeze({ x: 86, y: 300 });
+    const scale = Object.freeze({ x: 6.6, y: -220 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const labelPad = 14;
+    const labelGap = 22;
+    const axisLabelPad = 48;
+    const lineWidth = 2;
+    const fontSize = 16;
+
+    try {
+      const [samples, layout] = data;
+      const [headlineY, tickDrop, tickLeft, pointRadius, haloRadius] = layout;
+
+      const keyPoints = samples.filter(([, declared, caption]) =>
+        declared !== null && caption
+      );
+
+      const [
+        [tStart, mStart, startCaption],
+        [tMiddle, mMiddle, middleCaption],
+        [tEnd, mEnd, endCaption],
+      ] = keyPoints;
+
+      const factor = t =>
+        mMiddle * (mStart + Math.cos(Math.PI * t / tEnd));
+
+      const plotted = samples.map(([t, declared]) =>
+        Object.freeze([t, declared ?? factor(t)])
+      );
+
+      const svg = document.getElementById("diagram");
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const element = (tag, attributes, content) => {
+        const item = document.createElementNS(namespace, tag);
+
+        for (const [name, value] of Object.entries(attributes)) {
+          item.setAttribute(name, value);
+        }
+
+        if (content) {
+          item.textContent = content;
+        }
+
+        return item;
+      };
+
+      const append = item => {
+        plot.appendChild(item);
+        return item;
+      };
+
+      const line = (xStart, yStart, xEnd, yEnd, className) =>
+        append(element("line", {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          class: className,
+          "stroke-width": lineWidth,
+        }));
+
+      const text = (
+        content,
+        x,
+        y,
+        className,
+        anchor,
+        dx,
+        dy
+      ) => {
+        const attributes = {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "font-size": fontSize,
+        };
+
+        if (dx !== null) {
+          attributes.dx = dx;
+        }
+
+        if (dy !== null) {
+          attributes.dy = dy;
+        }
+
+        return append(element("text", attributes, content));
+      };
+
+      /*
+       * И заливка, и линия строятся из одной таблицы t. Значения множителя
+       * для промежуточных эпох вычисляются именно по формуле cosine
+       * annealing, а контрольные точки берутся из данных без округления.
+       */
+      let curvePath = "";
+      let firstPoint = true;
+      let areaPath =
+        `M ${sx(tStart)} ${sy(mEnd)} ` +
+        `L ${sx(tStart)} ${sy(mStart)} `;
+
+      for (const [t, multiplier] of plotted) {
+        curvePath +=
+          `${firstPoint ? "M" : "L"} ${sx(t)} ${sy(multiplier)} `;
+        areaPath += `L ${sx(t)} ${sy(multiplier)} `;
+        firstPoint = false;
+      }
+
+      areaPath += `L ${sx(tEnd)} ${sy(mEnd)} Z`;
+
+      append(element("path", {
+        d: areaPath,
+        class: "area",
+      }));
+
+      /*
+       * Две горизонтали выделяют значения 1 и 0.5. Вертикаль в T/2
+       * связывает середину обучения с половиной начального learning rate.
+       */
+      for (const multiplier of [mStart, mMiddle]) {
+        line(tStart, multiplier, tEnd, multiplier, "grid");
+      }
+
+      line(tMiddle, mEnd, tMiddle, mMiddle, "grid");
+
+      line(tStart, mEnd, tEnd, mEnd, "axis");
+      line(tStart, mEnd, tStart, mStart, "axis");
+
+      const xTicks = [
+        [tStart, "0"],
+        [tMiddle, "T/2 = 50"],
+        [tEnd, "T = 100"],
+      ];
+
+      for (const [t, caption] of xTicks) {
+        line(t, mEnd, t, tickDrop, "tick");
+        text(
+          caption,
+          t,
+          mEnd,
+          "tick-label x-tick-label",
+          "middle",
+          null,
+          labelPad
+        );
+      }
+
+      const yTicks = [
+        [mEnd, "0"],
+        [mMiddle, "0.5"],
+        [mStart, "1"],
+      ];
+
+      for (const [multiplier, caption] of yTicks) {
+        line(tStart, multiplier, tickLeft, multiplier, "tick");
+        text(
+          caption,
+          tStart,
+          multiplier,
+          "tick-label y-tick-label",
+          "end",
+          -labelPad,
+          null
+        );
+      }
+
+      append(element("path", {
+        d: curvePath,
+        class: "curve",
+      }));
+
+      const radius = Math.abs(sy(mEnd) - sy(pointRadius));
+      const outerRadius = Math.abs(sy(mEnd) - sy(haloRadius));
+
+      for (const [t, multiplier] of keyPoints) {
+        append(element("circle", {
+          cx: sx(t),
+          cy: sy(multiplier),
+          r: outerRadius,
+          class: "halo",
+        }));
+
+        append(element("circle", {
+          cx: sx(t),
+          cy: sy(multiplier),
+          r: radius,
+          class: "point",
+        }));
+      }
+
+      /*
+       * У трёх близких к кривой подписей разные направления смещения:
+       * начальная идёт вправо-вниз, средняя вправо-вверх, конечная
+       * влево-вверх. Поэтому подписи не складываются с точками и осями.
+       */
+      text(
+        startCaption,
+        tStart,
+        mStart,
+        "point-label",
+        "start",
+        labelPad,
+        labelGap
+      );
+
+      text(
+        middleCaption,
+        tMiddle,
+        mMiddle,
+        "point-label",
+        "start",
+        labelPad,
+        -labelPad
+      );
+
+      text(
+        endCaption,
+        tEnd,
+        mEnd,
+        "point-label",
+        "end",
+        -labelPad,
+        -labelGap
+      );
+
+      text(
+        "множитель learning rate",
+        tStart,
+        headlineY,
+        "axis-label",
+        "start",
+        null,
+        null
+      );
+
+      text(
+        "0.5 × (1 + cos(π × t/T))",
+        tEnd,
+        headlineY,
+        "formula",
+        "end",
+        null,
+        null
+      );
+
+      text(
+        "эпоха t",
+        tEnd,
+        mEnd,
+        "axis-label",
+        "end",
+        null,
+        axisLabelPad
+      );
+
+      fallback.hidden = true;
+      svg.hidden = false;
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

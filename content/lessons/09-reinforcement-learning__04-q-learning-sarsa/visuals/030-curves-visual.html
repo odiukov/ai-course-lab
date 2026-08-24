@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кривые обучения без эпизодического шума</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --axis: #475569;
+      --grid: #d8dee8;
+      --q: #2563c7;
+      --sarsa: #d05a20;
+      --plateau: #dcebd9;
+      --plateau-line: #54844d;
+      --optimal: #8b5b18;
+      --shadow: rgba(24, 39, 75, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101722;
+        --panel: #151e2b;
+        --ink: #edf3fa;
+        --muted: #aab6c5;
+        --axis: #b8c4d2;
+        --grid: #344154;
+        --q: #77aaf5;
+        --sarsa: #f29a68;
+        --plateau: #243d2d;
+        --plateau-line: #8bc783;
+        --optimal: #e2b865;
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+    }
+
+    figure {
+      width: 100%;
+      max-width: 960px;
+      margin: 0;
+      padding: 14px 14px 10px;
+      background: var(--panel);
+      box-shadow: 0 1px 4px var(--shadow);
+    }
+
+    figcaption {
+      padding: 0 6px 8px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.25;
+      font-weight: 720;
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      max-height: 430px;
+      background: var(--panel);
+      overflow: visible;
+    }
+
+    text {
+      font-family: inherit;
+      fill: var(--ink);
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .fallback {
+      margin: 10px 6px;
+      padding: 14px;
+      color: var(--ink);
+      background: var(--bg);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <figcaption>
+      <h1 id="diagram-title">Кривые обучения без эпизодического шума</h1>
+      <p class="subtitle">Средняя отдача по окнам 100 эпизодов на протяжении 2000 эпизодов</p>
+    </figcaption>
+
+    <svg id="chart"
+         viewBox="0 0 960 430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Сглаженные кривые обучения Q-learning и SARSA</title>
+      <desc id="svg-desc">
+        Средняя отдача обоих методов сначала растёт, а около 1000-го эпизода
+        выходит на плато примерно минус 6,6. Ориентир оптимального маршрута —
+        минус 6.
+      </desc>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать две кривые средней отдачи по окнам 100
+      эпизодов: Q-learning и SARSA поднимаются и примерно к 1000-му эпизоду
+      выходят на плато около −6,6 при ориентире оптимального маршрута −6.
+    </p>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze({
+      canvas: [960, 430],
+      origin: [96, 54],
+      scale: [0.4, -18.4],
+      axis: {
+        horizontal: [[0, 0], [2050, 0]],
+        vertical: [[0, 0], [0, -18.5]]
+      },
+      plot: {
+        left: 0,
+        right: 2000,
+        bottom: -18,
+        gridReturns: [-18, -13, -7],
+        returnTicks: [
+          [-18, "−18"],
+          [-13, "−13"],
+          [-7, "−7"]
+        ],
+        episodeTicks: [
+          [1000, "1000"],
+          [2000, "2000"]
+        ]
+      },
+      plateauBand: [
+        [950, -6.32],
+        [2000, -6.32],
+        [2000, -6.91],
+        [950, -6.91]
+      ],
+      optimal: {
+        line: [[0, -6], [2000, -6]],
+        label: [1970, -5.28]
+      },
+      plateau: {
+        point: [1000, -6.6],
+        guide: [[1000, 0], [1000, -18]],
+        leader: [
+          [1110, -3.25],
+          [1110, -4.35],
+          [1000, -6.6]
+        ],
+        label: [1110, -2.65],
+        radius: 13
+      },
+      axisLabels: {
+        returns: [35, -0.62],
+        episodes: [2000, -0.62]
+      },
+      note: [1450, -16.1],
+      legend: {
+        qLine: [[180, -19.55], [290, -19.55]],
+        qText: [330, -19.55],
+        sLine: [[1130, -19.55], [1240, -19.55]],
+        sText: [1280, -19.55]
+      },
+      qLearning: [
+        [100, -17.05],
+        [200, -14.35],
+        [300, -11.75],
+        [400, -9.72],
+        [500, -8.42],
+        [600, -7.63],
+        [700, -7.15],
+        [800, -6.87],
+        [900, -6.70],
+        [1000, -6.61],
+        [1100, -6.58],
+        [1200, -6.63],
+        [1300, -6.57],
+        [1400, -6.60],
+        [1500, -6.56],
+        [1600, -6.62],
+        [1700, -6.58],
+        [1800, -6.61],
+        [1900, -6.57],
+        [2000, -6.59]
+      ],
+      sarsa: [
+        [100, -17.55],
+        [200, -15.28],
+        [300, -12.86],
+        [400, -10.68],
+        [500, -9.05],
+        [600, -8.02],
+        [700, -7.42],
+        [800, -7.06],
+        [900, -6.85],
+        [1000, -6.72],
+        [1100, -6.68],
+        [1200, -6.71],
+        [1300, -6.65],
+        [1400, -6.69],
+        [1500, -6.64],
+        [1600, -6.67],
+        [1700, -6.63],
+        [1800, -6.68],
+        [1900, -6.64],
+        [2000, -6.66]
+      ]
+    });
+
+    const [originX, originY] = DATA.origin;
+    const [scaleX, scaleY] = DATA.scale;
+    const origin = Object.freeze({ x: originX, y: originY });
+    const scale = Object.freeze({ x: scaleX, y: scaleY });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const LABEL_GAP = 14;
+    const FONT = Object.freeze({
+      tick: 13,
+      label: 14,
+      callout: 15,
+      legend: 14
+    });
+    const STROKE = Object.freeze({
+      axis: 1.5,
+      grid: 1,
+      curve: 4,
+      guide: 1.5,
+      marker: 2,
+      dash: 6,
+      space: 7
+    });
+
+    try {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      const node = (name, attributes, content) => {
+        const element = document.createElementNS(NS, name);
+        Object.entries(attributes || {}).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+        if (content !== undefined) element.textContent = content;
+        return element;
+      };
+
+      const group = className => {
+        const element = node("g", className ? { class: className } : {});
+        svg.appendChild(element);
+        return element;
+      };
+
+      const line = (parent, start, end, attributes) => {
+        const [x1, y1] = start;
+        const [x2, y2] = end;
+        parent.appendChild(node("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          ...attributes
+        }));
+      };
+
+      const text = (parent, point, content, attributes, dx, dy) => {
+        const [x, y] = point;
+        parent.appendChild(node("text", {
+          x: sx(x) + (dx || 0),
+          y: sy(y) + (dy || 0),
+          ...attributes
+        }, content));
+      };
+
+      const points = values =>
+        values.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ");
+
+      const curve = (parent, values, color, description) => {
+        const polyline = node("polyline", {
+          points: points(values),
+          fill: "none",
+          stroke: color,
+          "stroke-width": STROKE.curve,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          "vector-effect": "non-scaling-stroke"
+        });
+        polyline.appendChild(node("title", {}, description));
+        parent.appendChild(polyline);
+      };
+
+      const styles = getComputedStyle(document.documentElement);
+      const color = name => styles.getPropertyValue(name).trim();
+
+      const bandGroup = group();
+      bandGroup.appendChild(node("polygon", {
+        points: points(DATA.plateauBand),
+        fill: color("--plateau"),
+        stroke: "none"
+      }));
+
+      const gridGroup = group();
+      DATA.plot.gridReturns.forEach(value => {
+        line(
+          gridGroup,
+          [DATA.plot.left, value],
+          [DATA.plot.right, value],
+          {
+            stroke: color("--grid"),
+            "stroke-width": STROKE.grid,
+            "vector-effect": "non-scaling-stroke"
+          }
+        );
+      });
+
+      line(
+        gridGroup,
+        DATA.optimal.line[0],
+        DATA.optimal.line[1],
+        {
+          stroke: color("--optimal"),
+          "stroke-width": STROKE.guide,
+          "stroke-dasharray": `${STROKE.dash} ${STROKE.space}`,
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+
+      line(
+        gridGroup,
+        DATA.plateau.guide[0],
+        DATA.plateau.guide[1],
+        {
+          stroke: color("--plateau-line"),
+          "stroke-width": STROKE.guide,
+          "stroke-dasharray": `${STROKE.grid} ${STROKE.space}`,
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+
+      const axisGroup = group();
+      line(
+        axisGroup,
+        DATA.axis.horizontal[0],
+        DATA.axis.horizontal[1],
+        {
+          stroke: color("--axis"),
+          "stroke-width": STROKE.axis,
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+      line(
+        axisGroup,
+        DATA.axis.vertical[0],
+        DATA.axis.vertical[1],
+        {
+          stroke: color("--axis"),
+          "stroke-width": STROKE.axis,
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+
+      DATA.plot.returnTicks.forEach(([value, label]) => {
+        line(
+          axisGroup,
+          [DATA.plot.left, value],
+          [DATA.plateau.radius, value],
+          {
+            stroke: color("--axis"),
+            "stroke-width": STROKE.axis,
+            "vector-effect": "non-scaling-stroke"
+          }
+        );
+        text(
+          axisGroup,
+          [DATA.plot.left, value],
+          label,
+          {
+            "text-anchor": "end",
+            "dominant-baseline": "middle",
+            "font-size": FONT.tick,
+            class: "muted"
+          },
+          -LABEL_GAP
+        );
+      });
+
+      DATA.plot.episodeTicks.forEach(([value, label]) => {
+        line(
+          axisGroup,
+          [value, 0],
+          [value, -0.34],
+          {
+            stroke: color("--axis"),
+            "stroke-width": STROKE.axis,
+            "vector-effect": "non-scaling-stroke"
+          }
+        );
+        text(
+          axisGroup,
+          [value, 0],
+          label,
+          {
+            "text-anchor": "middle",
+            "dominant-baseline": "hanging",
+            "font-size": FONT.tick,
+            class: "muted"
+          },
+          0,
+          LABEL_GAP
+        );
+      });
+
+      text(
+        axisGroup,
+        DATA.axisLabels.returns,
+        "Средняя отдача ↑",
+        {
+          "text-anchor": "start",
+          "font-size": FONT.label,
+          "font-weight": "650"
+        }
+      );
+      text(
+        axisGroup,
+        DATA.axisLabels.episodes,
+        "Эпизоды →",
+        {
+          "text-anchor": "end",
+          "font-size": FONT.label,
+          "font-weight": "650"
+        }
+      );
+
+      text(
+        axisGroup,
+        DATA.optimal.label,
+        "ориентир оптимального маршрута −6",
+        {
+          "text-anchor": "end",
+          "font-size": FONT.tick,
+          fill: color("--optimal")
+        }
+      );
+
+      const curvesGroup = group();
+      curve(
+        curvesGroup,
+        DATA.qLearning,
+        color("--q"),
+        "Q-learning: средняя отдача по окнам 100 эпизодов"
+      );
+      curve(
+        curvesGroup,
+        DATA.sarsa,
+        color("--sarsa"),
+        "SARSA: средняя отдача по окнам 100 эпизодов"
+      );
+
+      const plateauGroup = group();
+      plateauGroup.appendChild(node("polyline", {
+        points: points(DATA.plateau.leader),
+        fill: "none",
+        stroke: color("--plateau-line"),
+        "stroke-width": STROKE.guide,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "vector-effect": "non-scaling-stroke"
+      }));
+
+      const [plateauX, plateauY] = DATA.plateau.point;
+      plateauGroup.appendChild(node("circle", {
+        cx: sx(plateauX),
+        cy: sy(plateauY),
+        r: Math.abs(sx(DATA.plateau.radius) - sx(DATA.plot.left)),
+        fill: color("--panel"),
+        stroke: color("--plateau-line"),
+        "stroke-width": STROKE.marker,
+        "vector-effect": "non-scaling-stroke"
+      }));
+
+      text(
+        plateauGroup,
+        DATA.plateau.label,
+        "Плато около 1000-го эпизода",
+        {
+          "text-anchor": "start",
+          "font-size": FONT.callout,
+          "font-weight": "700",
+          fill: color("--plateau-line")
+        }
+      );
+      text(
+        plateauGroup,
+        DATA.plateau.label,
+        "средняя отдача ≈ −6,6",
+        {
+          "text-anchor": "start",
+          "font-size": FONT.label,
+          fill: color("--plateau-line")
+        },
+        0,
+        LABEL_GAP + FONT.label
+      );
+
+      text(
+        plateauGroup,
+        DATA.note,
+        "Эпизодические скачки убраны усреднением",
+        {
+          "text-anchor": "middle",
+          "font-size": FONT.tick,
+          class: "muted"
+        }
+      );
+
+      const legendGroup = group();
+      line(
+        legendGroup,
+        DATA.legend.qLine[0],
+        DATA.legend.qLine[1],
+        {
+          stroke: color("--q"),
+          "stroke-width": STROKE.curve,
+          "stroke-linecap": "round",
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+      text(
+        legendGroup,
+        DATA.legend.qText,
+        "Q-learning — средняя отдача",
+        {
+          "text-anchor": "start",
+          "dominant-baseline": "middle",
+          "font-size": FONT.legend,
+          "font-weight": "650"
+        }
+      );
+
+      line(
+        legendGroup,
+        DATA.legend.sLine[0],
+        DATA.legend.sLine[1],
+        {
+          stroke: color("--sarsa"),
+          "stroke-width": STROKE.curve,
+          "stroke-linecap": "round",
+          "vector-effect": "non-scaling-stroke"
+        }
+      );
+      text(
+        legendGroup,
+        DATA.legend.sText,
+        "SARSA — средняя отдача",
+        {
+          "text-anchor": "start",
+          "dominant-baseline": "middle",
+          "font-size": FONT.legend,
+          "font-weight": "650"
+        }
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+      if (svg) svg.hidden = true;
+      if (fallback) fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

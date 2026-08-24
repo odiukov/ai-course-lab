@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>HWC и CHW: как байты лежат в памяти</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6570;
+    --line:#3f4a55; --r:#d14b4b; --g:#3f9142; --b:#3f6bd1;
+    --box:#f2f4f7; --boxline:#c3cbd4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8ecf1; --muted:#a3aeba;
+      --line:#8b98a6; --r:#ff7b7b; --g:#6fd47a; --b:#7fa6ff;
+      --box:#1e242b; --boxline:#3a444f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;background:var(--bg);}
+  .fail{padding:10px;border:1px solid var(--boxline);border-radius:6px;
+    color:var(--muted);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Одна лента чисел — два маршрута чтения</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var W = 900, H = 470;                 // холст
+    var PAD = 8, LW = 1.4, FS = 13, FSM = 11.5;  // отступ подписи, толщина, кегли
+    var ORIGIN = {x:34, y:26};            // один origin
+    var SCALE  = 8;                       // один scale
+
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    var CH = ["R","G","B"];
+    var COL = {R:"var(--r)", G:"var(--g)", B:"var(--b)"};
+
+    var hwcRows = 3;      // показанные строки кадра
+    var hwcPix  = 3;      // показанные пиксели в строке
+    var cellW = 5, cellH = 5, pixGap = 1.2, rowGap = 1.6;
+    var hwcX = 2, hwcY = 8;
+
+    var planeW = 26, planeH = 14, planeGap = 4;
+    var chwX = 68, chwY = 5;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,size,fill,weight){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle",
+        "font-size":(size||FS),"fill":fill||"var(--fg)",
+        "font-family":"ui-monospace,SFMono-Regular,Menlo,monospace",
+        "font-weight":weight||"400"});
+      t.appendChild(document.createTextNode(s)); return t; }
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H,
+      preserveAspectRatio:"xMidYMid meet",role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah",markerWidth:"7",markerHeight:"7",
+      refX:"6",refY:"3",orient:"auto",markerUnits:"strokeWidth"});
+    mk.appendChild(el("path",{d:"M0,0 L6,3 L0,6 z",fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    function line(x1,y1,x2,y2,extra){
+      var a={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),
+        stroke:"var(--line)","stroke-width":LW,"stroke-linecap":"round"};
+      for(var k in (extra||{})) a[k]=extra[k];
+      svg.appendChild(el("line",a));
+    }
+    function box(x,y,w,h,fill,stroke){
+      svg.appendChild(el("rect",{x:sx(x),y:sy(y),
+        width:sx(x+w)-sx(x),height:sy(y+h)-sy(y),
+        rx:2,fill:fill||"var(--box)",
+        stroke:stroke||"var(--boxline)","stroke-width":LW}));
+    }
+
+    // ================= слева: HWC =================
+    svg.appendChild(txt(sx(hwcX), sy(hwcY-3.2),
+      "HWC — пиксели вперемешку", "start", FS, "var(--fg)", "600"));
+    svg.appendChild(txt(sx(hwcX), sy(hwcY-1.4),
+      "(128, 192, 3)  —  PIL, OpenCV, JPEG", "start", FSM, "var(--muted)"));
+
+    for(var r=0;r<hwcRows;r++){
+      var ry = hwcY + r*(cellH+rowGap);
+      for(var p=0;p<hwcPix;p++){
+        var px = hwcX + p*(3*cellW+pixGap);
+        for(var c=0;c<3;c++){
+          var cx = px + c*cellW;
+          box(cx, ry, cellW, cellH);
+          svg.appendChild(txt((sx(cx)+sx(cx+cellW))/2,
+            (sy(ry)+sy(ry+cellH))/2 + FS/3, CH[c], "middle", FS, COL[CH[c]], "600"));
+        }
+        // разделитель пикселей
+        if(p<hwcPix-1) line(px+3*cellW+pixGap/2, ry, px+3*cellW+pixGap/2, ry+cellH,
+          {"stroke-dasharray":"2 3","stroke":"var(--boxline)"});
+      }
+      svg.appendChild(txt(sx(hwcX)-PAD, (sy(ry)+sy(ry+cellH))/2 + FSM/3,
+        "строка "+r, "end", FSM, "var(--muted)"));
+    }
+    var hwcBottom = hwcY + hwcRows*(cellH+rowGap) - rowGap;
+    svg.appendChild(txt(sx(hwcX), sy(hwcBottom)+PAD+FSM,
+      "… 128 строк по 192 пикселя", "start", FSM, "var(--muted)"));
+
+    // ось W вправо над первой строкой
+    line(hwcX, hwcY-0.7, hwcX+3*cellW, hwcY-0.7, {"marker-end":"url(#ah)"});
+    svg.appendChild(txt(sx(hwcX+3*cellW)+PAD, sy(hwcY-0.7)+FSM/3,
+      "W →", "start", FSM, "var(--muted)"));
+
+    // ================= справа: CHW =================
+    svg.appendChild(txt(sx(chwX), sy(chwY-3.2),
+      "CHW — три плоскости", "start", FS, "var(--fg)", "600"));
+    svg.appendChild(txt(sx(chwX), sy(chwY-1.4),
+      "(3, 128, 192)  —  PyTorch, cuDNN", "start", FSM, "var(--muted)"));
+
+    for(var c2=0;c2<3;c2++){
+      var py = chwY + c2*(planeH+planeGap);
+      box(chwX, py, planeW, planeH);
+      svg.appendChild(txt((sx(chwX)+sx(chwX+planeW))/2,
+        (sy(py)+sy(py+planeH))/2 + FS/3,
+        "плоскость "+CH[c2]+" — 128×192", "middle", FS, COL[CH[c2]], "600"));
+      svg.appendChild(txt(sx(chwX)-PAD, (sy(py)+sy(py+planeH))/2 + FSM/3,
+        CH[c2], "end", FS, COL[CH[c2]], "600"));
+    }
+    var chwBottom = chwY + 3*(planeH+planeGap) - planeGap;
+    svg.appendChild(txt(sx(chwX+planeW), sy(chwBottom)+PAD+FSM,
+      "всего 73 728 чисел", "end", FSM, "var(--muted)"));
+
+    // ================= стрелки между блоками =================
+    var aL = hwcX + 3*cellW + 2*(3*cellW+pixGap) + 1.5; // правый край HWC
+    var aR = chwX - 3.2;
+    var yTop = hwcY + 2.0, yBot = hwcY + 9.0;
+
+    line(aL, yTop, aR, yTop, {"marker-end":"url(#ah)"});
+    svg.appendChild(txt(sx(aL)+PAD, sy(yTop)-PAD,
+      "transpose(2, 0, 1)", "start", FSM, "var(--fg)"));
+
+    line(aR, yBot, aL, yBot, {"marker-end":"url(#ah)"});
+    svg.appendChild(txt(sx(aR)-PAD, sy(yBot)+PAD+FSM,
+      "transpose(1, 2, 0)", "end", FSM, "var(--fg)"));
+
+    // ================= лента памяти внизу =================
+    var tapeY = 46, tapeX = hwcX, tapeW = 84, tapeH = 4;
+    box(tapeX, tapeY, tapeW, tapeH, "none");
+    for(var i=1;i<12;i++){
+      var tx = tapeX + tapeW*i/12;
+      line(tx, tapeY, tx, tapeY+tapeH, {"stroke":"var(--boxline)"});
+    }
+    svg.appendChild(txt((sx(tapeX)+sx(tapeX+tapeW))/2, sy(tapeY)-PAD,
+      "одна и та же память: 73 728 чисел подряд, 0…255",
+      "middle", FSM, "var(--muted)"));
+    svg.appendChild(txt(sx(tapeX), sy(tapeY+tapeH)+PAD+FSM,
+      "форма — не данные, а маршрут чтения ленты",
+      "start", FSM, "var(--muted)"));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = "";
+    var d = document.createElement("div");
+    d.className = "fail";
+    d.textContent = "Схема не построилась. Она должна показывать: слева — "+
+      "раскладка HWC формы (128, 192, 3), где числа идут тройками R G B | R G B | "+
+      "R G B по строкам кадра; справа — раскладка CHW формы (3, 128, 192), где те "+
+      "же числа собраны в три отдельные плоскости R, G и B размером 128×192. "+
+      "Переход слева направо — transpose(2, 0, 1), обратно — transpose(1, 2, 0). "+
+      "Внизу — одна лента памяти на 73 728 чисел: данные общие, меняется только "+
+      "маршрут чтения.";
+    host.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

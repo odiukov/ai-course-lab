@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Один цикл генерации, оценки и обновления PPO</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #596579;
+    --line: #53627a;
+    --policy-fill: #e7f0ff;
+    --policy-stroke: #2864b8;
+    --sample-fill: #eef7ff;
+    --sample-stroke: #5082b5;
+    --frozen-fill: #f3f0f8;
+    --frozen-stroke: #76628f;
+    --score-fill: #fff4d9;
+    --score-stroke: #a46b00;
+    --result-fill: #e7f8ed;
+    --result-stroke: #27804a;
+    --loss-fill: #ffe9e6;
+    --loss-stroke: #b5483e;
+    --update: #b5483e;
+    --badge: #67527e;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --panel: #171d28;
+      --ink: #edf2fb;
+      --muted: #b9c3d4;
+      --line: #91a0b8;
+      --policy-fill: #172d4c;
+      --policy-stroke: #75adfa;
+      --sample-fill: #183142;
+      --sample-stroke: #78b6dd;
+      --frozen-fill: #292434;
+      --frozen-stroke: #b9a4cf;
+      --score-fill: #3b301b;
+      --score-stroke: #e8b95f;
+      --result-fill: #193626;
+      --result-stroke: #69c68a;
+      --loss-fill: #402522;
+      --loss-stroke: #f08c82;
+      --update: #f08c82;
+      --badge: #c6b0dc;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .panel {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    box-sizing: border-box;
+  }
+
+  .diagram-title {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 455px;
+    background: var(--panel);
+  }
+
+  .node {
+    stroke-width: 2;
+  }
+
+  .policy {
+    fill: var(--policy-fill);
+    stroke: var(--policy-stroke);
+  }
+
+  .sample {
+    fill: var(--sample-fill);
+    stroke: var(--sample-stroke);
+  }
+
+  .frozen {
+    fill: var(--frozen-fill);
+    stroke: var(--frozen-stroke);
+  }
+
+  .score {
+    fill: var(--score-fill);
+    stroke: var(--score-stroke);
+  }
+
+  .result {
+    fill: var(--result-fill);
+    stroke: var(--result-stroke);
+  }
+
+  .loss {
+    fill: var(--loss-fill);
+    stroke: var(--loss-stroke);
+  }
+
+  .flow,
+  .update-flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .update-flow {
+    stroke: var(--update);
+    stroke-width: 3;
+  }
+
+  .arrow-head {
+    fill: var(--line);
+    stroke: none;
+  }
+
+  .update-head {
+    fill: var(--update);
+    stroke: none;
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .main-label {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .small-label {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .frozen-label {
+    fill: var(--badge);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .formula {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .arrow-label {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .update-label {
+    fill: var(--update);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    padding: 16px;
+    font-size: 15px;
+    color: var(--ink);
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<section class="panel" aria-labelledby="diagram-heading">
+  <div class="diagram-title" id="diagram-heading">
+    Один цикл PPO: генерация → оценка → ограниченное обновление
+  </div>
+  <svg id="diagram" viewBox="0 0 1200 455" width="1200" height="455"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-heading diagram-desc">
+    <desc id="diagram-desc">
+      Prompt поступает в policy, сгенерированный ответ оценивается моделью
+      награды и сравнивается с reference через KL. Скорректированная награда,
+      advantage и PPO clipped loss обновляют только policy.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+  <div id="fallback" class="fallback" hidden>
+    Схема должна была показать цикл: prompt → policy → ответ; ответ получает
+    reward, policy и замороженный reference дают распределения для KL;
+    reward − β×KL превращается в advantage, а PPO clipped loss обновляет
+    только policy. Reward model, reference и old policy остаются замороженными.
+  </div>
+</section>
+
+<script>
+(() => {
+  const [D] = [{
+    origin: [0, 0],
+    scale: [1, 1],
+    zero: 0,
+    unit: 1,
+    arrowLength: 11,
+    arrowHalf: 5,
+    nodes: [
+      {
+        x: 20, y: 65, w: 120, h: 56, kind: "sample",
+        texts: [
+          { at: [80, 87], value: "prompt", cls: "main-label" },
+          { at: [80, 107], value: "один промпт", cls: "small-label" }
+        ]
+      },
+      {
+        x: 180, y: 47, w: 160, h: 92, kind: "policy",
+        texts: [
+          { at: [260, 72], value: "policy", cls: "main-label" },
+          { at: [260, 96], value: "генерирует токены", cls: "small-label" },
+          { at: [260, 117], value: "обновляется", cls: "small-label" }
+        ]
+      },
+      {
+        x: 380, y: 65, w: 160, h: 56, kind: "sample",
+        texts: [
+          { at: [460, 87], value: "ответ", cls: "main-label" },
+          { at: [460, 107], value: "проба policy", cls: "small-label" }
+        ]
+      },
+      {
+        x: 580, y: 20, w: 170, h: 64, kind: "frozen",
+        texts: [
+          { at: [665, 43], value: "reward model", cls: "main-label" },
+          { at: [665, 64], value: "reward", cls: "formula" },
+          { at: [735, 32], value: "заморожена", cls: "frozen-label", anchor: "end" }
+        ]
+      },
+      {
+        x: 580, y: 112, w: 170, h: 64, kind: "policy",
+        texts: [
+          { at: [665, 137], value: "policy", cls: "main-label" },
+          { at: [665, 158], value: "распределение", cls: "small-label" }
+        ]
+      },
+      {
+        x: 580, y: 207, w: 170, h: 68, kind: "frozen",
+        texts: [
+          { at: [665, 231], value: "reference", cls: "main-label" },
+          { at: [665, 253], value: "распределение", cls: "small-label" },
+          { at: [735, 219], value: "заморожена", cls: "frozen-label", anchor: "end" }
+        ]
+      },
+      {
+        x: 790, y: 20, w: 180, h: 76, kind: "result",
+        texts: [
+          { at: [880, 43], value: "скорректированная", cls: "main-label" },
+          { at: [880, 64], value: "награда", cls: "main-label" },
+          { at: [880, 84], value: "reward − β×KL", cls: "formula" }
+        ]
+      },
+      {
+        x: 1000, y: 139, w: 165, h: 76, kind: "score",
+        texts: [
+          { at: [1082, 163], value: "KL-штраф", cls: "main-label" },
+          { at: [1082, 185], value: "policy ∥ reference", cls: "small-label" },
+          { at: [1082, 204], value: "мера отклонения", cls: "small-label" }
+        ]
+      },
+      {
+        x: 790, y: 282, w: 180, h: 64, kind: "result",
+        texts: [
+          { at: [880, 307], value: "advantage", cls: "main-label" },
+          { at: [880, 329], value: "лучше ли ожидаемого", cls: "small-label" }
+        ]
+      },
+      {
+        x: 580, y: 316, w: 170, h: 64, kind: "frozen",
+        texts: [
+          { at: [665, 340], value: "old policy", cls: "main-label" },
+          { at: [665, 362], value: "снимок до обновления", cls: "small-label" },
+          { at: [735, 328], value: "заморожена", cls: "frozen-label", anchor: "end" }
+        ]
+      },
+      {
+        x: 1010, y: 271, w: 165, h: 106, kind: "loss",
+        texts: [
+          { at: [1092, 296], value: "PPO clipped loss", cls: "main-label" },
+          { at: [1092, 320], value: "policy / old policy", cls: "formula" },
+          { at: [1092, 343], value: "clipping ограничивает", cls: "small-label" },
+          { at: [1092, 362], value: "размер изменения", cls: "small-label" }
+        ]
+      }
+    ],
+    arrows: [
+      {
+        points: [[140, 93], [180, 93]],
+        label: { at: [160, 93], value: "подача", dx: 0, dy: -10, anchor: "middle" }
+      },
+      {
+        points: [[340, 93], [380, 93]],
+        label: { at: [360, 93], value: "генерация", dx: 0, dy: -10, anchor: "middle" }
+      },
+      {
+        points: [[540, 93], [558, 93], [558, 52], [580, 52]]
+      },
+      {
+        points: [[540, 93], [564, 93], [564, 144], [580, 144]]
+      },
+      {
+        points: [[540, 93], [550, 93], [550, 241], [580, 241]],
+        label: { at: [550, 185], value: "тот же ответ", dx: -10, dy: 0, anchor: "end" }
+      },
+      {
+        points: [[750, 52], [790, 52]],
+        label: { at: [770, 52], value: "reward", dx: 0, dy: -10, anchor: "middle" }
+      },
+      {
+        points: [[750, 136], [955, 136], [955, 163], [1000, 163]],
+        label: { at: [842, 136], value: "распределение policy", dx: 0, dy: -10, anchor: "middle" }
+      },
+      {
+        points: [[750, 241], [930, 241], [930, 193], [1000, 193]],
+        label: { at: [842, 241], value: "распределение reference", dx: 0, dy: 18, anchor: "middle" }
+      },
+      {
+        points: [[1082, 139], [1082, 76], [970, 76]],
+        label: { at: [1082, 112], value: "− β×KL", dx: -10, dy: 0, anchor: "end" }
+      },
+      {
+        points: [[790, 76], [770, 76], [770, 314], [790, 314]],
+        label: { at: [770, 260], value: "оценка результата", dx: -10, dy: 0, anchor: "end" }
+      },
+      {
+        points: [[750, 128], [980, 128], [980, 291], [1010, 291]],
+        label: { at: [860, 128], value: "вероятности policy", dx: 0, dy: -10, anchor: "middle" }
+      },
+      {
+        points: [[970, 314], [1010, 314]]
+      },
+      {
+        points: [[750, 348], [982, 348], [982, 341], [1010, 341]],
+        label: { at: [866, 348], value: "вероятности выбранных токенов", dx: 0, dy: 18, anchor: "middle" }
+      }
+    ],
+    update: {
+      points: [[1092, 377], [1092, 426], [260, 426], [260, 139]],
+      label: {
+        at: [690, 426],
+        value: "градиент обновляет только policy",
+        dx: 0,
+        dy: -10,
+        anchor: "middle"
+      }
+    }
+  }];
+
+  const [originX, originY] = D.origin;
+  const [scaleX, scaleY] = D.scale;
+  const sx = x => originX + x * scaleX;
+  const sy = y => originY + y * scaleY;
+
+  const svg = document.getElementById("diagram");
+  const drawing = document.getElementById("drawing");
+  const fallback = document.getElementById("fallback");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const element = name => document.createElementNS(namespace, name);
+
+  const addText = spec => {
+    const [x, y] = spec.at;
+    const textNode = element("text");
+    textNode.setAttribute("x", sx(x));
+    textNode.setAttribute("y", sy(y));
+    textNode.setAttribute("text-anchor", spec.anchor || "middle");
+    textNode.setAttribute("dominant-baseline", "middle");
+    textNode.setAttribute("class", spec.cls || "arrow-label");
+    if (spec.dx !== undefined) textNode.setAttribute("dx", spec.dx);
+    if (spec.dy !== undefined) textNode.setAttribute("dy", spec.dy);
+    textNode.textContent = spec.value;
+    drawing.appendChild(textNode);
+  };
+
+  const addNode = node => {
+    const rect = element("rect");
+    rect.setAttribute("x", sx(node.x));
+    rect.setAttribute("y", sy(node.y));
+    rect.setAttribute("width", sx(node.x + node.w) - sx(node.x));
+    rect.setAttribute("height", sy(node.y + node.h) - sy(node.y));
+    rect.setAttribute("class", `node ${node.kind}`);
+    drawing.appendChild(rect);
+    node.texts.forEach(addText);
+  };
+
+  const addArrowHead = (points, update) => {
+    const reversed = points.slice().reverse();
+    const [end, before] = reversed;
+    const [endX, endY] = end;
+    const [beforeX, beforeY] = before;
+    const deltaX = endX - beforeX;
+    const deltaY = endY - beforeY;
+    const length = Math.hypot(deltaX, deltaY) || D.unit;
+    const unitX = deltaX / length;
+    const unitY = deltaY / length;
+    const baseX = endX - D.arrowLength * unitX;
+    const baseY = endY - D.arrowLength * unitY;
+    const leftX = baseX - D.arrowHalf * unitY;
+    const leftY = baseY + D.arrowHalf * unitX;
+    const rightX = baseX + D.arrowHalf * unitY;
+    const rightY = baseY - D.arrowHalf * unitX;
+    const polygon = element("polygon");
+    polygon.setAttribute("points", [
+      `${sx(endX)},${sy(endY)}`,
+      `${sx(leftX)},${sy(leftY)}`,
+      `${sx(rightX)},${sy(rightY)}`
+    ].join(" "));
+    polygon.setAttribute("class", update ? "update-head" : "arrow-head");
+    drawing.appendChild(polygon);
+  };
+
+  const addArrow = (arrow, update) => {
+    const path = element("path");
+    const commands = arrow.points.map((point, position) => {
+      const [x, y] = point;
+      return `${position === D.zero ? "M" : "L"} ${sx(x)} ${sy(y)}`;
+    });
+    path.setAttribute("d", commands.join(" "));
+    path.setAttribute("class", update ? "update-flow" : "flow");
+    drawing.appendChild(path);
+    addArrowHead(arrow.points, update);
+    if (arrow.label) {
+      addText({
+        ...arrow.label,
+        cls: update ? "update-label" : "arrow-label"
+      });
+    }
+  };
+
+  try {
+    D.arrows.forEach(arrow => addArrow(arrow, false));
+    addArrow(D.update, true);
+    D.nodes.forEach(addNode);
+  } catch (error) {
+    svg.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Где расходятся два промпта</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1b1f2a; --muted:#6b7280;
+    --hit:#1e9e6a; --hit-bg:#d8f3e6;
+    --miss:#9aa3ae; --miss-bg:#e4e7eb;
+    --split:#d9534f; --line:#c3c9d2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --fg:#e8ecf2; --muted:#9aa3ae;
+      --hit:#3ddc97; --hit-bg:#1c3b30;
+      --miss:#6b7280; --miss-bg:#242ا;
+      --split:#ff6b6b; --line:#39404b;
+    }
+  }
+  @media (prefers-color-scheme: dark){ :root{ --miss-bg:#242832; } }
+  html,body{margin:0;background:var(--bg);color:var(--fg)}
+  .wrap{background:var(--bg);padding:8px 0}
+  h2{font:600 15px/1.3 system-ui,sans-serif;margin:0 0 6px;padding:0 10px;color:var(--fg)}
+  svg{display:block;width:100%;height:auto;max-height:520px;margin:0 auto}
+  text{font-family:system-ui,sans-serif;fill:var(--fg)}
+  .fail{font:14px/1.5 system-ui,sans-serif;color:var(--fg);padding:0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Где расходятся два промпта: точка расхождения решает всё</h2>
+  <svg id="s" viewBox="0 0 720 300" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="Два промпта расходятся на девятом слове, 15000 токенов правил помечены как промах"></svg>
+  <div id="fb"></div>
+</div>
+<script>
+(function(){
+var svg=document.getElementById("s");
+try{
+  // ---- данные схемы ----
+  var WORDS=["Ты","помощник.","Сегодня","5","августа.","Правила:","…"];
+  var WORDS_B=["Ты","помощник.","Сегодня","6","августа.","Правила:","…"];
+  var SPLIT=3;            // индекс расходящегося слова (девятое слово промпта)
+  var RULES=15000;        // токенов правил
+  var TAIL=12;            // токенов даты, если её унести вниз
+  var ROWS=[
+    {y:2, words:WORDS,   label:"промпт A"},
+    {y:1, words:WORDS_B, label:"промпт B"}
+  ];
+  var BAR={y:0, hit:0, miss:SPLIT+4};      // полоса «дата сверху»
+  var BAR2={y:-1, hit:SPLIT+4, miss:0};    // полоса «дата снизу»
+  var N=WORDS.length;
+
+  // ---- одна пара функций перевода ----
+  var origin={x:118,y:74}, scale={x:74,y:56};
+  function sx(x){return origin.x+x*scale.x;}
+  function sy(y){return origin.y+(2-y)*scale.y;}
+
+  var NS="http://www.w3.org/2000/svg";
+  function el(t,a){var n=document.createElementNS(NS,t);for(var k in a)n.setAttribute(k,a[k]);return n;}
+  function txt(x,y,s,anc,cls,sz){var n=el("text",{x:x,y:y,"text-anchor":anc,"font-size":sz||13});
+    if(cls)n.setAttribute("fill",cls);n.textContent=s;svg.appendChild(n);return n;}
+
+  var PAD=6, LH=17, TH=1.6;
+
+  // маркер стрелки
+  var defs=el("defs",{});
+  var mk=el("marker",{id:"ah",viewBox:"0 0 10 10",refX:"9",refY:"5",
+    markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+  mk.appendChild(el("path",{d:"M0 0 L10 5 L0 10 z",fill:"currentColor"}));
+  defs.appendChild(mk); svg.appendChild(defs);
+
+  // ---- строки промптов ----
+  ROWS.forEach(function(r){
+    txt(sx(0)-PAD-4, sy(r.y)+5, r.label, "end", "var(--muted)", 12);
+    for(var i=0;i<r.words.length;i++){
+      var hit=i<SPLIT;
+      svg.appendChild(el("rect",{x:sx(i),y:sy(r.y)-scale.y/2.6,
+        width:scale.x-PAD,height:scale.y/1.3,rx:5,
+        fill:hit?"var(--hit-bg)":"var(--miss-bg)",
+        stroke:i===SPLIT?"var(--split)":"none","stroke-width":TH+0.4}));
+      txt(sx(i)+(scale.x-PAD)/2, sy(r.y)+5, r.words[i], "middle",
+        i===SPLIT?"var(--split)":(hit?"var(--hit)":"var(--miss)"), 13);
+    }
+  });
+
+  // ---- вертикаль расхождения ----
+  svg.appendChild(el("line",{x1:sx(SPLIT)-PAD/2,y1:sy(2)-scale.y/1.7,
+    x2:sx(SPLIT)-PAD/2,y2:sy(-1)+scale.y/1.7,
+    stroke:"var(--split)","stroke-width":TH,"stroke-dasharray":"5 4"}));
+  txt(sx(SPLIT)-PAD/2, sy(2)-scale.y/1.7-8, "расхождение: 9-е слово", "middle", "var(--split)", 12);
+
+  // ---- полоса 1: дата сверху ----
+  function bar(b,title,note){
+    var y=sy(b.y), h=scale.y/2.2, x0=sx(0);
+    txt(x0-PAD-4, y+4, title, "end", "var(--muted)", 12);
+    var w=sx(N)-sx(0);
+    var hw=b.hit? w*(b.hit/(b.hit+b.miss)) : 0;
+    if(hw>0){
+      svg.appendChild(el("rect",{x:x0,y:y-h/2,width:hw,height:h,rx:4,
+        fill:"var(--hit-bg)",stroke:"var(--hit)","stroke-width":TH}));
+    }
+    if(b.miss>0){
+      svg.appendChild(el("rect",{x:x0+hw,y:y-h/2,width:w-hw,height:h,rx:4,
+        fill:"var(--miss-bg)",stroke:"var(--miss)","stroke-width":TH,"stroke-dasharray":"4 3"}));
+    }
+    return {y:y,h:h,x0:x0,hw:hw,w:w};
+  }
+
+  var b1=bar(BAR,"дата сверху");
+  txt(sx(N)-PAD, b1.y+4, "промах: "+RULES.toLocaleString("ru-RU")+" токенов правил",
+      "end", "var(--miss)", 12);
+
+  var b2=bar(BAR2,"дата снизу");
+  txt(sx(0)+PAD+4, b2.y+4, "попадание: "+RULES.toLocaleString("ru-RU")+" токенов",
+      "start", "var(--hit)", 12);
+  txt(sx(N)+PAD, b2.y+4, TAIL+" ток.", "start", "var(--miss)", 12);
+
+  // ---- стрелка: перенос даты вниз (подпись у хвоста) ----
+  var ax=sx(SPLIT)-PAD/2, ay1=b1.y+b1.h/2+6, ay2=b2.y-b2.h/2-6;
+  var g=el("g",{stroke:"var(--split)",fill:"var(--split)","stroke-width":TH,
+    "marker-end":"url(#ah)",color:"var(--split)"});
+  g.appendChild(el("path",{d:"M"+ax+" "+ay1+" L"+sx(N-0.35)+" "+ay2,fill:"none"}));
+  svg.appendChild(g);
+  txt(ax+PAD, (ay1+ay2)/2+LH/2, "переставить дату вниз", "start", "var(--split)", 12);
+
+  // ---- легенда ----
+  var ly=sy(-1)+scale.y/1.1;
+  txt(sx(0), ly, "■ зелёное — общий префикс, кэш попал", "start", "var(--hit)", 12);
+  txt(sx(0), ly+LH, "■ серое — всё после первого расхождения, промах", "start", "var(--miss)", 12);
+}catch(e){
+  svg.remove();
+  document.getElementById("fb").className="fail";
+  document.getElementById("fb").textContent=
+   "Схема должна была показать: два промпта «Ты помощник. Сегодня 5 августа. Правила: …» и "+
+   "«…6 августа…» совпадают до девятого слова, а дальше расходятся — и оставшиеся 15 000 "+
+   "токенов одинаковых правил считаются промахом. Если перенести дату вниз, попаданием "+
+   "становятся 15 000 токенов, промахом — только 12.";
+}
+})();
+</script>
+</body>
+</html>

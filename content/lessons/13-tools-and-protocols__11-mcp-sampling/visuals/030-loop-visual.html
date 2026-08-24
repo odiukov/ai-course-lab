@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Цикл summarize_repo по шагам</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2027; --muted:#5c6472;
+    --code:#0d3b66; --code-bg:#e3edf7;
+    --model:#8c3a12; --model-bg:#fbe6d6;
+    --line:#8a919e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e9ecf1; --muted:#a3abba;
+      --code:#8fc3ef; --code-bg:#1b2b3c;
+      --model:#f2b183; --model-bg:#3b2313;
+      --line:#6c7484;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px 14px 16px;}
+  h2{font-size:15px;margin:0 0 8px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{padding:10px;color:var(--muted);font-size:13px;}
+  text{font-family:inherit;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Цикл <code>summarize_repo</code>: пять шагов, два обращения к модели</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (координаты в условных единицах) ----
+    var STEPS = [
+      {n:"1", x:0,  kind:"code",  title:"Обход дерева",       sub:"структура репозитория"},
+      {n:"2", x:4,  kind:"model", title:"sampling/createMessage", sub:"«выбери 5 файлов»"},
+      {n:"3", x:8,  kind:"code",  title:"Чтение файлов",      sub:"открыть эти 5"},
+      {n:"4", x:12, kind:"model", title:"sampling/createMessage", sub:"«опиши в трёх абзацах»"},
+      {n:"5", x:16, kind:"code",  title:"Возврат tools/call", sub:"описание как результат"}
+    ];
+    var BOX_W = 3.4, BOX_H = 2.2;   // единицы
+    var ROW_Y = 3.4;                // центр ряда, единицы
+    var PAUSE_Y = 6.6;              // строка «сервер ждёт»
+
+    // ---- одна пара функций перевода ----
+    var origin = {x: 42, y: 26}, scale = 52;
+    function sx(x){ return origin.x + x * scale; }
+    function sy(y){ return origin.y + y * scale; }
+
+    // литералы-исключения
+    var VB_W = 1000, VB_H = 470, PAD = 6, STROKE = 1.6, FS = 13, FS_SM = 11.5, FS_N = 15;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(t, a){ var e = document.createElementNS(NS,t);
+      for(var k in a){ e.setAttribute(k, a[k]); } return e; }
+    function txt(x, y, s, anchor, cls, size){
+      var t = el("text",{x:x, y:y, "text-anchor":anchor||"middle",
+        "font-size":size||FS, fill:"currentColor"});
+      if(cls){ t.setAttribute("class", cls); }
+      t.textContent = s; return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Пять шагов цикла summarize_repo, шаги 2 и 4 — обращения к модели"});
+
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah", markerWidth:"9", markerHeight:"9",
+      refX:"7.6", refY:"3.2", orient:"auto", markerUnits:"strokeWidth"});
+    mk.appendChild(el("path",{d:"M0,0 L8,3.2 L0,6.4 z", fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    // ---- шаги ----
+    STEPS.forEach(function(s, i){
+      var isModel = s.kind === "model";
+      var x0 = sx(s.x), x1 = sx(s.x + BOX_W);
+      var y0 = sy(ROW_Y - BOX_H/2), y1 = sy(ROW_Y + BOX_H/2);
+      var cx = sx(s.x + BOX_W/2);
+
+      var g = el("g",{});
+      g.appendChild(el("rect",{x:x0, y:y0, width:x1-x0, height:y1-y0,
+        rx:sx(0.22)-sx(0),
+        fill: isModel ? "var(--model-bg)" : "var(--code-bg)",
+        stroke: isModel ? "var(--model)" : "var(--code)",
+        "stroke-width": isModel ? STROKE*1.9 : STROKE}));
+
+      // номер — верх бокса, middle
+      var num = txt(cx, sy(ROW_Y - BOX_H/2 + 0.52), s.n, "middle", null, FS_N);
+      num.setAttribute("font-weight","700");
+      num.setAttribute("fill", isModel ? "var(--model)" : "var(--code)");
+      g.appendChild(num);
+
+      var ttl = txt(cx, sy(ROW_Y - 0.12), s.title, "middle", null, FS);
+      ttl.setAttribute("font-weight","600");
+      g.appendChild(ttl);
+
+      var sub = txt(cx, sy(ROW_Y + 0.52), s.sub, "middle", null, FS_SM);
+      sub.setAttribute("fill","var(--muted)");
+      g.appendChild(sub);
+
+      // тип шага — под боксом, middle
+      var kind = txt(cx, sy(ROW_Y + BOX_H/2 + 0.42),
+        isModel ? "обращение к модели" : "обычный код", "middle", null, FS_SM);
+      kind.setAttribute("fill", isModel ? "var(--model)" : "var(--muted)");
+      g.appendChild(kind);
+
+      svg.appendChild(g);
+
+      // стрелка к следующему
+      if(i < STEPS.length - 1){
+        var nx = STEPS[i+1].x;
+        svg.appendChild(el("line",{
+          x1:sx(s.x + BOX_W + 0.12), y1:sy(ROW_Y),
+          x2:sx(nx - 0.16), y2:sy(ROW_Y),
+          stroke:"var(--line)", "stroke-width":STROKE,
+          "marker-end":"url(#ah)"}));
+      }
+
+      // пауза сервера: только для шагов 2 и 4
+      if(isModel){
+        svg.appendChild(el("line",{
+          x1:cx, y1:sy(ROW_Y + BOX_H/2 + 0.72),
+          x2:cx, y2:sy(PAUSE_Y - 0.62),
+          stroke:"var(--model)", "stroke-width":STROKE,
+          "stroke-dasharray":"5 5", "marker-end":"url(#ah)"}));
+        var p = txt(cx, sy(PAUSE_Y - 0.2),
+          "сервер ждёт ответа с тем же id", "middle", null, FS_SM);
+        p.setAttribute("fill","var(--model)");
+        svg.appendChild(p);
+        var p2 = txt(cx, sy(PAUSE_Y + 0.42),
+          i === 1 ? "файлы ещё не выбраны" : "текст запроса собран из ответа шага 2",
+          "middle", null, FS_SM);
+        p2.setAttribute("fill","var(--muted)");
+        svg.appendChild(p2);
+      }
+    });
+
+    // ---- скобка «зависимость: шаг 4 нельзя собрать заранее» ----
+    var bx1 = sx(4 + BOX_W/2), bx2 = sx(12 + BOX_W/2);
+    var byTop = sy(0.62), byBox = sy(ROW_Y - BOX_H/2 - 0.14);
+    svg.appendChild(el("path",{
+      d:"M"+bx1+","+byBox+" L"+bx1+","+byTop+" L"+bx2+","+byTop+" L"+bx2+","+byBox,
+      fill:"none", stroke:"var(--model)", "stroke-width":STROKE,
+      "stroke-dasharray":"4 4", "marker-end":"url(#ah)"}));
+    var dep = txt(sx(8 + BOX_W/2), sy(0.32),
+      "вопрос 4 зависит от ответа 2", "middle", null, FS_SM);
+    dep.setAttribute("fill","var(--model)");
+    svg.appendChild(dep);
+
+    // ---- легенда: строка под схемой ----
+    var ly = sy(PAUSE_Y + 1.42);
+    var lx = sx(0);
+    svg.appendChild(el("rect",{x:lx, y:ly - sy(0.24)+sy(0), width:sx(0.5)-sx(0),
+      height:sx(0.5)-sx(0), rx:sx(0.08)-sx(0),
+      fill:"var(--code-bg)", stroke:"var(--code)", "stroke-width":STROKE}));
+    var l1 = txt(sx(0.68), sy(PAUSE_Y + 1.5),
+      "шаги 1, 3, 5 — код сервера, LLM API не трогает", "start", null, FS_SM);
+    l1.setAttribute("fill","var(--muted)");
+    svg.appendChild(l1);
+
+    var lx2 = sx(9);
+    svg.appendChild(el("rect",{x:lx2, y:ly - sy(0.24)+sy(0), width:sx(0.5)-sx(0),
+      height:sx(0.5)-sx(0), rx:sx(0.08)-sx(0),
+      fill:"var(--model-bg)", stroke:"var(--model)", "stroke-width":STROKE*1.9}));
+    var l2 = txt(sx(9.68), sy(PAUSE_Y + 1.5),
+      "шаги 2 и 4 — sampling/createMessage, ключи и токены пользователя",
+      "start", null, FS_SM);
+    l2.setAttribute("fill","var(--muted)");
+    svg.appendChild(l2);
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fallback">' +
+      'Схема не построилась. Она должна была показать пять пронумерованных шагов в ряд: ' +
+      '1 — обход дерева (код), 2 — sampling/createMessage «выбери 5 файлов» (обращение к модели), ' +
+      '3 — чтение файлов (код), 4 — sampling/createMessage «опиши в трёх абзацах» (обращение к модели), ' +
+      '5 — возврат tools/call (код). Шаги 2 и 4 выделены как единственные обращения к модели; ' +
+      'в эти два момента сервер замирает и ждёт ответа с тем же id, а текст запроса 4 ' +
+      'нельзя собрать до ответа на 2.</div>';
+  }
+})();
+</script>
+</body>
+</html>

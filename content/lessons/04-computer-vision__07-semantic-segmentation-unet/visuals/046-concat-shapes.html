@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как складываются каналы в decoder</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #59657a;
+      --frame: #cad2e2;
+      --arrow: #34435d;
+      --decoder-fill: #e5e9ff;
+      --decoder-stroke: #6574d8;
+      --skip-fill: #dcf5e9;
+      --skip-stroke: #278c64;
+      --cat-fill: #f4efff;
+      --cat-stroke: #805cc2;
+      --conv-fill: #fff0d8;
+      --conv-stroke: #c87820;
+      --output-fill: #ffe6c2;
+      --guide: #e6eaf2;
+      --note-fill: #f0f3f9;
+      --shadow-sheet: #f1f3ff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2d;
+        --ink: #edf2ff;
+        --muted: #b7c1d5;
+        --frame: #3b465c;
+        --arrow: #c7d2e8;
+        --decoder-fill: #29335d;
+        --decoder-stroke: #9ca9ff;
+        --skip-fill: #183f34;
+        --skip-stroke: #6ed3aa;
+        --cat-fill: #382a50;
+        --cat-stroke: #c2a3f1;
+        --conv-fill: #4b321c;
+        --conv-stroke: #f3b565;
+        --output-fill: #55391e;
+        --guide: #293348;
+        --note-fill: #202a3b;
+        --shadow-sheet: #222b4c;
+      }
+    }
+
+    html {
+      background: var(--page);
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .figure {
+      background: var(--panel);
+      border: 1px solid var(--frame);
+      box-sizing: border-box;
+    }
+
+    h1 {
+      color: var(--ink);
+      font-size: 22px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--panel);
+    }
+
+    .up-frame {
+      fill: none;
+      stroke: var(--frame);
+      stroke-width: 2;
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--arrow);
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .arrow-head {
+      fill: var(--arrow);
+      stroke: none;
+    }
+
+    .guide-line {
+      fill: none;
+      stroke: var(--guide);
+      stroke-width: 1;
+      stroke-dasharray: 5 6;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .decoder-card {
+      fill: var(--decoder-fill);
+      stroke: var(--decoder-stroke);
+      stroke-width: 2;
+    }
+
+    .card-shadow {
+      fill: var(--shadow-sheet);
+      stroke: var(--decoder-stroke);
+      stroke-width: 1;
+    }
+
+    .skip-card {
+      fill: var(--skip-fill);
+      stroke: var(--skip-stroke);
+      stroke-width: 2;
+    }
+
+    .cat-card {
+      fill: var(--cat-fill);
+      stroke: var(--cat-stroke);
+      stroke-width: 2;
+    }
+
+    .cat-skip {
+      fill: var(--skip-fill);
+      stroke: none;
+    }
+
+    .cat-decoder {
+      fill: var(--decoder-fill);
+      stroke: none;
+    }
+
+    .conv-card {
+      fill: var(--conv-fill);
+      stroke: var(--conv-stroke);
+      stroke-width: 2;
+    }
+
+    .output-card {
+      fill: var(--output-fill);
+      stroke: var(--conv-stroke);
+      stroke-width: 2;
+    }
+
+    .note-band {
+      fill: var(--note-fill);
+      stroke: var(--frame);
+      stroke-width: 1;
+    }
+
+    .label {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    .label-strong {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .label-code {
+      fill: var(--ink);
+      font-size: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: bold;
+    }
+
+    .label-small {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .label-accent {
+      fill: var(--cat-stroke);
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      color: var(--ink);
+      font-size: 17px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1 id="diagram-title">Как складываются каналы в decoder</h1>
+    <svg id="diagram"
+         viewBox="0 0 1120 430"
+         width="1120"
+         height="430"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">
+        Один Up-блок: карта decoder увеличивается, соединяется по каналам со skip-картой,
+        а DoubleConv формирует новую карту decoder.
+      </desc>
+    </svg>
+    <p id="fallback" class="fallback" hidden></p>
+  </main>
+
+  <script>
+    const diagramData = Object.freeze({
+      namespace: "http://www.w3.org/2000/svg",
+      origin: { x: 0, y: 0 },
+      scale: { x: 1, y: 1 },
+      radius: { x: 10, y: 10 },
+      frame: { x: 20, y: 25, w: 1080, h: 310 },
+      baseline: {
+        points: [
+          { x: 38, y: 220 },
+          { x: 1082, y: 220 }
+        ]
+      },
+      rectangles: [
+        { x: 48, y: 153, w: 125, h: 100, className: "card-shadow" },
+        { x: 52, y: 157, w: 125, h: 100, className: "card-shadow" },
+        { x: 56, y: 161, w: 125, h: 100, className: "decoder-card" },
+
+        { x: 263, y: 153, w: 132, h: 108, className: "card-shadow" },
+        { x: 267, y: 157, w: 132, h: 108, className: "card-shadow" },
+        { x: 271, y: 161, w: 132, h: 108, className: "decoder-card" },
+
+        { x: 445, y: 76, w: 180, h: 70, className: "skip-card" },
+
+        { x: 472, y: 171, w: 157, h: 98, className: "cat-card" },
+        { x: 472, y: 171, w: 18, h: 33, className: "cat-skip" },
+        { x: 472, y: 204, w: 18, h: 65, className: "cat-decoder" },
+
+        { x: 699, y: 171, w: 160, h: 98, className: "conv-card" },
+
+        { x: 928, y: 171, w: 137, h: 98, className: "output-card" },
+
+        { x: 38, y: 353, w: 1044, h: 55, className: "note-band" }
+      ],
+      separators: [
+        {
+          points: [
+            { x: 490, y: 204 },
+            { x: 629, y: 204 }
+          ],
+          className: "guide-line"
+        }
+      ],
+      arrows: [
+        {
+          points: [
+            { x: 187, y: 220 },
+            { x: 260, y: 220 }
+          ],
+          head: [
+            { x: 260, y: 220 },
+            { x: 247, y: 211 },
+            { x: 247, y: 229 }
+          ]
+        },
+        {
+          points: [
+            { x: 409, y: 220 },
+            { x: 463, y: 220 }
+          ],
+          head: [
+            { x: 463, y: 220 },
+            { x: 450, y: 211 },
+            { x: 450, y: 229 }
+          ]
+        },
+        {
+          points: [
+            { x: 535, y: 151 },
+            { x: 535, y: 163 }
+          ],
+          head: [
+            { x: 535, y: 163 },
+            { x: 526, y: 152 },
+            { x: 544, y: 152 }
+          ]
+        },
+        {
+          points: [
+            { x: 636, y: 220 },
+            { x: 690, y: 220 }
+          ],
+          head: [
+            { x: 690, y: 220 },
+            { x: 677, y: 211 },
+            { x: 677, y: 229 }
+          ]
+        },
+        {
+          points: [
+            { x: 866, y: 220 },
+            { x: 919, y: 220 }
+          ],
+          head: [
+            { x: 919, y: 220 },
+            { x: 906, y: 211 },
+            { x: 906, y: 229 }
+          ]
+        }
+      ],
+      labels: [
+        {
+          x: 43, y: 52, dx: 0, dy: 0,
+          anchor: "start", className: "label-strong",
+          text: "Один Up-блок"
+        },
+
+        {
+          x: 118, y: 199, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "decoder"
+        },
+        {
+          x: 118, y: 226, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "512 @ 16×16"
+        },
+        {
+          x: 118, y: 291, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "карта снизу"
+        },
+
+        {
+          x: 190, y: 194, dx: 0, dy: 0,
+          anchor: "start", className: "label-small",
+          text: "увеличение ×2"
+        },
+
+        {
+          x: 337, y: 199, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "decoder"
+        },
+        {
+          x: 337, y: 226, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "512 @ 32×32"
+        },
+        {
+          x: 337, y: 291, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "после Upsample"
+        },
+
+        {
+          x: 535, y: 103, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "skip из encoder"
+        },
+        {
+          x: 535, y: 130, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "256 @ 32×32"
+        },
+
+        {
+          x: 550, y: 196, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "cat([skip, x])"
+        },
+        {
+          x: 550, y: 228, dx: 0, dy: 0,
+          anchor: "middle", className: "label-accent",
+          text: "dim=1"
+        },
+        {
+          x: 550, y: 254, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "768 @ 32×32"
+        },
+        {
+          x: 550, y: 291, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "каналы поставлены рядом"
+        },
+
+        {
+          x: 640, y: 194, dx: 0, dy: 0,
+          anchor: "start", className: "label-strong",
+          text: "256 + 512 = 768"
+        },
+
+        {
+          x: 779, y: 211, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "DoubleConv"
+        },
+        {
+          x: 779, y: 239, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "смешивает признаки"
+        },
+        {
+          x: 779, y: 291, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "вход: 768 каналов"
+        },
+
+        {
+          x: 996, y: 207, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "decoder"
+        },
+        {
+          x: 996, y: 235, dx: 0, dy: 0,
+          anchor: "middle", className: "label-code",
+          text: "256 @ 32×32"
+        },
+        {
+          x: 996, y: 291, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "новая карта"
+        },
+
+        {
+          x: 560, y: 376, dx: 0, dy: 0,
+          anchor: "middle", className: "label-strong",
+          text: "cat не складывает значения: он пополняет стопку каналов"
+        },
+        {
+          x: 560, y: 397, dx: 0, dy: 0,
+          anchor: "middle", className: "label-small",
+          text: "N, H и W не меняются; 256 + 512 каналов дают 768"
+        }
+      ],
+      fallback:
+        "Схема должна была показать: decoder 512 @ 16×16 увеличивается до 512 @ 32×32, " +
+        "склеивается по dim=1 со skip-картой 256 @ 32×32 в 768 @ 32×32, " +
+        "после чего DoubleConv выдаёт 256 @ 32×32."
+    });
+
+    const origin = Object.freeze(diagramData.origin);
+    const scale = Object.freeze(diagramData.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = diagramData.namespace;
+
+      const make = (tag, attributes, text) => {
+        const element = document.createElementNS(ns, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          element.setAttribute(name, String(value));
+        });
+        if (text !== undefined) {
+          element.textContent = text;
+        }
+        return element;
+      };
+
+      const pathFrom = points => {
+        const [first, ...rest] = points;
+        const beginning = `M ${sx(first.x)} ${sy(first.y)}`;
+        const continuation = rest
+          .map(point => `L ${sx(point.x)} ${sy(point.y)}`)
+          .join(" ");
+        return `${beginning} ${continuation}`;
+      };
+
+      const pointList = points =>
+        points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+      const frame = diagramData.frame;
+      svg.appendChild(make("rect", {
+        x: sx(frame.x),
+        y: sy(frame.y),
+        width: sx(frame.w) - sx(0),
+        height: sy(frame.h) - sy(0),
+        rx: sx(diagramData.radius.x) - sx(0),
+        ry: sy(diagramData.radius.y) - sy(0),
+        class: "up-frame"
+      }));
+
+      svg.appendChild(make("path", {
+        d: pathFrom(diagramData.baseline.points),
+        class: "guide-line"
+      }));
+
+      diagramData.rectangles.forEach(rectangle => {
+        svg.appendChild(make("rect", {
+          x: sx(rectangle.x),
+          y: sy(rectangle.y),
+          width: sx(rectangle.w) - sx(0),
+          height: sy(rectangle.h) - sy(0),
+          rx: sx(diagramData.radius.x) - sx(0),
+          ry: sy(diagramData.radius.y) - sy(0),
+          class: rectangle.className
+        }));
+      });
+
+      diagramData.separators.forEach(separator => {
+        svg.appendChild(make("path", {
+          d: pathFrom(separator.points),
+          class: separator.className
+        }));
+      });
+
+      diagramData.arrows.forEach(arrow => {
+        svg.appendChild(make("path", {
+          d: pathFrom(arrow.points),
+          class: "flow-line"
+        }));
+        svg.appendChild(make("polygon", {
+          points: pointList(arrow.head),
+          class: "arrow-head"
+        }));
+      });
+
+      diagramData.labels.forEach(label => {
+        svg.appendChild(make("text", {
+          x: sx(label.x),
+          y: sy(label.y),
+          dx: label.dx,
+          dy: label.dy,
+          "text-anchor": label.anchor,
+          class: label.className
+        }, label.text));
+      });
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      if (svg) {
+        svg.hidden = true;
+      }
+      if (fallback) {
+        fallback.textContent = diagramData.fallback;
+        fallback.hidden = false;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как глубина усложняет границу решения</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --ink: #172033;
+    --muted: #5f6878;
+    --axis: #697386;
+    --grid: #d7dce5;
+    --panel: #ffffff;
+    --blue: #2368c4;
+    --amber: #b97300;
+    --coral: #c94f55;
+    --blue-soft: #d9e9ff;
+    --amber-soft: #ffebbd;
+    --coral-soft: #ffdadd;
+    --point-edge: #ffffff;
+    --boundary: #263246;
+    --fallback: #fff0d5;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #eef3fb;
+      --muted: #b8c0cf;
+      --axis: #aab4c5;
+      --grid: #394355;
+      --panel: #192230;
+      --blue: #70aaff;
+      --amber: #ffc45c;
+      --coral: #ff858b;
+      --blue-soft: #213f66;
+      --amber-soft: #5a4320;
+      --coral-soft: #5d3038;
+      --point-edge: #101722;
+      --boundary: #e3e9f2;
+      --fallback: #49391f;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: auto;
+  }
+
+  h1 {
+    color: var(--ink);
+    font-size: 22px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--page);
+  }
+
+  .panel-fill {
+    fill: var(--panel);
+  }
+
+  .region-blue {
+    fill: var(--blue-soft);
+  }
+
+  .region-amber {
+    fill: var(--amber-soft);
+  }
+
+  .region-coral {
+    fill: var(--coral-soft);
+  }
+
+  .decision-region {
+    stroke: var(--boundary);
+    stroke-width: 1.5px;
+    stroke-linejoin: miter;
+  }
+
+  .frame,
+  .axis {
+    fill: none;
+    stroke: var(--axis);
+    stroke-width: 1.5px;
+  }
+
+  .grid {
+    stroke: var(--grid);
+    stroke-width: 1px;
+  }
+
+  .point {
+    stroke: var(--point-edge);
+    stroke-width: 2px;
+  }
+
+  .point-blue {
+    fill: var(--blue);
+  }
+
+  .point-amber {
+    fill: var(--amber);
+  }
+
+  .point-coral {
+    fill: var(--coral);
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .panel-note {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .axis-label,
+  .legend-text {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .legend-note {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--fallback);
+    border: 1px solid var(--axis);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure>
+  <h1>Как глубина усложняет границу решения</h1>
+
+  <svg id="chart"
+       viewBox="0 0 920 410"
+       width="920"
+       height="410"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Одни точки, две глубины дерева</title>
+    <desc id="svg-description">
+      Слева дерево max_depth=2 делит пространство на несколько крупных
+      прямоугольников. Справа дерево max_depth=10 создаёт ступеньки,
+      выступы и маленькие островки вокруг отдельных точек.
+    </desc>
+    <g id="scene"></g>
+  </svg>
+
+  <div id="fallback" hidden>
+    Схема должна была показать одни и те же двумерные точки трёх классов:
+    крупные прямоугольные области при max_depth=2 и ступенчатую границу
+    с маленькими островками при max_depth=10.
+  </div>
+
+  <noscript>
+    Схема показывает одни и те же точки трёх классов: грубые прямоугольные
+    области при max_depth=2 и сложную ступенчатую границу при max_depth=10.
+  </noscript>
+</figure>
+
+<script>
+(() => {
+  const points = [
+    [.65, 4.75, "blue"], [1.15, 5.35, "blue"],
+    [1.85, 4.35, "blue"], [2.25, 5.15, "blue"],
+    [2.85, 4.65, "blue"], [3.35, 5.35, "blue"],
+    [3.85, 4.15, "blue"], [2.15, 3.35, "blue"],
+    [2.95, 3.65, "blue"], [5.85, 4.05, "blue"],
+
+    [.65, .95, "amber"], [1.15, 1.75, "amber"],
+    [1.75, 1.15, "amber"], [2.25, 1.95, "amber"],
+    [2.85, .65, "amber"], [3.35, 1.45, "amber"],
+    [3.85, 2.25, "amber"], [4.35, 1.25, "amber"],
+    [3.85, 3.35, "amber"], [6.85, .95, "amber"],
+
+    [4.95, .75, "coral"], [5.35, 1.75, "coral"],
+    [5.95, 2.55, "coral"], [6.45, 3.15, "coral"],
+    [7.15, 2.15, "coral"], [7.75, 3.85, "coral"],
+    [6.75, 4.75, "coral"], [7.45, 5.25, "coral"],
+    [5.45, 4.95, "coral"], [1.65, 4.55, "coral"]
+  ];
+
+  const origin = [48, 356];
+  const scale = [42, -42];
+  const [originX, originY] = origin;
+  const [scaleX, scaleY] = scale;
+  const sx = x => originX + x * scaleX;
+  const sy = y => originY + y * scaleY;
+
+  const panels = [
+    [0, 8.5, 0, 6, "max_depth=2", "Крупные области", "shallow"],
+    [11, 19.5, 0, 6, "max_depth=10", "Ступеньки и островки", "deep"]
+  ];
+
+  const shallowRegions = [
+    [0, 8.5, 0, 6, "coral"],
+    [0, 4.55, 2.8, 6, "blue"],
+    [0, 4.55, 0, 2.8, "amber"]
+  ];
+
+  const deepRegions = [
+    [0, 8.5, 0, 6, "coral"],
+    [0, 4.75, 2.8, 6, "blue"],
+    [0, 5.05, 0, 2.8, "amber"],
+    [1.8, 3.2, 2.8, 3.95, "blue"],
+    [3.55, 4.55, 2.8, 3.75, "amber"],
+    [4.4, 5.1, 2.45, 3.05, "blue"],
+    [1.4, 1.95, 4.25, 4.9, "coral"],
+    [4.05, 4.7, 4.55, 5.2, "coral"],
+    [5.55, 6.2, 3.7, 4.4, "blue"],
+    [5.0, 5.55, 1.45, 2.05, "amber"],
+    [6.55, 7.1, .65, 1.25, "amber"],
+    [6.2, 6.75, 2.85, 3.45, "coral"]
+  ];
+
+  const gridLines = [
+    [2, 0, 2, 6], [4, 0, 4, 6], [6, 0, 6, 6],
+    [0, 2, 8.5, 2], [0, 4, 8.5, 4]
+  ];
+
+  const pointSize = [.14, .13];
+  const [pointRadius, pointHalfSide] = pointSize;
+  const labelPad = 8;
+
+  const legendItems = [
+    [2.2, -.55, "blue", "Синий класс"],
+    [7.2, -.55, "amber", "Жёлтый класс"],
+    [12.65, -.55, "coral", "Коралловый класс"]
+  ];
+
+  const axisLabels = [
+    [8.5, -.16, "признак x", "end"],
+    [-.16, 6, "признак y", "end"],
+    [19.5, -.16, "признак x", "end"],
+    [10.84, 6, "признак y", "end"]
+  ];
+
+  const namespace = "http://www.w3.org/2000/svg";
+  const chart = document.getElementById("chart");
+  const scene = document.getElementById("scene");
+  const fallback = document.getElementById("fallback");
+
+  const make = (name, attributes, parent = scene) => {
+    const node = document.createElementNS(namespace, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, value);
+    }
+    parent.appendChild(node);
+    return node;
+  };
+
+  const rectangle = (parent, bounds, className) => {
+    const [left, right, bottom, top] = bounds;
+    return make("rect", {
+      x: sx(left),
+      y: sy(top),
+      width: sx(right) - sx(left),
+      height: sy(bottom) - sy(top),
+      class: className
+    }, parent);
+  };
+
+  const segment = (parent, coordinates, className) => {
+    const [xStart, yStart, xEnd, yEnd] = coordinates;
+    return make("line", {
+      x1: sx(xStart),
+      y1: sy(yStart),
+      x2: sx(xEnd),
+      y2: sy(yEnd),
+      class: className
+    }, parent);
+  };
+
+  const label = (parent, anchor, content, className, textAnchor) => {
+    const [x, y] = anchor;
+    const node = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": textAnchor
+    }, parent);
+    node.textContent = content;
+    return node;
+  };
+
+  const drawPoint = (parent, x, y, kind) => {
+    if (kind === "blue") {
+      make("circle", {
+        cx: sx(x),
+        cy: sy(y),
+        r: sx(x + pointRadius) - sx(x),
+        class: "point point-blue"
+      }, parent);
+      return;
+    }
+
+    if (kind === "amber") {
+      make("rect", {
+        x: sx(x - pointHalfSide),
+        y: sy(y + pointHalfSide),
+        width: sx(x + pointHalfSide) - sx(x - pointHalfSide),
+        height: sy(y - pointHalfSide) - sy(y + pointHalfSide),
+        class: "point point-amber"
+      }, parent);
+      return;
+    }
+
+    make("polygon", {
+      points: [
+        `${sx(x)},${sy(y + pointRadius)}`,
+        `${sx(x + pointRadius)},${sy(y)}`,
+        `${sx(x)},${sy(y - pointRadius)}`,
+        `${sx(x - pointRadius)},${sy(y)}`
+      ].join(" "),
+      class: "point point-coral"
+    }, parent);
+  };
+
+  try {
+    for (const panel of panels) {
+      const [left, right, bottom, top, title, note, depthKind] = panel;
+      const panelGroup = make("g", {}, scene);
+      const localRegions =
+        depthKind === "shallow" ? shallowRegions : deepRegions;
+
+      rectangle(
+        panelGroup,
+        [left, right, bottom, top],
+        "panel-fill"
+      );
+
+      for (const gridLine of gridLines) {
+        const [xStart, yStart, xEnd, yEnd] = gridLine;
+        segment(
+          panelGroup,
+          [left + xStart, yStart, left + xEnd, yEnd],
+          "grid"
+        );
+      }
+
+      for (const region of localRegions) {
+        const [regionLeft, regionRight, regionBottom, regionTop, kind] = region;
+        rectangle(
+          panelGroup,
+          [
+            left + regionLeft,
+            left + regionRight,
+            regionBottom,
+            regionTop
+          ],
+          `decision-region region-${kind}`
+        );
+      }
+
+      for (const point of points) {
+        const [x, y, kind] = point;
+        drawPoint(panelGroup, left + x, y, kind);
+      }
+
+      segment(panelGroup, [left, bottom, right, bottom], "axis");
+      segment(panelGroup, [left, bottom, left, top], "axis");
+      segment(panelGroup, [left, top, right, top], "frame");
+      segment(panelGroup, [right, bottom, right, top], "frame");
+
+      label(
+        panelGroup,
+        [(left + right) / pointRadius / (pointRadius + pointRadius), 7.25],
+        title,
+        "panel-title",
+        "middle"
+      );
+
+      label(
+        panelGroup,
+        [(left + right) / pointRadius / (pointRadius + pointRadius), 6.68],
+        note,
+        "panel-note",
+        "middle"
+      );
+    }
+
+    for (const axisLabel of axisLabels) {
+      const [x, y, content, anchor] = axisLabel;
+      const node = label(scene, [x, y], content, "axis-label", anchor);
+      node.setAttribute("dy", labelPad);
+    }
+
+    for (const legendItem of legendItems) {
+      const [x, y, kind, content] = legendItem;
+      drawPoint(scene, x, y, kind);
+      const node = label(
+        scene,
+        [x + pointRadius, y],
+        content,
+        "legend-text",
+        "start"
+      );
+      node.setAttribute("dx", labelPad);
+      node.setAttribute("dy", labelPad / pointRadius * pointRadius);
+    }
+
+    label(
+      scene,
+      [9.75, -1.08],
+      "Цвет области — решение дерева; знак точки — её истинный класс",
+      "legend-note",
+      "middle"
+    );
+  } catch (error) {
+    chart.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

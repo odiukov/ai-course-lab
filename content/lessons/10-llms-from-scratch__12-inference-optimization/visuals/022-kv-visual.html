@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Повторный расчёт и KV-кэш</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #182033;
+    --muted: #586176;
+    --line: #9aa4b8;
+    --bad: #b83a45;
+    --bad-fill: #fff0f1;
+    --bad-soft: #fde0e3;
+    --good: #087c62;
+    --good-fill: #eaf9f4;
+    --good-soft: #d5f2e8;
+    --cache: #3268b2;
+    --cache-fill: #edf4ff;
+    --attention: #7254b7;
+    --attention-fill: #f2edff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151e;
+      --panel: #181e2a;
+      --ink: #edf1fa;
+      --muted: #aab4c8;
+      --line: #647087;
+      --bad: #ff8993;
+      --bad-fill: #351e24;
+      --bad-soft: #4a252d;
+      --good: #62d6b3;
+      --good-fill: #17352f;
+      --good-soft: #20483e;
+      --cache: #80aff4;
+      --cache-fill: #1c304e;
+      --attention: #b9a1fa;
+      --attention-fill: #302750;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 12px 16px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 472px;
+    background: var(--bg);
+    font-family: inherit;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .panel-bad { stroke: var(--bad); }
+  .panel-good { stroke: var(--good); }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .bad-line {
+    stroke: var(--bad);
+    stroke-width: 2px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .good-line {
+    stroke: var(--good);
+    stroke-width: 2px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .cache-line {
+    stroke: var(--cache);
+    stroke-width: 2px;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .token {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .bad-box {
+    fill: var(--bad-fill);
+    stroke: var(--bad);
+    stroke-width: 1.5px;
+  }
+
+  .bad-chip {
+    fill: var(--bad-soft);
+    stroke: var(--bad);
+    stroke-width: 1.5px;
+  }
+
+  .good-box {
+    fill: var(--good-fill);
+    stroke: var(--good);
+    stroke-width: 1.5px;
+  }
+
+  .good-chip {
+    fill: var(--good-soft);
+    stroke: var(--good);
+    stroke-width: 1.5px;
+  }
+
+  .cache-box {
+    fill: var(--cache-fill);
+    stroke: var(--cache);
+    stroke-width: 1.5px;
+  }
+
+  .attention {
+    fill: var(--attention-fill);
+    stroke: var(--attention);
+    stroke-width: 1.5px;
+  }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .bad-text { fill: var(--bad); }
+  .good-text { fill: var(--good); }
+  .cache-text { fill: var(--cache); }
+
+  .label {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .box-label {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .caption {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  #fallback {
+    padding: 16px;
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<h1>Токен 7: повторный расчёт или чтение из KV-кэша</h1>
+<svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+     role="img"
+     aria-label="Сравнение генерации токена 7 без KV-кэша и с KV-кэшем"></svg>
+<div id="fallback" hidden>
+  Слева модель заново вычисляет K и V токенов 1–6. Справа она читает шесть
+  сохранённых пар из KV-кэша и вычисляет только новые K7 и V7.
+</div>
+
+<script>
+const data = [{
+  canvas: { w: 120, h: 44 },
+  radius: 0.7,
+  arrow: { length: 1.05, half: 0.52 },
+  panels: [
+    { x: 1.5, y: 1.5, w: 56, h: 41, cls: "panel panel-bad" },
+    { x: 62.5, y: 1.5, w: 56, h: 41, cls: "panel panel-good" }
+  ],
+  divider: { x1: 60, y1: 3.2, x2: 60, y2: 40.8 },
+  left: {
+    heading: { x: 29.5, y: 4.7, text: "БЕЗ KV-КЭША" },
+    sub: { x: 29.5, y: 7.2, text: "История проходит проекции снова" },
+    history: { x: 5, y: 10, text: "Токены истории" },
+    tokens: [
+      { x: 5, text: "1" }, { x: 13.2, text: "2" },
+      { x: 21.4, text: "3" }, { x: 29.6, text: "4" },
+      { x: 37.8, text: "5" }, { x: 46, text: "6" }
+    ],
+    tokenY: 11.5,
+    tokenW: 6.8,
+    tokenH: 4.2,
+    projection: { x: 5, y: 19, w: 47.8, h: 6, textY: 22.6 },
+    projectionText: "Заново вычислить K и V для токенов 1–6",
+    pairLabel: { x: 5, y: 27.3, text: "Повторно полученные пары" },
+    pairs: [
+      { x: 5, text: "K1 · V1" }, { x: 13.2, text: "K2 · V2" },
+      { x: 21.4, text: "K3 · V3" }, { x: 29.6, text: "K4 · V4" },
+      { x: 37.8, text: "K5 · V5" }, { x: 46, text: "K6 · V6" }
+    ],
+    pairY: 28.4,
+    pairW: 6.8,
+    pairH: 4.2,
+    bus: { x1: 8.4, y1: 34.3, x2: 49.4, y2: 34.3 },
+    attention: { x: 10, y: 35.8, w: 37.8, h: 4.1, textY: 38.3 },
+    caption: { x: 29.5, y: 41.5, text: "Дорогая работа для истории повторяется" }
+  },
+  right: {
+    heading: { x: 90.5, y: 4.7, text: "С KV-КЭШЕМ" },
+    sub: { x: 90.5, y: 7.2, text: "Храним один раз, затем читаем" },
+    cache: { x: 65.5, y: 11.5, w: 25, h: 19.2, titleY: 14 },
+    cacheTitle: "KV-кэш: 6 сохранённых пар",
+    saved: [
+      { x: 68, y: 15.7, text: "K1 · V1" },
+      { x: 79.2, y: 15.7, text: "K2 · V2" },
+      { x: 68, y: 20.3, text: "K3 · V3" },
+      { x: 79.2, y: 20.3, text: "K4 · V4" },
+      { x: 68, y: 24.9, text: "K5 · V5" },
+      { x: 79.2, y: 24.9, text: "K6 · V6" }
+    ],
+    savedW: 9.3,
+    savedH: 3.5,
+    token: { x: 101, y: 11.5, w: 14, h: 4.2, textY: 14.1 },
+    projection: { x: 98, y: 18.5, w: 20, h: 5.5, textY: 21.8 },
+    fresh: { x: 102, y: 26.2, w: 12, h: 4.2, textY: 28.8 },
+    writeArrow: { x1: 102, y1: 29.4, x2: 90.5, y2: 29.4 },
+    writeLabel: { x: 96.2, y: 28.2, text: "записать" },
+    readArrow: { x1: 88.4, y1: 30.7, x2: 99.2, y2: 35.8 },
+    readLabel: { x: 88.8, y: 34.4, text: "читать 6 пар" },
+    freshArrow: { x1: 108, y1: 30.4, x2: 108, y2: 35.8 },
+    attention: { x: 96, y: 35.8, w: 20, h: 4.1, line1Y: 37.6, line2Y: 39.2 },
+    caption: { x: 90.5, y: 41.5, text: "Считаем только K7, V7; историю читаем" }
+  }
+}];
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 10, y: 10 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const d = data[0];
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function node(tag, attrs, text) {
+    const n = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => n.setAttribute(key, value));
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function add(tag, attrs, text) {
+    const n = node(tag, attrs, text);
+    svg.appendChild(n);
+    return n;
+  }
+
+  function box(b, cls) {
+    return add("rect", {
+      x: sx(b.x),
+      y: sy(b.y),
+      width: sx(b.x + b.w) - sx(b.x),
+      height: sy(b.y + b.h) - sy(b.y),
+      rx: sx(d.radius) - sx(0),
+      ry: sy(d.radius) - sy(0),
+      class: cls
+    });
+  }
+
+  function textAt(t, cls, anchor) {
+    return add("text", {
+      x: sx(t.x),
+      y: sy(t.y),
+      class: cls,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, t.text);
+  }
+
+  function segment(a, cls) {
+    return add("line", {
+      x1: sx(a.x1),
+      y1: sy(a.y1),
+      x2: sx(a.x2),
+      y2: sy(a.y2),
+      class: cls
+    });
+  }
+
+  function arrow(a, cls) {
+    segment(a, cls);
+    const dx = a.x2 - a.x1;
+    const dy = a.y2 - a.y1;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const bx = a.x2 - ux * d.arrow.length;
+    const by = a.y2 - uy * d.arrow.length;
+    const px = -uy * d.arrow.half;
+    const py = ux * d.arrow.half;
+    const points = [
+      { x: a.x2, y: a.y2 },
+      { x: bx + px, y: by + py },
+      { x: bx - px, y: by - py }
+    ].map(p => `${sx(p.x)},${sy(p.y)}`).join(" ");
+    add("polygon", { points, class: cls });
+  }
+
+  d.panels.forEach(p => box(p, p.cls));
+  segment(d.divider, "divider");
+
+  const l = d.left;
+  textAt(l.heading, "heading bad-text", "middle");
+  textAt(l.sub, "small", "middle");
+  textAt(l.history, "small", "start");
+
+  l.tokens.forEach(t => {
+    box({ x: t.x, y: l.tokenY, w: l.tokenW, h: l.tokenH }, "token");
+    textAt({
+      x: t.x + l.tokenW / scale.x,
+      y: l.tokenY + l.tokenH / scale.x,
+      text: `токен ${t.text}`
+    }, "box-label", "middle");
+    arrow({
+      x1: t.x + l.tokenW / scale.x,
+      y1: l.tokenY + l.tokenH,
+      x2: t.x + l.tokenW / scale.x,
+      y2: l.projection.y
+    }, "bad-line");
+  });
+
+  box(l.projection, "bad-box");
+  textAt({
+    x: l.projection.x + l.projection.w / scale.x,
+    y: l.projection.textY,
+    text: l.projectionText
+  }, "label bad-text", "middle");
+
+  textAt(l.pairLabel, "small", "start");
+
+  l.pairs.forEach(p => {
+    box({ x: p.x, y: l.pairY, w: l.pairW, h: l.pairH }, "bad-chip");
+    textAt({
+      x: p.x + l.pairW / scale.x,
+      y: l.pairY + l.pairH / scale.x,
+      text: p.text
+    }, "box-label", "middle");
+    segment({
+      x1: p.x + l.pairW / scale.x,
+      y1: l.pairY + l.pairH,
+      x2: p.x + l.pairW / scale.x,
+      y2: l.bus.y1
+    }, "bad-line");
+  });
+
+  segment(l.bus, "bad-line");
+  arrow({
+    x1: (l.bus.x1 + l.bus.x2) / scale.x,
+    y1: l.bus.y1,
+    x2: (l.bus.x1 + l.bus.x2) / scale.x,
+    y2: l.attention.y
+  }, "bad-line");
+
+  box(l.attention, "attention");
+  textAt({
+    x: l.attention.x + l.attention.w / scale.x,
+    y: l.attention.textY,
+    text: "attention для токена 7"
+  }, "box-label", "middle");
+  textAt(l.caption, "caption bad-text", "middle");
+
+  const r = d.right;
+  textAt(r.heading, "heading good-text", "middle");
+  textAt(r.sub, "small", "middle");
+
+  box(r.cache, "cache-box");
+  textAt({
+    x: r.cache.x + r.cache.w / scale.x,
+    y: r.cache.titleY,
+    text: r.cacheTitle
+  }, "box-label cache-text", "middle");
+
+  r.saved.forEach(p => {
+    box({ x: p.x, y: p.y, w: r.savedW, h: r.savedH }, "good-chip");
+    textAt({
+      x: p.x + r.savedW / scale.x,
+      y: p.y + r.savedH / scale.x,
+      text: p.text
+    }, "box-label", "middle");
+  });
+
+  box(r.token, "token");
+  textAt({
+    x: r.token.x + r.token.w / scale.x,
+    y: r.token.textY,
+    text: "новый токен 7"
+  }, "box-label", "middle");
+
+  arrow({
+    x1: r.token.x + r.token.w / scale.x,
+    y1: r.token.y + r.token.h,
+    x2: r.projection.x + r.projection.w / scale.x,
+    y2: r.projection.y
+  }, "good-line");
+
+  box(r.projection, "good-box");
+  textAt({
+    x: r.projection.x + r.projection.w / scale.x,
+    y: r.projection.textY,
+    text: "вычислить только K7 и V7"
+  }, "label good-text", "middle");
+
+  arrow({
+    x1: r.projection.x + r.projection.w / scale.x,
+    y1: r.projection.y + r.projection.h,
+    x2: r.fresh.x + r.fresh.w / scale.x,
+    y2: r.fresh.y
+  }, "good-line");
+
+  box(r.fresh, "good-chip");
+  textAt({
+    x: r.fresh.x + r.fresh.w / scale.x,
+    y: r.fresh.textY,
+    text: "K7 · V7"
+  }, "box-label", "middle");
+
+  arrow(r.writeArrow, "good-line");
+  textAt(r.writeLabel, "small good-text", "middle");
+  arrow(r.readArrow, "cache-line");
+  textAt(r.readLabel, "small cache-text", "end");
+  arrow(r.freshArrow, "good-line");
+
+  box(r.attention, "attention");
+  textAt({
+    x: r.attention.x + r.attention.w / scale.x,
+    y: r.attention.line1Y,
+    text: "attention токена 7"
+  }, "box-label", "middle");
+  textAt({
+    x: r.attention.x + r.attention.w / scale.x,
+    y: r.attention.line2Y,
+    text: "K/V токенов 1–7"
+  }, "small", "middle");
+  textAt(r.caption, "caption good-text", "middle");
+} catch (error) {
+  document.getElementById("diagram").replaceChildren();
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

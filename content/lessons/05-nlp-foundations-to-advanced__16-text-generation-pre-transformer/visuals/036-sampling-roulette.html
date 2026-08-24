@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Выбор слова как вероятностная рулетка</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: white;
+      --panel: whitesmoke;
+      --text: midnightblue;
+      --muted: dimgray;
+      --outline: midnightblue;
+      --sat: royalblue;
+      --jumped: darkorange;
+      --point: crimson;
+      --card: aliceblue;
+      --card-accent: darkorange;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111827;
+        --panel: #172033;
+        --text: #f8fafc;
+        --muted: #cbd5e1;
+        --outline: #e2e8f0;
+        --sat: #60a5fa;
+        --jumped: #fbbf24;
+        --point: #fb7185;
+        --card: #243047;
+        --card-accent: #fbbf24;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .frame {
+      background: var(--panel);
+      border: 1px solid var(--outline);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .sector {
+      stroke: var(--outline);
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .sector-sat {
+      fill: var(--sat);
+    }
+
+    .sector-jumped {
+      fill: var(--jumped);
+    }
+
+    .wheel-outline,
+    .divider {
+      fill: none;
+      stroke: var(--outline);
+      stroke-width: 2px;
+    }
+
+    .arrow-line {
+      fill: none;
+      stroke: var(--outline);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--outline);
+    }
+
+    .sample-arrow .arrow-line {
+      stroke: var(--point);
+    }
+
+    .sample-arrow .arrow-head {
+      fill: var(--point);
+    }
+
+    .sample-point {
+      fill: var(--point);
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .sector-word,
+    .sector-value {
+      fill: white;
+      font-weight: bold;
+      paint-order: stroke;
+      stroke: rgba(0, 0, 0, .35);
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .sector-word {
+      font-size: 20px;
+    }
+
+    .sector-value {
+      font-size: 17px;
+    }
+
+    .annotation {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .arrow-caption,
+    .legend {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .result-card {
+      fill: var(--card);
+      stroke: var(--outline);
+      stroke-width: 2px;
+    }
+
+    .result-accent {
+      stroke: var(--card-accent);
+      stroke-width: 5px;
+      stroke-linecap: round;
+    }
+
+    .result-kicker {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .result-word {
+      fill: var(--text);
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    .result-detail {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .fallback {
+      display: none;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--outline);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Выбор слова как вероятностная рулетка</h1>
+    <p class="subtitle">Размер сектора задаёт шанс, а случайная точка определяет следующее слово.</p>
+
+    <div class="frame">
+      <svg
+        id="diagram"
+        viewBox="0 0 940 500"
+        width="940"
+        height="500"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-labelledby="svg-title svg-description">
+        <title id="svg-title">Вероятностная рулетка выбора слова</title>
+        <desc id="svg-description">
+          Круг разделён на сектор sat с вероятностью 0.80 и сектор jumped
+          с вероятностью 0.20. Случайная точка попала в сектор jumped,
+          поэтому следующим словом выбрано jumped.
+        </desc>
+      </svg>
+    </div>
+
+    <div id="fallback" class="fallback" role="img" aria-label="Описание схемы">
+      Схема должна была показать круг с секторами «sat 0.80» и
+      «jumped 0.20»: случайная точка попадает в один из секторов,
+      после чего соответствующее слово выбирается следующим.
+    </div>
+  </main>
+
+  <script>
+    const data = Object.freeze([{
+      zero: 0,
+      one: 1,
+      half: 0.5,
+      turn: 2,
+      startTurn: -0.25,
+      wheel: {
+        cx: 34,
+        cy: 25,
+        radius: 20,
+        labelRadius: 12.5,
+        pointRadius: 16,
+        outlinePointRadius: 20
+      },
+      sectors: [
+        {
+          word: "sat",
+          probability: 0.80,
+          valueLabel: "0.80",
+          className: "sector-sat"
+        },
+        {
+          word: "jumped",
+          probability: 0.20,
+          valueLabel: "0.20",
+          className: "sector-jumped"
+        }
+      ],
+      sample: {
+        value: 0.98,
+        label: "случайная точка",
+        selectedWord: "jumped",
+        selectedValue: "0.20"
+      },
+      callout: {
+        labelX: 3,
+        labelY: 3,
+        tailX: 18,
+        tailY: 4
+      },
+      resultArrow: {
+        x1: 54,
+        y1: 25,
+        x2: 64,
+        y2: 25,
+        labelX: 59,
+        labelY: 22
+      },
+      result: {
+        x: 64,
+        y: 13,
+        width: 30,
+        height: 24,
+        accentX: 66,
+        accentTop: 16,
+        accentBottom: 34,
+        centerX: 79,
+        kickerY: 19,
+        wordY: 27,
+        detailY: 33
+      },
+      legend: {
+        x: 34,
+        y: 47,
+        text: "80% круга → чаще, 20% круга → реже, но оба слова возможны"
+      },
+      labelGap: 2.8,
+      pointSize: 0.9,
+      arrowLength: 1.8,
+      arrowHalf: 0.9,
+      offsets: {
+        none: { dx: 0, dy: 0 },
+        callout: { dx: 0, dy: 0 },
+        arrowCaption: { dx: 0, dy: -8 },
+        legend: { dx: 0, dy: 0 }
+      }
+    }]);
+
+    const origin = Object.freeze({ x: 68, y: 42 });
+    const scale = Object.freeze({ x: 8.5, y: 8.5 });
+
+    const sx = (x) => origin.x + x * scale.x;
+    const sy = (y) => origin.y + y * scale.y;
+
+    try {
+      const [D] = data;
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      if (!svg) {
+        throw new Error("Контейнер SVG не найден");
+      }
+
+      function element(name, attributes, textContent) {
+        const item = document.createElementNS(namespace, name);
+
+        Object.entries(attributes || {}).forEach(([key, value]) => {
+          item.setAttribute(key, String(value));
+        });
+
+        if (textContent !== undefined) {
+          item.textContent = textContent;
+        }
+
+        return item;
+      }
+
+      function append(parent, child) {
+        parent.appendChild(child);
+        return child;
+      }
+
+      function polar(turnValue, radius) {
+        const angle = turnValue * D.turn * Math.PI;
+        return {
+          x: D.wheel.cx + Math.cos(angle) * radius,
+          y: D.wheel.cy + Math.sin(angle) * radius
+        };
+      }
+
+      function radiusX(radius) {
+        return sx(D.wheel.cx + radius) - sx(D.wheel.cx);
+      }
+
+      function radiusY(radius) {
+        return sy(D.wheel.cy + radius) - sy(D.wheel.cy);
+      }
+
+      function sectorPath(from, to) {
+        const start = polar(D.startTurn + from, D.wheel.radius);
+        const end = polar(D.startTurn + to, D.wheel.radius);
+        const largeArc = to - from > D.half ? D.one : D.zero;
+
+        return [
+          "M", sx(D.wheel.cx), sy(D.wheel.cy),
+          "L", sx(start.x), sy(start.y),
+          "A", radiusX(D.wheel.radius), radiusY(D.wheel.radius),
+          D.zero, largeArc, D.one, sx(end.x), sy(end.y),
+          "Z"
+        ].join(" ");
+      }
+
+      function line(x1, y1, x2, y2, className) {
+        return element("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+      }
+
+      function rect(x, y, width, height, className) {
+        return element("rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(x),
+          height: sy(y + height) - sy(y),
+          class: className
+        });
+      }
+
+      function textLabel(
+        x,
+        y,
+        content,
+        className,
+        anchor,
+        offset
+      ) {
+        const labelOffset = offset || D.offsets.none;
+
+        return element("text", {
+          x: sx(x),
+          y: sy(y),
+          dx: labelOffset.dx,
+          dy: labelOffset.dy,
+          class: className,
+          "text-anchor": anchor
+        }, content);
+      }
+
+      function stackedSectorLabel(turnValue, word, probability) {
+        const anchor = polar(
+          turnValue,
+          D.wheel.labelRadius
+        );
+        const group = element("g", {});
+
+        append(group, textLabel(
+          anchor.x,
+          anchor.y - D.labelGap,
+          word,
+          "sector-word",
+          "middle",
+          D.offsets.none
+        ));
+
+        append(group, textLabel(
+          anchor.x,
+          anchor.y + D.labelGap,
+          probability,
+          "sector-value",
+          "middle",
+          D.offsets.none
+        ));
+
+        return group;
+      }
+
+      function arrow(x1, y1, x2, y2, groupClass) {
+        const group = element("g", { class: groupClass });
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = x2 - ux * D.arrowLength;
+        const baseY = y2 - uy * D.arrowLength;
+        const sideX = -uy * D.arrowHalf;
+        const sideY = ux * D.arrowHalf;
+
+        append(group, line(x1, y1, x2, y2, "arrow-line"));
+
+        append(group, element("polygon", {
+          points: [
+            `${sx(x2)},${sy(y2)}`,
+            `${sx(baseX + sideX)},${sy(baseY + sideY)}`,
+            `${sx(baseX - sideX)},${sy(baseY - sideY)}`
+          ].join(" "),
+          class: "arrow-head"
+        }));
+
+        return group;
+      }
+
+      const drawing = element("g", {
+        "aria-hidden": "true"
+      });
+
+      let accumulated = D.zero;
+
+      D.sectors.forEach((sector) => {
+        const start = accumulated;
+        const end = accumulated + sector.probability;
+
+        append(drawing, element("path", {
+          d: sectorPath(start, end),
+          class: `sector ${sector.className}`
+        }));
+
+        const middleTurn =
+          D.startTurn + start + sector.probability * D.half;
+
+        append(drawing, stackedSectorLabel(
+          middleTurn,
+          sector.word,
+          sector.valueLabel
+        ));
+
+        accumulated = end;
+      });
+
+      const splitPoint = polar(
+        D.startTurn + D.sectors[D.one].probability,
+        D.wheel.outlinePointRadius
+      );
+
+      const actualSplitPoint = polar(
+        D.startTurn + D.sectors[D.zero].probability,
+        D.wheel.outlinePointRadius
+      );
+
+      append(drawing, line(
+        D.wheel.cx,
+        D.wheel.cy,
+        actualSplitPoint.x,
+        actualSplitPoint.y,
+        "divider"
+      ));
+
+      append(drawing, element("circle", {
+        cx: sx(D.wheel.cx),
+        cy: sy(D.wheel.cy),
+        r: radiusX(D.wheel.radius),
+        class: "wheel-outline"
+      }));
+
+      const samplePoint = polar(
+        D.startTurn + D.sample.value,
+        D.wheel.pointRadius
+      );
+
+      append(drawing, textLabel(
+        D.callout.labelX,
+        D.callout.labelY,
+        D.sample.label,
+        "annotation",
+        "start",
+        D.offsets.callout
+      ));
+
+      append(drawing, arrow(
+        D.callout.tailX,
+        D.callout.tailY,
+        samplePoint.x,
+        samplePoint.y,
+        "sample-arrow"
+      ));
+
+      append(drawing, element("circle", {
+        cx: sx(samplePoint.x),
+        cy: sy(samplePoint.y),
+        r: radiusX(D.pointSize),
+        class: "sample-point"
+      }));
+
+      append(drawing, arrow(
+        D.resultArrow.x1,
+        D.resultArrow.y1,
+        D.resultArrow.x2,
+        D.resultArrow.y2,
+        "result-arrow"
+      ));
+
+      append(drawing, textLabel(
+        D.resultArrow.labelX,
+        D.resultArrow.labelY,
+        "выбирается слово",
+        "arrow-caption",
+        "middle",
+        D.offsets.arrowCaption
+      ));
+
+      append(drawing, rect(
+        D.result.x,
+        D.result.y,
+        D.result.width,
+        D.result.height,
+        "result-card"
+      ));
+
+      append(drawing, line(
+        D.result.accentX,
+        D.result.accentTop,
+        D.result.accentX,
+        D.result.accentBottom,
+        "result-accent"
+      ));
+
+      append(drawing, textLabel(
+        D.result.centerX,
+        D.result.kickerY,
+        "следующее слово",
+        "result-kicker",
+        "middle",
+        D.offsets.none
+      ));
+
+      append(drawing, textLabel(
+        D.result.centerX,
+        D.result.wordY,
+        D.sample.selectedWord,
+        "result-word",
+        "middle",
+        D.offsets.none
+      ));
+
+      append(drawing, textLabel(
+        D.result.centerX,
+        D.result.detailY,
+        `точка попала в сектор ${D.sample.selectedValue}`,
+        "result-detail",
+        "middle",
+        D.offsets.none
+      ));
+
+      append(drawing, textLabel(
+        D.legend.x,
+        D.legend.y,
+        D.legend.text,
+        "legend",
+        "middle",
+        D.offsets.legend
+      ));
+
+      append(svg, drawing);
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+
+      if (svg) {
+        svg.style.display = "none";
+      }
+
+      if (fallback) {
+        fallback.style.display = "block";
+      }
+    }
+  </script>
+</body>
+</html>

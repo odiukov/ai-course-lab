@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Встречные потоки в одной таблице</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5d6672; --grid:#c9d1da;
+    --up:#1f6fd0; --upfill:#e4eefb;
+    --down:#c2570d; --downfill:#fdeddc;
+    --both:#6b3fb5; --bothfill:#efe6fb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e8edf3; --muted:#9aa6b4; --grid:#3a444f;
+      --up:#6fb0ff; --upfill:#1b2c42;
+      --down:#ffa257; --downfill:#3a2513;
+      --both:#c39cff; --bothfill:#2c2140;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  text{fill:var(--fg);font-family:inherit;}
+  .fail{color:var(--muted);font-size:13px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Встречные потоки в одной таблице: две диагонали навстречу</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные ----------
+    var RANKS = [0,1,2,3];                 // устройства (4 ранга)
+    var SLOTS = [0,1,2,3,4,5];             // слоты времени
+    // поток "вниз-вправо": F1..F4 по диагонали
+    var UP = [
+      {slot:0, rank:0, label:"F1"},
+      {slot:1, rank:1, label:"F2"},
+      {slot:2, rank:2, label:"F3"},
+      {slot:3, rank:3, label:"F4"}
+    ];
+    // встречный поток "вверх-вправо": F5R..F8R
+    var DOWN = [
+      {slot:0, rank:3, label:"F5R"},
+      {slot:1, rank:2, label:"F6R"},
+      {slot:2, rank:1, label:"F7R"},
+      {slot:3, rank:0, label:"F8R"}
+    ];
+    var MERGE = {slot:3, rank:1, label:"F4/F5R"}; // совмещение двух направлений
+
+    // ---------- одно отображение ----------
+    var origin = {x:150, y:56};
+    var scale  = {x:112, y:74};
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    // ---------- размеры холста (литералы разрешены) ----------
+    var VBW = 900, VBH = 470;
+    var PAD = 6, FS = 13, FSS = 11.5, LW = 1.4;
+
+    var ns = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(ns,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor||"middle",
+        "font-size":size||FS,"dominant-baseline":"middle"});
+      if(cls) t.setAttribute("fill",cls);
+      t.textContent=s; return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VBW+" "+VBH,
+      preserveAspectRatio:"xMidYMid meet",role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:VBW,height:VBH,fill:"var(--bg)"}));
+
+    var defs = el("defs",{});
+    [["aUp","var(--up)"],["aDn","var(--down)"]].forEach(function(m){
+      var mk = el("marker",{id:m[0],viewBox:"0 0 10 10",refX:"9",refY:"5",
+        markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+      mk.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:m[1]}));
+      defs.appendChild(mk);
+    });
+    svg.appendChild(defs);
+
+    // ---------- сетка ----------
+    var g = el("g",{});
+    RANKS.forEach(function(r){
+      SLOTS.forEach(function(s){
+        g.appendChild(el("rect",{
+          x:sx(s), y:sy(r), width:sx(1)-sx(0), height:sy(1)-sy(0),
+          fill:"none", stroke:"var(--grid)","stroke-width":LW}));
+      });
+    });
+    svg.appendChild(g);
+
+    // ---------- подписи осей ----------
+    RANKS.forEach(function(r){
+      svg.appendChild(txt(sx(0)-PAD*2, sy(r)+(sy(1)-sy(0))/2,
+        "ранг "+r, "end", "var(--muted)", FS));
+    });
+    SLOTS.forEach(function(s){
+      svg.appendChild(txt(sx(s)+(sx(1)-sx(0))/2, sy(0)-PAD*3,
+        "t"+(s+1), "middle", "var(--muted)", FSS));
+    });
+    svg.appendChild(txt(sx(0), sy(0)-PAD*6, "время →", "start",
+      "var(--muted)", FS));
+    svg.appendChild(txt(sx(0)-PAD*2, sy(0)-PAD*6, "устройства", "end",
+      "var(--muted)", FS));
+
+    // ---------- ячейки ----------
+    function cell(d, fill, stroke, label){
+      var cx = sx(d.slot)+(sx(1)-sx(0))/2, cy = sy(d.rank)+(sy(1)-sy(0))/2;
+      svg.appendChild(el("rect",{
+        x:sx(d.slot)+ (sx(1)-sx(0))*0.09,
+        y:sy(d.rank)+ (sy(1)-sy(0))*0.16,
+        width:(sx(1)-sx(0))*0.82, height:(sy(1)-sy(0))*0.68,
+        rx:5, fill:fill, stroke:stroke, "stroke-width":LW+0.4}));
+      svg.appendChild(txt(cx, cy, label||d.label, "middle", stroke, FS));
+      return {x:cx, y:cy};
+    }
+
+    var upPts = UP.map(function(d){
+      if(d.slot===MERGE.slot && d.rank===MERGE.rank) return null;
+      return cell(d,"var(--upfill)","var(--up)");
+    });
+    var dnPts = DOWN.map(function(d){
+      if(d.slot===MERGE.slot && d.rank===MERGE.rank) return null;
+      return cell(d,"var(--downfill)","var(--down)");
+    });
+    // совмещённая ячейка ранга 1
+    var mPt = cell(MERGE,"var(--bothfill)","var(--both)",MERGE.label);
+
+    // восстановим точки для ниток (совмещение принадлежит обоим)
+    function pt(d){
+      return {x:sx(d.slot)+(sx(1)-sx(0))/2, y:sy(d.rank)+(sy(1)-sy(0))/2};
+    }
+
+    // ---------- нитки-диагонали ----------
+    function thread(list, color, marker){
+      var d = list.map(function(o,i){ var p=pt(o);
+        return (i?"L":"M")+p.x+","+p.y; }).join(" ");
+      svg.appendChild(el("path",{d:d,fill:"none",stroke:color,
+        "stroke-width":LW+1.2,"stroke-dasharray":"7 5",
+        "marker-end":"url(#"+marker+")","opacity":"0.9"}));
+    }
+    thread(UP,"var(--up)","aUp");
+    thread(DOWN,"var(--down)","aDn");
+
+    // ---------- подписи потоков: у ХВОСТОВ, в разные стороны ----------
+    var upTail = pt(UP[0]), dnTail = pt(DOWN[0]);
+    svg.appendChild(txt(upTail.x, upTail.y-(sy(1)-sy(0))*0.44-PAD,
+      "верхний поток: вниз-вправо", "start", "var(--up)", FSS));
+    svg.appendChild(txt(dnTail.x, dnTail.y+(sy(1)-sy(0))*0.44+PAD*2,
+      "нижний поток: вверх-вправо", "start", "var(--down)", FSS));
+
+    // подпись к совмещению — снизу от ячейки, чтобы не спорить с нитками
+    svg.appendChild(txt(mPt.x, mPt.y+(sy(1)-sy(0))*0.44+PAD*2,
+      "ранг 1: две копии слоёв", "middle", "var(--both)", FSS));
+
+    // ---------- легенда строкой под схемой ----------
+    var ly = sy(RANKS.length)+ (sy(1)-sy(0))*0.62;
+    var lx = sx(0);
+    [["var(--up)","F1..F4 — микробатчи от ранга 0"],
+     ["var(--down)","F5R..F8R — встречные, от ранга 3"],
+     ["var(--both)","F4/F5R — обе работы в одной клетке"]
+    ].forEach(function(item,i){
+      var x = lx + i*(sx(2)-sx(0));
+      svg.appendChild(el("rect",{x:x, y:ly-FSS/2, width:FSS, height:FSS,
+        rx:3, fill:item[0], opacity:"0.85"}));
+      svg.appendChild(txt(x+FSS+PAD, ly, item[1], "start",
+        "var(--muted)", FSS));
+    });
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать сетку ' +
+      '4 ранга × слоты времени: диагональ F1..F4 идёт слева направо и вниз ' +
+      '(верхний поток, от ранга 0), диагональ F5R..F8R — слева направо и ' +
+      'вверх (нижний поток, от ранга 3). Клетка ранга 1 подписана F4/F5R: ' +
+      'там сходятся оба направления, поэтому на устройстве лежат две копии ' +
+      'слоёв. Читать таблицу надо по диагонали, а не по строке.</p>';
+  }
+})();
+</script>
+</body>
+</html>

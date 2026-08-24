@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Облако до и после поворота PCA</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#6b7280;
+    --axis:#9aa3af; --dot:#3b6fd4; --pc1:#d1493f; --pc2:#2f8f5b; --cut:#b91c1c;
+    --panel:#f4f6f9; --grid:#e3e7ee;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e8ecf2; --muted:#9aa3af;
+      --axis:#5c6572; --dot:#7aa2f7; --pc1:#f07a70; --pc2:#6fce9a; --cut:#f2635a;
+      --panel:#1a2029; --grid:#242c37;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fail{padding:10px;border:1px solid var(--axis);border-radius:6px;
+    font-size:13px;line-height:1.5;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Облако до и после поворота PCA: точки те же, оси другие</h2>
+  <div id="host"><noscript class="fail">Схема: слева облако, вытянутое по диагонали в осях x и y; справа то же облако в осях PC1 (вдоль длинной стороны) и PC2 (вдоль короткой), PC2 отрезается.</noscript></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var CLOUD = [
+      [-3.4,-2.2],[-3.0,-1.5],[-2.6,-2.0],[-2.4,-1.1],[-2.0,-1.6],[-1.8,-0.7],
+      [-1.5,-1.3],[-1.2,-0.4],[-1.0,-1.0],[-0.7,-0.1],[-0.5,-0.8],[-0.2,0.2],
+      [0.0,-0.4],[0.2,0.5],[0.5,-0.1],[0.8,0.7],[1.0,0.2],[1.3,1.0],
+      [1.5,0.4],[1.8,1.3],[2.1,0.8],[2.4,1.6],[2.6,1.0],[3.0,1.9],[3.3,1.3],
+      [-2.2,-1.9],[-0.9,-0.9],[0.6,0.4],[1.9,0.9],[2.8,1.5]
+    ];
+    var ANG = Math.atan2(1, 2);            // наклон длинной стороны облака
+    var COS = Math.cos(ANG), SIN = Math.sin(ANG);
+
+    // ---- холст (литералы: размеры) ----
+    var VB_W = 940, VB_H = 470;
+
+    // ---- ОДИН origin, ОДИН scale, ОДНА пара sx/sy ----
+    var origin = { x: 250, y: 235 };
+    var scale  = 42;
+    function sx(x){ return origin.x + x * scale; }
+    function sy(y){ return origin.y - y * scale; }
+
+    // смещение правой панели задаётся в тех же координатах данных
+    var SHIFT = (VB_W / 2) / scale;        // сдвиг вправо в единицах данных
+
+    var PAD_LBL = 8;      // пиксельный отступ подписи
+    var LW = 1.6;         // толщина линий
+    var FS = 13;          // размер шрифта
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n, a){ var e = document.createElementNS(NS, n);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+
+    var svg = el('svg', {
+      viewBox: '0 0 ' + VB_W + ' ' + VB_H,
+      preserveAspectRatio: 'xMidYMid meet',
+      xmlns: NS
+    });
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    function line(p, q, cls, extra){
+      var a = el('line',{x1:sx(p[0]),y1:sy(p[1]),x2:sx(q[0]),y2:sy(q[1]),
+        stroke:cls,'stroke-width':LW,'stroke-linecap':'round'});
+      if(extra) for(var k in extra) a.setAttribute(k, extra[k]);
+      svg.appendChild(a); return a;
+    }
+    function text(p, s, anchor, dx, dy, color, weight){
+      var t = el('text',{x:sx(p[0])+dx, y:sy(p[1])+dy,'text-anchor':anchor,
+        'font-size':FS, fill:color||'var(--fg)','font-weight':weight||'400'});
+      t.textContent = s; svg.appendChild(t); return t;
+    }
+    // стрелка: наконечник строится из точек данных, всё через sx/sy
+    function arrow(p, q, color){
+      line(p, q, color);
+      var dx = q[0]-p[0], dy = q[1]-p[1], L = Math.hypot(dx,dy);
+      var ux = dx/L, uy = dy/L, nx = -uy, ny = ux;
+      var h = 10/scale, w = 5/scale;          // геометрия наконечника в данных
+      var b = [q[0]-ux*h, q[1]-uy*h];
+      var pts = [q, [b[0]+nx*w, b[1]+ny*w], [b[0]-nx*w, b[1]-ny*w]]
+        .map(function(pt){ return sx(pt[0])+','+sy(pt[1]); }).join(' ');
+      svg.appendChild(el('polygon',{points:pts, fill:color}));
+    }
+    function dot(p, color, o){
+      svg.appendChild(el('circle',{cx:sx(p[0]),cy:sy(p[1]),r:3.2,
+        fill:color, opacity:(o===undefined?0.85:o)}));
+    }
+
+    // ================= ЛЕВО: исходные оси x, y =================
+    var AX = 3.9, AY = 2.6;
+    arrow([-AX,0],[AX,0],'var(--axis)');
+    arrow([0,-AY],[0,AY],'var(--axis)');
+    text([AX,0], 'x', 'middle', 0, FS + PAD_LBL, 'var(--muted)');
+    text([0,AY], 'y', 'end', -PAD_LBL, 0, 'var(--muted)');
+
+    CLOUD.forEach(function(p){ dot(p, 'var(--dot)'); });
+
+    text([0,AY], 'До: облако по диагонали', 'middle', 0, -PAD_LBL*2,
+         'var(--fg)', '600');
+    text([0,-AY], 'нужны обе координаты', 'middle', 0, FS + PAD_LBL*2,
+         'var(--muted)');
+
+    // ================= стрелка перехода =================
+    var mid = SHIFT/2;
+    arrow([mid - 0.5, 0.35],[mid + 0.5, 0.35],'var(--muted)');
+    text([mid, 0.35], 'поворот', 'middle', 0, -PAD_LBL, 'var(--muted)');
+    text([mid, 0.35], 'PCA', 'middle', 0, FS + PAD_LBL, 'var(--muted)');
+
+    // ================= ПРАВО: оси PC1, PC2 =================
+    function R(p){                       // поворот в новые оси + сдвиг панели
+      return [ p[0]*COS + p[1]*SIN + SHIFT, -p[0]*SIN + p[1]*COS ];
+    }
+    var BX = 4.3, BY = 2.6;
+    arrow([SHIFT-BX,0],[SHIFT+BX,0],'var(--pc1)');
+    arrow([SHIFT,-BY],[SHIFT,BY],'var(--pc2)');
+    text([SHIFT+BX,0], 'PC1', 'middle', 0, FS + PAD_LBL, 'var(--pc1)', '600');
+    text([SHIFT,BY], 'PC2', 'end', -PAD_LBL, 0, 'var(--pc2)', '600');
+
+    // полоса, которую отрезаем по PC2
+    var band = CLOUD.map(R).reduce(function(m,p){
+      return Math.max(m, Math.abs(p[1])); }, 0);
+    svg.appendChild(el('rect',{
+      x: sx(SHIFT-BX), y: sy(band),
+      width: sx(SHIFT+BX)-sx(SHIFT-BX), height: sy(-band)-sy(band),
+      fill:'var(--pc2)', opacity:0.10
+    }));
+    line([SHIFT-BX, band],[SHIFT+BX, band],'var(--cut)',
+         {'stroke-dasharray':'5 4','stroke-width':1});
+    line([SHIFT-BX,-band],[SHIFT+BX,-band],'var(--cut)',
+         {'stroke-dasharray':'5 4','stroke-width':1});
+
+    CLOUD.map(R).forEach(function(p){ dot(p, 'var(--dot)'); });
+    // проекция на PC1: PC2 отброшена
+    CLOUD.map(R).forEach(function(p){
+      line([p[0],p[1]],[p[0],0],'var(--cut)',{'stroke-width':0.8,opacity:0.35});
+      dot([p[0],0], 'var(--cut)', 0.9);
+    });
+
+    text([SHIFT,BY], 'После: PC1 вдоль длинной стороны', 'middle', 0,
+         -PAD_LBL*2, 'var(--fg)', '600');
+    text([SHIFT, -BY], 'по PC2 все жмутся к нулю — отрезаем', 'middle', 0,
+         FS + PAD_LBL*2, 'var(--cut)');
+
+    // ================= легенда =================
+    var ly = -BY - 0.55;
+    dot([ -AX + 0.15, ly ], 'var(--dot)');
+    text([ -AX + 0.15, ly ], 'точки данных (те же самые, не двигались)',
+         'start', PAD_LBL, FS*0.35, 'var(--muted)');
+    dot([ mid + 0.3, ly ], 'var(--cut)', 0.9);
+    text([ mid + 0.3, ly ], 'та же точка после отбрасывания PC2',
+         'start', PAD_LBL, FS*0.35, 'var(--muted)');
+
+    host.innerHTML = '';
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail">Схема не построилась. Она должна была ' +
+      'показать: слева — облако точек, вытянутое по диагонали в осях x и y ' +
+      '(нужны обе координаты); справа — то же облако в повёрнутых осях, где ' +
+      'PC1 идёт вдоль длинной стороны, PC2 — вдоль короткой, разброс по PC2 ' +
+      'мал, и эту координату отрезают, проецируя точки на PC1.</div>';
+  }
+})();
+</script>
+</body>
+</html>

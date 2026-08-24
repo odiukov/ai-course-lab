@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Дерево трассы капстоуна</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d23; --muted:#5c6472;
+    --line:#9aa3b2; --leaf:#0f766e; --parent:#b45309; --box:#eef1f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf2; --muted:#9aa3b2;
+      --line:#6b7482; --leaf:#5eead4; --parent:#fbbf24; --box:#1e232b;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:100%;padding:8px 6px 4px;box-sizing:border-box;}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{padding:8px;font-size:13px;line-height:1.5;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Дерево трассы: отступ — это «внутри», а не «плюс»</h2>
+  <div id="host"><svg id="d" viewBox="0 0 640 400" preserveAspectRatio="xMidYMid meet" role="img"
+    aria-label="Иерархия из 11 span от agent.invoke_agent"></svg></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    // ---- данные: depth = уровень вложенности, row = строка сверху вниз
+    var SPANS=[
+      {row:0, depth:0, name:"agent.invoke_agent",              t:"40", leaf:false},
+      {row:1, depth:1, name:"llm.chat (старт)",                 t:"",   leaf:true},
+      {row:2, depth:1, name:"mcp.call · arxiv_search",          t:"",   leaf:true},
+      {row:3, depth:1, name:"mcp.call · notes://recent",        t:"",   leaf:true},
+      {row:4, depth:1, name:"mcp.call · prompts/get",           t:"",   leaf:true},
+      {row:5, depth:1, name:"a2a.tasks/send · writer-agent",    t:"34", leaf:false},
+      {row:6, depth:2, name:"task transitions (opaque internals)", t:"33", leaf:true},
+      {row:7, depth:1, name:"mcp.call · generate_report",       t:"",   leaf:false},
+      {row:8, depth:2, name:"tasks/status polling",             t:"",   leaf:true},
+      {row:9, depth:2, name:"tasks/status polling",             t:"",   leaf:true},
+      {row:10,depth:2, name:"tasks/result · ui:// ресурс",      t:"",   leaf:true}
+    ];
+
+    // ---- одна система координат: origin + scale, дальше не меняются
+    var ORIGIN={x:26, y:22};
+    var SCALE={x:22, y:30};
+    function sx(x){ return ORIGIN.x + x*SCALE.x; }
+    function sy(y){ return ORIGIN.y + y*SCALE.y; }
+
+    var LAST=SPANS[SPANS.length-1];
+    var FINAL={row:LAST.row+1, depth:1, name:"llm.chat (финальный синтез)", t:"", leaf:true};
+    SPANS.push(FINAL);
+
+    var svg=document.getElementById("d");
+    var NS="http://www.w3.org/2000/svg";
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+    function txt(x,y,s,anchor,cls){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,class:cls||""});
+      t.textContent=s; svg.appendChild(t); return t;
+    }
+
+    var PAD=5;            // пиксельный отступ подписи от точки привязки
+    var LW=1.4;           // толщина линий
+    var FS=12;            // размер шрифта
+
+    var st=el("style",{});
+    st.textContent=
+      "text{font-family:inherit;font-size:"+FS+"px;fill:var(--fg)}"+
+      ".mut{fill:var(--muted);font-size:"+(FS-1)+"px}"+
+      ".leaf{fill:var(--leaf);font-weight:600}"+
+      ".par{fill:var(--parent);font-weight:600}";
+    svg.appendChild(st);
+
+    // ---- скобки-«коробки»: родитель накрывает детей по вертикали
+    function cover(from,to,depth,color){
+      var x=sx(depth*2+1.1), y1=sy(from), y2=sy(to);
+      svg.appendChild(el("path",{d:"M "+sx(depth*2+1.6)+" "+y1+" L "+x+" "+y1+
+        " L "+x+" "+y2+" L "+sx(depth*2+1.6)+" "+y2,
+        fill:"none",stroke:color,"stroke-width":LW+1,"stroke-linejoin":"round",opacity:"0.75"}));
+    }
+    cover(0, FINAL.row, 0, "var(--parent)");   // agent.invoke_agent накрывает всё
+    cover(5, 6, 1, "var(--parent)");           // a2a.tasks/send накрывает ребёнка
+    cover(7, 10, 1, "var(--parent)");          // generate_report накрывает три вызова
+
+    // ---- сами span
+    SPANS.forEach(function(s){
+      var y=sy(s.row);
+      var x0=sx(s.depth*2+2);
+      var x1=sx(s.depth*2+3.4);
+      svg.appendChild(el("line",{x1:x0,y1:y,x2:x1,y2:y,
+        stroke:s.leaf?"var(--leaf)":"var(--line)","stroke-width":s.leaf?LW+2.2:LW+1}));
+      var lbl=txt(x1+PAD, y+4, s.name, "start", s.leaf?"leaf":(s.depth===0?"par":""));
+      if(s.t){
+        // время — справа, у хвоста подписи, на своей колонке
+        txt(sx(24), y+4, s.t+" с", "end", "par");
+      }
+      if(!s.leaf && s.depth>0){ lbl.setAttribute("class","par"); }
+    });
+
+    // ---- пояснение к спорному месту: стрелка сбоку от середины, подпись у хвоста
+    var ay=(sy(5)+sy(6))/2;
+    svg.appendChild(el("line",{x1:sx(21),y1:sy(4.2),x2:sx(24.6),y2:ay,
+      stroke:"var(--muted)","stroke-width":LW,"stroke-dasharray":"3 3"}));
+    svg.appendChild(el("path",{d:"M "+sx(24.6)+" "+ay+
+      " L "+sx(23.6)+" "+(ay-6)+" L "+sx(23.6)+" "+(ay+6)+" Z",fill:"var(--muted)"}));
+    txt(sx(21), sy(4.2)-PAD, "34 из 40 с — здесь, не в поиске", "middle", "mut");
+
+    // ---- легенда одной строкой под схемой
+    var ly=sy(FINAL.row+1.1);
+    svg.appendChild(el("line",{x1:sx(2),y1:ly,x2:sx(3.4),y2:ly,
+      stroke:"var(--leaf)","stroke-width":LW+2.2}));
+    txt(sx(3.4)+PAD, ly+4, "лист — тут реально тратится время", "start", "mut");
+    txt(sx(24), ly+4, "34 + 33 ≠ 67: ребёнок внутри родителя", "end", "mut");
+    txt(sx(2), sy(FINAL.row+2), "11 span, один trace id, весь запрос — 40 с", "start", "mut");
+
+    // ---- viewBox по содержимому
+    var W=sx(25), H=sy(FINAL.row+2.4);
+    svg.setAttribute("viewBox","0 0 "+W+" "+H);
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"none"}));
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема должна была показать дерево из 11 span: '+
+      'корень <b>agent.invoke_agent</b>, под ним llm.chat, три mcp.call, '+
+      '<b>a2a.tasks/send</b> (34 с) с единственным вложенным <b>task transitions</b> (33 с, opaque internals), '+
+      'mcp.call generate_report с тремя детьми (два tasks/status polling и tasks/result с ui://-ресурсом) '+
+      'и финальный llm.chat. Отступ означает «внутри»: 34 и 33 не складываются, весь запрос — 40 с.</div>';
+  }
+})();
+</script>
+</body>
+</html>

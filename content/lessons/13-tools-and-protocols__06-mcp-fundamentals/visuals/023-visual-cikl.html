@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Жизненный цикл MCP-соединения</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2430; --muted:#6b7484;
+    --line:#3a4454; --cli:#1f6f9a; --srv:#a1561f; --dead:#9aa2b0;
+    --band1:#e8f1f7; --band2:#f6ece2; --band3:#eeeff2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141821; --fg:#e6eaf2; --muted:#98a2b5;
+      --line:#c3ccdb; --cli:#63b6e6; --srv:#e2a06a; --dead:#5b6577;
+      --band1:#1a2836; --band2:#2b2118; --band3:#1c2029;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:12px;}
+  h2{font-size:15px;margin:0 0 8px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  .fallback{padding:10px;border:1px solid var(--dead);border-radius:6px;
+    color:var(--fg);font-size:13px;}
+  text{fill:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Три фазы одного соединения: время идёт сверху вниз</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var CLIENT = 0, SERVER = 9;           // x-колонки в единицах схемы
+    var msgs = [
+      {y:1,  from:CLIENT, to:SERVER, text:"initialize",                        side:"tail"},
+      {y:2,  from:SERVER, to:CLIENT, text:"ответ: capabilities, serverInfo",   side:"tail"},
+      {y:3,  from:CLIENT, to:SERVER, text:"notifications/initialized",         side:"tail", note:"без ответа: у уведомления нет id"},
+      {y:5,  from:CLIENT, to:SERVER, text:"tools/list",                        side:"tail"},
+      {y:6,  from:CLIENT, to:SERVER, text:"tools/call",                        side:"tail"},
+      {y:7,  from:SERVER, to:CLIENT, text:"sampling/createMessage",            side:"tail"},
+      {y:8,  from:SERVER, to:CLIENT, text:"notifications/tools/list_changed",  side:"tail"}
+    ];
+    var phases = [
+      {y0:0.4, y1:3.5,  name:"initialize", band:"var(--band1)"},
+      {y0:3.5, y1:8.6,  name:"operation",  band:"var(--band2)"},
+      {y0:8.6, y1:10.4, name:"shutdown",   band:"var(--band3)"}
+    ];
+    var LIFE_TOP = 0.4, LIFE_CUT = 9.4, LIFE_END = 10.0;
+
+    // ---- один origin, один scale, одна пара sx/sy ----
+    var origin = {x:150, y:38}, scale = {x:52, y:42};
+    function sx(x){ return origin.x + x * scale.x; }
+    function sy(y){ return origin.y + y * scale.y; }
+
+    // ---- холст: литералы разрешены ----
+    var W = 700, H = 500, PAD = 6, FS = 13, FS_SMALL = 12, SW = 1.6;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||FS});
+      if(cls) t.setAttribute("fill",cls);
+      t.textContent=s; return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+W+" "+H, preserveAspectRatio:"xMidYMid meet",
+                        role:"img","aria-label":"Схема жизненного цикла MCP-соединения"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    var defs = el("defs",{});
+    [["ah-cli","var(--cli)"],["ah-srv","var(--srv)"]].forEach(function(d){
+      var m = el("marker",{id:d[0],viewBox:"0 0 10 10",refX:"9",refY:"5",
+        markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"});
+      m.appendChild(el("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:d[1]}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+
+    // ---- полосы фаз + их подписи слева ----
+    phases.forEach(function(p){
+      svg.appendChild(el("rect",{
+        x: sx(CLIENT) - scale.x*1.6, y: sy(p.y0),
+        width: sx(SERVER) - sx(CLIENT) + scale.x*3.2,
+        height: sy(p.y1) - sy(p.y0),
+        fill: p.band, rx: 5
+      }));
+      svg.appendChild(txt(sx(CLIENT) - scale.x*1.7, sy((p.y0+p.y1)/2),
+        p.name, "end", "var(--muted)", FS_SMALL));
+    });
+
+    // ---- линии жизни: живая часть и обрыв ----
+    [CLIENT, SERVER].forEach(function(c){
+      svg.appendChild(el("line",{x1:sx(c),y1:sy(LIFE_TOP),x2:sx(c),y2:sy(LIFE_CUT),
+        stroke:"var(--line)","stroke-width":SW}));
+      svg.appendChild(el("line",{x1:sx(c),y1:sy(LIFE_CUT),x2:sx(c),y2:sy(LIFE_END),
+        stroke:"var(--dead)","stroke-width":SW,"stroke-dasharray":"3 5"}));
+    });
+
+    // ---- заголовки колонок ----
+    svg.appendChild(txt(sx(CLIENT), sy(LIFE_TOP) - PAD, "клиент", "middle", "var(--cli)", FS));
+    svg.appendChild(txt(sx(SERVER), sy(LIFE_TOP) - PAD, "сервер", "middle", "var(--srv)", FS));
+
+    // ---- стрелки сообщений ----
+    msgs.forEach(function(m){
+      var toRight = m.to === SERVER;
+      var color = toRight ? "var(--cli)" : "var(--srv)";
+      var mark  = toRight ? "url(#ah-cli)" : "url(#ah-srv)";
+      svg.appendChild(el("line",{
+        x1:sx(m.from), y1:sy(m.y), x2:sx(m.to), y2:sy(m.y),
+        stroke:color,"stroke-width":SW,"marker-end":mark
+      }));
+      // подпись у хвоста: вправо -> start у левого конца, влево -> end у правого
+      svg.appendChild(txt(sx(m.from) + (toRight ? PAD : -PAD), sy(m.y) - PAD,
+        m.text, toRight ? "start" : "end", color, FS));
+      if(m.note){
+        svg.appendChild(txt(sx(m.from) + PAD, sy(m.y) + scale.y*0.45,
+          m.note, "start", "var(--muted)", FS_SMALL));
+      }
+    });
+
+    // ---- обрыв: перечёркивание обеих линий ----
+    [CLIENT, SERVER].forEach(function(c){
+      svg.appendChild(el("line",{
+        x1:sx(c) - scale.x*0.22, y1:sy(LIFE_CUT) - scale.y*0.12,
+        x2:sx(c) + scale.x*0.22, y2:sy(LIFE_CUT) + scale.y*0.12,
+        stroke:"var(--dead)","stroke-width":SW
+      }));
+    });
+    svg.appendChild(txt(sx((CLIENT+SERVER)/2), sy(LIFE_END) - PAD,
+      "транспорт закрыт — метода нет, стрелки нет", "middle", "var(--muted)", FS_SMALL));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fallback">Схема не построилась. Она должна показывать две '+
+      'вертикальные линии жизни (клиент и сервер), время сверху вниз, и три фазы. '+
+      '<b>initialize:</b> initialize вправо, ответ влево, notifications/initialized вправо без ответа. '+
+      '<b>operation:</b> tools/list и tools/call вправо, sampling/createMessage влево, '+
+      'notifications/tools/list_changed влево. '+
+      '<b>shutdown:</b> обе линии просто обрываются — ни стрелки, ни метода.</div>';
+  }
+})();
+</script>
+</body>
+</html>

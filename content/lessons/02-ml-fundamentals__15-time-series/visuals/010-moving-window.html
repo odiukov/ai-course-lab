@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как окно скользящего среднего движется по ряду</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f9fc;
+      --ink: #182230;
+      --muted: #66758a;
+      --panel: #ffffff;
+      --line: #8ea0b6;
+      --track: #d7e0eb;
+      --accent: #1769e0;
+      --accent-soft: #e7f0ff;
+      --current: #0b766e;
+      --current-soft: #dff5f1;
+      --empty: #edf1f6;
+      --shadow: #c4cfdd;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111821;
+        --ink: #edf3fb;
+        --muted: #aab8ca;
+        --panel: #1b2531;
+        --line: #71839a;
+        --track: #344354;
+        --accent: #72a9ff;
+        --accent-soft: #243d62;
+        --current: #6ed8cc;
+        --current-soft: #173f3d;
+        --empty: #273341;
+        --shadow: #0a0f15;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 8px;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    h1 {
+      margin: 8px;
+      font-size: 22px;
+      line-height: normal;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      overflow: visible;
+      background: var(--page);
+      border: 1px solid var(--track);
+    }
+
+    text {
+      fill: var(--ink);
+      font-family: inherit;
+    }
+
+    .section-label {
+      fill: var(--muted);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .value {
+      font-size: 18px;
+      font-weight: bold;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .movement-label {
+      fill: var(--accent);
+      font-size: 16px;
+      font-weight: bold;
+      text-anchor: start;
+    }
+
+    .track-line {
+      fill: none;
+      stroke: var(--track);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .guide-line {
+      fill: none;
+      stroke: var(--track);
+      stroke-width: 1px;
+    }
+
+    .move-line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3px;
+      stroke-linecap: round;
+    }
+
+    .arrow-head {
+      fill: var(--accent);
+    }
+
+    .series-node {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .series-node.current {
+      fill: var(--current-soft);
+      stroke: var(--current);
+    }
+
+    .card {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .card.full {
+      stroke: var(--accent);
+    }
+
+    .card-title {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+      text-anchor: middle;
+    }
+
+    .slot {
+      fill: var(--accent-soft);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .slot.current {
+      fill: var(--current-soft);
+      stroke: var(--current);
+      stroke-width: 2px;
+    }
+
+    .slot.empty {
+      fill: var(--empty);
+      stroke: var(--track);
+    }
+
+    .slot-text {
+      font-size: 15px;
+      font-weight: bold;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .slot-text.empty {
+      fill: var(--muted);
+    }
+
+    .divider {
+      stroke: var(--track);
+      stroke-width: 1px;
+    }
+
+    .mean-label {
+      fill: var(--muted);
+      font-size: 13px;
+      text-anchor: middle;
+    }
+
+    .mean-value {
+      fill: var(--accent);
+      font-size: 19px;
+      font-weight: bold;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    #fallback {
+      margin: 8px;
+      padding: 8px;
+      color: var(--ink);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      font-size: 16px;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Как окно скользящего среднего движется по ряду</h1>
+
+    <p id="fallback">
+      Схема показывает ряд из восьми наблюдений. Под каждой позицией находится
+      окно длины 3 с доступными последними значениями и их средним.
+    </p>
+
+    <svg
+      id="diagram"
+      class="hidden"
+      viewBox="0 0 1200 430"
+      width="1200"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Движение окна скользящего среднего</title>
+      <desc id="svg-desc">
+        Восемь значений расположены слева направо. Под каждым значением показано
+        окно шириной три: сначала оно содержит только доступную часть ряда, а
+        затем при каждом сдвиге теряет самое старое значение и принимает новое.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      series: Object.freeze([4, 6, 8, 10, 12, 8, 4, 6]),
+      window: 3
+    });
+
+    const ORIGIN = Object.freeze({ x: 60, y: 28 });
+    const SCALE = Object.freeze({ x: 100, y: 55 });
+
+    const sx = x => ORIGIN.x + x * SCALE.x;
+    const sy = y => ORIGIN.y + y * SCALE.y;
+
+    const LABEL_PAD = 8;
+
+    try {
+      const [FOUR, SIX, EIGHT, TEN, TWELVE] = DATA.series;
+      const THREE = DATA.window;
+      const ZERO = THREE - THREE;
+      const ONE = FOUR - THREE;
+      const TWO = SIX - FOUR;
+      const FIVE = EIGHT - THREE;
+      const SEVEN = TEN - THREE;
+      const HALF = ONE / TWO;
+      const QUARTER = ONE / FOUR;
+      const EIGHTH = ONE / EIGHT;
+      const THIRD = ONE / THREE;
+
+      const xStart = THREE / FOUR;
+      const xGap = EIGHT / SIX;
+      const seriesY = TWO;
+      const movementY = THREE;
+      const cardTop = FOUR;
+      const cardBottom = SEVEN;
+      const cardHalf = HALF + EIGHT / (TEN * TEN);
+      const cardRadius = ONE / TWELVE;
+      const nodeRadiusX = ONE / FOUR;
+      const nodeRadiusY = ONE / FOUR;
+      const headerY = FOUR + HALF;
+      const slotY = FIVE + HALF;
+      const slotHalfX = ONE / EIGHT;
+      const slotHalfY = ONE / FOUR;
+      const dividerY = SIX;
+      const meanCaptionY = SIX + QUARTER;
+      const meanValueY = SIX + THREE / FOUR;
+      const slotOffsets = Object.freeze([-THIRD, ZERO, THIRD]);
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+
+      function element(name, attributes, content) {
+        const item = document.createElementNS(namespace, name);
+        for (const [key, value] of Object.entries(attributes || {})) {
+          item.setAttribute(key, String(value));
+        }
+        if (content !== undefined) {
+          item.textContent = String(content);
+        }
+        return item;
+      }
+
+      function addText(parent, x, y, className, content, anchor) {
+        const label = element("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        }, content);
+        parent.appendChild(label);
+        return label;
+      }
+
+      const lastIndex = DATA.series.length - ONE;
+      const xEnd = xStart + lastIndex * xGap;
+
+      addText(
+        drawing,
+        xStart,
+        ONE,
+        "section-label",
+        "Ряд из восьми наблюдений",
+        "start"
+      );
+
+      drawing.appendChild(element("line", {
+        x1: sx(xStart),
+        y1: sy(seriesY),
+        x2: sx(xEnd),
+        y2: sy(seriesY),
+        class: "track-line"
+      }));
+
+      DATA.series.forEach((value, index) => {
+        const centerX = xStart + index * xGap;
+
+        drawing.appendChild(element("line", {
+          x1: sx(centerX),
+          y1: sy(seriesY + nodeRadiusY),
+          x2: sx(centerX),
+          y2: sy(cardTop),
+          class: "guide-line"
+        }));
+
+        drawing.appendChild(element("ellipse", {
+          cx: sx(centerX),
+          cy: sy(seriesY),
+          rx: sx(nodeRadiusX) - sx(ZERO),
+          ry: sy(nodeRadiusY) - sy(ZERO),
+          class: "series-node current"
+        }));
+
+        addText(
+          drawing,
+          centerX,
+          seriesY,
+          "value",
+          value,
+          "middle"
+        );
+      });
+
+      drawing.appendChild(element("line", {
+        x1: sx(xStart),
+        y1: sy(movementY),
+        x2: sx(xEnd),
+        y2: sy(movementY),
+        class: "move-line"
+      }));
+
+      drawing.appendChild(element("polygon", {
+        points: [
+          `${sx(xEnd)},${sy(movementY)}`,
+          `${sx(xEnd - QUARTER)},${sy(movementY - EIGHTH)}`,
+          `${sx(xEnd - QUARTER)},${sy(movementY + EIGHTH)}`
+        ].join(" "),
+        class: "arrow-head"
+      }));
+
+      const movementLabel = addText(
+        drawing,
+        xStart,
+        movementY - QUARTER,
+        "movement-label",
+        "окно длины 3 движется вправо",
+        "start"
+      );
+      movementLabel.setAttribute("dy", -LABEL_PAD);
+
+      DATA.series.forEach((value, index) => {
+        const centerX = xStart + index * xGap;
+        const startIndex = Math.max(ZERO, index - THREE + ONE);
+        const windowValues = DATA.series.slice(startIndex, index + ONE);
+        const sum = windowValues.reduce(
+          (total, item) => total + item,
+          ZERO
+        );
+        const mean = sum / windowValues.length;
+        const missing = THREE - windowValues.length;
+        const displayed = [];
+
+        for (let emptyIndex = ZERO; emptyIndex < missing; emptyIndex += ONE) {
+          displayed.push(null);
+        }
+        displayed.push(...windowValues);
+
+        const group = element("g", {
+          "aria-label":
+            `Окно: ${windowValues.join(", ")}; среднее ${mean}`
+        });
+
+        group.appendChild(element("rect", {
+          x: sx(centerX - cardHalf),
+          y: sy(cardTop),
+          width: sx(centerX + cardHalf) - sx(centerX - cardHalf),
+          height: sy(cardBottom) - sy(cardTop),
+          rx: sx(cardRadius) - sx(ZERO),
+          ry: sy(cardRadius) - sy(ZERO),
+          class: windowValues.length === THREE ? "card full" : "card"
+        }));
+
+        addText(
+          group,
+          centerX,
+          headerY,
+          "card-title",
+          windowValues.length === THREE ? "полное окно" : "окно",
+          "middle"
+        );
+
+        displayed.forEach((slotValue, slotIndex) => {
+          const slotX = centerX + slotOffsets[slotIndex];
+          const isEmpty = slotValue === null;
+          const isCurrent = slotIndex === displayed.length - ONE;
+
+          group.appendChild(element("rect", {
+            x: sx(slotX - slotHalfX),
+            y: sy(slotY - slotHalfY),
+            width: sx(slotX + slotHalfX) - sx(slotX - slotHalfX),
+            height: sy(slotY + slotHalfY) - sy(slotY - slotHalfY),
+            rx: sx(cardRadius) - sx(ZERO),
+            ry: sy(cardRadius) - sy(ZERO),
+            class: isEmpty
+              ? "slot empty"
+              : isCurrent
+                ? "slot current"
+                : "slot"
+          }));
+
+          addText(
+            group,
+            slotX,
+            slotY,
+            isEmpty ? "slot-text empty" : "slot-text",
+            isEmpty ? "—" : slotValue,
+            "middle"
+          );
+        });
+
+        group.appendChild(element("line", {
+          x1: sx(centerX - cardHalf + EIGHTH),
+          y1: sy(dividerY),
+          x2: sx(centerX + cardHalf - EIGHTH),
+          y2: sy(dividerY),
+          class: "divider"
+        }));
+
+        addText(
+          group,
+          centerX,
+          meanCaptionY,
+          "mean-label",
+          "среднее",
+          "middle"
+        );
+
+        addText(
+          group,
+          centerX,
+          meanValueY,
+          "mean-value",
+          mean,
+          "middle"
+        );
+
+        drawing.appendChild(group);
+      });
+
+      fallback.classList.add("hidden");
+      svg.classList.remove("hidden");
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      const svg = document.getElementById("diagram");
+      fallback.textContent =
+        "Схема должна была показать ряд из восьми значений и окно длины 3: " +
+        "в каждой позиции — доступные последние значения и их среднее.";
+      fallback.classList.remove("hidden");
+      svg.classList.add("hidden");
+    }
+  </script>
+</body>
+</html>

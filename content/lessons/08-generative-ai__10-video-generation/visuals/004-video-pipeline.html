@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Маршрут видео через VAE, патчи, DiT и декодер</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel-blue: #eef6ff;
+      --panel-violet: #f3efff;
+      --panel-green: #eefbf4;
+      --panel-warm: #fff7e8;
+      --ink: #172033;
+      --muted: #58657a;
+      --line: #75839a;
+      --blue: #2764d8;
+      --violet: #7147c8;
+      --green: #16805a;
+      --orange: #b96512;
+      --notice: #edf2f7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101722;
+        --panel: #172131;
+        --panel-blue: #142a46;
+        --panel-violet: #281f43;
+        --panel-green: #12352c;
+        --panel-warm: #382b18;
+        --ink: #edf3ff;
+        --muted: #b8c4d8;
+        --line: #8796ad;
+        --blue: #78a9ff;
+        --violet: #b69aff;
+        --green: #6ed6aa;
+        --orange: #f1b66f;
+        --notice: #1d2a3b;
+      }
+    }
+
+    html,
+    body {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 20px;
+      text-align: center;
+      color: var(--ink);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--bg);
+    }
+
+    .card {
+      fill: var(--panel);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .encoder,
+    .decoder {
+      fill: var(--panel-blue);
+      stroke: var(--blue);
+    }
+
+    .latent {
+      fill: var(--panel-violet);
+      stroke: var(--violet);
+    }
+
+    .patches {
+      fill: var(--panel-warm);
+      stroke: var(--orange);
+    }
+
+    .dit {
+      fill: var(--panel-violet);
+      stroke: var(--violet);
+      stroke-width: 3px;
+    }
+
+    .output {
+      fill: var(--panel-green);
+      stroke: var(--green);
+    }
+
+    .prompt {
+      fill: var(--panel-blue);
+      stroke: var(--blue);
+      stroke-width: 2px;
+    }
+
+    .generation {
+      fill: var(--panel-warm);
+      stroke: var(--orange);
+      stroke-width: 2px;
+    }
+
+    .notice {
+      fill: var(--notice);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+    }
+
+    .branch-arrow {
+      fill: none;
+      stroke: var(--orange);
+      stroke-width: 3px;
+    }
+
+    .condition-arrow {
+      fill: none;
+      stroke: var(--blue);
+      stroke-width: 3px;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+    }
+
+    .branch-head {
+      fill: var(--orange);
+    }
+
+    .condition-head {
+      fill: var(--blue);
+    }
+
+    text {
+      font-size: 15px;
+      fill: var(--ink);
+      dominant-baseline: middle;
+    }
+
+    .title {
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 13px;
+      fill: var(--muted);
+    }
+
+    .value {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .arrow-label {
+      font-size: 13px;
+      fill: var(--muted);
+    }
+
+    .branch-label {
+      font-size: 13px;
+      fill: var(--orange);
+      font-weight: bold;
+    }
+
+    .condition-label {
+      font-size: 13px;
+      fill: var(--blue);
+      font-weight: bold;
+    }
+
+    .notice-main {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .notice-detail {
+      font-size: 14px;
+      fill: var(--muted);
+    }
+
+    #fallback {
+      padding: 16px;
+      font-size: 16px;
+      color: var(--ink);
+      background: var(--notice);
+    }
+  </style>
+</head>
+<body>
+  <h1 id="diagram-title">Маршрут видео: VAE → патчи → DiT → декодер</h1>
+
+  <svg id="diagram" viewBox="0 0 1440 500"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title"
+       aria-label="Маршрут реального видео через энкодер VAE, латент, патчи, DiT, сборку латента и декодер VAE. При генерации маршрут начинается с зашумлённого латента.">
+    <g id="scene"></g>
+  </svg>
+
+  <p id="fallback" hidden>
+    Схема должна была показать, как видео сжимается энкодером VAE, делится на
+    патчи, обрабатывается DiT и становится обычными RGB-кадрами только после
+    декодера VAE. При генерации путь начинается с зашумлённого латента.
+  </p>
+
+  <script>
+    const data = [
+      {kind: "config", headBack: 12, headWing: 7},
+      {kind: "background", x1: 0, y1: 0, x2: 1440, y2: 500},
+
+      {
+        kind: "card", className: "card", x1: 20, y1: 145, x2: 150, y2: 295,
+        labels: [
+          {x: 85, y: 171, text: "Реальное видео", className: "title"},
+          {x: 85, y: 211, text: "240 кадров", className: "value"},
+          {x: 85, y: 241, text: "1920 × 1080 × 3", className: "value"},
+          {x: 85, y: 271, text: "RGB-пиксели", className: "small"}
+        ]
+      },
+      {
+        kind: "card", className: "card encoder", x1: 190, y1: 145, x2: 325, y2: 295,
+        labels: [
+          {x: 257, y: 174, text: "Энкодер VAE", className: "title"},
+          {x: 257, y: 214, text: "сжимает время", className: "small"},
+          {x: 257, y: 239, text: "и пространство", className: "small"},
+          {x: 257, y: 272, text: "нужен при обучении", className: "small"}
+        ]
+      },
+      {
+        kind: "card", className: "card latent", x1: 365, y1: 145, x2: 505, y2: 295,
+        labels: [
+          {x: 435, y: 170, text: "Латентный объём", className: "title"},
+          {x: 435, y: 210, text: "[T_latent, H_latent,", className: "small"},
+          {x: 435, y: 237, text: "W_latent, C_latent]", className: "small"},
+          {x: 435, y: 272, text: "сжатые числа", className: "value"}
+        ]
+      },
+      {
+        kind: "card", className: "card patches", x1: 545, y1: 145, x2: 710, y2: 295,
+        labels: [
+          {x: 627, y: 169, text: "Разбиение", className: "title"},
+          {x: 627, y: 194, text: "на 3D-патчи", className: "title"},
+          {x: 627, y: 233, text: "20 000–100 000", className: "value"},
+          {x: 627, y: 260, text: "патчей = токенов", className: "small"},
+          {x: 627, y: 280, text: "время + высота + ширина", className: "small"}
+        ]
+      },
+      {
+        kind: "card", className: "card dit", x1: 755, y1: 145, x2: 925, y2: 295,
+        labels: [
+          {x: 840, y: 171, text: "DiT", className: "title"},
+          {x: 840, y: 207, text: "много раз убирает шум", className: "small"},
+          {x: 840, y: 233, text: "согласует движение", className: "small"},
+          {x: 840, y: 259, text: "учитывает позиции", className: "small"},
+          {x: 840, y: 280, text: "время + y + x", className: "value"}
+        ]
+      },
+      {
+        kind: "card", className: "card latent", x1: 970, y1: 145, x2: 1105, y2: 295,
+        labels: [
+          {x: 1037, y: 171, text: "Сборка патчей", className: "title"},
+          {x: 1037, y: 210, text: "[T_latent, H_latent,", className: "small"},
+          {x: 1037, y: 237, text: "W_latent, C_latent]", className: "small"},
+          {x: 1037, y: 272, text: "снова латент", className: "value"}
+        ]
+      },
+      {
+        kind: "card", className: "card decoder", x1: 1145, y1: 145, x2: 1265, y2: 295,
+        labels: [
+          {x: 1205, y: 174, text: "Декодер VAE", className: "title"},
+          {x: 1205, y: 218, text: "разворачивает", className: "small"},
+          {x: 1205, y: 244, text: "латент", className: "small"},
+          {x: 1205, y: 272, text: "в RGB-пиксели", className: "value"}
+        ]
+      },
+      {
+        kind: "card", className: "card output", x1: 1305, y1: 145, x2: 1420, y2: 295,
+        labels: [
+          {x: 1362, y: 171, text: "Готовое видео", className: "title"},
+          {x: 1362, y: 211, text: "240 кадров", className: "value"},
+          {x: 1362, y: 241, text: "1920 × 1080 × 3", className: "value"},
+          {x: 1362, y: 271, text: "можно смотреть", className: "small"}
+        ]
+      },
+
+      {
+        kind: "box", className: "prompt", x1: 755, y1: 35, x2: 925, y2: 100,
+        labels: [
+          {x: 840, y: 58, text: "Текстовый запрос", className: "title"},
+          {x: 840, y: 83, text: "смысл будущего ролика", className: "small"}
+        ]
+      },
+      {
+        kind: "box", className: "generation", x1: 365, y1: 340, x2: 505, y2: 410,
+        labels: [
+          {x: 435, y: 363, text: "Генерация", className: "title"},
+          {x: 435, y: 390, text: "зашумлённый латент", className: "small"}
+        ]
+      },
+      {
+        kind: "box", className: "notice", x1: 210, y1: 440, x2: 1230, y2: 490,
+        labels: [
+          {x: 720, y: 458, text: "После DiT всё ещё нет готовых кадров.", className: "notice-main"},
+          {x: 720, y: 479, text: "Пиксели появляются только после декодера VAE.", className: "notice-detail"}
+        ]
+      },
+
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 150, y1: 220, x2: 190, y2: 220,
+        label: {x: 170, y: 126, text: "маршрут обучения", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 325, y1: 220, x2: 365, y2: 220,
+        label: {x: 345, y: 126, text: "сжатие", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 505, y1: 220, x2: 545, y2: 220,
+        label: {x: 525, y: 126, text: "patchify", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 710, y1: 220, x2: 755, y2: 220,
+        label: {x: 732, y: 126, text: "последовательность", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 925, y1: 220, x2: 970, y2: 220,
+        label: {x: 947, y: 126, text: "unpatchify", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 1105, y1: 220, x2: 1145, y2: 220,
+        label: {x: 1125, y: 126, text: "латент", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "arrow", headClass: "arrow-head",
+        x1: 1265, y1: 220, x2: 1305, y2: 220,
+        label: {x: 1285, y: 126, text: "декодирование", className: "arrow-label"}
+      },
+      {
+        kind: "arrow", className: "condition-arrow", headClass: "condition-head",
+        x1: 840, y1: 100, x2: 840, y2: 145,
+        label: {x: 855, y: 120, text: "условие", className: "condition-label", anchor: "start"}
+      },
+      {
+        kind: "arrow", className: "branch-arrow", headClass: "branch-head",
+        x1: 505, y1: 375, x2: 610, y2: 295,
+        label: {x: 520, y: 326, text: "старт без готового видео", className: "branch-label", anchor: "start"}
+      }
+    ];
+
+    const origin = {x: 0, y: 0};
+    const scale = {x: 1, y: 1};
+
+    function sx(x) {
+      return origin.x + x * scale.x;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale.y;
+    }
+
+    try {
+      const svgNamespace = "http://www.w3.org/2000/svg";
+      const scene = document.getElementById("scene");
+      const config = data.find(item => item.kind === "config");
+
+      function element(name, attributes, parent = scene) {
+        const node = document.createElementNS(svgNamespace, name);
+        Object.entries(attributes).forEach(([name, value]) => {
+          node.setAttribute(name, value);
+        });
+        parent.appendChild(node);
+        return node;
+      }
+
+      function rectangle(item) {
+        element("rect", {
+          x: sx(item.x1),
+          y: sy(item.y1),
+          width: sx(item.x2) - sx(item.x1),
+          height: sy(item.y2) - sy(item.y1),
+          class: item.className
+        });
+      }
+
+      function label(item) {
+        const node = element("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          class: item.className,
+          "text-anchor": item.anchor || "middle"
+        });
+        node.textContent = item.text;
+      }
+
+      function arrow(item) {
+        element("line", {
+          x1: sx(item.x1),
+          y1: sy(item.y1),
+          x2: sx(item.x2),
+          y2: sy(item.y2),
+          class: item.className
+        });
+
+        const dx = item.x2 - item.x1;
+        const dy = item.y2 - item.y1;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const px = -uy;
+        const py = ux;
+        const baseX = item.x2 - ux * config.headBack;
+        const baseY = item.y2 - uy * config.headBack;
+
+        const points = [
+          `${sx(item.x2)},${sy(item.y2)}`,
+          `${sx(baseX + px * config.headWing)},${sy(baseY + py * config.headWing)}`,
+          `${sx(baseX - px * config.headWing)},${sy(baseY - py * config.headWing)}`
+        ].join(" ");
+
+        element("polygon", {
+          points: points,
+          class: item.headClass
+        });
+
+        if (item.label) {
+          label(item.label);
+        }
+      }
+
+      data.forEach(item => {
+        if (item.kind === "background") {
+          element("rect", {
+            x: sx(item.x1),
+            y: sy(item.y1),
+            width: sx(item.x2) - sx(item.x1),
+            height: sy(item.y2) - sy(item.y1),
+            fill: "var(--bg)"
+          });
+        }
+
+        if (item.kind === "card" || item.kind === "box") {
+          rectangle(item);
+          item.labels.forEach(label);
+        }
+
+        if (item.kind === "arrow") {
+          arrow(item);
+        }
+      });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Карта трёх веток NSA</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#22303f; --mut:#5d6b7a; --line:#7b8794;
+    --cmp:#2f7ea8; --sel:#c2683a; --win:#3f8f68; --gate:#6b52a3; --box:#ffffff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e7edf3; --mut:#a3b0bd; --line:#8b98a6;
+      --cmp:#63b6dd; --sel:#e79a68; --win:#6fc697; --gate:#a790e0; --box:#1c222a;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:10px 12px 14px}
+  h2{font-size:15px;margin:0 0 6px}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg)}
+  .box{fill:var(--box);stroke:var(--line);stroke-width:1.2}
+  .cell{fill:none;stroke:var(--line);stroke-width:1}
+  .on.cmp{fill:var(--cmp);fill-opacity:.18;stroke:var(--cmp)}
+  .on.sel{fill:var(--sel);fill-opacity:.18;stroke:var(--sel)}
+  .on.win{fill:var(--win);fill-opacity:.18;stroke:var(--win)}
+  .dot{fill:var(--cmp)}
+  .tick{stroke:var(--sel);stroke-width:1}
+  .arw{fill:none;stroke:var(--line);stroke-width:1.4}
+  .head{fill:var(--line)}
+  .t{fill:var(--fg);font-size:13px}
+  .n{fill:var(--mut);font-size:11.5px}
+  .g{fill:var(--fg);font-size:11.5px}
+  .lg{fill:var(--mut);font-size:11.5px}
+  .b{font-weight:600}
+  .fail{padding:10px;color:var(--fg);font-size:13px}
+</style>
+<div class="wrap">
+  <h2>Один запрос — три ветки — один гейт</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    var NS='http://www.w3.org/2000/svg';
+    var CANVAS={w:700,h:424};
+    var SCALE=22, ORIGIN={x:34,y:14};
+    function sx(u){return ORIGIN.x+u*SCALE;}
+    function sy(u){return ORIGIN.y+u*SCALE;}
+
+    var QUERY={x1:0,x2:3.4,cy:8,h:0.95};
+    var BX={x1:8,x2:18,h:2};
+    var GATE={x1:21.6,x2:25.4,cy:8,h:1.6};
+    var OUT={x:28};
+    var ROW={x1:8.5,x2:17.5,gap:0.14};
+    var HEAD={dx:0.42,dy:0.24};
+
+    var BRANCHES=[
+      {key:'cmp',cy:2.4,title:'Сжатая ветка',note:'блоки по l = 32 → один токен',
+       cells:4,fill:[0,1,2,3],gate:7.0,gy:-0.5,sub:'cmp'},
+      {key:'sel',cy:8.0,title:'Выбранная ветка',note:'top-k = 4 блока, токены без сжатия',
+       cells:8,fill:[1,3,4,6],gate:8.0,gy:-0.5,sub:'sel'},
+      {key:'win',cy:13.6,title:'Оконная ветка',note:'w = 512 последних токенов',
+       cells:8,fill:[6,7],gate:9.0,gy:0.85,sub:'win'}
+    ];
+
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+CANVAS.w+' '+CANVAS.h);
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label','Запрос идёт в сжатую, выбранную и оконную ветки, их выходы сводит гейт');
+
+    function el(tag,at,cls){var e=document.createElementNS(NS,tag);
+      for(var k in at)e.setAttribute(k,at[k]); if(cls)e.setAttribute('class',cls);
+      svg.appendChild(e); return e;}
+    function rect(x1,y1,x2,y2,cls,r){
+      return el('rect',{x:sx(x1),y:sy(y1),width:sx(x2)-sx(x1),height:sy(y2)-sy(y1),rx:r||0},cls);}
+    function line(x1,y1,x2,y2,cls){
+      return el('line',{x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2)},cls);}
+    function txt(x,y,cls,anchor,mid){
+      var t=el('text',{x:sx(x),y:sy(y),'text-anchor':anchor||'start'},cls);
+      if(mid)t.setAttribute('dominant-baseline','middle'); return t;}
+    function runs(t,parts){
+      for(var i=0;i<parts.length;i++){
+        var p=parts[i], s=document.createElementNS(NS,'tspan');
+        if(typeof p==='string'){s.textContent=p; t.appendChild(s);}
+        else{
+          s.textContent=p[0]; t.appendChild(s);
+          var b=document.createElementNS(NS,'tspan');
+          b.setAttribute('dy',3); b.setAttribute('font-size','8.5');
+          b.textContent=p[1]; t.appendChild(b);
+          var r=document.createElementNS(NS,'tspan');
+          r.setAttribute('dy',-3); r.textContent='\u200a'; t.appendChild(r);
+        }
+      }
+      return t;
+    }
+    function arrow(x1,y1,x2,y2){
+      var c=(x2-x1)*0.45, tip=x2-HEAD.dx*0.8;
+      el('path',{d:'M '+sx(x1)+' '+sy(y1)+' C '+sx(x1+c)+' '+sy(y1)+' '+
+                    sx(x2-c)+' '+sy(y2)+' '+sx(tip)+' '+sy(y2)},'arw');
+      el('polygon',{points:sx(x2)+','+sy(y2)+' '+
+        sx(x2-HEAD.dx)+','+sy(y2-HEAD.dy)+' '+sx(x2-HEAD.dx)+','+sy(y2+HEAD.dy)},'head');
+    }
+
+    /* запрос */
+    rect(QUERY.x1,QUERY.cy-QUERY.h,QUERY.x2,QUERY.cy+QUERY.h,'box',6);
+    txt((QUERY.x1+QUERY.x2)/2,QUERY.cy,'t b','middle',true).textContent='Запрос';
+
+    /* ветки */
+    BRANCHES.forEach(function(b){
+      rect(BX.x1,b.cy-BX.h,BX.x2,b.cy+BX.h,'box',6);
+      txt(ROW.x1,b.cy-1.15,'t b').textContent=b.title;
+      txt(ROW.x1,b.cy+1.55,'n').textContent=b.note;
+
+      var w=(ROW.x2-ROW.x1)/b.cells;
+      for(var i=0;i<b.cells;i++){
+        var a=ROW.x1+i*w, z=a+w-ROW.gap, on=b.fill.indexOf(i)>=0;
+        rect(a,b.cy-0.6,z,b.cy+0.5,'cell '+(on?'on '+b.key:''),2);
+        if(!on) continue;
+        if(b.key==='cmp'){
+          el('circle',{cx:sx((a+z)/2),cy:sy(b.cy-0.05),r:sx(0.13)-sx(0)},'dot');
+        } else if(b.key==='sel'){
+          for(var k=1;k<=3;k++) line(a+(z-a)*k/4,b.cy-0.42,a+(z-a)*k/4,b.cy+0.32,'tick');
+        }
+      }
+      arrow(QUERY.x2,QUERY.cy,BX.x1,b.cy);
+      arrow(BX.x2,b.cy,GATE.x1,b.gate);
+      runs(txt(BX.x2+0.35,b.cy+b.gy,'g'),[['g',b.sub]]);
+    });
+
+    /* гейт */
+    rect(GATE.x1,GATE.cy-GATE.h,GATE.x2,GATE.cy+GATE.h,'box',6);
+    txt((GATE.x1+GATE.x2)/2,GATE.cy-0.3,'t b','middle',true).textContent='Гейт';
+    txt((GATE.x1+GATE.x2)/2,GATE.cy+0.75,'n','middle',true).textContent='малая MLP';
+    arrow(GATE.x2,GATE.cy,OUT.x,GATE.cy);
+    txt(OUT.x+0.25,GATE.cy,'t b','start',true).textContent='out';
+
+    /* легенда */
+    runs(txt(0,16.9,'lg'),['out = ',['g','cmp'],' · ',['out','cmp'],'  +  ',
+      ['g','sel'],' · ',['out','sel'],'  +  ',['g','win'],' · ',['out','win']]);
+    txt(0,17.9,'lg').textContent=
+      'Три ветки считаются параллельно по одному KV-кэшу; веса гейта не обязаны давать в сумме единицу.';
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема не построилась. Она должна показывать: '+
+      'один запрос уходит в три параллельные ветки — сжатую (блоки по l = 32, каждый в один токен), '+
+      'выбранную (top-k = 4 блока с несжатыми токенами) и оконную (w = 512 последних токенов); '+
+      'выходы трёх веток сходятся в гейт, малую MLP, которая выдаёт веса g_cmp, g_sel, g_win '+
+      'и складывает их в один выход out.</div>';
+  }
+})();
+</script>
+</html>

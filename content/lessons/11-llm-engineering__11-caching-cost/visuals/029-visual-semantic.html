@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Путь запроса через семантический кэш</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5b6672;
+    --box:#f2f5f9; --stroke:#3c4a5a;
+    --hit:#1a7f4b; --hitbg:#e6f5ec;
+    --miss:#a8560c; --missbg:#fcefe2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161b; --fg:#e8edf3; --muted:#9aa7b4;
+      --box:#1e252e; --stroke:#8fa2b6;
+      --hit:#5fd699; --hitbg:#163023;
+      --miss:#f0a75c; --missbg:#332413;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:12px 8px 16px;}
+  h2{font-size:16px;margin:0 0 8px;font-weight:600;}
+  svg{width:100%;height:auto;max-height:520px;display:block;background:var(--bg);}
+  .fail{padding:10px;color:var(--muted);font-size:14px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Путь запроса через семантический кэш</h2>
+  <div id="host"><svg id="d" viewBox="0 0 900 500" preserveAspectRatio="xMidYMid meet" role="img"
+    aria-label="Схема: запрос, эмбеддинг, сравнение с кэшем, ветка попадания и ветка промаха"></svg></div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    var SVG=document.getElementById("d");
+    var NS="http://www.w3.org/2000/svg";
+
+    // ---- данные схемы (условные единицы) ----
+    var W=6, H=1.1;                    // размер блока в единицах
+    var nodes=[
+      {id:"q",   x:22, y:1,  t:["Запрос ученика","«How do I return an item?»"], k:"n"},
+      {id:"e",   x:22, y:4,  t:["Эмбеддер","текст → числа"], k:"n"},
+      {id:"c",   x:22, y:7,  t:["Сравнение с кэшем","косинусная близость"], k:"d"},
+      {id:"hit", x:10, y:11, t:["Ответ из кэша","50 мс, модель спит"], k:"h"},
+      {id:"api", x:34, y:11, t:["Вызов LLM API","GPT-4o, ≈ $0.0075"], k:"m"},
+      {id:"put", x:34, y:14, t:["Запись в кэш","ответ + его эмбеддинг"], k:"m"},
+      {id:"out", x:22, y:17, t:["Ответ пользователю",""], k:"n"}
+    ];
+    var edges=[
+      {a:"q",  b:"e",  s:"b", e:"t", k:"n", lab:"", side:0},
+      {a:"e",  b:"c",  s:"b", e:"t", k:"n", lab:"20 токенов ≈ $0.0000004", side:1},
+      {a:"c",  b:"hit",s:"l", e:"t", k:"h", lab:"sim > 0.95", side:-1},
+      {a:"c",  b:"api",s:"r", e:"t", k:"m", lab:"sim < 0.95", side:1},
+      {a:"api",b:"put",s:"b", e:"t", k:"m", lab:"", side:0},
+      {a:"put",b:"out",s:"b", e:"r", k:"m", lab:"", side:0},
+      {a:"hit",b:"out",s:"b", e:"l", k:"h", lab:"", side:0}
+    ];
+
+    // ---- единственный перевод координат ----
+    var origin={x:40,y:26}, scale=19.5;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    var LW=2, FS=13, FS2=11.5, PAD=6;  // толщины/кегли/отступ подписи — литералы по правилам
+
+    function el(n,a){var g=document.createElementNS(NS,n);for(var k in a)g.setAttribute(k,a[k]);return g;}
+    function add(n,a){var g=el(n,a);SVG.appendChild(g);return g;}
+    function txt(x,y,s,anchor,size,cls){
+      var t=add("text",{x:x,y:y,"text-anchor":anchor,"font-size":size,
+        "dominant-baseline":"middle",fill:"currentColor"});
+      if(cls)t.setAttribute("class",cls);
+      t.textContent=s;return t;
+    }
+
+    var COL={n:"var(--stroke)",h:"var(--hit)",m:"var(--miss)",d:"var(--stroke)"};
+    var BG ={n:"var(--box)",  h:"var(--hitbg)",m:"var(--missbg)",d:"var(--box)"};
+
+    // маркеры стрелок в трёх цветах
+    var defs=add("defs",{});
+    ["n","h","m"].forEach(function(k){
+      var m=el("marker",{id:"ah-"+k,viewBox:"0 0 10 10",refX:"9",refY:"5",
+        markerWidth:"6",markerHeight:"6",orient:"auto-start-reverse"});
+      m.appendChild(el("path",{d:"M0,0 L10,5 L0,10 z",fill:COL[k]}));
+      defs.appendChild(m);
+    });
+
+    var by={};
+    nodes.forEach(function(n){ by[n.id]=n; });
+
+    // точки привязки блока — все через sx/sy
+    function anchor(n,side){
+      var cx=n.x, cy=n.y, hw=W/2, hh=H/2;
+      if(side==="t") return {x:sx(cx), y:sy(cy-hh)};
+      if(side==="b") return {x:sx(cx), y:sy(cy+hh)};
+      if(side==="l") return {x:sx(cx-hw), y:sy(cy)};
+      return {x:sx(cx+hw), y:sy(cy)};
+    }
+
+    // ---- рёбра (ортогональные) ----
+    edges.forEach(function(e){
+      var A=anchor(by[e.a],e.s), B=anchor(by[e.b],e.e);
+      var d, midx, midy;
+      if(A.x===B.x || A.y===B.y){
+        d="M"+A.x+","+A.y+" L"+B.x+","+B.y;
+        midx=(A.x+B.x)/2; midy=(A.y+B.y)/2;
+      } else if(e.s==="l"||e.s==="r"){
+        d="M"+A.x+","+A.y+" L"+B.x+","+A.y+" L"+B.x+","+B.y;
+        midx=(A.x+B.x)/2; midy=A.y;
+      } else {
+        d="M"+A.x+","+A.y+" L"+A.x+","+B.y+" L"+B.x+","+B.y;
+        midx=A.x; midy=(A.y+B.y)/2;
+      }
+      add("path",{d:d,fill:"none",stroke:COL[e.k],"stroke-width":LW,
+        "stroke-linejoin":"round","marker-end":"url(#ah-"+e.k+")"});
+
+      if(e.lab){
+        if(e.side<0) txt(midx-PAD, midy-PAD, e.lab, "end", FS2).setAttribute("fill",COL[e.k]);
+        else         txt(midx+PAD, midy-PAD, e.lab, "start", FS2).setAttribute("fill",COL[e.k]);
+      }
+    });
+
+    // ---- узлы ----
+    nodes.forEach(function(n){
+      var x=sx(n.x-W/2), y=sy(n.y-H/2), w=sx(n.x+W/2)-x, h=sy(n.y+H/2)-y;
+      if(n.k==="d"){
+        var cx=sx(n.x), cy=sy(n.y);
+        add("path",{d:"M"+cx+","+y+" L"+(x+w)+","+cy+" L"+cx+","+(y+h)+" L"+x+","+cy+" z",
+          fill:BG[n.k],stroke:COL[n.k],"stroke-width":LW});
+      } else {
+        add("rect",{x:x,y:y,width:w,height:h,rx:sx(0.4)-sx(0),
+          fill:BG[n.k],stroke:COL[n.k],"stroke-width":LW});
+      }
+      var cx2=sx(n.x), cy2=sy(n.y);
+      if(n.t[1]){
+        txt(cx2, cy2-sy(0.28)+sy(0), n.t[0], "middle", FS).setAttribute("fill",COL[n.k]);
+        var s=txt(cx2, cy2+sy(0.3)-sy(0), n.t[1], "middle", FS2);
+        s.setAttribute("fill","var(--muted)");
+      } else {
+        txt(cx2, cy2, n.t[0], "middle", FS).setAttribute("fill",COL[n.k]);
+      }
+    });
+
+    // ---- легенда под схемой ----
+    var ly=19.4;
+    var lh=txt(sx(1), sy(ly), "▬ попадание: ответ за 50 мс без вызова модели","start",FS2);
+    lh.setAttribute("fill",COL.h);
+    var lm=txt(sx(1), sy(ly+0.95), "▬ промах: вызов API, ответ оседает в кэше и готовит попадание","start",FS2);
+    lm.setAttribute("fill",COL.m);
+    var lc=txt(sx(1), sy(ly+1.9), "проверка эмбеддингом дешевле вызова в 20 000 раз","start",FS2);
+    lc.setAttribute("fill","var(--muted)");
+
+    // ---- viewBox по содержимому ----
+    var bb=SVG.getBBox();
+    var pad=10;
+    SVG.setAttribute("viewBox",(bb.x-pad)+" "+(bb.y-pad)+" "+(bb.width+2*pad)+" "+(bb.height+2*pad));
+  }catch(err){
+    host.innerHTML='<div class="fail"><b>Схема не построилась.</b> Она должна показывать: '+
+      'запрос ученика идёт в эмбеддер, эмбеддинг сравнивается с кэшем. '+
+      'При sim &gt; 0.95 ответ отдаётся из кэша за 50 мс, модель не вызывается. '+
+      'При sim &lt; 0.95 идёт вызов LLM API (≈ $0.0075), ответ возвращается пользователю '+
+      'и попутно кладётся в кэш вместе с эмбеддингом. '+
+      'Сама проверка стоит ≈ $0.0000004 на 20 токенов — в 20 000 раз дешевле вызова.</div>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <title>Как клиент собирает поток SSE</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --line: steelblue;
+      --soft-line: lightsteelblue;
+      --chunk: aliceblue;
+      --buffer: lavender;
+      --working: honeydew;
+      --status: azure;
+      --artifact: lavenderblush;
+      --completed: mintcream;
+      --accent: darkorange;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-height: 520px;
+      padding: 10px;
+      background: var(--bg);
+    }
+
+    h1 {
+      margin: unset;
+      padding-block-end: 10px;
+      font-size: 20px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      overflow: visible;
+      background: var(--bg);
+      font-size: 14px;
+    }
+
+    .outline {
+      stroke: var(--soft-line);
+      stroke-width: 1px;
+    }
+
+    .flow,
+    .stem,
+    .tick {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .stem,
+    .tick {
+      stroke-width: 1px;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+    }
+
+    .chunk {
+      fill: var(--chunk);
+    }
+
+    .buffer {
+      fill: var(--buffer);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .working {
+      fill: var(--working);
+    }
+
+    .status {
+      fill: var(--status);
+    }
+
+    .artifact {
+      fill: var(--artifact);
+    }
+
+    .completed {
+      fill: var(--completed);
+    }
+
+    .event-dot {
+      fill: var(--bg);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .ink {
+      fill: var(--ink);
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .accent {
+      fill: var(--accent);
+    }
+
+    .title {
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 13px;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    #fallback {
+      margin: unset;
+      padding: 10px;
+      border: 2px solid var(--line);
+      background: var(--buffer);
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    [hidden] {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: black;
+        --ink: whitesmoke;
+        --muted: lightgray;
+        --line: lightskyblue;
+        --soft-line: slategray;
+        --chunk: midnightblue;
+        --buffer: darkslateblue;
+        --working: darkgreen;
+        --status: darkslategray;
+        --artifact: indigo;
+        --completed: darkgreen;
+        --accent: orange;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="diagram-title">Как клиент собирает поток SSE</h1>
+
+    <p id="fallback">
+      Схема должна была показать четыре события по времени: working,
+      текстовый statusUpdate, artifactUpdate с append=true и
+      lastChunk=false, затем completed.
+    </p>
+
+    <svg
+      id="diagram"
+      width="960"
+      height="430"
+      viewBox="0 0 960 430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+      hidden
+    >
+      <desc id="diagram-description">
+        Сетевые куски соединяются во временном буфере. После пустой строки
+        клиент извлекает целое SSE-событие и выдаёт четыре события в исходном
+        порядке: working, текстовый statusUpdate, artifactUpdate и completed.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const data = [
+      {
+        role: "network-label",
+        x: 26,
+        y: 30,
+        text: "сетевые куски",
+        anchor: "start"
+      },
+      {
+        role: "chunk",
+        x: 170,
+        y: 10,
+        w: 285,
+        h: 58,
+        lines: [
+          { x: 188, y: 33, text: 'data: {"artifactUp', className: "mono ink" },
+          { x: 188, y: 53, text: "обрыв посреди JSON", className: "small muted" }
+        ]
+      },
+      {
+        role: "chunk",
+        x: 485,
+        y: 10,
+        w: 250,
+        h: 58,
+        lines: [
+          { x: 503, y: 33, text: 'date":...}', className: "mono ink" },
+          { x: 503, y: 53, text: "следующий кусок", className: "small muted" }
+        ]
+      },
+      {
+        role: "join",
+        x: 470,
+        y: 39,
+        text: "+",
+        anchor: "middle"
+      },
+      {
+        role: "arrow",
+        line: { x1: 312, y1: 70, x2: 312, y2: 88 },
+        head: [[312, 96], [306, 86], [318, 86]]
+      },
+      {
+        role: "arrow",
+        line: { x1: 610, y1: 70, x2: 610, y2: 88 },
+        head: [[610, 96], [604, 86], [616, 86]]
+      },
+      {
+        role: "buffer",
+        x: 115,
+        y: 98,
+        w: 730,
+        h: 68,
+        divider: { x1: 660, y1: 106, x2: 660, y2: 158 },
+        lines: [
+          { x: 138, y: 121, text: "временный буфер", className: "title ink", anchor: "start" },
+          { x: 138, y: 148, text: 'data: {"artifactUpdate":...}', className: "mono ink", anchor: "start" },
+          { x: 752, y: 121, text: "пустая строка", className: "title accent", anchor: "middle" },
+          { x: 752, y: 148, text: "граница SSE-события", className: "small ink", anchor: "middle" }
+        ]
+      },
+      {
+        role: "arrow",
+        line: { x1: 480, y1: 168, x2: 480, y2: 192 },
+        head: [[480, 202], [473, 190], [487, 190]]
+      },
+      {
+        role: "extract-label",
+        x: 500,
+        y: 185,
+        text: "извлечь целую запись",
+        anchor: "start"
+      },
+      {
+        role: "axis",
+        line: { x1: 54, y1: 225, x2: 912, y2: 225 },
+        head: [[922, 225], [908, 217], [908, 233]],
+        label: { x: 54, y: 210, text: "время", anchor: "start" }
+      },
+      {
+        role: "event",
+        className: "working",
+        card: { x: 20, y: 270, w: 205, h: 125 },
+        marker: { x: 122, y: 225, r: 7 },
+        stem: { x1: 122, y1: 234, x2: 122, y2: 268 },
+        lines: [
+          { x: 122, y: 295, text: "working", className: "title ink", anchor: "middle" },
+          { x: 122, y: 325, text: "рабочее состояние", className: "small muted", anchor: "middle" },
+          { x: 122, y: 355, text: "TASK_STATE_WORKING", className: "mono ink", anchor: "middle" }
+        ]
+      },
+      {
+        role: "event",
+        className: "status",
+        card: { x: 245, y: 270, w: 205, h: 125 },
+        marker: { x: 347, y: 225, r: 7 },
+        stem: { x1: 347, y1: 234, x2: 347, y2: 268 },
+        lines: [
+          { x: 347, y: 295, text: "statusUpdate", className: "title ink", anchor: "middle" },
+          { x: 347, y: 325, text: "текстовое обновление", className: "small muted", anchor: "middle" },
+          { x: 347, y: 355, text: "«Ищу документацию…»", className: "small ink", anchor: "middle" }
+        ]
+      },
+      {
+        role: "event",
+        className: "artifact",
+        card: { x: 470, y: 270, w: 205, h: 125 },
+        marker: { x: 572, y: 225, r: 7 },
+        stem: { x1: 572, y1: 234, x2: 572, y2: 268 },
+        lines: [
+          { x: 572, y: 295, text: "artifactUpdate", className: "title ink", anchor: "middle" },
+          { x: 572, y: 328, text: "append: true", className: "mono ink", anchor: "middle" },
+          { x: 572, y: 358, text: "lastChunk: false", className: "mono ink", anchor: "middle" }
+        ]
+      },
+      {
+        role: "event",
+        className: "completed",
+        card: { x: 695, y: 270, w: 205, h: 125 },
+        marker: { x: 797, y: 225, r: 7 },
+        stem: { x1: 797, y1: 234, x2: 797, y2: 268 },
+        lines: [
+          { x: 797, y: 295, text: "completed", className: "title ink", anchor: "middle" },
+          { x: 797, y: 325, text: "поток завершён", className: "small muted", anchor: "middle" },
+          { x: 797, y: 355, text: "TASK_STATE_COMPLETED", className: "mono ink", anchor: "middle" }
+        ]
+      },
+      {
+        role: "fallback-position",
+        x: 480,
+        y: 215
+      }
+    ];
+
+    const origin = { x: 18, y: 10 };
+    const scale = { x: 1, y: 1 };
+    const labelPadding = 10;
+    const lineThickness = 2;
+    const fontSize = 14;
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const svg = document.getElementById("diagram");
+    const fallback = document.getElementById("fallback");
+
+    try {
+      const make = (name, attributes, text) => {
+        const node = document.createElementNS(svg.namespaceURI, name);
+
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+
+        if (text !== undefined) {
+          node.textContent = text;
+        }
+
+        return node;
+      };
+
+      const addText = item => {
+        svg.appendChild(make("text", {
+          x: sx(item.x),
+          y: sy(item.y),
+          class: item.className || "ink",
+          "text-anchor": item.anchor || "start"
+        }, item.text));
+      };
+
+      const addRect = (item, className) => {
+        svg.appendChild(make("rect", {
+          x: sx(item.x),
+          y: sy(item.y),
+          width: sx(item.x + item.w) - sx(item.x),
+          height: sy(item.y + item.h) - sy(item.y),
+          class: className
+        }));
+      };
+
+      const addLine = (item, className) => {
+        svg.appendChild(make("line", {
+          x1: sx(item.x1),
+          y1: sy(item.y1),
+          x2: sx(item.x2),
+          y2: sy(item.y2),
+          class: className
+        }));
+      };
+
+      const addHead = points => {
+        svg.appendChild(make("polygon", {
+          points: points.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" "),
+          class: "arrow-head"
+        }));
+      };
+
+      data.forEach(item => {
+        if (item.role === "chunk") {
+          addRect(item, "chunk outline");
+          item.lines.forEach(addText);
+        }
+
+        if (item.role === "network-label" || item.role === "join") {
+          addText({
+            x: item.x,
+            y: item.y,
+            text: item.text,
+            anchor: item.anchor,
+            className: item.role === "join" ? "title accent" : "small muted"
+          });
+        }
+
+        if (item.role === "arrow") {
+          addLine(item.line, "flow");
+          addHead(item.head);
+        }
+
+        if (item.role === "buffer") {
+          addRect(item, "buffer");
+          addLine(item.divider, "tick");
+          item.lines.forEach(addText);
+        }
+
+        if (item.role === "extract-label") {
+          addText({
+            x: item.x,
+            y: item.y,
+            text: item.text,
+            anchor: item.anchor,
+            className: "small muted"
+          });
+        }
+
+        if (item.role === "axis") {
+          addLine(item.line, "flow");
+          addHead(item.head);
+          addText({
+            x: item.label.x,
+            y: item.label.y,
+            text: item.label.text,
+            anchor: item.label.anchor,
+            className: "small muted"
+          });
+        }
+
+        if (item.role === "event") {
+          addLine(item.stem, "stem");
+          addRect(item.card, `${item.className} outline`);
+
+          svg.appendChild(make("circle", {
+            cx: sx(item.marker.x),
+            cy: sy(item.marker.y),
+            r: sx(item.marker.r) - sx(0),
+            class: "event-dot"
+          }));
+
+          item.lines.forEach(addText);
+        }
+      });
+
+      svg.dataset.labelPadding = labelPadding;
+      svg.dataset.lineThickness = lineThickness;
+      svg.dataset.fontSize = fontSize;
+      fallback.hidden = true;
+      svg.hidden = false;
+    } catch (error) {
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

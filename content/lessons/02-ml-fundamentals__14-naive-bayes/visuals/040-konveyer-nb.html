@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путь от сырого текста до вероятностей классов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #8793a8;
+    --input: #dcecff;
+    --input-stroke: #3976b8;
+    --model: #fff0c7;
+    --model-stroke: #a46c00;
+    --calc: #eee3ff;
+    --calc-stroke: #7650ad;
+    --output: #dff5e5;
+    --output-stroke: #398052;
+    --chip: #edf4ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    margin: unset;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    margin: unset;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--panel);
+  }
+
+  .canvas-bg { fill: var(--panel); }
+  .card { stroke-width: 2px; }
+  .input-card { fill: var(--input); stroke: var(--input-stroke); }
+  .model-card { fill: var(--model); stroke: var(--model-stroke); }
+  .calc-card { fill: var(--calc); stroke: var(--calc-stroke); }
+  .output-card { fill: var(--output); stroke: var(--output-stroke); }
+
+  .tag-input { fill: var(--input-stroke); }
+  .tag-model { fill: var(--model-stroke); }
+  .tag-calc { fill: var(--calc-stroke); }
+  .tag-output { fill: var(--output-stroke); }
+
+  .tag-text {
+    fill: #ffffff;
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .body {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .code {
+    fill: var(--ink);
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+  }
+
+  .probability {
+    fill: var(--output-stroke);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .connector {
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+  }
+
+  .arrowhead { fill: var(--line); }
+  .divider { stroke: var(--line); stroke-width: 1px; }
+  .legend-text { fill: var(--muted); font-size: 12px; }
+  .legend-note { fill: var(--ink); font-size: 13px; }
+  .legend-input { fill: var(--input-stroke); }
+  .legend-model { fill: var(--model-stroke); }
+  .legend-calc { fill: var(--calc-stroke); }
+  .legend-output { fill: var(--output-stroke); }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+    text-align: center;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2c;
+      --ink: #edf2fa;
+      --muted: #b7c2d4;
+      --line: #8190a8;
+      --input: #183552;
+      --input-stroke: #71b6f2;
+      --model: #473718;
+      --model-stroke: #e7b84f;
+      --calc: #34264d;
+      --calc-stroke: #ba96ee;
+      --output: #193c2a;
+      --output-stroke: #72ce91;
+      --chip: #203a58;
+    }
+
+    .tag-text { fill: #101722; }
+  }
+</style>
+</head>
+<body>
+<h1>Путь от сырого текста до вероятностей классов</h1>
+<svg id="diagram" viewBox="0 0 1500 420" width="1500" height="420"
+     preserveAspectRatio="xMidYMid meet"
+     role="img"
+     aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Путь от текста до предсказания Naive Bayes</title>
+  <desc id="diagram-desc">Текст превращается в токены, счётчики, log-баллы и вероятности классов с использованием словаря и log-вероятностей обученной модели.</desc>
+</svg>
+<p id="fallback" hidden>Схема должна была показать цепочку: текст → токены → словарь → вектор счётчиков → log-вероятности слов → log-баллы классов → predict или predict_proba.</p>
+
+<script>
+const diagramData = [
+  {
+    canvasW: 1500, canvasH: 420,
+    origin: { x: 0, y: 0 }, scale: { x: 1, y: 1 },
+    radius: 12, tagInset: 12, tagY: 10, tagH: 24,
+    arrowHead: 8, arrowHalf: 6,
+    legendSize: 14
+  },
+  {
+    kind: "node", x: 25, y: 62, w: 180, h: 244,
+    theme: "input", tag: "КОНКРЕТНОЕ ПИСЬМО", tagW: 148,
+    lines: [
+      { text: "ТЕКСТ", x: 90, y: 58, anchor: "middle", cls: "title" },
+      { text: "«скидка на", x: 90, y: 96, anchor: "middle", cls: "body" },
+      { text: "билеты", x: 90, y: 118, anchor: "middle", cls: "body" },
+      { text: "сегодня»", x: 90, y: 140, anchor: "middle", cls: "body" },
+      { text: "сырая строка", x: 90, y: 202, anchor: "middle", cls: "small" }
+    ]
+  },
+  {
+    kind: "node", x: 235, y: 62, w: 180, h: 244,
+    theme: "input", tag: "КОНКРЕТНОЕ ПИСЬМО", tagW: 148,
+    lines: [
+      { text: "ТОКЕНЫ", x: 90, y: 58, anchor: "middle", cls: "title" },
+      { text: "[скидка]", x: 90, y: 91, anchor: "middle", cls: "code" },
+      { text: "[на]", x: 90, y: 116, anchor: "middle", cls: "code" },
+      { text: "[билеты]", x: 90, y: 141, anchor: "middle", cls: "code" },
+      { text: "[сегодня]", x: 90, y: 166, anchor: "middle", cls: "code" },
+      { text: "разбиение на слова", x: 90, y: 215, anchor: "middle", cls: "small" }
+    ]
+  },
+  {
+    kind: "node", x: 445, y: 62, w: 180, h: 244,
+    theme: "model", tag: "ОБУЧЕННАЯ МОДЕЛЬ", tagW: 148,
+    lines: [
+      { text: "СЛОВАРЬ", x: 90, y: 58, anchor: "middle", cls: "title" },
+      { text: "закреплённый порядок", x: 90, y: 85, anchor: "middle", cls: "small" },
+      { text: "скидка", x: 35, y: 118, anchor: "start", cls: "body" },
+      { text: "на", x: 35, y: 141, anchor: "start", cls: "body" },
+      { text: "билеты", x: 35, y: 164, anchor: "start", cls: "body" },
+      { text: "сегодня", x: 35, y: 187, anchor: "start", cls: "body" },
+      { text: "не строится заново", x: 90, y: 222, anchor: "middle", cls: "small" }
+    ]
+  },
+  {
+    kind: "node", x: 655, y: 62, w: 180, h: 244,
+    theme: "input", tag: "КОНКРЕТНОЕ ПИСЬМО", tagW: 148,
+    lines: [
+      { text: "ВЕКТОР", x: 90, y: 53, anchor: "middle", cls: "title" },
+      { text: "СЧЁТЧИКОВ", x: 90, y: 72, anchor: "middle", cls: "title" },
+      { text: "скидка", x: 30, y: 111, anchor: "start", cls: "body" },
+      { text: "●", x: 147, y: 111, anchor: "middle", cls: "body" },
+      { text: "на", x: 30, y: 137, anchor: "start", cls: "body" },
+      { text: "●", x: 147, y: 137, anchor: "middle", cls: "body" },
+      { text: "билеты", x: 30, y: 163, anchor: "start", cls: "body" },
+      { text: "●", x: 147, y: 163, anchor: "middle", cls: "body" },
+      { text: "сегодня", x: 30, y: 189, anchor: "start", cls: "body" },
+      { text: "●", x: 147, y: 189, anchor: "middle", cls: "body" },
+      { text: "● — одно вхождение", x: 90, y: 222, anchor: "middle", cls: "small" }
+    ]
+  },
+  {
+    kind: "node", x: 865, y: 62, w: 180, h: 244,
+    theme: "model", tag: "ОБУЧЕННАЯ МОДЕЛЬ", tagW: 148,
+    lines: [
+      { text: "LOG-ВЕРОЯТНОСТИ", x: 90, y: 53, anchor: "middle", cls: "title" },
+      { text: "СЛОВ", x: 90, y: 72, anchor: "middle", cls: "title" },
+      { text: "log P(слово | класс)", x: 90, y: 116, anchor: "middle", cls: "code" },
+      { text: "получены из", x: 90, y: 151, anchor: "middle", cls: "body" },
+      { text: "сглаженных частот", x: 90, y: 174, anchor: "middle", cls: "body" },
+      { text: "уже хранятся в модели", x: 90, y: 218, anchor: "middle", cls: "small" }
+    ]
+  },
+  {
+    kind: "node", x: 1075, y: 62, w: 180, h: 244,
+    theme: "calc", tag: "ВЫЧИСЛЯЮТСЯ СЕЙЧАС", tagW: 156,
+    lines: [
+      { text: "LOG-БАЛЛЫ", x: 90, y: 53, anchor: "middle", cls: "title" },
+      { text: "КЛАССОВ", x: 90, y: 72, anchor: "middle", cls: "title" },
+      { text: "log-prior класса", x: 90, y: 107, anchor: "middle", cls: "code" },
+      { text: "+", x: 90, y: 132, anchor: "middle", cls: "body" },
+      { text: "Σ вкладов слов", x: 90, y: 157, anchor: "middle", cls: "code" },
+      { text: "спам: log-балл", x: 90, y: 194, anchor: "middle", cls: "body" },
+      { text: "обычное: log-балл", x: 90, y: 218, anchor: "middle", cls: "body" }
+    ]
+  },
+  {
+    kind: "node", x: 1285, y: 62, w: 190, h: 244,
+    theme: "output", tag: "РЕЗУЛЬТАТ", tagW: 94,
+    lines: [
+      { text: "PREDICT ИЛИ", x: 95, y: 53, anchor: "middle", cls: "title" },
+      { text: "PREDICT_PROBA", x: 95, y: 72, anchor: "middle", cls: "title" },
+      { text: "predict → спам", x: 95, y: 109, anchor: "middle", cls: "code" },
+      { text: "predict_proba", x: 95, y: 148, anchor: "middle", cls: "code" },
+      { text: "спам", x: 32, y: 180, anchor: "start", cls: "body" },
+      { text: "0,82", x: 158, y: 180, anchor: "end", cls: "probability" },
+      { text: "обычное", x: 32, y: 210, anchor: "start", cls: "body" },
+      { text: "0,18", x: 158, y: 210, anchor: "end", cls: "probability" }
+    ]
+  },
+  { kind: "arrow", x1: 209, x2: 231, y: 184 },
+  { kind: "arrow", x1: 419, x2: 441, y: 184 },
+  { kind: "arrow", x1: 629, x2: 651, y: 184 },
+  { kind: "arrow", x1: 839, x2: 861, y: 184 },
+  { kind: "arrow", x1: 1049, x2: 1071, y: 184 },
+  { kind: "arrow", x1: 1259, x2: 1281, y: 184 },
+  {
+    kind: "legend", y: 348,
+    entries: [
+      { x: 72, cls: "legend-input", textX: 96, text: "конкретное письмо" },
+      { x: 410, cls: "legend-model", textX: 434, text: "обученная модель" },
+      { x: 774, cls: "legend-calc", textX: 798, text: "вычисление для письма" },
+      { x: 1188, cls: "legend-output", textX: 1212, text: "ответ модели" }
+    ],
+    noteX: 750, noteY: 396,
+    note: "Словарь и log-вероятности сохранены; текст, счётчики и баллы относятся к текущему письму."
+  }
+];
+
+const [cfg, ...items] = diagramData;
+const origin = cfg.origin;
+const scale = cfg.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function add(tag, attrs, parent) {
+    const element = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      element.setAttribute(name, String(value));
+    }
+    (parent || svg).appendChild(element);
+    return element;
+  }
+
+  function drawText(parent, value, x, y, anchor, cls) {
+    const element = add("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      class: cls
+    }, parent);
+    element.textContent = value;
+  }
+
+  add("rect", {
+    x: sx(cfg.origin.x),
+    y: sy(cfg.origin.y),
+    width: sx(cfg.canvasW) - sx(cfg.origin.x),
+    height: sy(cfg.canvasH) - sy(cfg.origin.y),
+    class: "canvas-bg"
+  });
+
+  for (const item of items) {
+    if (item.kind === "arrow") {
+      add("line", {
+        x1: sx(item.x1),
+        y1: sy(item.y),
+        x2: sx(item.x2 - cfg.arrowHead),
+        y2: sy(item.y),
+        class: "connector"
+      });
+      add("polygon", {
+        points: [
+          sx(item.x2) + "," + sy(item.y),
+          sx(item.x2 - cfg.arrowHead) + "," + sy(item.y - cfg.arrowHalf),
+          sx(item.x2 - cfg.arrowHead) + "," + sy(item.y + cfg.arrowHalf)
+        ].join(" "),
+        class: "arrowhead"
+      });
+    }
+
+    if (item.kind === "node") {
+      const group = add("g", { "aria-label": item.lines[0].text });
+      add("rect", {
+        x: sx(item.x),
+        y: sy(item.y),
+        width: sx(item.x + item.w) - sx(item.x),
+        height: sy(item.y + item.h) - sy(item.y),
+        rx: sx(cfg.radius) - sx(cfg.origin.x),
+        ry: sy(cfg.radius) - sy(cfg.origin.y),
+        class: "card " + item.theme + "-card"
+      }, group);
+      add("rect", {
+        x: sx(item.x + cfg.tagInset),
+        y: sy(item.y + cfg.tagY),
+        width: sx(item.x + cfg.tagInset + item.tagW) - sx(item.x + cfg.tagInset),
+        height: sy(item.y + cfg.tagY + cfg.tagH) - sy(item.y + cfg.tagY),
+        rx: sx(cfg.radius) - sx(cfg.origin.x),
+        ry: sy(cfg.radius) - sy(cfg.origin.y),
+        class: "tag-" + item.theme
+      }, group);
+      drawText(
+        group,
+        item.tag,
+        item.x + cfg.tagInset + item.tagW / scale.x / scale.x,
+        item.y + cfg.tagY + cfg.tagH - cfg.radius / scale.y,
+        "middle",
+        "tag-text"
+      );
+      for (const line of item.lines) {
+        drawText(
+          group,
+          line.text,
+          item.x + line.x,
+          item.y + line.y,
+          line.anchor,
+          line.cls
+        );
+      }
+    }
+
+    if (item.kind === "legend") {
+      add("line", {
+        x1: sx(cfg.tagInset),
+        y1: sy(item.y - cfg.tagH),
+        x2: sx(cfg.canvasW - cfg.tagInset),
+        y2: sy(item.y - cfg.tagH),
+        class: "divider"
+      });
+      for (const entry of item.entries) {
+        add("rect", {
+          x: sx(entry.x),
+          y: sy(item.y),
+          width: sx(entry.x + cfg.legendSize) - sx(entry.x),
+          height: sy(item.y + cfg.legendSize) - sy(item.y),
+          rx: sx(cfg.radius / scale.x) - sx(cfg.origin.x),
+          ry: sy(cfg.radius / scale.y) - sy(cfg.origin.y),
+          class: entry.cls
+        });
+        drawText(svg, entry.text, entry.textX, item.y + cfg.legendSize, "start", "legend-text");
+      }
+      drawText(svg, item.note, item.noteX, item.noteY, "middle", "legend-note");
+    }
+  }
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

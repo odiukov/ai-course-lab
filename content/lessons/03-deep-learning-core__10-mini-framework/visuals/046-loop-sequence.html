@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Жизненный цикл градиента на одном шаге</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f6f8fc;
+      --panel: #ffffff;
+      --card: #f8faff;
+      --card-strong: #eef3ff;
+      --text: #172033;
+      --muted: #5d687e;
+      --line: #aeb9ce;
+      --blue: #356ae6;
+      --blue-soft: #e7efff;
+      --violet: #7651d8;
+      --violet-soft: #efeaff;
+      --rose: #c43c73;
+      --rose-soft: #fde9f1;
+      --green: #168360;
+      --green-soft: #e2f5ed;
+      --loop: #68758c;
+      --shadow: #dce2ed;
+      --error: #9b294d;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --panel: #171c27;
+        --card: #1c2331;
+        --card-strong: #222c40;
+        --text: #edf1fa;
+        --muted: #aeb8ca;
+        --line: #56647c;
+        --blue: #79a4ff;
+        --blue-soft: #23375d;
+        --violet: #b39afa;
+        --violet-soft: #382e59;
+        --rose: #f181ae;
+        --rose-soft: #512b3d;
+        --green: #66d7ad;
+        --green-soft: #204b3d;
+        --loop: #93a0b6;
+        --shadow: #0b0e14;
+        --error: #ff9dbc;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    .phase-label {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .phase-line,
+    .connector,
+    .loop-line {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .phase-line {
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .connector {
+      stroke: var(--blue);
+      stroke-width: 3px;
+    }
+
+    .connector.loss {
+      stroke: var(--violet);
+    }
+
+    .connector.backward {
+      stroke: var(--rose);
+    }
+
+    .connector.update {
+      stroke: var(--green);
+    }
+
+    .loop-line {
+      stroke: var(--loop);
+      stroke-width: 3px;
+      stroke-dasharray: 8px 7px;
+    }
+
+    .card {
+      fill: var(--card);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .card.backward {
+      fill: var(--rose-soft);
+      stroke: var(--rose);
+    }
+
+    .card.update {
+      fill: var(--green-soft);
+      stroke: var(--green);
+    }
+
+    .card.zero {
+      fill: var(--card-strong);
+      stroke: var(--blue);
+    }
+
+    .divider {
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .icon-disc {
+      fill: var(--blue-soft);
+      stroke: var(--blue);
+      stroke-width: 2px;
+    }
+
+    .icon-disc.loss {
+      fill: var(--violet-soft);
+      stroke: var(--violet);
+    }
+
+    .icon-disc.backward {
+      fill: var(--rose-soft);
+      stroke: var(--rose);
+    }
+
+    .icon-disc.update {
+      fill: var(--green-soft);
+      stroke: var(--green);
+    }
+
+    .icon-text {
+      fill: var(--blue);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .icon-text.loss {
+      fill: var(--violet);
+    }
+
+    .icon-text.backward {
+      fill: var(--rose);
+    }
+
+    .icon-text.update {
+      fill: var(--green);
+    }
+
+    .card-title {
+      fill: var(--text);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .card-copy {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .badge {
+      fill: var(--blue-soft);
+      stroke: var(--blue);
+      stroke-width: 1px;
+    }
+
+    .badge.backward {
+      fill: var(--rose-soft);
+      stroke: var(--rose);
+    }
+
+    .badge.update {
+      fill: var(--green-soft);
+      stroke: var(--green);
+    }
+
+    .badge-text {
+      fill: var(--text);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .loop-label {
+      fill: var(--loop);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .summary-box {
+      fill: var(--card-strong);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .summary {
+      fill: var(--text);
+      font-size: 15px;
+    }
+
+    .summary-accent {
+      fill: var(--rose);
+      font-weight: bold;
+    }
+
+    .fallback {
+      color: var(--error);
+      font-size: 16px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1>Жизненный цикл градиента на одном шаге</h1>
+    <svg
+      id="scene"
+      viewBox="0 0 1180 430"
+      width="1180"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Жизненный цикл градиента на одном шаге</title>
+      <desc id="svg-description">Обнуление градиентов, прямой проход, MSE, градиент loss, backward, шаг SGD и переход к следующему примеру.</desc>
+    </svg>
+    <p id="fallback" class="fallback" hidden>
+      Схема должна была показать путь: zero gradients → forward → MSE →
+      градиент loss → backward → SGD step → следующий пример.
+    </p>
+  </main>
+
+  <script>
+    const data = [
+      {
+        kind: "config",
+        originX: 20,
+        originY: 0,
+        scaleX: 1,
+        scaleY: 1,
+        zero: 0,
+        cardWidth: 160,
+        cardHeight: 224,
+        cardY: 48,
+        corner: 14,
+        iconY: 82,
+        iconRadius: 24,
+        titleY: 115,
+        titleGap: 19,
+        dividerY: 143,
+        copyY: 170,
+        copyGap: 25,
+        badgeY: 222,
+        badgeHeight: 34,
+        badgeInset: 13,
+        badgeCorner: 10,
+        connectorY: 159,
+        arrowLength: 10,
+        arrowHalf: 6,
+        phaseY: 25,
+        phaseLineY: 31,
+        phaseStart: 5,
+        phaseEnd: 1095,
+        loopStartX: 1020,
+        loopStartY: 272,
+        loopY: 326,
+        loopEndX: 80,
+        loopEndY: 272,
+        loopLabelX: 550,
+        loopLabelY: 317,
+        resetLabelX: 102,
+        resetLabelY: 350,
+        summaryX: 90,
+        summaryY: 370,
+        summaryWidth: 920,
+        summaryHeight: 42,
+        summaryCorner: 12,
+        summaryTextX: 550,
+        summaryTextY: 396,
+        dash: 8,
+        dashGap: 7,
+        last: -1,
+        beforeLast: -2
+      },
+      {
+        kind: "stage",
+        id: "zero",
+        x: 0,
+        w: 160,
+        className: "zero",
+        icon: "ZERO",
+        titles: [
+          { text: "Обнулить", y: 108 },
+          { text: "градиенты", y: 127 }
+        ],
+        copy: [
+          { text: "поле grad", y: 171 },
+          { text: "становится пустым", y: 196 }
+        ],
+        badge: "вес: 0,40"
+      },
+      {
+        kind: "stage",
+        id: "forward",
+        x: 188,
+        w: 160,
+        className: "",
+        icon: "→",
+        titles: [
+          { text: "Прямой проход", y: 118 }
+        ],
+        copy: [
+          { text: "строится", y: 171 },
+          { text: "предсказание", y: 196 }
+        ],
+        badge: "вес: 0,40"
+      },
+      {
+        kind: "stage",
+        id: "mse",
+        x: 376,
+        w: 160,
+        className: "",
+        icon: "MSE",
+        titles: [
+          { text: "MSE", y: 118 }
+        ],
+        copy: [
+          { text: "ошибка", y: 171 },
+          { text: "измерена", y: 196 }
+        ],
+        badge: "вес: 0,40"
+      },
+      {
+        kind: "stage",
+        id: "loss-gradient",
+        x: 564,
+        w: 160,
+        className: "loss",
+        icon: "∂loss",
+        titles: [
+          { text: "Градиент loss", y: 118 }
+        ],
+        copy: [
+          { text: "сигнал идёт", y: 171 },
+          { text: "от ошибки", y: 196 }
+        ],
+        badge: "вес: 0,40"
+      },
+      {
+        kind: "stage",
+        id: "backward",
+        x: 752,
+        w: 160,
+        className: "backward",
+        icon: "BACK",
+        titles: [
+          { text: "backward", y: 118 }
+        ],
+        copy: [
+          { text: "поле grad", y: 171 },
+          { text: "получает −0,08", y: 196 }
+        ],
+        badge: "вес: 0,40"
+      },
+      {
+        kind: "stage",
+        id: "sgd",
+        x: 940,
+        w: 160,
+        className: "update",
+        icon: "SGD",
+        titles: [
+          { text: "Шаг SGD", y: 118 }
+        ],
+        copy: [
+          { text: "читает пару", y: 171 },
+          { text: "вес + grad", y: 196 }
+        ],
+        badge: "вес изменён"
+      },
+      { kind: "connection", from: "zero", to: "forward", className: "" },
+      { kind: "connection", from: "forward", to: "mse", className: "" },
+      { kind: "connection", from: "mse", to: "loss-gradient", className: "loss" },
+      { kind: "connection", from: "loss-gradient", to: "backward", className: "backward" },
+      { kind: "connection", from: "backward", to: "sgd", className: "update" },
+      {
+        kind: "loop",
+        points: [
+          { x: 1020, y: 272 },
+          { x: 1020, y: 326 },
+          { x: 80, y: 326 },
+          { x: 80, y: 272 }
+        ]
+      }
+    ];
+
+    const cfg = data.find(item => item.kind === "config");
+    const origin = Object.freeze({ x: cfg.originX, y: cfg.originY });
+    const scale = Object.freeze({ x: cfg.scaleX, y: cfg.scaleY });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("scene");
+      const namespace = svg.namespaceURI;
+      const stages = data.filter(item => item.kind === "stage");
+      const connections = data.filter(item => item.kind === "connection");
+      const loop = data.find(item => item.kind === "loop");
+
+      const make = (name, attributes, className) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const addText = (parent, value, x, y, className, anchor) => {
+        const node = make(
+          "text",
+          {
+            x: sx(x),
+            y: sy(y),
+            "text-anchor": anchor
+          },
+          className
+        );
+        node.textContent = value;
+        parent.appendChild(node);
+        return node;
+      };
+
+      const arrowHead = (parent, from, to, className) => {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = to.x - ux * cfg.arrowLength;
+        const baseY = to.y - uy * cfg.arrowLength;
+        const leftX = baseX - uy * cfg.arrowHalf;
+        const leftY = baseY + ux * cfg.arrowHalf;
+        const rightX = baseX + uy * cfg.arrowHalf;
+        const rightY = baseY - ux * cfg.arrowHalf;
+        const points = [
+          `${sx(to.x)},${sy(to.y)}`,
+          `${sx(leftX)},${sy(leftY)}`,
+          `${sx(rightX)},${sy(rightY)}`
+        ].join(" ");
+        parent.appendChild(make("polygon", { points }, className));
+      };
+
+      const phase = make("g", {}, "");
+      addText(
+        phase,
+        "ОДИН ШАГ ОБУЧЕНИЯ",
+        (cfg.phaseStart + cfg.phaseEnd) / cfg.scaleX,
+        cfg.phaseY,
+        "phase-label",
+        "middle"
+      );
+      phase.appendChild(
+        make(
+          "line",
+          {
+            x1: sx(cfg.phaseStart),
+            y1: sy(cfg.phaseLineY),
+            x2: sx(cfg.phaseEnd),
+            y2: sy(cfg.phaseLineY)
+          },
+          "phase-line"
+        )
+      );
+      svg.appendChild(phase);
+
+      connections.forEach(connection => {
+        const fromStage = stages.find(stage => stage.id === connection.from);
+        const toStage = stages.find(stage => stage.id === connection.to);
+        const from = { x: fromStage.x + fromStage.w, y: cfg.connectorY };
+        const to = { x: toStage.x, y: cfg.connectorY };
+        const className = `connector ${connection.className}`.trim();
+        svg.appendChild(
+          make(
+            "line",
+            {
+              x1: sx(from.x),
+              y1: sy(from.y),
+              x2: sx(to.x),
+              y2: sy(to.y)
+            },
+            className
+          )
+        );
+        arrowHead(svg, from, to, className);
+      });
+
+      stages.forEach(stage => {
+        const group = make("g", {}, "");
+        const cardClass = `card ${stage.className}`.trim();
+        const iconClass = `icon-disc ${stage.className}`.trim();
+        const iconTextClass = `icon-text ${stage.className}`.trim();
+        const badgeClass = `badge ${stage.className}`.trim();
+        const centerX = stage.x + stage.w / cfg.scaleX;
+
+        group.appendChild(
+          make(
+            "rect",
+            {
+              x: sx(stage.x),
+              y: sy(cfg.cardY),
+              width: sx(stage.x + stage.w) - sx(stage.x),
+              height: sy(cfg.cardY + cfg.cardHeight) - sy(cfg.cardY),
+              rx: sx(cfg.corner) - sx(cfg.zero),
+              ry: sy(cfg.corner) - sy(cfg.zero)
+            },
+            cardClass
+          )
+        );
+
+        group.appendChild(
+          make(
+            "circle",
+            {
+              cx: sx(centerX),
+              cy: sy(cfg.iconY),
+              r: sx(cfg.iconRadius) - sx(cfg.zero)
+            },
+            iconClass
+          )
+        );
+
+        addText(group, stage.icon, centerX, cfg.iconY, iconTextClass, "middle")
+          .setAttribute("dominant-baseline", "middle");
+
+        stage.titles.forEach(title => {
+          addText(group, title.text, centerX, title.y, "card-title", "middle");
+        });
+
+        group.appendChild(
+          make(
+            "line",
+            {
+              x1: sx(stage.x + cfg.badgeInset),
+              y1: sy(cfg.dividerY),
+              x2: sx(stage.x + stage.w - cfg.badgeInset),
+              y2: sy(cfg.dividerY)
+            },
+            "divider"
+          )
+        );
+
+        stage.copy.forEach(line => {
+          addText(group, line.text, centerX, line.y, "card-copy", "middle");
+        });
+
+        group.appendChild(
+          make(
+            "rect",
+            {
+              x: sx(stage.x + cfg.badgeInset),
+              y: sy(cfg.badgeY),
+              width:
+                sx(stage.x + stage.w - cfg.badgeInset) -
+                sx(stage.x + cfg.badgeInset),
+              height: sy(cfg.badgeY + cfg.badgeHeight) - sy(cfg.badgeY),
+              rx: sx(cfg.badgeCorner) - sx(cfg.zero),
+              ry: sy(cfg.badgeCorner) - sy(cfg.zero)
+            },
+            badgeClass
+          )
+        );
+
+        addText(
+          group,
+          stage.badge,
+          centerX,
+          cfg.badgeY + cfg.badgeHeight / cfg.scaleX,
+          "badge-text",
+          "middle"
+        ).setAttribute("dominant-baseline", "middle");
+
+        svg.appendChild(group);
+      });
+
+      const loopPoints = loop.points
+        .map(point => `${sx(point.x)},${sy(point.y)}`)
+        .join(" ");
+
+      svg.appendChild(
+        make(
+          "polyline",
+          {
+            points: loopPoints,
+            "stroke-dasharray":
+              `${sx(cfg.dash) - sx(cfg.zero)} ${sx(cfg.dashGap) - sx(cfg.zero)}`
+          },
+          "loop-line"
+        )
+      );
+
+      arrowHead(
+        svg,
+        loop.points.at(cfg.beforeLast),
+        loop.points.at(cfg.last),
+        "loop-line"
+      );
+
+      addText(
+        svg,
+        "после SGD начинается следующий пример",
+        cfg.loopLabelX,
+        cfg.loopLabelY,
+        "loop-label",
+        "middle"
+      );
+
+      addText(
+        svg,
+        "сначала снова: zero gradients",
+        cfg.resetLabelX,
+        cfg.resetLabelY,
+        "loop-label",
+        "start"
+      );
+
+      svg.appendChild(
+        make(
+          "rect",
+          {
+            x: sx(cfg.summaryX),
+            y: sy(cfg.summaryY),
+            width: sx(cfg.summaryX + cfg.summaryWidth) - sx(cfg.summaryX),
+            height: sy(cfg.summaryY + cfg.summaryHeight) - sy(cfg.summaryY),
+            rx: sx(cfg.summaryCorner) - sx(cfg.zero),
+            ry: sy(cfg.summaryCorner) - sy(cfg.zero)
+          },
+          "summary-box"
+        )
+      );
+
+      const summary = addText(
+        svg,
+        "",
+        cfg.summaryTextX,
+        cfg.summaryTextY,
+        "summary",
+        "middle"
+      );
+
+      const summaryParts = [
+        { text: "backward записывает градиент", className: "summary-accent" },
+        { text: "  →  SGD использует  →  zero gradients очищает", className: "" }
+      ];
+
+      summaryParts.forEach(part => {
+        const span = make("tspan", {}, part.className);
+        span.textContent = part.text;
+        summary.appendChild(span);
+      });
+    } catch (error) {
+      const svg = document.getElementById("scene");
+      const fallback = document.getElementById("fallback");
+      svg.replaceChildren();
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

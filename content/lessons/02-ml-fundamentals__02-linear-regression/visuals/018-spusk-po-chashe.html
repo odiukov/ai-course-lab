@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как градиентный спуск ищет минимум</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #596579;
+    --grid: #cbd5e1;
+    --axis: #475569;
+    --high: #dbeafe;
+    --middle: #93c5fd;
+    --low: #3b82f6;
+    --route: #ea580c;
+    --route-fill: #fff7ed;
+    --minimum: #15803d;
+    --warning: #dc2626;
+    --slow: #7c3aed;
+    --box: #e2e8f0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--box);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 12px 18px 8px;
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 455px;
+    background: var(--panel);
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .muted { fill: var(--muted); }
+  .axis { stroke: var(--axis); fill: none; }
+  .tick { stroke: var(--axis); }
+  .panel-frame { fill: none; stroke: var(--box); }
+  .contour { fill: none; }
+  .outer { stroke: var(--high); }
+  .middle { stroke: var(--middle); }
+  .inner { stroke: var(--low); }
+  .floor { fill: var(--high); stroke: var(--low); }
+  .route { stroke: var(--route); fill: none; }
+  .route-head { fill: var(--route); }
+  .route-dot { fill: var(--route-fill); stroke: var(--route); }
+  .minimum { fill: var(--minimum); stroke: var(--panel); }
+  .large { stroke: var(--warning); fill: none; }
+  .large-head { fill: var(--warning); }
+  .large-dot { fill: var(--panel); stroke: var(--warning); }
+  .small { stroke: var(--slow); fill: none; }
+  .small-head { fill: var(--slow); }
+  .small-dot { fill: var(--panel); stroke: var(--slow); }
+  .section { stroke: var(--grid); fill: none; }
+  .guide { stroke: var(--grid); fill: none; stroke-dasharray: 5px 5px; }
+  .fallback {
+    margin: 12px 18px 18px;
+    color: var(--warning);
+    font-size: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0b1120;
+      --panel: #111827;
+      --ink: #e5edf8;
+      --muted: #a9b6ca;
+      --grid: #334155;
+      --axis: #94a3b8;
+      --high: #1e3a5f;
+      --middle: #2563a7;
+      --low: #60a5fa;
+      --route: #fb923c;
+      --route-fill: #431f0d;
+      --minimum: #4ade80;
+      --warning: #f87171;
+      --slow: #c084fc;
+      --box: #334155;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Как градиентный спуск ищет минимум</h1>
+  <svg id="diagram" viewBox="0 0 960 455"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Траектория градиентного спуска по чаше MSE</title>
+    <desc id="svg-desc">Точки движутся от w равно нулю и b равно нулю к минимуму около w равно трём и b равно семи. Справа сравнены слишком большой и слишком маленький шаг.</desc>
+  </svg>
+  <p id="fallback" class="fallback" hidden>Схема должна была показать путь от w = 0, b = 0 к минимуму около w = 3, b = 7 и сравнить слишком большой и слишком маленький шаг.</p>
+</main>
+
+<script>
+const D = Object.freeze({
+  canvas: { width: 960, height: 455 },
+  index: { first: 0 },
+  style: {
+    thin: 1.5, normal: 2, strong: 3, point: 5, minimum: 7,
+    arrowLength: 0.16, arrowWidth: 0.10,
+    fontSmall: 13, fontNormal: 15, fontStrong: 16
+  },
+  offsets: {
+    axis: 10, tick: 7, label: 12, far: 18, high: 22,
+    minX: 14, minY: -16, noteX: 16, noteY: -22
+  },
+  main: {
+    axisW: { a: { x: 0, y: 0 }, b: { x: 5.65, y: 0 } },
+    axisB: { a: { x: 0, y: 0 }, b: { x: 0, y: 12.35 } },
+    wTick: { x: 3, y: 0, half: 0.14 },
+    bTick: { x: 0, y: 7, half: 0.14 },
+    center: { x: 3, y: 7 },
+    contours: [
+      { rx: 2.72, ry: 5.92, cls: "outer", width: 2 },
+      { rx: 2.22, ry: 4.72, cls: "outer", width: 2 },
+      { rx: 1.73, ry: 3.55, cls: "middle", width: 2 },
+      { rx: 1.24, ry: 2.43, cls: "middle", width: 2 },
+      { rx: 0.76, ry: 1.40, cls: "inner", width: 2 },
+      { rx: 0.34, ry: 0.58, cls: "floor", width: 2 }
+    ],
+    route: [
+      { x: 0, y: 0 },
+      { x: 0.78, y: 2.18 },
+      { x: 1.48, y: 4.02 },
+      { x: 2.04, y: 5.34 },
+      { x: 2.45, y: 6.17 },
+      { x: 2.72, y: 6.65 },
+      { x: 2.89, y: 6.88 },
+      { x: 3, y: 7 }
+    ],
+    labels: {
+      w: { x: 5.65, y: 0, dx: 10, dy: 22, anchor: "start", text: "w" },
+      b: { x: 0, y: 12.35, dx: -10, dy: 5, anchor: "end", text: "b" },
+      zero: { x: 0, y: 0, dx: -10, dy: 20, anchor: "end", text: "0" },
+      three: { x: 3, y: 0, dx: 0, dy: 22, anchor: "middle", text: "3" },
+      seven: { x: 0, y: 7, dx: -12, dy: 5, anchor: "end", text: "7" },
+      high: { x: 0.44, y: 11.42, dx: 8, dy: -4, anchor: "start", text: "MSE выше" },
+      start: { x: 0, y: 0, dx: 16, dy: -14, anchor: "start", text: "старт: w = 0, b = 0" },
+      recalc: { x: 1.48, y: 4.02, dx: 18, dy: -22, anchor: "start", text: "наклон измеряется заново" },
+      minimum: { x: 3, y: 7, dx: 14, dy: -16, anchor: "start", text: "минимум: w ≈ 3, b ≈ 7" },
+      mainTitle: { x: 2.82, y: 12.38, dx: 0, dy: 0, anchor: "middle", text: "умеренный learning rate" }
+    }
+  },
+  panels: [
+    {
+      frame: [
+        { x: 6.25, y: 0.22 }, { x: 9.62, y: 0.22 },
+        { x: 9.62, y: 12.62 }, { x: 6.25, y: 12.62 }
+      ],
+      title: { x: 7.94, y: 11.92, dx: 0, dy: 0, anchor: "middle", text: "слишком большой шаг" },
+      caption: { x: 7.94, y: 0.72, dx: 0, dy: 0, anchor: "middle", text: "перелёт через дно" },
+      curve: [
+        { x: 6.55, y: 10.08 }, { x: 6.82, y: 8.04 },
+        { x: 7.15, y: 6.15 }, { x: 7.50, y: 4.55 },
+        { x: 7.82, y: 3.50 }, { x: 7.94, y: 3.30 },
+        { x: 8.08, y: 3.52 }, { x: 8.40, y: 4.58 },
+        { x: 8.76, y: 6.18 }, { x: 9.08, y: 8.06 },
+        { x: 9.34, y: 10.10 }
+      ],
+      minimum: { x: 7.94, y: 3.30 },
+      route: [
+        { x: 6.62, y: 9.58 }, { x: 9.18, y: 8.84 },
+        { x: 6.92, y: 7.62 }, { x: 8.96, y: 6.72 },
+        { x: 7.18, y: 5.83 }
+      ],
+      lineClass: "large",
+      headClass: "large-head",
+      dotClass: "large-dot"
+    },
+    {
+      frame: [
+        { x: 9.92, y: 0.22 }, { x: 13.48, y: 0.22 },
+        { x: 13.48, y: 12.62 }, { x: 9.92, y: 12.62 }
+      ],
+      title: { x: 11.70, y: 11.92, dx: 0, dy: 0, anchor: "middle", text: "слишком маленький шаг" },
+      caption: { x: 11.70, y: 0.72, dx: 0, dy: 0, anchor: "middle", text: "движение едва заметно" },
+      curve: [
+        { x: 10.18, y: 10.08 }, { x: 10.48, y: 8.04 },
+        { x: 10.82, y: 6.15 }, { x: 11.18, y: 4.55 },
+        { x: 11.54, y: 3.50 }, { x: 11.70, y: 3.30 },
+        { x: 11.86, y: 3.52 }, { x: 12.22, y: 4.58 },
+        { x: 12.60, y: 6.18 }, { x: 12.94, y: 8.06 },
+        { x: 13.22, y: 10.10 }
+      ],
+      minimum: { x: 11.70, y: 3.30 },
+      route: [
+        { x: 10.28, y: 9.54 }, { x: 10.39, y: 8.90 },
+        { x: 10.51, y: 8.29 }, { x: 10.64, y: 7.70 },
+        { x: 10.78, y: 7.14 }, { x: 10.93, y: 6.62 },
+        { x: 11.09, y: 6.13 }
+      ],
+      lineClass: "small",
+      headClass: "small-head",
+      dotClass: "small-dot"
+    }
+  ]
+});
+const origin = Object.freeze({ x: 70, y: 420 });
+const scale = Object.freeze({ x: 64, y: -30 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  function node(tag, attrs, parent, content) {
+    const item = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([name, value]) => item.setAttribute(name, value));
+    if (content !== undefined) item.textContent = content;
+    parent.appendChild(item);
+    return item;
+  }
+
+  function line(a, b, cls, width, parent) {
+    return node("line", {
+      x1: sx(a.x), y1: sy(a.y), x2: sx(b.x), y2: sy(b.y),
+      class: cls, "stroke-width": width, "stroke-linecap": "round"
+    }, parent);
+  }
+
+  function polygon(points, cls, width, parent) {
+    return node("polygon", {
+      points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: cls, "stroke-width": width, "stroke-linejoin": "round"
+    }, parent);
+  }
+
+  function text(label, cls, size, weight, parent) {
+    return node("text", {
+      x: sx(label.x), y: sy(label.y), dx: label.dx, dy: label.dy,
+      "text-anchor": label.anchor, class: cls,
+      "font-size": size, "font-weight": weight
+    }, parent, label.text);
+  }
+
+  function dot(point, radius, cls, width, parent) {
+    return node("circle", {
+      cx: sx(point.x), cy: sy(point.y),
+      r: Math.abs(sx(point.x + radius) - sx(point.x)),
+      class: cls, "stroke-width": width
+    }, parent);
+  }
+
+  function arrow(a, b, cls, headClass, width, parent) {
+    line(a, b, cls, width, parent);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const base = {
+      x: b.x - ux * D.style.arrowLength,
+      y: b.y - uy * D.style.arrowLength
+    };
+    const left = {
+      x: base.x - uy * D.style.arrowWidth,
+      y: base.y + ux * D.style.arrowWidth
+    };
+    const right = {
+      x: base.x + uy * D.style.arrowWidth,
+      y: base.y - ux * D.style.arrowWidth
+    };
+    polygon([b, left, right], headClass, width, parent);
+  }
+
+  function route(points, lineClass, headClass, dotClass, parent) {
+    points.forEach((point, index) => {
+      if (index !== D.index.first) {
+        arrow(points[index - D.style.thin / D.style.thin], point,
+          lineClass, headClass, D.style.strong, parent);
+      }
+      dot(point, D.style.point / scale.x, dotClass, D.style.normal, parent);
+    });
+  }
+
+  const contours = node("g", { "aria-label": "Контуры чаши MSE" }, svg);
+  D.main.contours.forEach(contour => {
+    node("ellipse", {
+      cx: sx(D.main.center.x),
+      cy: sy(D.main.center.y),
+      rx: Math.abs(sx(D.main.center.x + contour.rx) - sx(D.main.center.x)),
+      ry: Math.abs(sy(D.main.center.y + contour.ry) - sy(D.main.center.y)),
+      class: `contour ${contour.cls}`,
+      "stroke-width": contour.width
+    }, contours);
+  });
+
+  const axes = node("g", { "aria-label": "Оси параметров w и b" }, svg);
+  line(D.main.axisW.a, D.main.axisW.b, "axis", D.style.normal, axes);
+  line(D.main.axisB.a, D.main.axisB.b, "axis", D.style.normal, axes);
+  line(
+    { x: D.main.wTick.x, y: D.main.wTick.y - D.main.wTick.half },
+    { x: D.main.wTick.x, y: D.main.wTick.y + D.main.wTick.half },
+    "tick", D.style.normal, axes
+  );
+  line(
+    { x: D.main.bTick.x - D.main.bTick.half, y: D.main.bTick.y },
+    { x: D.main.bTick.x + D.main.bTick.half, y: D.main.bTick.y },
+    "tick", D.style.normal, axes
+  );
+
+  text(D.main.labels.w, "", D.style.fontStrong, "bold", axes);
+  text(D.main.labels.b, "", D.style.fontStrong, "bold", axes);
+  text(D.main.labels.zero, "muted", D.style.fontSmall, "normal", axes);
+  text(D.main.labels.three, "muted", D.style.fontSmall, "normal", axes);
+  text(D.main.labels.seven, "muted", D.style.fontSmall, "normal", axes);
+  text(D.main.labels.high, "muted", D.style.fontSmall, "normal", axes);
+  text(D.main.labels.mainTitle, "", D.style.fontStrong, "bold", axes);
+
+  const descent = node("g", { "aria-label": "Последовательные шаги к минимуму" }, svg);
+  route(D.main.route, "route", "route-head", "route-dot", descent);
+  dot(D.main.center, D.style.minimum / scale.x,
+    "minimum", D.style.normal, descent);
+  text(D.main.labels.start, "", D.style.fontNormal, "bold", descent);
+  text(D.main.labels.recalc, "muted", D.style.fontSmall, "normal", descent);
+  text(D.main.labels.minimum, "", D.style.fontNormal, "bold", descent);
+
+  D.panels.forEach(panel => {
+    const group = node("g", { "aria-label": panel.title.text }, svg);
+    polygon(panel.frame, "panel-frame", D.style.thin, group);
+    node("polyline", {
+      points: panel.curve.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: "section", "stroke-width": D.style.normal,
+      "stroke-linecap": "round", "stroke-linejoin": "round"
+    }, group);
+    line(
+      { x: panel.minimum.x, y: panel.minimum.y },
+      { x: panel.minimum.x, y: panel.minimum.y + D.style.arrowLength * D.style.strong },
+      "guide", D.style.thin, group
+    );
+    dot(panel.minimum, D.style.minimum / scale.x,
+      "minimum", D.style.normal, group);
+    route(panel.route, panel.lineClass, panel.headClass, panel.dotClass, group);
+    text(panel.title, "", D.style.fontNormal, "bold", group);
+    text(panel.caption, "muted", D.style.fontSmall, "normal", group);
+  });
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

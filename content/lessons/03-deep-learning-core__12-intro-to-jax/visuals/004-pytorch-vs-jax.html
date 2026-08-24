@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Состояние в PyTorch и поток данных в JAX</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #eef2f7;
+    --canvas: #ffffff;
+    --text: #172033;
+    --muted: #58657a;
+    --line: #718096;
+    --divider: #c7d0dd;
+    --left-panel: #f4f7fb;
+    --right-panel: #f2faf7;
+    --blue: #2563a9;
+    --blue-soft: #dcecff;
+    --blue-strong: #b8d8ff;
+    --green: #147a62;
+    --green-soft: #d9f3e9;
+    --green-strong: #b8ead8;
+    --old: #e5eaf1;
+    --neutral: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111720;
+      --canvas: #18202b;
+      --text: #eef4ff;
+      --muted: #b4c0d1;
+      --line: #99a7ba;
+      --divider: #455165;
+      --left-panel: #1d2938;
+      --right-panel: #192d2a;
+      --blue: #78b7ff;
+      --blue-soft: #223b58;
+      --blue-strong: #2d5279;
+      --green: #65d6b5;
+      --green-soft: #1d443b;
+      --green-strong: #286052;
+      --old: #303b4b;
+      --neutral: #202a37;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: unset;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  main {
+    background: var(--canvas);
+  }
+
+  header {
+    padding: 12px 22px;
+    background: var(--canvas);
+    border-bottom: 2px solid var(--divider);
+  }
+
+  h1,
+  header p {
+    margin: unset;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  header p {
+    padding-top: 4px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 400px;
+    background: var(--canvas);
+  }
+
+  text {
+    fill: var(--text);
+    dominant-baseline: alphabetic;
+    pointer-events: none;
+  }
+
+  .section {
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .label {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .small {
+    font-size: 13px;
+    fill: var(--muted);
+  }
+
+  .caption {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .panel-left {
+    fill: var(--left-panel);
+    stroke: var(--blue);
+    stroke-width: 2px;
+  }
+
+  .panel-right {
+    fill: var(--right-panel);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .model {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 3px;
+  }
+
+  .state-old {
+    fill: var(--old);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .state-new {
+    fill: var(--blue-strong);
+    stroke: var(--blue);
+    stroke-width: 3px;
+  }
+
+  .training {
+    fill: var(--neutral);
+    stroke: var(--blue);
+    stroke-width: 2px;
+  }
+
+  .jax-input {
+    fill: var(--neutral);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .function {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 3px;
+  }
+
+  .jax-output {
+    fill: var(--green-strong);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .next-call {
+    fill: var(--neutral);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .separator {
+    stroke: var(--divider);
+    stroke-width: 2px;
+  }
+
+  .blue-arrow,
+  .green-arrow,
+  .neutral-arrow {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 3px;
+  }
+
+  .blue-arrow {
+    stroke: var(--blue);
+  }
+
+  .green-arrow {
+    stroke: var(--green);
+  }
+
+  .neutral-arrow {
+    stroke: var(--line);
+  }
+
+  .arrow-head.blue-arrow {
+    fill: var(--blue);
+    stroke: none;
+  }
+
+  .arrow-head.green-arrow {
+    fill: var(--green);
+    stroke: none;
+  }
+
+  .arrow-head.neutral-arrow {
+    fill: var(--line);
+    stroke: none;
+  }
+
+  noscript p {
+    padding: 12px 22px;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="diagram-heading">Состояние модели и поток параметров</h1>
+    <p>PyTorch хранит состояние внутри объекта · JAX передаёт параметры через вычисление</p>
+  </header>
+
+  <svg id="diagram"
+       viewBox="0 0 1200 400"
+       width="1200"
+       height="400"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-heading diagram-description">
+    <title>Сравнение состояния в PyTorch и потока параметров в JAX</title>
+    <desc id="diagram-description">
+      Слева объект model хранит вес, backward создаёт градиент, а optimizer step
+      меняет вес с 0,5 на 0,6. Справа функция JAX получает params и x и возвращает
+      результат вместе с новыми params, которые явно передаются в следующий вызов.
+    </desc>
+    <g id="layer"></g>
+  </svg>
+
+  <noscript>
+    <p>
+      PyTorch меняет вес внутри model через backward() и optimizer.step();
+      JAX получает params и x, возвращая результат и новые params.
+    </p>
+  </noscript>
+</main>
+
+<script>
+const data = [{
+  bounds: [0, 0, 1200, 400],
+  arrowHead: [11, 6],
+
+  rects: [
+    [24, 12, 552, 370, 14, "panel-left"],
+    [624, 12, 552, 370, 14, "panel-right"],
+
+    [45, 115, 78, 48, 9, "training"],
+    [168, 74, 260, 179, 14, "model"],
+    [194, 119, 94, 48, 8, "state-old"],
+    [312, 119, 94, 48, 8, "state-new"],
+    [194, 190, 88, 40, 8, "training"],
+    [306, 190, 100, 40, 8, "training"],
+    [452, 115, 96, 48, 9, "training"],
+    [452, 188, 96, 44, 9, "training"],
+
+    [646, 86, 125, 58, 9, "jax-input"],
+    [646, 174, 125, 48, 9, "jax-input"],
+    [820, 92, 160, 130, 14, "function"],
+    [1025, 92, 128, 48, 9, "jax-output"],
+    [1025, 168, 128, 58, 9, "jax-output"],
+    [820, 255, 160, 44, 9, "next-call"]
+  ],
+
+  lines: [
+    [600, 24, 600, 370, "separator"]
+  ],
+
+  arrows: [
+    ["blue-arrow", [[123, 139], [168, 139]]],
+    ["blue-arrow", [[288, 143], [312, 143]]],
+    ["blue-arrow", [[428, 139], [452, 139]]],
+    ["neutral-arrow", [[500, 163], [500, 188]]],
+    ["blue-arrow", [[452, 210], [430, 210], [430, 260], [237, 260], [237, 230]]],
+    ["blue-arrow", [[282, 210], [306, 210]]],
+    ["blue-arrow", [[356, 190], [356, 167]]],
+
+    ["green-arrow", [[771, 115], [820, 115]]],
+    ["green-arrow", [[771, 198], [820, 198]]],
+    ["green-arrow", [[980, 115], [1025, 115]]],
+    ["green-arrow", [[980, 197], [1025, 197]]],
+    ["green-arrow", [[1089, 226], [1089, 276], [980, 276]]]
+  ],
+
+  labels: [
+    ["PyTorch: состояние внутри объекта", 300, 43, "middle", "section"],
+    ["данные x", 84, 145, "middle", "label"],
+    ["объект model", 298, 101, "middle", "label"],
+    ["вес 0,5", 241, 149, "middle", "label"],
+    ["вес 0,6", 359, 149, "middle", "label"],
+    ["градиент", 238, 215, "middle", "small"],
+    ["optimizer", 356, 205, "middle", "small"],
+    ["step()", 356, 222, "middle", "code"],
+    ["результат y", 500, 145, "middle", "label"],
+    ["loss", 500, 215, "middle", "code"],
+    ["backward()", 418, 281, "end", "code"],
+    ["тот же объект", 300, 329, "middle", "small"],
+    ["model теперь хранит вес 0,6", 300, 354, "middle", "caption"],
+
+    ["JAX: параметры идут через функцию", 900, 43, "middle", "section"],
+    ["params", 708, 108, "middle", "code"],
+    ["вес 0,5", 708, 131, "middle", "label"],
+    ["данные x", 708, 204, "middle", "label"],
+    ["чистая функция", 900, 129, "middle", "small"],
+    ["f(params, x)", 900, 158, "middle", "code"],
+    ["результат y", 1089, 122, "middle", "label"],
+    ["новые params", 1089, 190, "middle", "small"],
+    ["вес 0,6", 1089, 214, "middle", "label"],
+    ["передать явно", 1076, 252, "middle", "small"],
+    ["следующий f(params, x)", 900, 282, "middle", "code"],
+    ["старые params с весом 0,5", 708, 270, "middle", "small"],
+    ["не изменились сами", 708, 291, "middle", "small"],
+    ["params видны на входе и выходе", 900, 345, "middle", "caption"]
+  ],
+
+  fallback: [
+    ["Слева PyTorch меняет вес внутри model через backward() и step().", 600, 178],
+    ["Справа JAX возвращает результат и новые params для следующего вызова.", 600, 218]
+  ]
+}];
+
+const origin = { x: 0, y: 0 };
+const scale = 1;
+
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const [scene] = data;
+const svg = document.getElementById("diagram");
+const layer = document.getElementById("layer");
+const namespace = svg.namespaceURI;
+
+function node(tag, attributes, className) {
+  const item = document.createElementNS(namespace, tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    item.setAttribute(name, String(value));
+  }
+  if (className) item.setAttribute("class", className);
+  return item;
+}
+
+function drawRect(spec) {
+  const [x, y, width, height, radius, kind] = spec;
+  return node("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(x + width) - sx(x),
+    height: sy(y + height) - sy(y),
+    rx: sx(x + radius) - sx(x),
+    ry: sy(y + radius) - sy(y)
+  }, kind);
+}
+
+function drawLine(spec) {
+  const [x1, y1, x2, y2, kind] = spec;
+  return node("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2)
+  }, kind);
+}
+
+function drawArrow(spec) {
+  const [kind, points] = spec;
+  const group = node("g", {}, "");
+  const pathPoints = points
+    .map(([x, y]) => `${sx(x)},${sy(y)}`)
+    .join(" ");
+
+  group.append(node("polyline", { points: pathPoints }, kind));
+
+  let before;
+  let tip;
+  for (const [x, y] of points) {
+    before = tip;
+    tip = { x, y };
+  }
+
+  const [headLength, halfWidth] = scene.arrowHead;
+  const dx = tip.x - before.x;
+  const dy = tip.y - before.y;
+  const length = Math.hypot(dx, dy);
+  const ux = dx / length;
+  const uy = dy / length;
+  const baseX = tip.x - ux * headLength;
+  const baseY = tip.y - uy * headLength;
+
+  const vertices = [
+    [tip.x, tip.y],
+    [baseX - uy * halfWidth, baseY + ux * halfWidth],
+    [baseX + uy * halfWidth, baseY - ux * halfWidth]
+  ];
+
+  const headPoints = vertices
+    .map(([x, y]) => `${sx(x)},${sy(y)}`)
+    .join(" ");
+
+  group.append(node("polygon", { points: headPoints }, `arrow-head ${kind}`));
+  return group;
+}
+
+function drawLabel(spec) {
+  const [content, x, y, anchor, kind] = spec;
+  const item = node("text", {
+    x: sx(x),
+    y: sy(y),
+    "text-anchor": anchor
+  }, kind);
+  item.textContent = content;
+  return item;
+}
+
+try {
+  for (const rect of scene.rects) layer.append(drawRect(rect));
+  for (const line of scene.lines) layer.append(drawLine(line));
+  for (const arrow of scene.arrows) layer.append(drawArrow(arrow));
+  for (const label of scene.labels) layer.append(drawLabel(label));
+} catch (error) {
+  layer.replaceChildren();
+
+  for (const [content, x, y] of scene.fallback) {
+    const item = node("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": "middle"
+    }, "fallback");
+    item.textContent = content;
+    layer.append(item);
+  }
+}
+</script>
+</body>
+</html>

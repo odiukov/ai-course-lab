@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Как порядок обслуживания удерживает горячую ветку в HBM</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: white;
+    --ink: darkslategray;
+    --muted: slategray;
+    --panel: ghostwhite;
+    --card: aliceblue;
+    --hot: honeydew;
+    --cold: mistyrose;
+    --switch: lemonchiffon;
+    --line: lightslategray;
+    --queue: steelblue;
+    --hot-line: seagreen;
+    --cold-line: firebrick;
+    --switch-line: darkorange;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: black;
+      --ink: whitesmoke;
+      --muted: silver;
+      --panel: darkslategray;
+      --card: midnightblue;
+      --hot: darkgreen;
+      --cold: maroon;
+      --switch: darkgoldenrod;
+      --line: lightslategray;
+      --queue: lightskyblue;
+      --hot-line: lightgreen;
+      --cold-line: lightsalmon;
+      --switch-line: gold;
+    }
+  }
+
+  html,
+  body {
+    margin: unset;
+    padding: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--bg);
+  }
+
+  figcaption {
+    margin: unset;
+    padding: unset;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--bg);
+    overflow: hidden;
+    shape-rendering: geometricPrecision;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .divider,
+  .neutral-line {
+    stroke: var(--line);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .queue-line {
+    stroke: var(--queue);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .hot-line {
+    stroke: var(--hot-line);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .cold-line {
+    stroke: var(--cold-line);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .switch-line {
+    stroke: var(--switch-line);
+    stroke-width: 2px;
+    fill: none;
+  }
+
+  .hot-edge {
+    stroke: var(--hot-line);
+    stroke-width: 4px;
+  }
+
+  .cold-edge {
+    stroke: var(--cold-line);
+    stroke-width: 4px;
+  }
+
+  .switch-edge {
+    stroke: var(--switch-line);
+    stroke-width: 4px;
+  }
+
+  .card {
+    fill: var(--card);
+    stroke: var(--queue);
+    stroke-width: 2px;
+  }
+
+  .hot {
+    fill: var(--hot);
+    stroke: var(--hot-line);
+    stroke-width: 2px;
+  }
+
+  .cold {
+    fill: var(--cold);
+    stroke: var(--cold-line);
+    stroke-width: 2px;
+  }
+
+  .switch {
+    fill: var(--switch);
+    stroke: var(--switch-line);
+    stroke-width: 2px;
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+
+  .panel-title {
+    font-size: 17px;
+    font-weight: bold;
+  }
+
+  .section-label {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .card-main {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .card-sub {
+    font-size: 12px;
+  }
+
+  .state-main {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .state-sub {
+    font-size: 12px;
+  }
+
+  .conclusion {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend {
+    font-size: 12px;
+  }
+
+  .fallback {
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<figure>
+  <figcaption>Как порядок обслуживания удерживает горячую ветку в HBM</figcaption>
+  <svg id="diagram" viewBox="0 0 1000 460" width="1000" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Сравнение FCFS и depth-first обслуживания</title>
+    <desc id="svg-desc">Одинаковые запросы A, B, A обслуживаются как A, B, A при FCFS и как A, A, B при depth-first. Во втором случае длинный префикс A остаётся в HBM.</desc>
+    <g id="stage"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = [{
+  zero: 0,
+  canvas: { width: 1000, height: 460 },
+  origin: { x: 16, y: 8 },
+  scale: { x: 2, y: 2 },
+  arrow: { length: 5, wing: 3 },
+  panels: [
+    {
+      frame: { x1: 0, y1: 3, x2: 232, y2: 194 },
+      title: { text: "FCFS: A → B → A", x: 116, y: 13 },
+      divider: { x1: 0, y1: 22, x2: 232, y2: 22 },
+      section: { text: "ПОРЯДОК ОЧЕРЕДИ", x: 10, y: 31 },
+      cards: [
+        {
+          box: { x1: 10, y1: 38, x2: 68, y2: 78 },
+          center: 39,
+          lines: [
+            { text: "ветка A", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "2 000 токенов", y: 72, className: "card-sub" }
+          ]
+        },
+        {
+          box: { x1: 87, y1: 38, x2: 145, y2: 78 },
+          center: 116,
+          lines: [
+            { text: "ветка B", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "50 токенов", y: 72, className: "card-sub" }
+          ]
+        },
+        {
+          box: { x1: 164, y1: 38, x2: 222, y2: 78 },
+          center: 193,
+          lines: [
+            { text: "ветка A", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "2 000 токенов", y: 72, className: "card-sub" }
+          ]
+        }
+      ],
+      queueArrows: [
+        { x1: 70, y1: 58, x2: 84, y2: 58 },
+        { x1: 147, y1: 58, x2: 161, y2: 58 }
+      ],
+      downArrows: [
+        { x1: 39, y1: 81, x2: 39, y2: 97, className: "hot-line" },
+        { x1: 116, y1: 81, x2: 116, y2: 97, className: "cold-line" },
+        { x1: 193, y1: 81, x2: 193, y2: 97, className: "cold-line" }
+      ],
+      states: [
+        {
+          box: { x1: 10, y1: 101, x2: 68, y2: 148 },
+          kind: "hot",
+          edge: "hot-edge",
+          center: 39,
+          lines: [
+            { text: "HBM", y: 113, className: "state-main" },
+            { text: "A горячая", y: 128, className: "state-sub" },
+            { text: "2 000 токенов", y: 141, className: "state-sub" }
+          ]
+        },
+        {
+          box: { x1: 87, y1: 101, x2: 145, y2: 148 },
+          kind: "cold",
+          edge: "cold-edge",
+          center: 116,
+          lines: [
+            { text: "B входит в HBM", y: 113, className: "state-main" },
+            { text: "место занято", y: 128, className: "state-sub" },
+            { text: "A вытеснена", y: 141, className: "state-sub" }
+          ]
+        },
+        {
+          box: { x1: 164, y1: 101, x2: 222, y2: 148 },
+          kind: "cold",
+          edge: "cold-edge",
+          center: 193,
+          lines: [
+            { text: "промах", y: 113, className: "state-main" },
+            { text: "пересчёт", y: 128, className: "state-sub" },
+            { text: "2 000 токенов", y: 141, className: "state-sub" }
+          ]
+        }
+      ],
+      conclusion: [
+        { text: "B разрывает два обращения к A", x: 116, y: 169 },
+        { text: "2 000 токенов вычисляются снова", x: 116, y: 184 }
+      ]
+    },
+    {
+      frame: { x1: 240, y1: 3, x2: 472, y2: 194 },
+      title: { text: "Depth-first: A → A → B", x: 356, y: 13 },
+      divider: { x1: 240, y1: 22, x2: 472, y2: 22 },
+      section: { text: "ПОРЯДОК ОЧЕРЕДИ", x: 250, y: 31 },
+      cards: [
+        {
+          box: { x1: 250, y1: 38, x2: 308, y2: 78 },
+          center: 279,
+          lines: [
+            { text: "ветка A", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "2 000 токенов", y: 72, className: "card-sub" }
+          ]
+        },
+        {
+          box: { x1: 327, y1: 38, x2: 385, y2: 78 },
+          center: 356,
+          lines: [
+            { text: "ветка A", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "2 000 токенов", y: 72, className: "card-sub" }
+          ]
+        },
+        {
+          box: { x1: 404, y1: 38, x2: 462, y2: 78 },
+          center: 433,
+          lines: [
+            { text: "ветка B", y: 49, className: "card-main" },
+            { text: "общий префикс", y: 61, className: "card-sub" },
+            { text: "50 токенов", y: 72, className: "card-sub" }
+          ]
+        }
+      ],
+      queueArrows: [
+        { x1: 310, y1: 58, x2: 324, y2: 58 },
+        { x1: 387, y1: 58, x2: 401, y2: 58 }
+      ],
+      downArrows: [
+        { x1: 279, y1: 81, x2: 279, y2: 97, className: "hot-line" },
+        { x1: 356, y1: 81, x2: 356, y2: 97, className: "hot-line" },
+        { x1: 433, y1: 81, x2: 433, y2: 97, className: "switch-line" }
+      ],
+      states: [
+        {
+          box: { x1: 250, y1: 101, x2: 308, y2: 148 },
+          kind: "hot",
+          edge: "hot-edge",
+          center: 279,
+          lines: [
+            { text: "HBM", y: 113, className: "state-main" },
+            { text: "A горячая", y: 128, className: "state-sub" },
+            { text: "2 000 токенов", y: 141, className: "state-sub" }
+          ]
+        },
+        {
+          box: { x1: 327, y1: 101, x2: 385, y2: 148 },
+          kind: "hot",
+          edge: "hot-edge",
+          center: 356,
+          lines: [
+            { text: "попадание", y: 113, className: "state-main" },
+            { text: "A всё ещё в HBM", y: 128, className: "state-sub" },
+            { text: "2 000 токенов", y: 141, className: "state-sub" }
+          ]
+        },
+        {
+          box: { x1: 404, y1: 101, x2: 462, y2: 148 },
+          kind: "switch",
+          edge: "switch-edge",
+          center: 433,
+          lines: [
+            { text: "затем B", y: 113, className: "state-main" },
+            { text: "смена ветки", y: 128, className: "state-sub" },
+            { text: "50 токенов", y: 141, className: "state-sub" }
+          ]
+        }
+      ],
+      conclusion: [
+        { text: "A используется повторно до B", x: 356, y: 169 },
+        { text: "длинный префикс остаётся в HBM", x: 356, y: 184 }
+      ]
+    }
+  ],
+  legend: [
+    { box: { x1: 0, y1: 204, x2: 8, y2: 211 }, kind: "hot", text: "ветка A резидентна в HBM", x: 13, y: 210 },
+    { box: { x1: 160, y1: 204, x2: 168, y2: 211 }, kind: "cold", text: "вытеснение и повторный расчёт", x: 173, y: 210 },
+    { box: { x1: 355, y1: 204, x2: 363, y2: 211 }, kind: "switch", text: "смена на ветку B", x: 368, y: 210 }
+  ],
+  fallback: {
+    x: 236,
+    y: 105,
+    text: "Схема должна была показать: FCFS — A → B → A, depth-first — A → A → B."
+  }
+}];
+
+const diagram = DATA.find(Boolean);
+const origin = diagram.origin;
+const scale = diagram.scale;
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const stage = document.getElementById("stage");
+const NS = stage.namespaceURI;
+
+function element(name, className) {
+  const node = document.createElementNS(NS, name);
+  if (className) node.setAttribute("class", className);
+  return node;
+}
+
+function addRect(box, className) {
+  const node = element("rect", className);
+  node.setAttribute("x", sx(box.x1));
+  node.setAttribute("y", sy(box.y1));
+  node.setAttribute("width", sx(box.x2) - sx(box.x1));
+  node.setAttribute("height", sy(box.y2) - sy(box.y1));
+  stage.appendChild(node);
+  return node;
+}
+
+function addLine(segment, className) {
+  const node = element("line", className);
+  node.setAttribute("x1", sx(segment.x1));
+  node.setAttribute("y1", sy(segment.y1));
+  node.setAttribute("x2", sx(segment.x2));
+  node.setAttribute("y2", sy(segment.y2));
+  stage.appendChild(node);
+  return node;
+}
+
+function addPolygon(points, className) {
+  const node = element("polygon", className);
+  node.setAttribute("points", points.map(point =>
+    sx(point.x) + "," + sy(point.y)
+  ).join(" "));
+  stage.appendChild(node);
+  return node;
+}
+
+function addText(content, x, y, anchor, className) {
+  const node = element("text", className);
+  node.setAttribute("x", sx(x));
+  node.setAttribute("y", sy(y));
+  node.setAttribute("text-anchor", anchor);
+  node.setAttribute("dominant-baseline", "middle");
+  node.textContent = content;
+  stage.appendChild(node);
+  return node;
+}
+
+function addArrow(segment, className) {
+  const dx = segment.x2 - segment.x1;
+  const dy = segment.y2 - segment.y1;
+  const distance = Math.hypot(dx, dy);
+  if (!distance) return;
+
+  const ux = dx / distance;
+  const uy = dy / distance;
+  const baseX = segment.x2 - ux * diagram.arrow.length;
+  const baseY = segment.y2 - uy * diagram.arrow.length;
+
+  addLine(segment, className);
+  addPolygon([
+    { x: segment.x2, y: segment.y2 },
+    {
+      x: baseX - uy * diagram.arrow.wing,
+      y: baseY + ux * diagram.arrow.wing
+    },
+    {
+      x: baseX + uy * diagram.arrow.wing,
+      y: baseY - ux * diagram.arrow.wing
+    }
+  ], className);
+}
+
+function addCard(card) {
+  addRect(card.box, "card");
+  card.lines.forEach(line =>
+    addText(line.text, card.center, line.y, "middle", line.className)
+  );
+}
+
+function addState(state) {
+  addRect(state.box, state.kind);
+  addLine({
+    x1: state.box.x1,
+    y1: state.box.y1,
+    x2: state.box.x2,
+    y2: state.box.y1
+  }, state.edge);
+  state.lines.forEach(line =>
+    addText(line.text, state.center, line.y, "middle", line.className)
+  );
+}
+
+function renderPanel(panel) {
+  addRect(panel.frame, "panel");
+  addText(panel.title.text, panel.title.x, panel.title.y, "middle", "panel-title");
+  addLine(panel.divider, "divider");
+  addText(panel.section.text, panel.section.x, panel.section.y, "start", "section-label");
+
+  panel.cards.forEach(addCard);
+  panel.queueArrows.forEach(segment => addArrow(segment, "queue-line"));
+  panel.downArrows.forEach(segment => addArrow(segment, segment.className));
+  panel.states.forEach(addState);
+  panel.conclusion.forEach(line =>
+    addText(line.text, line.x, line.y, "middle", "conclusion")
+  );
+}
+
+try {
+  diagram.panels.forEach(renderPanel);
+  diagram.legend.forEach(item => {
+    addRect(item.box, item.kind);
+    addText(item.text, item.x, item.y, "start", "legend");
+  });
+} catch (error) {
+  while (stage.firstChild) stage.removeChild(stage.firstChild);
+  addText(
+    diagram.fallback.text,
+    diagram.fallback.x,
+    diagram.fallback.y,
+    "middle",
+    "fallback"
+  );
+}
+</script>
+</body>
+</html>

@@ -73,17 +73,21 @@ export function buildCoveredContext(opts: {
     if (!step) continue;
 
     const number = index + 1;
-    titles.push(`- ${number}. ${step.title}`);
+    // Сразу даём агенту каноническую ссылку: её можно скопировать дословно,
+    // не вычисляя номер и не приписывая мысль соседнему code-шагу.
+    titles.push(`- [шаг ${number}](#step-${number}): ${step.title}`);
 
     for (const formula of displayFormulas(step.body)) {
       const key = formula.replace(/\s+/g, "");
-      if (!formulas.has(key)) formulas.set(key, `- шаг ${number}: ${truncate(formula, MAX_FORMULA_CHARS)}`);
+      if (!formulas.has(key)) {
+        formulas.set(key, `- [шаг ${number}](#step-${number}): ${truncate(formula, MAX_FORMULA_CHARS)}`);
+      }
     }
 
     const analogy = analogyOpening(step.body);
     if (analogy) {
       const key = analogy.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "");
-      if (!analogies.has(key)) analogies.set(key, `- шаг ${number}: ${analogy}`);
+      if (!analogies.has(key)) analogies.set(key, `- [шаг ${number}](#step-${number}): ${analogy}`);
     }
   }
 

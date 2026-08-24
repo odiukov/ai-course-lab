@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Один шаг обучения DPO</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f7f9fc;
+  --panel:#ffffff;
+  --policy:#e7f1ff;
+  --reference:#edf0f4;
+  --logprob:#f8fbff;
+  --accent:#1769c2;
+  --accent-soft:#b9d7f7;
+  --frozen:#647184;
+  --backward:#c7354b;
+  --ink:#172033;
+  --muted:#526176;
+  --border:#8391a5;
+  --footer:#eef4fa;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#111722;
+    --panel:#182131;
+    --policy:#172f4d;
+    --reference:#252d39;
+    --logprob:#192536;
+    --accent:#78b9ff;
+    --accent-soft:#386794;
+    --frozen:#aab5c4;
+    --backward:#ff8293;
+    --ink:#eef4ff;
+    --muted:#bdc8d8;
+    --border:#718096;
+    --footer:#172536;
+  }
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--ink)}
+body{margin:unset;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1200px;margin:auto}
+h1{
+  margin:unset;
+  padding:8px;
+  font-size:22px;
+  line-height:normal;
+}
+figure{margin:unset}
+svg{
+  display:block;
+  width:100%;
+  height:auto;
+  max-height:470px;
+  background:var(--bg);
+  border:1px solid var(--border);
+}
+.box{
+  fill:var(--panel);
+  stroke:var(--border);
+  stroke-width:1.7px;
+}
+.pair{fill:var(--panel)}
+.policy{fill:var(--policy);stroke:var(--accent)}
+.reference{fill:var(--reference);stroke:var(--frozen)}
+.logprob{fill:var(--logprob);stroke:var(--accent-soft)}
+.logit{fill:var(--panel);stroke:var(--accent)}
+.loss{fill:var(--panel);stroke:var(--backward)}
+.footer{fill:var(--footer);stroke:var(--border)}
+.flow-line{
+  fill:none;
+  stroke:var(--accent);
+  stroke-width:2.4px;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.back-line{
+  fill:none;
+  stroke:var(--backward);
+  stroke-width:3px;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.flow-head{fill:var(--accent)}
+.back-head{fill:var(--backward)}
+.junction{fill:var(--accent);stroke:var(--bg);stroke-width:1.5px}
+text{
+  fill:var(--ink);
+  font-size:15px;
+  dominant-baseline:middle;
+}
+.title-text{font-size:17px;font-weight:bold}
+.formula{font-size:16px;font-family:ui-monospace,"SFMono-Regular",Consolas,monospace}
+.small{font-size:13px;fill:var(--muted)}
+.frozen-text{font-size:13px;fill:var(--frozen);font-weight:bold}
+.back-text{font-size:14px;fill:var(--backward);font-weight:bold}
+.footer-text{font-size:14px}
+.fallback{font-size:18px;fill:var(--ink)}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="diagram-title">Один шаг обучения DPO</h1>
+  <figure aria-labelledby="diagram-title">
+    <svg id="diagram" viewBox="0 0 1200 470" width="1200" height="470"
+         preserveAspectRatio="xMidYMid meet" role="img"
+         aria-describedby="diagram-description">
+      <desc id="diagram-description">
+        Пара готовых ответов проходит через policy и замороженную reference.
+        Четыре логарифма вероятностей образуют DPO-logit и loss.
+        Backward проходит только через policy.
+      </desc>
+    </svg>
+  </figure>
+</main>
+
+<script>
+const DATA = Object.freeze([
+  {
+    ox:32, oy:18, kx:1.06, ky:1,
+    zero:0, radius:10, head:11, wing:6, dot:5,
+    dash:9, gap:7,
+    fallback:[
+      ["Схема: pair → четыре sequence log-probabilities → DPO-logit → loss",35,205],
+      ["Backward проходит только через policy; reference остаётся frozen.",35,240]
+    ]
+  },
+  [
+    ["pair",0,145,180,150,"pair",[
+      ["Одна пара",90,172,"title-text","middle"],
+      ["общий промпт  x",18,203,"formula","start"],
+      ["предпочтительный  y⁺",18,230,"","start"],
+      ["отклонённый  y⁻",18,256,"","start"],
+      ["готовые тексты · без генерации",90,281,"small","middle"]
+    ]],
+    ["policy",255,55,150,120,"policy",[
+      ["POLICY",330,82,"title-text","middle"],
+      ["оценивает  y⁺",330,111,"","middle"],
+      ["оценивает  y⁻",330,138,"","middle"],
+      ["веса обучаются",330,162,"small","middle"]
+    ]],
+    ["reference",255,260,150,120,"reference",[
+      ["REFERENCE",330,286,"title-text","middle"],
+      ["оценивает  y⁺",330,315,"","middle"],
+      ["оценивает  y⁻",330,342,"","middle"],
+      ["FROZEN · без backward",330,367,"frozen-text","middle"]
+    ]],
+    ["pi-win",475,40,190,62,"logprob",[
+      ["log π(y⁺ | x)",570,62,"formula","middle"],
+      ["policy · предпочтительный",570,86,"small","middle"]
+    ]],
+    ["pi-lose",475,122,190,62,"logprob",[
+      ["log π(y⁻ | x)",570,144,"formula","middle"],
+      ["policy · отклонённый",570,168,"small","middle"]
+    ]],
+    ["ref-win",475,245,190,62,"logprob",[
+      ["log πref(y⁺ | x)",570,267,"formula","middle"],
+      ["reference · предпочтительный",570,291,"small","middle"]
+    ]],
+    ["ref-lose",475,327,190,62,"logprob",[
+      ["log πref(y⁻ | x)",570,349,"formula","middle"],
+      ["reference · отклонённый",570,373,"small","middle"]
+    ]],
+    ["logit",735,128,180,170,"logit",[
+      ["DPO-logit",825,153,"title-text","middle"],
+      ["β · [",825,181,"formula","middle"],
+      ["(log π⁺ − log π⁻)",825,207,"formula","middle"],
+      ["− (log πref⁺ − log πref⁻)",825,233,"formula","middle"],
+      ["]",825,257,"formula","middle"],
+      ["сдвиг относительно reference",825,282,"small","middle"]
+    ]],
+    ["loss",965,168,105,90,"loss",[
+      ["LOSS",1017,193,"title-text","middle"],
+      ["−log σ(logit)",1017,220,"formula","middle"],
+      ["одна ошибка",1017,245,"small","middle"]
+    ]],
+    ["footer",0,405,1070,35,"footer",[
+      ["вперёд: pair → четыре sequence log-probabilities → DPO-logit → loss",
+       15,427,"footer-text","start"],
+      ["назад: loss → только policy",1055,427,"back-text","end"]
+    ]]
+  ],
+  [
+    ["flow-line",[[180,220],[220,220]]]
+  ],
+  [
+    ["flow-line",[[220,220],[220,115],[255,115]]],
+    ["flow-line",[[220,220],[220,320],[255,320]]],
+    ["flow-line",[[405,100],[440,100],[440,71],[475,71]]],
+    ["flow-line",[[405,130],[440,130],[440,153],[475,153]]],
+    ["flow-line",[[405,305],[440,305],[440,276],[475,276]]],
+    ["flow-line",[[405,335],[440,335],[440,358],[475,358]]],
+    ["flow-line",[[665,71],[700,71],[735,160]]],
+    ["flow-line",[[665,153],[700,153],[735,195]]],
+    ["flow-line",[[665,276],[700,276],[735,232]]],
+    ["flow-line",[[665,358],[700,358],[735,267]]],
+    ["flow-line",[[915,213],[965,213]]]
+  ],
+  [
+    ["back-line",[[1017,168],[1017,8],[330,8],[330,55]],
+      ["backward: градиент только через policy",680,25,"back-text","middle"]]
+  ],
+  [
+    [220,220]
+  ]
+]);
+
+const [cfg, boxes, segments, arrows, curves, dots] = DATA;
+const origin = Object.freeze({x:cfg.ox,y:cfg.oy});
+const scale = Object.freeze({x:cfg.kx,y:cfg.ky});
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (tag, attrs, className) => {
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([name,value]) => element.setAttribute(name,value));
+    if (className) element.setAttribute("class",className);
+    svg.appendChild(element);
+    return element;
+  };
+
+  const pointsText = points =>
+    points.map(([x,y]) => `${sx(x)},${sy(y)}`).join(" ");
+
+  const arrowHead = (from, to, className) => {
+    const [ax,ay] = from;
+    const [bx,by] = to;
+    const angle = Math.atan2(by-ay,bx-ax);
+    const left = [
+      bx-cfg.head*Math.cos(angle)+cfg.wing*Math.sin(angle),
+      by-cfg.head*Math.sin(angle)-cfg.wing*Math.cos(angle)
+    ];
+    const right = [
+      bx-cfg.head*Math.cos(angle)-cfg.wing*Math.sin(angle),
+      by-cfg.head*Math.sin(angle)+cfg.wing*Math.cos(angle)
+    ];
+    make("polygon",{points:pointsText([[bx,by],left,right])},className);
+  };
+
+  const polyline = (className, points, headed) => {
+    const d = points.map(([x,y],position) =>
+      `${position ? "L" : "M"} ${sx(x)} ${sy(y)}`
+    ).join(" ");
+    const path = make("path",{d},className);
+    if (headed) {
+      const reversed = [...points].reverse();
+      const [tip,previous] = reversed;
+      arrowHead(previous,tip,
+        className === "back-line" ? "back-head" : "flow-head");
+    }
+    return path;
+  };
+
+  boxes.forEach(([,x,y,w,h,className,lines]) => {
+    make("rect",{
+      x:sx(x),
+      y:sy(y),
+      width:sx(x+w)-sx(x),
+      height:sy(y+h)-sy(y),
+      rx:sx(cfg.radius)-sx(cfg.zero),
+      ry:sy(cfg.radius)-sy(cfg.zero)
+    },`box ${className}`);
+
+    lines.forEach(([content,tx,ty,textClass,anchor]) => {
+      const text = make("text",{
+        x:sx(tx),
+        y:sy(ty),
+        "text-anchor":anchor
+      },textClass);
+      text.textContent = content;
+    });
+  });
+
+  segments.forEach(([className,points]) => polyline(className,points,false));
+  arrows.forEach(([className,points]) => polyline(className,points,true));
+
+  curves.forEach(([className,points,label]) => {
+    const [start,controlA,controlB,end] = points;
+    const d = [
+      `M ${sx(start[0])} ${sy(start[1])}`,
+      `C ${sx(controlA[0])} ${sy(controlA[1])}`,
+      `${sx(controlB[0])} ${sy(controlB[1])}`,
+      `${sx(end[0])} ${sy(end[1])}`
+    ].join(" ");
+    const path = make("path",{d},className);
+    path.setAttribute(
+      "stroke-dasharray",
+      `${sx(cfg.dash)-sx(cfg.zero)} ${sx(cfg.gap)-sx(cfg.zero)}`
+    );
+    arrowHead(controlB,end,"back-head");
+
+    const [content,x,y,textClass,anchor] = label;
+    const text = make("text",{
+      x:sx(x),
+      y:sy(y),
+      "text-anchor":anchor
+    },textClass);
+    text.textContent = content;
+  });
+
+  dots.forEach(([x,y]) => {
+    make("circle",{
+      cx:sx(x),
+      cy:sy(y),
+      r:sx(x+cfg.dot)-sx(x)
+    },"junction");
+  });
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+
+  cfg.fallback.forEach(([content,x,y]) => {
+    const text = document.createElementNS(ns,"text");
+    text.setAttribute("x",sx(x));
+    text.setAttribute("y",sy(y));
+    text.setAttribute("text-anchor","start");
+    text.setAttribute("class","fallback");
+    text.textContent = content;
+    svg.appendChild(text);
+  });
+}
+</script>
+</body>
+</html>

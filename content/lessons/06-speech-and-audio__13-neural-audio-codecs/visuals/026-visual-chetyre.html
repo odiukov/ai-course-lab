@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Четыре кодека на одной оси</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#1d2026; --muted:#5d6472; --axis:#3a4150;
+    --fid:#b0442f; --seq:#2d6a9f; --mid:#6b7280; --card:#ffffff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ebf0; --muted:#9aa3b2; --axis:#8b94a5;
+      --fid:#e08a72; --seq:#7fb6e6; --mid:#98a1b0; --card:#1b1f26;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:12px 8px;}
+  h2{font-size:15px;margin:0 0 6px;letter-spacing:.01em;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;line-height:1.5;color:var(--fg);padding:8px 4px;}
+  text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>За что борется кодек: одна ось, четыре точки</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+
+  // ---- размеры холста (литералы: viewBox, толщины, кегли, отступы подписей) ----
+  var VB_W = 900, VB_H = 400;
+  var LW = 2, LW_THIN = 1.4, FS = 13, FS_S = 11.5, FS_B = 14;
+  var PAD_LBL = 10, PAD_LBL_BIG = 18, PAD_TICK = 7;
+
+  // ---- данные схемы ----
+  // t: положение на оси (0 = полюс короткой последовательности, 10 = полюс верности)
+  var CODECS = [
+    { t: 0.6, key:"Mimi",    side:-1, lines:["12.5 Гц", "8 codebook'ов", "4.4 kbps"], tone:"seq" },
+    { t: 3.2, key:"SNAC",    side:+1, lines:["~12 Гц (грубые)"],                      tone:"seq" },
+    { t: 5.9, key:"EnCodec", side:-1, lines:["75 Гц"],                                tone:"mid" },
+    { t: 9.4, key:"DAC",     side:+1, lines:["44.1 кГц", "86 Гц", "12 codebook'ов"],  tone:"fid" }
+  ];
+  var AXIS_Y   = 0;      // ось в координатах данных
+  var DOT_R    = 0.16;   // радиус точки в единицах данных
+  var TICK_H   = 0.42;
+  var STEM     = 1.0;    // длина выноски от оси до блока подписи
+  var POLE_Y   = 2.05;   // высота подписи полюса над осью
+  var ARROW_Y  = -1.55;  // стрелки-полюса под осью
+  var ARROW_HW = 0.22;   // полуширина наконечника
+  var ARROW_HL = 0.42;   // длина наконечника
+  var X_MIN = 0, X_MAX = 10;
+
+  // ---- ОДИН origin, ОДИН scale, ОДНА пара sx/sy ----
+  var scale  = 74;                      // пикселей на единицу данных
+  var origin = { x: 108, y: 236 };      // пиксель, куда попадает (0,0)
+  function sx(x){ return origin.x + x * scale; }
+  function sy(y){ return origin.y - y * scale; }
+
+  function el(n, a){
+    var e = document.createElementNS("http://www.w3.org/2000/svg", n);
+    for (var k in a) e.setAttribute(k, a[k]);
+    return e;
+  }
+  function txt(x, y, s, anchor, cls, size){
+    var t = el("text", {x:x, y:y, "text-anchor":anchor, "font-size":size||FS,
+                        fill:"var(--"+(cls||"fg")+")"});
+    t.textContent = s;
+    return t;
+  }
+  function color(tone){ return tone==="fid" ? "fid" : tone==="seq" ? "seq" : "mid"; }
+
+  try {
+    var svg = el("svg", {
+      viewBox: "0 0 " + VB_W + " " + VB_H,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": "Ось от короткой последовательности к верности звука: Mimi, SNAC, EnCodec, DAC"
+    });
+
+    // фон
+    svg.appendChild(el("rect", {x:0, y:0, width:VB_W, height:VB_H, fill:"var(--bg)"}));
+
+    // ---- ось ----
+    svg.appendChild(el("line", {
+      x1:sx(X_MIN), y1:sy(AXIS_Y), x2:sx(X_MAX), y2:sy(AXIS_Y),
+      stroke:"var(--axis)", "stroke-width":LW, "stroke-linecap":"round"
+    }));
+
+    // ---- полюса: стрелки под осью ----
+    function pole(xTail, xHead, cls, label, anchor){
+      var dir = xHead > xTail ? 1 : -1;
+      svg.appendChild(el("line", {
+        x1:sx(xTail), y1:sy(ARROW_Y), x2:sx(xHead - dir*ARROW_HL), y2:sy(ARROW_Y),
+        stroke:"var(--"+cls+")", "stroke-width":LW, "stroke-linecap":"round"
+      }));
+      svg.appendChild(el("polygon", {
+        points: [
+          sx(xHead)+","+sy(ARROW_Y),
+          sx(xHead - dir*ARROW_HL)+","+sy(ARROW_Y + ARROW_HW),
+          sx(xHead - dir*ARROW_HL)+","+sy(ARROW_Y - ARROW_HW)
+        ].join(" "),
+        fill:"var(--"+cls+")"
+      }));
+      // подпись у ХВОСТА стрелки
+      var lb = txt(sx(xTail), sy(ARROW_Y) - PAD_LBL_BIG, label, anchor, cls, FS_S);
+      svg.appendChild(lb);
+    }
+    pole(4.55, X_MIN, "seq", "короче последовательность", "start");
+    pole(5.45, X_MAX, "fid", "выше верность звука", "end");
+
+    // ---- подписи полюсов над осью ----
+    svg.appendChild(txt(sx(X_MIN), sy(POLE_Y), "полюс короткой", "start", "seq", FS_B));
+    svg.appendChild(txt(sx(X_MIN), sy(POLE_Y) + PAD_LBL_BIG, "последовательности", "start", "seq", FS_B));
+    svg.appendChild(txt(sx(X_MAX), sy(POLE_Y), "полюс", "end", "fid", FS_B));
+    svg.appendChild(txt(sx(X_MAX), sy(POLE_Y) + PAD_LBL_BIG, "верности", "end", "fid", FS_B));
+
+    // ---- точки кодеков ----
+    CODECS.forEach(function(c){
+      var cls = color(c.tone);
+
+      // засечка на оси
+      svg.appendChild(el("line", {
+        x1:sx(c.t), y1:sy(AXIS_Y - TICK_H/2), x2:sx(c.t), y2:sy(AXIS_Y + TICK_H/2),
+        stroke:"var(--axis)", "stroke-width":LW_THIN
+      }));
+
+      // точка
+      svg.appendChild(el("circle", {
+        cx:sx(c.t), cy:sy(AXIS_Y), r:Math.abs(sy(DOT_R) - sy(0)),
+        fill:"var(--"+cls+")"
+      }));
+
+      // выноска вверх (side +1) или вниз (side -1)
+      var yEnd = AXIS_Y + c.side * STEM;
+      svg.appendChild(el("line", {
+        x1:sx(c.t), y1:sy(AXIS_Y + c.side * TICK_H/2), x2:sx(c.t), y2:sy(yEnd),
+        stroke:"var(--"+cls+")", "stroke-width":LW_THIN, "stroke-dasharray":"3 3"
+      }));
+
+      // блок подписи: имя + числа, всегда middle по точке привязки
+      var yPx = sy(yEnd);
+      var step = FS + 4;
+      if (c.side > 0){
+        svg.appendChild(txt(sx(c.t), yPx - PAD_LBL, c.key, "middle", cls, FS_B));
+        c.lines.forEach(function(s, i){
+          svg.appendChild(txt(sx(c.t), yPx - PAD_LBL - (i+1)*step - 4, s, "middle", "muted", FS_S));
+        });
+      } else {
+        svg.appendChild(txt(sx(c.t), yPx + PAD_LBL + FS_B, c.key, "middle", cls, FS_B));
+        c.lines.forEach(function(s, i){
+          svg.appendChild(txt(sx(c.t), yPx + PAD_LBL + FS_B + (i+1)*step, s, "middle", "muted", FS_S));
+        });
+      }
+    });
+
+    host.appendChild(svg);
+  } catch (e) {
+    var d = document.createElement("div");
+    d.className = "fallback";
+    d.textContent =
+      "Схема: одна ось «за что борется кодек». Левый полюс — короткая последовательность: " +
+      "Mimi (12.5 Гц, 8 codebook'ов, 4.4 kbps). Рядом SNAC (~12 Гц у грубых codebook'ов). " +
+      "Середина — EnCodec (75 Гц). Правый полюс — верность звука: DAC (44.1 кГц, 86 Гц, 12 codebook'ов).";
+    host.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

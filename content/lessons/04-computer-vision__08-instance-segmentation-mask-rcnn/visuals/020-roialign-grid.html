@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как RoI Align размещает точки внутри дробной рамки</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --ink: #172033;
+    --muted: #53627a;
+    --grid: #aeb9ca;
+    --cell-a: #edf2f8;
+    --cell-b: #e3eaf3;
+    --roi: #2463d4;
+    --sample: #d83863;
+    --sample-ring: #ffffff;
+    --focus: #fff0ae;
+    --panel: #ffffff;
+    --neighbor-a: #dce9ff;
+    --neighbor-b: #cbdcff;
+    --guide: #886e25;
+    --border: #cad3e1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #151a23;
+      --ink: #edf2fb;
+      --muted: #b8c3d6;
+      --grid: #69758a;
+      --cell-a: #222b39;
+      --cell-b: #293445;
+      --roi: #73a6ff;
+      --sample: #ff6f91;
+      --sample-ring: #151a23;
+      --focus: #594d20;
+      --panel: #1c2431;
+      --neighbor-a: #293e61;
+      --neighbor-b: #344d76;
+      --guide: #dbc26f;
+      --border: #465266;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    max-width: 1040px;
+    margin: auto;
+    background: var(--page);
+    border: 1px solid var(--border);
+  }
+
+  .figure-title {
+    font-size: 18px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--ink);
+    margin: auto;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    max-height: 470px;
+    background: var(--page);
+  }
+
+  .feature-cell {
+    stroke: none;
+  }
+
+  .cell-a {
+    fill: var(--cell-a);
+  }
+
+  .cell-b {
+    fill: var(--cell-b);
+  }
+
+  .feature-line {
+    stroke: var(--grid);
+    stroke-width: 1px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .roi-line {
+    stroke: var(--roi);
+    stroke-width: 2px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .roi-border {
+    stroke: var(--roi);
+    stroke-width: 3px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .focus-bin {
+    fill: var(--focus);
+    stroke: none;
+  }
+
+  .sample {
+    fill: var(--sample);
+    stroke: var(--sample-ring);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .sample-selected {
+    fill: var(--sample);
+    stroke: var(--sample-ring);
+    stroke-width: 3px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .leader {
+    stroke: var(--muted);
+    stroke-width: 1.5px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .guide {
+    stroke: var(--guide);
+    stroke-width: 1.5px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow {
+    stroke: var(--muted);
+    stroke-width: 1.5px;
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .arrow-head {
+    fill: var(--muted);
+    stroke: none;
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .neighbor-a {
+    fill: var(--neighbor-a);
+    stroke: var(--grid);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .neighbor-b {
+    fill: var(--neighbor-b);
+    stroke: var(--grid);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .neighbor-value {
+    fill: var(--roi);
+    stroke: var(--sample-ring);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .label-strong {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .label-small {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .panel-title {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .fallback {
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<figure class="figure" aria-labelledby="diagram-heading">
+  <figcaption class="figure-title" id="diagram-heading">
+    RoI Align: 7 × 7 дробных участков и билинейная выборка
+  </figcaption>
+
+  <svg id="diagram" viewBox="0 0 940 420"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Точки выборки RoI Align внутри дробной рамки</title>
+    <desc id="svg-description">
+      Дробная рамка делится на сетку семь на семь. В центре каждого участка
+      находится точка выборки. Увеличенный фрагмент показывает четыре соседние
+      клетки карты признаков, участвующие в билинейной интерполяции.
+    </desc>
+  </svg>
+
+  <p id="fallback" class="fallback" hidden>
+    Схема должна была показать дробную рамку, разделённую на сетку 7 × 7:
+    по одной точке выборки в центре каждого из 49 участков и четыре соседние
+    клетки карты признаков для билинейной интерполяции.
+  </p>
+</figure>
+
+<script>
+(() => {
+  "use strict";
+
+  const data = Object.freeze([{
+    zero: 0,
+    one: 1,
+    two: 2,
+    half: 0.5,
+    featureN: 6,
+    roiX1: 1.2,
+    roiY1: 1.2,
+    roiX2: 5.4,
+    roiY2: 5.4,
+    roiN: 7,
+    roiWidth: 4.2,
+    selectedColumn: 3,
+    selectedRow: 3,
+    originX: 40,
+    originY: 10,
+    scale: 55,
+    mainTitleX: 3,
+    mainTitleY: 0.42,
+    edgeLabelY: 6.36,
+    summaryY: 6.82,
+    focusGrow: 0.04,
+    smallDot: 0.075,
+    largeDot: 0.13,
+    neighborDot: 0.105,
+    leaderStartX: 5.62,
+    zoomLeft: 9.1,
+    zoomTop: 0.45,
+    zoomRight: 16.05,
+    zoomBottom: 6.62,
+    zoomTitleX: 12.58,
+    zoomTitleY: 0.86,
+    cellsLeft: 10.05,
+    cellsTop: 1.45,
+    cellSize: 2,
+    sampleX: 12.56,
+    sampleY: 3.16,
+    sampleLabelX: 15.68,
+    sampleLabelY: 2.12,
+    arrowTailX: 14.86,
+    arrowTailY: 2.28,
+    arrowTipX: 12.72,
+    arrowTipY: 3.08,
+    arrowLength: 0.22,
+    arrowWidth: 0.12,
+    neighborLabelX: 12.05,
+    neighborLabelY: 6.12,
+    formulaLabelX: 12.05,
+    formulaLabelY: 6.45,
+    connectorTopY: 1.22,
+    connectorBottomY: 5.82,
+    dash: 0.11,
+    dashGap: 0.08,
+    textLift: -8,
+    textDrop: 18,
+    textSide: 8
+  }]);
+
+  const [D] = data;
+  const origin = Object.freeze({ x: D.originX, y: D.originY });
+  const scale = D.scale;
+
+  const sx = x => origin.x + x * scale;
+  const sy = y => origin.y + y * scale;
+
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function make(name, attributes, content) {
+    const node = document.createElementNS(ns, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      node.setAttribute(key, String(value));
+    });
+    if (content !== undefined) node.textContent = content;
+    return node;
+  }
+
+  function add(node) {
+    svg.appendChild(node);
+    return node;
+  }
+
+  function line(x1, y1, x2, y2, className) {
+    return add(make("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(x2),
+      y2: sy(y2),
+      class: className
+    }));
+  }
+
+  function rect(x, y, width, height, className) {
+    return add(make("rect", {
+      x: sx(x),
+      y: sy(y),
+      width: sx(x + width) - sx(x),
+      height: sy(y + height) - sy(y),
+      class: className
+    }));
+  }
+
+  function circle(x, y, radius, className) {
+    return add(make("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(radius) - sx(D.zero),
+      class: className
+    }));
+  }
+
+  function text(x, y, content, className, anchor, dx, dy) {
+    return add(make("text", {
+      x: sx(x),
+      y: sy(y),
+      dx,
+      dy,
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content));
+  }
+
+  function arrow(x1, y1, x2, y2) {
+    line(x1, y1, x2, y2, "arrow");
+
+    const vx = x2 - x1;
+    const vy = y2 - y1;
+    const magnitude = Math.sqrt(vx * vx + vy * vy);
+    const ux = vx / magnitude;
+    const uy = vy / magnitude;
+    const px = -uy;
+    const py = ux;
+
+    const baseX = x2 - ux * D.arrowLength;
+    const baseY = y2 - uy * D.arrowLength;
+    const leftX = baseX + px * D.arrowWidth;
+    const leftY = baseY + py * D.arrowWidth;
+    const rightX = baseX - px * D.arrowWidth;
+    const rightY = baseY - py * D.arrowWidth;
+
+    add(make("polygon", {
+      points: [
+        `${sx(x2)},${sy(y2)}`,
+        `${sx(leftX)},${sy(leftY)}`,
+        `${sx(rightX)},${sy(rightY)}`
+      ].join(" "),
+      class: "arrow-head"
+    }));
+  }
+
+  try {
+    const roiBinWidth = (D.roiX2 - D.roiX1) / D.roiN;
+    const roiBinHeight = (D.roiY2 - D.roiY1) / D.roiN;
+    const focusX = D.roiX1 + D.selectedColumn * roiBinWidth;
+    const focusY = D.roiY1 + D.selectedRow * roiBinHeight;
+    const focusCenterX = focusX + roiBinWidth / D.two;
+    const focusCenterY = focusY + roiBinHeight / D.two;
+
+    for (let row = D.zero; row < D.featureN; row += D.one) {
+      for (let column = D.zero; column < D.featureN; column += D.one) {
+        rect(
+          column,
+          row,
+          D.one,
+          D.one,
+          (row + column) % D.two === D.zero ? "feature-cell cell-a" :
+            "feature-cell cell-b"
+        );
+      }
+    }
+
+    for (let index = D.zero; index <= D.featureN; index += D.one) {
+      line(index, D.zero, index, D.featureN, "feature-line");
+      line(D.zero, index, D.featureN, index, "feature-line");
+    }
+
+    rect(
+      focusX - D.focusGrow,
+      focusY - D.focusGrow,
+      roiBinWidth + D.focusGrow * D.two,
+      roiBinHeight + D.focusGrow * D.two,
+      "focus-bin"
+    );
+
+    for (let index = D.zero; index <= D.roiN; index += D.one) {
+      const gridX = D.roiX1 + index * roiBinWidth;
+      const gridY = D.roiY1 + index * roiBinHeight;
+      line(gridX, D.roiY1, gridX, D.roiY2, "roi-line");
+      line(D.roiX1, gridY, D.roiX2, gridY, "roi-line");
+    }
+
+    rect(
+      D.roiX1,
+      D.roiY1,
+      D.roiX2 - D.roiX1,
+      D.roiY2 - D.roiY1,
+      "roi-border"
+    );
+
+    for (let row = D.zero; row < D.roiN; row += D.one) {
+      for (let column = D.zero; column < D.roiN; column += D.one) {
+        const pointX = D.roiX1 + (column + D.half) * roiBinWidth;
+        const pointY = D.roiY1 + (row + D.half) * roiBinHeight;
+        const selected = row === D.selectedRow &&
+          column === D.selectedColumn;
+        circle(
+          pointX,
+          pointY,
+          selected ? D.largeDot : D.smallDot,
+          selected ? "sample-selected" : "sample"
+        );
+      }
+    }
+
+    text(
+      D.mainTitleX,
+      D.mainTitleY,
+      "Дробная рамка: x = 1,2 … 5,4",
+      "label-strong",
+      "middle",
+      D.zero,
+      D.zero
+    );
+
+    text(
+      D.roiX1,
+      D.edgeLabelY,
+      "x = 1,2",
+      "label",
+      "start",
+      D.textSide,
+      D.zero
+    );
+
+    text(
+      D.roiX2,
+      D.edgeLabelY,
+      "x = 5,4",
+      "label",
+      "end",
+      -D.textSide,
+      D.zero
+    );
+
+    text(
+      D.mainTitleX,
+      D.summaryY,
+      "ширина 4,2 клетки → 7 × 7 участков → 49 точек",
+      "label-small",
+      "middle",
+      D.zero,
+      D.zero
+    );
+
+    rect(
+      D.zoomLeft,
+      D.zoomTop,
+      D.zoomRight - D.zoomLeft,
+      D.zoomBottom - D.zoomTop,
+      "panel"
+    );
+
+    line(
+      focusX + roiBinWidth,
+      focusY,
+      D.zoomLeft,
+      D.connectorTopY,
+      "leader"
+    );
+
+    line(
+      focusX + roiBinWidth,
+      focusY + roiBinHeight,
+      D.zoomLeft,
+      D.connectorBottomY,
+      "leader"
+    );
+
+    text(
+      D.zoomTitleX,
+      D.zoomTitleY,
+      "Увеличение одной точки",
+      "panel-title",
+      "middle",
+      D.zero,
+      D.zero
+    );
+
+    for (let row = D.zero; row < D.two; row += D.one) {
+      for (let column = D.zero; column < D.two; column += D.one) {
+        const cellX = D.cellsLeft + column * D.cellSize;
+        const cellY = D.cellsTop + row * D.cellSize;
+        rect(
+          cellX,
+          cellY,
+          D.cellSize,
+          D.cellSize,
+          (row + column) % D.two === D.zero ?
+            "neighbor-a" : "neighbor-b"
+        );
+      }
+    }
+
+    const neighborCenters = [
+      [D.cellsLeft + D.half * D.cellSize,
+       D.cellsTop + D.half * D.cellSize],
+      [D.cellsLeft + D.cellSize + D.half * D.cellSize,
+       D.cellsTop + D.half * D.cellSize],
+      [D.cellsLeft + D.half * D.cellSize,
+       D.cellsTop + D.cellSize + D.half * D.cellSize],
+      [D.cellsLeft + D.cellSize + D.half * D.cellSize,
+       D.cellsTop + D.cellSize + D.half * D.cellSize]
+    ];
+
+    neighborCenters.forEach(([x, y]) => {
+      const guide = line(x, y, D.sampleX, D.sampleY, "guide");
+      guide.setAttribute(
+        "stroke-dasharray",
+        `${sx(D.dash) - sx(D.zero)} ${sx(D.dashGap) - sx(D.zero)}`
+      );
+      circle(x, y, D.neighborDot, "neighbor-value");
+    });
+
+    circle(D.sampleX, D.sampleY, D.largeDot, "sample-selected");
+
+    text(
+      D.sampleLabelX,
+      D.sampleLabelY,
+      "дробная точка выборки",
+      "label-strong",
+      "end",
+      D.zero,
+      D.textLift
+    );
+
+    arrow(
+      D.arrowTailX,
+      D.arrowTailY,
+      D.arrowTipX,
+      D.arrowTipY
+    );
+
+    text(
+      D.neighborLabelX,
+      D.neighborLabelY,
+      "4 соседние клетки карты признаков",
+      "label",
+      "middle",
+      D.zero,
+      D.zero
+    );
+
+    text(
+      D.formulaLabelX,
+      D.formulaLabelY,
+      "их значения смешиваются билинейно",
+      "label-small",
+      "middle",
+      D.zero,
+      D.textDrop
+    );
+  } catch (error) {
+    svg.hidden = true;
+    fallback.hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

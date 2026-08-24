@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Дерево методов оценки</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5a5a5a;
+    --line:#333333; --box:#e8e8e8; --boxline:#333333;
+    --leaf:#f7f7f7; --root:#d6d6d6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#f0f0f0; --muted:#a8a8a8;
+      --line:#b9b9b9; --box:#2b3038; --boxline:#8f98a3;
+      --leaf:#1e2228; --root:#3a414b;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 6px 10px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;text-align:center;}
+  svg{display:block;width:100%;height:auto;max-height:520px;margin:0 auto;}
+  .fail{padding:8px;font-size:13px;color:var(--muted);line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Дерево методов оценки: ветка — цена, лист — вопрос</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---------- данные схемы (единственные литералы-данные) ----------
+    var TREE = {
+      root: {id:"E", x:0, y:0, w:11, h:2.2, label:"LLM Evaluation"},
+      branches: [
+        { x:-12, y:-4, w:11, h:2.2, label:"Automated Metrics", note:"дёшево, секунды",
+          leaves:[
+            {label:"BLEU",        q:"n-граммы"},
+            {label:"ROUGE",       q:"покрытие"},
+            {label:"BERTScore",   q:"близко по смыслу?"},
+            {label:"Exact Match", q:"совпало слово в слово?"}
+          ]},
+        { x:0, y:-4, w:11, h:2.2, label:"LLM-as-Judge", note:"платно, минуты",
+          leaves:[
+            {label:"Single grader", q:"балл 1–5"},
+            {label:"Pairwise",      q:"какой из двух лучше?"},
+            {label:"Best-of-N",     q:"лучший из 5"}
+          ]},
+        { x:12, y:-4, w:11, h:2.2, label:"Human Evaluation", note:"дорого, часы",
+          leaves:[
+            {label:"Expert review", q:"30 ответов вручную"},
+            {label:"User feedback", q:"👍/👎, шумно"},
+            {label:"A/B testing",   q:"живой трафик"}
+          ]}
+      ],
+      leafTop:-8, leafStep:-2.6, leafW:10.4, leafH:2.0
+    };
+
+    // ---------- один origin, один scale ----------
+    var ORIGIN = {x:300, y:40};
+    var SCALE  = 15;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y - y * SCALE; }
+
+    // ---------- пиксельные литералы ----------
+    var VB_W = 600, VB_H = 470, PAD = 4, STROKE = 1.4, FS = 11.5, FS_SM = 9.5, FS_BIG = 12.5;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+
+    var svg = el("svg",{viewBox:"0 0 "+VB_W+" "+VB_H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Дерево методов оценки LLM: три ветки и их листья"});
+    svg.appendChild(el("rect",{x:0,y:0,width:VB_W,height:VB_H,fill:"var(--bg)"}));
+
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah",markerWidth:"7",markerHeight:"7",
+      refX:"6",refY:"3",orient:"auto",markerUnits:"strokeWidth"});
+    mk.appendChild(el("path",{d:"M0,0 L6,3 L0,6 Z",fill:"var(--line)"}));
+    defs.appendChild(mk); svg.appendChild(defs);
+
+    function box(cx,cy,w,h,text,fill,fs,sub){
+      var g = el("g",{});
+      g.appendChild(el("rect",{
+        x:sx(cx-w/2), y:sy(cy+h/2),
+        width:sx(cx+w/2)-sx(cx-w/2), height:sy(cy-h/2)-sy(cy+h/2),
+        rx:PAD, fill:fill, stroke:"var(--boxline)", "stroke-width":STROKE}));
+      var t = el("text",{x:sx(cx), y:sy(cy), "text-anchor":"middle",
+        "dominant-baseline":"central", "font-size":fs, fill:"var(--fg)"});
+      t.textContent = text;
+      if(sub){
+        t.setAttribute("y", sy(cy) - fs*0.42);
+        var s = el("text",{x:sx(cx), y:sy(cy)+fs*0.62, "text-anchor":"middle",
+          "dominant-baseline":"central", "font-size":FS_SM, fill:"var(--muted)"});
+        s.textContent = sub; g.appendChild(t); g.appendChild(s);
+      } else { g.appendChild(t); }
+      svg.appendChild(g);
+    }
+
+    function elbow(x1,y1,x2,y2,arrow){
+      var my = (y1+y2)/2;
+      var p = el("path",{d:"M"+sx(x1)+","+sy(y1)+" L"+sx(x1)+","+sy(my)+
+        " L"+sx(x2)+","+sy(my)+" L"+sx(x2)+","+sy(y2),
+        fill:"none", stroke:"var(--line)", "stroke-width":STROKE});
+      if(arrow) p.setAttribute("marker-end","url(#ah)");
+      svg.appendChild(p);
+    }
+
+    var R = TREE.root;
+    box(R.x, R.y, R.w, R.h, R.label, "var(--root)", FS_BIG);
+
+    TREE.branches.forEach(function(b){
+      elbow(R.x, R.y - R.h/2, b.x, b.y + b.h/2, true);
+      box(b.x, b.y, b.w, b.h, b.label, "var(--box)", FS, b.note);
+
+      b.leaves.forEach(function(lf, i){
+        var ly = TREE.leafTop + i*TREE.leafStep;
+        var spineX = b.x - b.w/2 + TREE.leafW*0.06;
+        // вертикальный «ствол» ветки + горизонтальная веточка к листу
+        svg.appendChild(el("path",{
+          d:"M"+sx(spineX)+","+sy(b.y - b.h/2)+" L"+sx(spineX)+","+sy(ly),
+          fill:"none", stroke:"var(--line)", "stroke-width":STROKE}));
+        svg.appendChild(el("path",{
+          d:"M"+sx(spineX)+","+sy(ly)+" L"+sx(b.x - TREE.leafW/2)+","+sy(ly),
+          fill:"none", stroke:"var(--line)", "stroke-width":STROKE}));
+
+        var lw = TREE.leafW, lh = TREE.leafH;
+        svg.appendChild(el("rect",{
+          x:sx(b.x-lw/2), y:sy(ly+lh/2),
+          width:sx(b.x+lw/2)-sx(b.x-lw/2), height:sy(ly-lh/2)-sy(ly+lh/2),
+          rx:PAD, fill:"var(--leaf)", stroke:"var(--boxline)", "stroke-width":STROKE}));
+        var t1 = el("text",{x:sx(b.x), y:sy(ly)-FS_SM*0.45, "text-anchor":"middle",
+          "dominant-baseline":"central", "font-size":FS_SM+0.8, fill:"var(--fg)"});
+        t1.textContent = lf.label; svg.appendChild(t1);
+        var t2 = el("text",{x:sx(b.x), y:sy(ly)+FS_SM*0.72, "text-anchor":"middle",
+          "dominant-baseline":"central", "font-size":FS_SM-0.7, fill:"var(--muted)"});
+        t2.textContent = lf.q; svg.appendChild(t2);
+      });
+    });
+
+    // подписи уровней — слева, у хвоста, text-anchor:end
+    var lvlX = -18.6;
+    function level(y, txt){
+      var t = el("text",{x:sx(lvlX), y:sy(y), "text-anchor":"end",
+        "dominant-baseline":"central", "font-size":FS_SM, fill:"var(--muted)"});
+      t.textContent = txt; svg.appendChild(t);
+    }
+    level(-2.0, "1-й уровень:");
+    level(-3.3, "сколько платишь");
+    level(-9.0, "2-й уровень:");
+    level(-10.3, "какой вопрос");
+    level(-11.6, "задаёшь ответу");
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она показывает дерево: '+
+      'корень «LLM Evaluation» ветвится на три ветки — Automated Metrics (BLEU, ROUGE, '+
+      'BERTScore, Exact Match), LLM-as-Judge (Single grader, Pairwise, Best-of-N) и '+
+      'Human Evaluation (Expert review, User feedback, A/B testing). Первый уровень '+
+      'отвечает, сколько ты платишь за оценку; второй — какой именно вопрос ты задаёшь ответу.</div>';
+  }
+})();
+</script>
+</body>
+</html>

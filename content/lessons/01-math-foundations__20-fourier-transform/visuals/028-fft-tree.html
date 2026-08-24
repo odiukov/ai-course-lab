@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Рекурсивное разбиение восьми отсчётов</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7fafc;
+    --panel: #ffffff;
+    --panel-alt: #eaf3f8;
+    --ink: #173149;
+    --muted: #587083;
+    --line: #8aa4b7;
+    --split: #287c94;
+    --butterfly: #52748c;
+    --accent: #d65b27;
+    --accent-fill: #fff0e8;
+    --border: #c4d4df;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111a22;
+      --panel: #182630;
+      --panel-alt: #203440;
+      --ink: #e7f1f7;
+      --muted: #adc1ce;
+      --line: #668394;
+      --split: #66bdd0;
+      --butterfly: #86a9bd;
+      --accent: #ff9a68;
+      --accent-fill: #49291f;
+      --border: #38515f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    max-height: 520px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  header {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  h1 {
+    margin: unset;
+    padding: 10px 14px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--bg);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 13px;
+    font-weight: bold;
+    user-select: none;
+  }
+
+  .caption {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .legend {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: normal;
+  }
+
+  .route-label { fill: var(--accent); }
+
+  .node-box {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .group-box { fill: var(--panel-alt); }
+
+  .route-node .node-box {
+    fill: var(--accent-fill);
+    stroke: var(--accent);
+    stroke-width: 2.5px;
+  }
+
+  .tree-edge {
+    fill: none;
+    stroke: var(--split);
+    stroke-width: 1.8px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .tree-edge.route {
+    stroke: var(--accent);
+    stroke-width: 3px;
+  }
+
+  .butterfly-edge {
+    fill: none;
+    stroke: var(--butterfly);
+    stroke-width: 1.25px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .stage-dot {
+    fill: var(--bg);
+    stroke: var(--butterfly);
+    stroke-width: 1.5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .output-line {
+    stroke: var(--butterfly);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .final-box {
+    fill: var(--panel-alt);
+    stroke: var(--split);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  #fallback {
+    margin: unset;
+    padding: 14px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Рекурсивное разбиение восьми отсчётов</h1>
+  </header>
+  <figure>
+    <svg id="diagram" viewBox="0 0 1200 470"
+         preserveAspectRatio="xMidYMid meet"
+         role="img" aria-labelledby="svg-title svg-desc">
+      <title id="svg-title">Дерево radix-2 FFT для восьми отсчётов</title>
+      <desc id="svg-desc">Отсчёты делятся на чётные и нечётные группы, затем на пары и листья в порядке 0, 4, 2, 6, 1, 5, 3, 7, после чего объединяются бабочками.</desc>
+      <g id="plot"></g>
+    </svg>
+    <p id="fallback" hidden>Схема должна была показать разбиение x[0…7] на группы [0,2,4,6] и [1,3,5,7], листья в порядке 0,4,2,6,1,5,3,7 и обратное объединение бабочками.</p>
+  </figure>
+</main>
+
+<script>
+const data = Object.freeze({
+  canvas: { width: 1200, height: 470 },
+  origin: { x: 42, y: 42 },
+  scale: 46,
+  zero: 0,
+  geom: {
+    two: 2,
+    round: 0.14,
+    dot: 0.075,
+    curve: 0.42
+  },
+  captions: [
+    { x: 0.2, y: 0.28, text: "разбиение: чётные / нечётные", anchor: "start" },
+    { x: 10.55, y: 0.28, text: "листья", anchor: "start" },
+    { x: 12.7, y: 0.28, text: "обратное объединение бабочками", anchor: "start" }
+  ],
+  nodes: [
+    { id: "root", x: 1.35, y: 4.6, w: 2.05, h: 0.82, text: "x[0…7]", kind: "group", route: true },
+    { id: "even", x: 5.0, y: 2.5, w: 2.75, h: 0.76, text: "[0,2,4,6]", kind: "group", route: true },
+    { id: "odd", x: 5.0, y: 6.5, w: 2.75, h: 0.76, text: "[1,3,5,7]", kind: "group" },
+
+    { id: "p04", x: 8.65, y: 1.6, w: 1.8, h: 0.66, text: "[0,4]", kind: "pair" },
+    { id: "p26", x: 8.65, y: 3.6, w: 1.8, h: 0.66, text: "[2,6]", kind: "pair", route: true },
+    { id: "p15", x: 8.65, y: 5.6, w: 1.8, h: 0.66, text: "[1,5]", kind: "pair" },
+    { id: "p37", x: 8.65, y: 7.6, w: 1.8, h: 0.66, text: "[3,7]", kind: "pair" },
+
+    { id: "x0", x: 11.25, y: 1.2, w: 1.15, h: 0.58, text: "x[0]", kind: "leaf" },
+    { id: "x4", x: 11.25, y: 2.0, w: 1.15, h: 0.58, text: "x[4]", kind: "leaf" },
+    { id: "x2", x: 11.25, y: 3.2, w: 1.15, h: 0.58, text: "x[2]", kind: "leaf" },
+    { id: "x6", x: 11.25, y: 4.0, w: 1.15, h: 0.58, text: "x[6]", kind: "leaf", route: true },
+    { id: "x1", x: 11.25, y: 5.2, w: 1.15, h: 0.58, text: "x[1]", kind: "leaf" },
+    { id: "x5", x: 11.25, y: 6.0, w: 1.15, h: 0.58, text: "x[5]", kind: "leaf" },
+    { id: "x3", x: 11.25, y: 7.2, w: 1.15, h: 0.58, text: "x[3]", kind: "leaf" },
+    { id: "x7", x: 11.25, y: 8.0, w: 1.15, h: 0.58, text: "x[7]", kind: "leaf" }
+  ],
+  treeEdges: [
+    { from: "root", to: "even", route: true },
+    { from: "root", to: "odd" },
+    { from: "even", to: "p04" },
+    { from: "even", to: "p26", route: true },
+    { from: "odd", to: "p15" },
+    { from: "odd", to: "p37" },
+    { from: "p04", to: "x0" },
+    { from: "p04", to: "x4" },
+    { from: "p26", to: "x2" },
+    { from: "p26", to: "x6", route: true },
+    { from: "p15", to: "x1" },
+    { from: "p15", to: "x5" },
+    { from: "p37", to: "x3" },
+    { from: "p37", to: "x7" }
+  ],
+  rows: [1.2, 2.0, 3.2, 4.0, 5.2, 6.0, 7.2, 8.0],
+  stages: [
+    {
+      x1: 12.0, x2: 14.45, labelX: 13.2, label: "пары",
+      pairs: [[1.2, 2.0], [3.2, 4.0], [5.2, 6.0], [7.2, 8.0]]
+    },
+    {
+      x1: 14.45, x2: 17.7, labelX: 16.1, label: "четвёрки",
+      pairs: [[1.2, 3.2], [2.0, 4.0], [5.2, 7.2], [6.0, 8.0]]
+    },
+    {
+      x1: 17.7, x2: 21.45, labelX: 19.6, label: "восемь",
+      pairs: [[1.2, 5.2], [2.0, 6.0], [3.2, 7.2], [4.0, 8.0]]
+    }
+  ],
+  stageLabelY: 0.72,
+  final: { x: 23.7, y: 4.6, w: 2.2, h: 7.6, left: 22.6 },
+  legend: [
+    { x: 0.3, y: 8.82, text: "Листья: 0, 4, 2, 6, 1, 5, 3, 7", cls: "legend", anchor: "start" },
+    { x: 8.7, y: 8.82, text: "Путь x[6]: чётная половина → [2,6] → x[6]", cls: "legend route-label", anchor: "start" }
+  ]
+});
+
+const origin = Object.freeze(data.origin);
+const scale = data.scale;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+const svg = document.getElementById("diagram");
+const plot = document.getElementById("plot");
+const fallback = document.getElementById("fallback");
+const ns = "http://www.w3.org/2000/svg";
+
+try {
+  const make = (name, attrs = {}) => {
+    const element = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      element.setAttribute(key, value);
+    }
+    return element;
+  };
+
+  const addText = ({ x, y, text, cls = "", anchor = "middle" }) => {
+    const element = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: cls,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    });
+    element.textContent = text;
+    plot.append(element);
+  };
+
+  const nodeMap = new Map(data.nodes.map(node => [node.id, node]));
+
+  const treePath = edge => {
+    const from = nodeMap.get(edge.from);
+    const to = nodeMap.get(edge.to);
+    const start = { x: from.x + from.w / data.geom.two, y: from.y };
+    const end = { x: to.x - to.w / data.geom.two, y: to.y };
+    const middle = (start.x + end.x) / data.geom.two;
+    return [
+      "M", sx(start.x), sy(start.y),
+      "C", sx(middle), sy(start.y),
+      sx(middle), sy(end.y),
+      sx(end.x), sy(end.y)
+    ].join(" ");
+  };
+
+  for (const edge of data.treeEdges) {
+    plot.append(make("path", {
+      d: treePath(edge),
+      class: edge.route ? "tree-edge route" : "tree-edge"
+    }));
+  }
+
+  for (const node of data.nodes) {
+    const group = make("g", {
+      class: node.route ? "node route-node" : "node"
+    });
+    const left = node.x - node.w / data.geom.two;
+    const top = node.y - node.h / data.geom.two;
+    group.append(make("rect", {
+      x: sx(left),
+      y: sy(top),
+      width: sx(left + node.w) - sx(left),
+      height: sy(top + node.h) - sy(top),
+      rx: sx(data.geom.round) - sx(data.zero),
+      ry: sy(data.geom.round) - sy(data.zero),
+      class: node.kind === "group" ? "node-box group-box" : "node-box"
+    }));
+    const label = make("text", {
+      x: sx(node.x),
+      y: sy(node.y),
+      "text-anchor": "middle",
+      "dominant-baseline": "middle"
+    });
+    label.textContent = node.text;
+    group.append(label);
+    plot.append(group);
+  }
+
+  const curve = (x1, y1, x2, y2) => {
+    const bend = (x2 - x1) * data.geom.curve;
+    return [
+      "M", sx(x1), sy(y1),
+      "C", sx(x1 + bend), sy(y1),
+      sx(x2 - bend), sy(y2),
+      sx(x2), sy(y2)
+    ].join(" ");
+  };
+
+  for (const stage of data.stages) {
+    for (const [upper, lower] of stage.pairs) {
+      const routes = [
+        [upper, upper],
+        [upper, lower],
+        [lower, upper],
+        [lower, lower]
+      ];
+      for (const [fromY, toY] of routes) {
+        plot.append(make("path", {
+          d: curve(stage.x1, fromY, stage.x2, toY),
+          class: "butterfly-edge"
+        }));
+      }
+      for (const row of [upper, lower]) {
+        plot.append(make("circle", {
+          cx: sx(stage.x2),
+          cy: sy(row),
+          r: sx(data.geom.dot) - sx(data.zero),
+          class: "stage-dot"
+        }));
+      }
+    }
+    addText({
+      x: stage.labelX,
+      y: data.stageLabelY,
+      text: stage.label,
+      cls: "caption"
+    });
+  }
+
+  for (const row of data.rows) {
+    plot.append(make("line", {
+      x1: sx(data.stages.at(-data.geom.two + data.geom.two).x2),
+      y1: sy(row),
+      x2: sx(data.final.left),
+      y2: sy(row),
+      class: "output-line"
+    }));
+  }
+
+  const finalLeft = data.final.x - data.final.w / data.geom.two;
+  const finalTop = data.final.y - data.final.h / data.geom.two;
+  plot.append(make("rect", {
+    x: sx(finalLeft),
+    y: sy(finalTop),
+    width: sx(finalLeft + data.final.w) - sx(finalLeft),
+    height: sy(finalTop + data.final.h) - sy(finalTop),
+    rx: sx(data.geom.round) - sx(data.zero),
+    ry: sy(data.geom.round) - sy(data.zero),
+    class: "final-box"
+  }));
+
+  addText({ x: data.final.x, y: 4.35, text: "X[0…7]" });
+  addText({ x: data.final.x, y: 4.86, text: "8 коэффициентов", cls: "caption" });
+
+  for (const caption of data.captions) {
+    addText({ ...caption, cls: "caption" });
+  }
+
+  for (const label of data.legend) {
+    addText(label);
+  }
+} catch (error) {
+  svg.hidden = true;
+  fallback.hidden = false;
+}
+</script>
+</body>
+</html>

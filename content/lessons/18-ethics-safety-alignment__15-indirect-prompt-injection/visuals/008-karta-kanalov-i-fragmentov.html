@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как внешняя инструкция попадает в общий промпт</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #536179;
+    --frame: #cbd4e2;
+    --external-fill: #fff1e8;
+    --external-stroke: #c64b19;
+    --trusted-fill: #e7f7ef;
+    --trusted-stroke: #18794e;
+    --assembly-fill: #f1edff;
+    --assembly-stroke: #6545b5;
+    --prompt-fill: #edf4ff;
+    --prompt-stroke: #285ea8;
+    --arrow: #68758b;
+    --warning: #a73918;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #182130;
+      --ink: #f2f5fa;
+      --muted: #b8c3d3;
+      --frame: #405069;
+      --external-fill: #3b241d;
+      --external-stroke: #ff9568;
+      --trusted-fill: #18352b;
+      --trusted-stroke: #68d6a5;
+      --assembly-fill: #292440;
+      --assembly-stroke: #ae96ff;
+      --prompt-fill: #1c2d47;
+      --prompt-stroke: #83b7ff;
+      --arrow: #a7b4c7;
+      --warning: #ff9b78;
+    }
+  }
+
+  html, body {
+    margin: unset;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    background: var(--panel);
+    border: 2px solid var(--frame);
+  }
+
+  h2 {
+    margin: unset;
+    padding: 11px 16px;
+    border-bottom: 2px solid var(--frame);
+    font-size: 18px;
+    line-height: normal;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--panel);
+  }
+
+  .box {
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .external {
+    fill: var(--external-fill);
+    stroke: var(--external-stroke);
+  }
+
+  .trusted {
+    fill: var(--trusted-fill);
+    stroke: var(--trusted-stroke);
+  }
+
+  .assembly {
+    fill: var(--assembly-fill);
+    stroke: var(--assembly-stroke);
+  }
+
+  .prompt {
+    fill: var(--prompt-fill);
+    stroke: var(--prompt-stroke);
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--arrow);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .trusted-line {
+    stroke: var(--trusted-stroke);
+  }
+
+  .external-line {
+    stroke: var(--external-stroke);
+  }
+
+  .combined-line {
+    stroke: var(--assembly-stroke);
+  }
+
+  .arrow-external {
+    fill: var(--external-stroke);
+  }
+
+  .arrow-trusted {
+    fill: var(--trusted-stroke);
+  }
+
+  .arrow-combined {
+    fill: var(--assembly-stroke);
+  }
+
+  .divider {
+    stroke: var(--prompt-stroke);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .body {
+    fill: var(--ink);
+    font-size: 14px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .tag {
+    fill: var(--muted);
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: .04em;
+  }
+
+  .warning {
+    fill: var(--warning);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--ink);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h2 id="diagram-title">Как внешняя инструкция попадает в общий промпт</h2>
+  <svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Три внешних канала сходятся в недоверенный фрагмент, который сборщик объединяет с доверенным вопросом пользователя в один промпт">
+  </svg>
+</figure>
+
+<script>
+const diagram = Object.freeze({
+  canvas: { w: 1200, h: 450 },
+  radius: 12,
+  boxes: [
+    { x: 30, y: 54,  w: 270, h: 78, kind: "external" },
+    { x: 30, y: 164, w: 270, h: 78, kind: "external" },
+    { x: 30, y: 274, w: 270, h: 78, kind: "external" },
+    { x: 420, y: 133, w: 245, h: 156, kind: "external" },
+    { x: 430, y: 28,  w: 235, h: 76, kind: "trusted" },
+    { x: 720, y: 139, w: 135, h: 150, kind: "assembly" },
+    { x: 900, y: 53,  w: 270, h: 294, kind: "prompt" },
+    { x: 920, y: 105, w: 230, h: 84, kind: "trusted" },
+    { x: 920, y: 207, w: 230, h: 105, kind: "external" }
+  ],
+  lines: [
+    {
+      kind: "external-line",
+      points: [[300,93],[350,93],[390,168],[420,168]],
+      tip: [[420,168],[408,161],[408,175]],
+      arrow: "arrow-external"
+    },
+    {
+      kind: "external-line",
+      points: [[300,203],[420,211]],
+      tip: [[420,211],[408,204],[408,218]],
+      arrow: "arrow-external"
+    },
+    {
+      kind: "external-line",
+      points: [[300,313],[350,313],[390,254],[420,254]],
+      tip: [[420,254],[408,247],[408,261]],
+      arrow: "arrow-external"
+    },
+    {
+      kind: "trusted-line",
+      points: [[665,66],[748,66],[787,139]],
+      tip: [[787,139],[776,130],[789,125]],
+      arrow: "arrow-trusted"
+    },
+    {
+      kind: "external-line",
+      points: [[665,211],[720,211]],
+      tip: [[720,211],[708,204],[708,218]],
+      arrow: "arrow-external"
+    },
+    {
+      kind: "combined-line",
+      points: [[855,214],[900,214]],
+      tip: [[900,214],[888,207],[888,221]],
+      arrow: "arrow-combined"
+    }
+  ],
+  dividers: [
+    [[900,92],[1170,92]],
+    [[900,329],[1170,329]]
+  ],
+  texts: [
+    { x: 50, y: 76,  text: "RAG-ДОКУМЕНТ", className: "tag", anchor: "start" },
+    { x: 50, y: 101, text: "Найденный документ", className: "title", anchor: "start" },
+    { x: 50, y: 120, text: "с чужой инструкцией внутри", className: "small", anchor: "start" },
+
+    { x: 50, y: 186, text: "ВХОДЯЩЕЕ ПИСЬМО", className: "tag", anchor: "start" },
+    { x: 50, y: 211, text: "Тело письма", className: "title", anchor: "start" },
+    { x: 50, y: 230, text: "с текстом отправителя", className: "small", anchor: "start" },
+
+    { x: 50, y: 296, text: "ВЕБ-ИНСТРУМЕНТ", className: "tag", anchor: "start" },
+    { x: 50, y: 321, text: "Вывод инструмента", className: "title", anchor: "start" },
+    { x: 50, y: 340, text: "с подконтрольным результатом", className: "small", anchor: "start" },
+
+    { x: 542, y: 53, text: "ДОВЕРЕННЫЙ ФРАГМЕНТ", className: "tag", anchor: "middle" },
+    { x: 542, y: 77, text: "«Сравни условия страховок»", className: "title", anchor: "middle" },
+    { x: 542, y: 95, text: "вопрос пользователя", className: "small", anchor: "middle" },
+
+    { x: 542, y: 159, text: "НЕДОВЕРЕННЫЙ ФРАГМЕНТ", className: "tag", anchor: "middle" },
+    { x: 542, y: 190, text: "«Игнорируй запрос…»", className: "title", anchor: "middle" },
+    { x: 542, y: 216, text: "Содержимое пришло извне,", className: "body", anchor: "middle" },
+    { x: 542, y: 237, text: "но уже стало текстом", className: "body", anchor: "middle" },
+    { x: 542, y: 258, text: "для обработки моделью", className: "body", anchor: "middle" },
+
+    { x: 787, y: 169, text: "СБОРЩИК", className: "tag", anchor: "middle" },
+    { x: 787, y: 201, text: "Склейка", className: "title", anchor: "middle" },
+    { x: 787, y: 226, text: "шаблона", className: "body", anchor: "middle" },
+    { x: 787, y: 247, text: "запроса", className: "body", anchor: "middle" },
+    { x: 787, y: 318, text: "Здесь атака пересекает границу", className: "warning", anchor: "middle" },
+
+    { x: 1035, y: 79, text: "ОБЩИЙ ПРОМПТ", className: "title", anchor: "middle" },
+    { x: 940, y: 128, text: "ДОВЕРЕННО", className: "tag", anchor: "start" },
+    { x: 940, y: 153, text: "Задача пользователя", className: "title", anchor: "start" },
+    { x: 940, y: 174, text: "Сравнить две страховки", className: "small", anchor: "start" },
+
+    { x: 940, y: 230, text: "НЕДОВЕРЕННО", className: "tag", anchor: "start" },
+    { x: 940, y: 255, text: "Внешний контент", className: "title", anchor: "start" },
+    { x: 940, y: 278, text: "Документ, письмо", className: "small", anchor: "start" },
+    { x: 940, y: 297, text: "или вывод инструмента", className: "small", anchor: "start" },
+
+    { x: 1035, y: 339, text: "Один вход модели", className: "tag", anchor: "middle" },
+
+    { x: 30, y: 397, text: "Источники разные", className: "title", anchor: "start" },
+    { x: 30, y: 420, text: "→ внешний текст становится фрагментом общего промпта рядом с настоящей задачей", className: "body", anchor: "start" }
+  ],
+  fallback: {
+    x: 40,
+    y: 210,
+    text: "Схема: RAG-документ, письмо и вывод веб-инструмента попадают в общий промпт рядом с доверенным вопросом пользователя."
+  }
+});
+
+const origin = Object.freeze({ x: 0, y: 0 });
+const scale = Object.freeze({ x: 1, y: 1 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function node(name, attrs, content) {
+    const item = document.createElementNS(ns, name);
+    for (const key of Object.keys(attrs)) {
+      item.setAttribute(key, attrs[key]);
+    }
+    if (content !== undefined) item.textContent = content;
+    return item;
+  }
+
+  svg.appendChild(node("rect", {
+    x: sx(0),
+    y: sy(0),
+    width: sx(diagram.canvas.w) - sx(0),
+    height: sy(diagram.canvas.h) - sy(0),
+    fill: "var(--panel)"
+  }));
+
+  for (const line of diagram.lines) {
+    svg.appendChild(node("polyline", {
+      points: line.points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: `connector ${line.kind}`
+    }));
+    svg.appendChild(node("polygon", {
+      points: line.tip.map(point => `${sx(point[0])},${sy(point[1])}`).join(" "),
+      class: line.arrow
+    }));
+  }
+
+  for (const box of diagram.boxes) {
+    svg.appendChild(node("rect", {
+      x: sx(box.x),
+      y: sy(box.y),
+      width: sx(box.x + box.w) - sx(box.x),
+      height: sy(box.y + box.h) - sy(box.y),
+      rx: sx(diagram.radius) - sx(0),
+      ry: sy(diagram.radius) - sy(0),
+      class: `box ${box.kind}`
+    }));
+  }
+
+  for (const divider of diagram.dividers) {
+    svg.appendChild(node("line", {
+      x1: sx(divider[0][0]),
+      y1: sy(divider[0][1]),
+      x2: sx(divider[1][0]),
+      y2: sy(divider[1][1]),
+      class: "divider"
+    }));
+  }
+
+  for (const label of diagram.texts) {
+    svg.appendChild(node("text", {
+      x: sx(label.x),
+      y: sy(label.y),
+      class: label.className,
+      "text-anchor": label.anchor
+    }, label.text));
+  }
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const message = document.createElementNS(ns, "text");
+  message.setAttribute("x", sx(diagram.fallback.x));
+  message.setAttribute("y", sy(diagram.fallback.y));
+  message.setAttribute("class", "fallback");
+  message.textContent = diagram.fallback.text;
+  svg.appendChild(message);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как меняется объём данных внутри GPT</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #59657a;
+    --line: #8793a8;
+    --input: #dbeafe;
+    --input-strong: #2563eb;
+    --activation: #ede9fe;
+    --activation-strong: #7c3aed;
+    --logit: #ffedd5;
+    --logit-strong: #ea580c;
+    --softmax: #dcfce7;
+    --softmax-strong: #15803d;
+    --note: #eef2f7;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --panel: #182235;
+      --text: #f3f4f6;
+      --muted: #b8c2d4;
+      --line: #8592a8;
+      --input: #183763;
+      --input-strong: #60a5fa;
+      --activation: #36275c;
+      --activation-strong: #c4b5fd;
+      --logit: #542b18;
+      --logit-strong: #fb923c;
+      --softmax: #153d2b;
+      --softmax-strong: #4ade80;
+      --note: #202c40;
+    }
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  h1 {
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--bg);
+    font-family: inherit;
+    shape-rendering: geometricPrecision;
+  }
+
+  text {
+    fill: var(--text);
+  }
+
+  .kicker {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .stage-title {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .dimension {
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  .count {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .arrow-label {
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .arrow-detail {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .inside {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .note {
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .outline, .grid, .arrow, .brace {
+    fill: none;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .outline {
+    stroke-width: 2px;
+  }
+
+  .grid {
+    stroke: var(--line);
+    stroke-width: 1px;
+  }
+
+  .arrow {
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .brace {
+    stroke: var(--activation-strong);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .input-face {
+    fill: var(--input);
+    stroke: var(--input-strong);
+  }
+
+  .input-dot {
+    fill: var(--panel);
+    stroke: var(--input-strong);
+    stroke-width: 1px;
+  }
+
+  .activation-face {
+    fill: var(--activation);
+    stroke: var(--activation-strong);
+  }
+
+  .activation-side {
+    fill: var(--panel);
+    stroke: var(--activation-strong);
+  }
+
+  .logit-face {
+    fill: var(--logit);
+    stroke: var(--logit-strong);
+  }
+
+  .logit-side {
+    fill: var(--panel);
+    stroke: var(--logit-strong);
+  }
+
+  .block {
+    fill: var(--activation);
+    stroke: var(--activation-strong);
+    stroke-width: 1px;
+  }
+
+  .softmax {
+    fill: var(--softmax);
+    stroke: var(--softmax-strong);
+  }
+
+  .note-box {
+    fill: var(--note);
+    stroke: var(--line);
+  }
+</style>
+</head>
+<body>
+<h1 id="diagram-title">Как меняется объём данных внутри GPT</h1>
+
+<svg id="diagram" width="1200" height="450" viewBox="0 0 1200 450"
+     preserveAspectRatio="xMidYMid meet"
+     role="img" aria-labelledby="diagram-title diagram-description">
+  <desc id="diagram-description">
+    Батч 4 на 128 token IDs превращается в активации формы 4 на 128 на 768,
+    сохраняет эту форму в двенадцати блоках и затем превращается в логиты
+    формы 4 на 128 на 50257.
+  </desc>
+  <g id="drawing"></g>
+</svg>
+
+<script>
+const scheme = [{
+  zero: 0,
+  origin: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  radius: 8,
+  arrowHead: 8,
+  rows: [0, 1, 2, 3],
+  tokenColumns: [0, 1, 2, 3, 4, 5, 6],
+  activationColumns: [1, 2, 3, 4, 5, 6, 7],
+  logitColumns: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  blocks: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  canvas: { left: 26, right: 1174 },
+  header: { x: 600, y: 28 },
+  input: {
+    x: 65, y: 125, w: 215, h: 112,
+    titleX: 172, titleY: 82,
+    rowStart: 139, rowGap: 25,
+    dotStart: 91, dotGap: 24, dotW: 13, dotH: 13,
+    dimX: 172, dimY: 275,
+    countX: 172, countY: 301
+  },
+  activation: {
+    x: 405, y: 121, w: 255, h: 142, depth: 18,
+    titleX: 532, titleY: 82,
+    rowGap: 35.5,
+    columnGap: 31.8,
+    dimX: 532, dimY: 299,
+    countX: 532, countY: 325,
+    braceLeft: 414, braceRight: 650, braceY: 343,
+    braceTip: 6,
+    blockX: 414, blockY: 361, blockW: 16, blockH: 15,
+    blockGap: 20,
+    blockLabelX: 532, blockLabelY: 354
+  },
+  logits: {
+    x: 824, y: 103, w: 300, h: 190, depth: 22,
+    titleX: 974, titleY: 68,
+    rowGap: 47.5,
+    columnGap: 25,
+    dimX: 974, dimY: 326,
+    countX: 974, countY: 351,
+    pillX: 844, pillY: 370, pillW: 260, pillH: 38,
+    pillTextX: 974, pillTextY: 394
+  },
+  firstArrow: {
+    x1: 298, y1: 191, x2: 386, y2: 191,
+    labelX: 342, labelY: 143,
+    detailX: 342, detailY: 162
+  },
+  secondArrow: {
+    x1: 691, y1: 191, x2: 805, y2: 191,
+    labelX: 748, labelY: 143,
+    detailX: 748, detailY: 162
+  },
+  note: {
+    x: 65, y: 422, w: 1059, h: 25,
+    textX: 594, textY: 440
+  },
+  fallback: { x: 600, y: 225 }
+}];
+
+const origin = Object.freeze(scheme[0].origin);
+const scale = Object.freeze(scheme[0].scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+const D = scheme[0];
+const svgNS = "http://www.w3.org/2000/svg";
+const root = document.getElementById("drawing");
+
+function element(name, attrs, parent = root) {
+  const node = document.createElementNS(svgNS, name);
+  Object.entries(attrs).forEach(([key, value]) => {
+    node.setAttribute(key, String(value));
+  });
+  parent.append(node);
+  return node;
+}
+
+function line(x1, y1, x2, y2, klass, parent = root) {
+  return element("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2), class: klass
+  }, parent);
+}
+
+function rect(x, y, w, h, klass, parent = root) {
+  return element("rect", {
+    x: sx(x),
+    y: sy(y),
+    width: sx(w) - sx(D.zero),
+    height: sy(h) - sy(D.zero),
+    rx: sx(D.radius) - sx(D.zero),
+    ry: sy(D.radius) - sy(D.zero),
+    class: klass
+  }, parent);
+}
+
+function polygon(points, klass, parent = root) {
+  return element("polygon", {
+    points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: klass
+  }, parent);
+}
+
+function text(label, x, y, klass, anchor = "middle", parent = root) {
+  const node = element("text", {
+    x: sx(x), y: sy(y), class: klass, "text-anchor": anchor
+  }, parent);
+  node.textContent = label;
+  return node;
+}
+
+function arrow(spec) {
+  line(spec.x1, spec.y1, spec.x2, spec.y2, "arrow");
+  line(
+    spec.x2 - D.arrowHead,
+    spec.y2 - D.arrowHead,
+    spec.x2,
+    spec.y2,
+    "arrow"
+  );
+  line(
+    spec.x2 - D.arrowHead,
+    spec.y2 + D.arrowHead,
+    spec.x2,
+    spec.y2,
+    "arrow"
+  );
+}
+
+function cuboid(spec, faceClass, sideClass) {
+  polygon([
+    { x: spec.x, y: spec.y },
+    { x: spec.x + spec.depth, y: spec.y - spec.depth },
+    { x: spec.x + spec.w + spec.depth, y: spec.y - spec.depth },
+    { x: spec.x + spec.w, y: spec.y }
+  ], `${sideClass} outline`);
+
+  polygon([
+    { x: spec.x + spec.w, y: spec.y },
+    { x: spec.x + spec.w + spec.depth, y: spec.y - spec.depth },
+    { x: spec.x + spec.w + spec.depth, y: spec.y + spec.h - spec.depth },
+    { x: spec.x + spec.w, y: spec.y + spec.h }
+  ], `${sideClass} outline`);
+
+  rect(spec.x, spec.y, spec.w, spec.h, `${faceClass} outline`);
+}
+
+try {
+  text("Один проход модели · батч 4 × 128", D.header.x, D.header.y, "kicker");
+
+  text("TOKEN IDs", D.input.titleX, D.input.titleY, "stage-title");
+  rect(
+    D.input.x,
+    D.input.y,
+    D.input.w,
+    D.input.h,
+    "input-face outline"
+  );
+
+  D.rows.forEach(row => {
+    if (row !== D.zero) {
+      line(
+        D.input.x,
+        D.input.y + row * D.input.rowGap,
+        D.input.x + D.input.w,
+        D.input.y + row * D.input.rowGap,
+        "grid"
+      );
+    }
+
+    D.tokenColumns.forEach(column => {
+      rect(
+        D.input.dotStart + column * D.input.dotGap,
+        D.input.rowStart + row * D.input.rowGap,
+        D.input.dotW,
+        D.input.dotH,
+        "input-dot"
+      );
+    });
+  });
+
+  text("4 × 128", D.input.dimX, D.input.dimY, "dimension");
+  text("512 целых чисел", D.input.countX, D.input.countY, "count");
+
+  arrow(D.firstArrow);
+  text(
+    "поиск эмбеддингов",
+    D.firstArrow.labelX,
+    D.firstArrow.labelY,
+    "arrow-label"
+  );
+  text(
+    "1 ID → вектор из 768 чисел",
+    D.firstArrow.detailX,
+    D.firstArrow.detailY,
+    "arrow-detail"
+  );
+
+  text(
+    "АКТИВАЦИИ",
+    D.activation.titleX,
+    D.activation.titleY,
+    "stage-title"
+  );
+  cuboid(D.activation, "activation-face", "activation-side");
+
+  D.rows.forEach(row => {
+    if (row !== D.zero) {
+      line(
+        D.activation.x,
+        D.activation.y + row * D.activation.rowGap,
+        D.activation.x + D.activation.w,
+        D.activation.y + row * D.activation.rowGap,
+        "grid"
+      );
+    }
+  });
+
+  D.activationColumns.forEach(column => {
+    line(
+      D.activation.x + column * D.activation.columnGap,
+      D.activation.y,
+      D.activation.x + column * D.activation.columnGap,
+      D.activation.y + D.activation.h,
+      "grid"
+    );
+  });
+
+  text(
+    "4 × 128 × 768",
+    D.activation.dimX,
+    D.activation.dimY,
+    "dimension"
+  );
+  text(
+    "393 216 временных чисел",
+    D.activation.countX,
+    D.activation.countY,
+    "count"
+  );
+
+  line(
+    D.activation.braceLeft,
+    D.activation.braceY,
+    D.activation.braceRight,
+    D.activation.braceY,
+    "brace"
+  );
+  line(
+    D.activation.braceLeft,
+    D.activation.braceY,
+    D.activation.braceLeft,
+    D.activation.braceY - D.activation.braceTip,
+    "brace"
+  );
+  line(
+    D.activation.braceRight,
+    D.activation.braceY,
+    D.activation.braceRight,
+    D.activation.braceY - D.activation.braceTip,
+    "brace"
+  );
+  text(
+    "12 блоков: форма сохраняется",
+    D.activation.blockLabelX,
+    D.activation.blockLabelY,
+    "small"
+  );
+
+  D.blocks.forEach(block => {
+    rect(
+      D.activation.blockX + block * D.activation.blockGap,
+      D.activation.blockY,
+      D.activation.blockW,
+      D.activation.blockH,
+      "block"
+    );
+  });
+
+  arrow(D.secondArrow);
+  text(
+    "линейная проекция",
+    D.secondArrow.labelX,
+    D.secondArrow.labelY,
+    "arrow-label"
+  );
+  text(
+    "для каждой из 512 позиций",
+    D.secondArrow.detailX,
+    D.secondArrow.detailY,
+    "arrow-detail"
+  );
+
+  text("ЛОГИТЫ", D.logits.titleX, D.logits.titleY, "stage-title");
+  cuboid(D.logits, "logit-face", "logit-side");
+
+  D.rows.forEach(row => {
+    if (row !== D.zero) {
+      line(
+        D.logits.x,
+        D.logits.y + row * D.logits.rowGap,
+        D.logits.x + D.logits.w,
+        D.logits.y + row * D.logits.rowGap,
+        "grid"
+      );
+    }
+  });
+
+  D.logitColumns.forEach(column => {
+    line(
+      D.logits.x + column * D.logits.columnGap,
+      D.logits.y,
+      D.logits.x + column * D.logits.columnGap,
+      D.logits.y + D.logits.h,
+      "grid"
+    );
+  });
+
+  text(
+    "4 × 128 × 50 257",
+    D.logits.dimX,
+    D.logits.dimY,
+    "dimension"
+  );
+  text(
+    "25 731 584 логита",
+    D.logits.countX,
+    D.logits.countY,
+    "count"
+  );
+
+  rect(
+    D.logits.pillX,
+    D.logits.pillY,
+    D.logits.pillW,
+    D.logits.pillH,
+    "softmax outline"
+  );
+  text(
+    "Softmax → столько же вероятностей",
+    D.logits.pillTextX,
+    D.logits.pillTextY,
+    "inside"
+  );
+
+  rect(D.note.x, D.note.y, D.note.w, D.note.h, "note-box outline");
+  text(
+    "512  →  393 216  →  25 731 584 временных чисел за один проход",
+    D.note.textX,
+    D.note.textY,
+    "note"
+  );
+} catch (error) {
+  root.replaceChildren();
+  text(
+    "Схема: 4 × 128 token IDs → 4 × 128 × 768 активаций → 4 × 128 × 50 257 логитов",
+    D.fallback.x,
+    D.fallback.y,
+    "note"
+  );
+}
+</script>
+</body>
+</html>

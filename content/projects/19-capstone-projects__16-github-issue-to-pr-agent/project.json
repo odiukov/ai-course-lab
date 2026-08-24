@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "title": "Автономный агент GitHub Issue-to-PR",
+  "summary": "Ты построишь самостоятельного облачного coding-агента: метка на GitHub issue запускает изолированный worker, который воспроизводит окружение репозитория, исправляет код, проверяет полный CI и открывает готовый к ревью PR. Затем ты оценишь систему на 30 реальных подготовленных задачах и сравнишь её стоимость, задержку и pass rate с Cursor Background Agents и AWS Remote SWE Agents.",
+  "time": "30 часов",
+  "languages": [
+    "Python",
+    "TypeScript",
+    "YAML"
+  ],
+  "prerequisites": [
+    "Фаза 11",
+    "Фаза 13",
+    "Фаза 14",
+    "Фаза 15",
+    "Фаза 17"
+  ],
+  "phases": [
+    "P11",
+    "P13",
+    "P14",
+    "P15",
+    "P17"
+  ],
+  "tracks": [
+    "agent-harness",
+    "evaluation",
+    "safety"
+  ],
+  "brief": {
+    "problem": "Асинхронный облачный coding-агент — отдельный класс продукта, а не удалённый интерактивный терминал. Пользователь ставит на GitHub issue метку `@agent fix this`, после чего worker без дополнительных вопросов клонирует репозиторий, восстанавливает его сборочное окружение, исследует код, вносит исправление, запускает тесты и публикует PR с объяснением результата. Именно к такой форме сходятся AWS Remote SWE Agents, Cursor Background Agents, OpenAI Codex cloud, Google Jules и Factory Droids.\n\nГлавная сложность находится не в генерации патча. Агент должен начать с чистой облачной среды и понять, как собрать незнакомый Python-, Node-, Go- или Rust-репозиторий без заранее подготовленного образа. Он обязан корректно обращаться с нестабильными тестами, завершать работу при красном CI и сохранять покрытие. Одновременно worker получает доступ к реальному GitHub-репозиторию, поэтому установка приложения, короткоживущие credentials и политика веток становятся частью модели безопасности.\n\nСистема должна ограничивать расходы по репозиторию и отдельной задаче, не позволять агенту менять `.github/workflows`, напрямую писать в `main` или выполнять force-push. Каждый успешный запуск должен оставлять проверяемый след: rationale, сводку diff, стоимость, число ходов и ссылку на Langfuse trace. Итог проверяется не демонстрацией на одной удобной задаче, а benchmark из 30 подготовленных issues разной сложности и сравнением с hosted-альтернативами по pass rate, качеству PR, стоимости, задержке и безопасности.",
+    "concept": "GitHub App принимает событие о метке issue либо комментарии в PR и передаёт нормализованную задачу в AWS Lambda. Lambda фильтрует триггер `@agent fix this` и кладёт работу в SQS. Dispatcher извлекает сообщение, проверяет дневной бюджет репозитория и лимит числа PR, после чего запускает отдельную задачу ECS Fargate. Для каждой работы создаётся свежая Daytona- или E2B-песочница, а доступ к GitHub выдаётся через короткоживущий installation token.\n\nWorker клонирует репозиторий, создаёт рабочее дерево и отдельную агентскую ветку. Если проект не содержит подходящего Dockerfile, слой environment inference определяет язык, framework и package manager — `uv`, `pnpm`, `go mod` или `cargo` — и синтезирует generic Dockerfile под целевой runtime. Затем mini-swe-agent или SWE-agent v2 запускает ограниченный цикл над Claude Opus 4.7 либо GPT-5.4-Codex. Агент использует `ripgrep`, tree-sitter repo-map, чтение и редактирование файлов, тесты и безопасные git-операции. Один запуск ограничен стоимостью $20, 30 минутами и 30 ходами.\n\nПосле завершения цикла полный CI повторно выполняется внутри sandbox. Красный результат запрещает публикацию PR. Изменение покрытия вычисляется относительно базовой ветки; падение более чем на 2% не блокирует PR, но добавляет `needs-review`. В опубликованном PR находятся rationale, сводка diff, trace URL, стоимость и число ходов. Ревьюер может обратиться к агенту через `@agent` для последующей работы, сохраняя асинхронный GitHub-native процесс.",
+    "architecture": "Поток начинается с GitHub issue, помеченного `@agent fix this`, либо с PR-комментария. Webhook GitHub App поступает в AWS Lambda, где событие фильтруется и превращается в сообщение SQS. Dispatcher перед запуском вычислительно дорогой части проверяет дневные долларовые и количественные лимиты конкретного репозитория, а затем создаёт изолированную ECS Fargate task.\n\nWorker получает свежую Daytona- или E2B-песочницу, клонирует репозиторий, создаёт worktree и агентскую ветку, после чего использует существующий Dockerfile либо синтезирует его по языку и package manager. mini-swe-agent или SWE-agent v2 строит repo-map, ищет код через `ripgrep`, редактирует разрешённые пути и запускает тесты в пределах стоимости, времени и числа ходов.\n\nОтдельный verification gate выполняет полный CI и считает coverage delta. Только после проверки worker пушит агентскую ветку и открывает PR через GitHub App. Branch protection запрещает прямую запись в `main` и force-push, а проверка diff блокирует изменения `.github/workflows`. PR связывается с архивом Langfuse, чтобы оператор видел rationale, изменения, стоимость и историю запуска.",
+    "stack": [
+      "Триггер: GitHub App с fine-grained permissions и короткоживущим installation token",
+      "Webhook и очередь: AWS Lambda принимает события, фильтрует триггер и отправляет задачи в SQS",
+      "Worker: отдельная ECS Fargate task для каждого асинхронного запуска",
+      "Sandbox: Daytona devcontainer или E2B sandbox со свежим окружением на задачу",
+      "Agent loop: mini-swe-agent или SWE-agent v2 поверх Claude Opus 4.7 либо GPT-5.4-Codex",
+      "Навигация по репозиторию: tree-sitter repo-map и ripgrep",
+      "Verification: полный CI в sandbox и coverage delta через coverage.py либо jacoco",
+      "Наблюдаемость: Langfuse с архивом trace для каждого PR",
+      "Бюджет: дневной долларовый предел и максимальное число PR для каждого репозитория"
+    ]
+  },
+  "milestones": [
+    {
+      "id": "m01-github-app",
+      "title": "Создай безопасное GitHub App",
+      "task": "Настрой GitHub App, короткоживущие installation tokens, разрешённые операции и независимую защиту веток для реальных целевых репозиториев.",
+      "doneWhen": [
+        "GitHub App установлено на целевой репозиторий и выдаёт короткоживущий token с заявленными fine-grained permissions",
+        "Branch protection запрещает прямой push в `main` и force-push, а приложение отсутствует в bypass list",
+        "Worker отклоняет предложенный diff с записью под `.github/workflows` до push"
+      ],
+      "contractTargets": [
+        "InstallationToken.mint",
+        "InstallationToken.can"
+      ],
+      "evidence": "Принеси ссылку на установленное GitHub App или экран его permissions, настройки branch protection и лог внешнего запуска, где попытки force-push, записи в `main` и изменения `.github/workflows` были отклонены."
+    },
+    {
+      "id": "m02-webhook-receiver",
+      "title": "Прими webhook и поставь задачу в очередь",
+      "task": "Реализуй TypeScript webhook receiver в AWS Lambda, который принимает нужные GitHub-события, фильтрует триггер и публикует контракт задачи в SQS.",
+      "doneWhen": [
+        "GitHub-событие с меткой `@agent fix this` создаёт в SQS задачу с репозиторием и номером issue",
+        "Нерелевантная метка не создаёт сообщение в SQS",
+        "PR-комментарий принимается как предусмотренный входной тип и сохраняет контекст исходного PR"
+      ],
+      "contractTargets": [],
+      "evidence": "Принеси внешний GitHub delivery log, логи развёрнутой Lambda и содержимое сообщения SQS для релевантного события, а также лог события с другой меткой, после которого задача не появилась."
+    },
+    {
+      "id": "m03-dispatcher",
+      "title": "Ограничь бюджет и запускай Fargate",
+      "task": "Построй dispatcher, который читает SQS, применяет дневные лимиты репозитория и запускает ECS Fargate task только для разрешённой работы.",
+      "doneWhen": [
+        "Разрешённое сообщение SQS запускает ECS Fargate task с контекстом репозитория и issue",
+        "Задача сверх per-task или дневного долларового предела отклоняется до запуска worker",
+        "После внешнего запуска ledger отражает фактическую стоимость и увеличивает PR-счётчик только при открытом PR",
+        "Репозиторий с пятью открытыми за день PR больше не получает новый запуск"
+      ],
+      "contractTargets": [
+        "BudgetLedger.permit",
+        "dispatch"
+      ],
+      "evidence": "Принеси логи SQS и ECS для разрешённой задачи, запись фактического расхода, а также внешний лог отказа по долларовому или PR-лимиту, подтверждающий, что новая Fargate task не стартовала."
+    },
+    {
+      "id": "m04-environment-inference",
+      "title": "Воспроизведи окружение репозитория",
+      "task": "Научи worker определять язык и package manager, использовать существующий Dockerfile либо синтезировать generic Dockerfile и поднимать проект в свежей sandbox.",
+      "doneWhen": [
+        "Worker распознаёт Python, Node, Go и Rust, а также соответствующие заявленные package managers",
+        "При наличии Dockerfile worker использует его, а при отсутствии создаёт generic Dockerfile",
+        "Свежая Daytona- или E2B-песочница устанавливает зависимости и запускает исходные тесты репозитория",
+        "Trace фиксирует результат inference и способ создания окружения"
+      ],
+      "contractTargets": [],
+      "evidence": "Принеси логи двух внешних sandbox-запусков: с существующим Dockerfile и с синтезированным, включая найденный язык/package manager, сборку окружения и запуск тестовой команды."
+    },
+    {
+      "id": "m05-agent-loop",
+      "title": "Запусти ограниченный цикл агента",
+      "task": "Интегрируй mini-swe-agent или SWE-agent v2 с выбранной моделью и инструментами исследования, редактирования, тестирования и git.",
+      "doneWhen": [
+        "Агент получает issue, строит repo-map, находит код, вносит patch и запускает тесты в sandbox",
+        "Harness останавливает запуск при достижении $20, 30 минут или 30 ходов",
+        "Каждый ход, стоимость и итоговая причина завершения сохраняются в Langfuse trace",
+        "После цикла управление передаётся verification gate, а не прямой публикации PR"
+      ],
+      "contractTargets": [
+        "run_agent"
+      ],
+      "evidence": "Принеси ссылку на Langfuse trace внешнего запуска с реальным issue, где видны вызовы инструментов, patch, тесты, число ходов, стоимость и итоговый переход к verification."
+    },
+    {
+      "id": "m06-verification",
+      "title": "Поставь CI и coverage gate",
+      "task": "После agent loop запускай полный CI внутри sandbox, считай coverage delta и принимай решение о публикации или маркировке PR.",
+      "doneWhen": [
+        "Полный CI выполняется в sandbox после завершения agent loop",
+        "Красный CI завершает запуск без открытия PR",
+        "Coverage delta вычисляется относительно базовой ветки через coverage.py или jacoco",
+        "Падение покрытия более чем на 2% разрешает PR только с меткой `needs-review`"
+      ],
+      "contractTargets": [
+        "run_verify"
+      ],
+      "evidence": "Принеси внешний CI-лог успешного запуска с coverage delta и отдельный лог красного запуска без PR; для падения покрытия более 2% приложи ссылку на PR с меткой `needs-review`."
+    },
+    {
+      "id": "m07-pr-posting",
+      "title": "Опубликуй review-ready PR",
+      "task": "После положительного verification verdict запушь агентскую ветку и открой PR через GitHub API с полным объяснением и ссылкой на trace.",
+      "doneWhen": [
+        "После зелёного CI агентская ветка отправляется без force-push, а GitHub App открывает PR",
+        "PR содержит title, rationale, diff summary, trace URL, стоимость и число ходов",
+        "PR связан с исходной задачей и допускает последующий `@agent` follow-up",
+        "Решение verification о `needs-review` переносится в метки PR"
+      ],
+      "contractTargets": [
+        "open_pr"
+      ],
+      "evidence": "Принеси ссылку на настоящий PR, открытый GitHub App после Fargate-прогона, с rationale, сводкой diff, стоимостью, числом ходов, trace URL и требуемыми метками."
+    },
+    {
+      "id": "m08-credential-hygiene",
+      "title": "Защити credentials и архивы",
+      "task": "Обеспечь выдачу worker только короткоживущего installation token и очищай логи от секретов перед сохранением trace.",
+      "doneWhen": [
+        "Каждый worker использует короткоживущий installation token, ограниченный нужным репозиторием",
+        "Истёкший token не позволяет выполнить публикацию PR",
+        "Логи очищаются от секретов до архивирования в Langfuse",
+        "Очищенный trace сохраняет сведения о ходе, тестах, стоимости и причине завершения"
+      ],
+      "contractTargets": [],
+      "evidence": "Принеси лог внешней Fargate task с временем жизни installation token и ссылку на архивированный Langfuse trace, где намеренно попавшее в вывод тестовое секретное значение удалено до сохранения."
+    },
+    {
+      "id": "m09-evaluation",
+      "title": "Проведи benchmark на 30 issues",
+      "task": "Запусти полную систему на 30 подготовленных issues разной сложности и сравни результаты с Cursor Background Agents и AWS Remote SWE Agents.",
+      "doneWhen": [
+        "Все 30 seeded issues имеют зафиксированный внешний результат и ссылку на соответствующий trace",
+        "Отчёт содержит pass rate, PR quality, стоимость и latency для self-hosted системы",
+        "Те же issues прогнаны через Cursor Background Agents и AWS Remote SWE Agents",
+        "Сравнение показывает результаты инструментов по стоимости и pass rate",
+        "Итог оформлен в `outputs/skill-issue-to-pr.md`"
+      ],
+      "contractTargets": [
+        "main"
+      ],
+      "evidence": "Принеси `outputs/skill-issue-to-pr.md` с таблицей всех 30 внешних прогонов, ссылками на issues, PR и traces, агрегированными метриками и сопоставимыми результатами Cursor Background Agents и AWS Remote SWE Agents."
+    }
+  ],
+  "rubric": [
+    {
+      "id": "pass-rate",
+      "weight": 25,
+      "criterion": "Pass rate на 30 issues",
+      "measurement": "End-to-end успех: зелёный CI и приемлемое покрытие"
+    },
+    {
+      "id": "pr-quality",
+      "weight": 20,
+      "criterion": "Качество PR",
+      "measurement": "Размер diff, coverage delta и соблюдение стиля"
+    },
+    {
+      "id": "cost-latency",
+      "weight": 20,
+      "criterion": "Стоимость и задержка на решённую задачу",
+      "measurement": "Доллары и wall-clock время на каждый PR"
+    },
+    {
+      "id": "safety",
+      "weight": 20,
+      "criterion": "Безопасность",
+      "measurement": "Scoped token, per-repo budget, запрет force-push и credential hygiene"
+    },
+    {
+      "id": "operator-ux",
+      "weight": 15,
+      "criterion": "Операторский UX",
+      "measurement": "Rationale-комментарии, возможность повторного запуска и follow-up через @-mention"
+    }
+  ],
+  "slug": "19-capstone-projects__16-github-issue-to-pr-agent",
+  "sourcePath": "source/phases/19-capstone-projects/16-github-issue-to-pr-agent/docs/en.md",
+  "generatedAt": "2026-08-23T10:42:44.741Z"
+}

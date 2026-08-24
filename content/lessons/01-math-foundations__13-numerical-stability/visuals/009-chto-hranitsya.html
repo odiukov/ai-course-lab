@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Что лежит в памяти вместо 0.1 и 0.2</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b2430; --muted:#5d6b7f;
+    --line:#39506b; --accent:#b3401f; --ok:#1f6f4a; --bad:#b3243a;
+    --box:#f2f5f9; --boxstroke:#c3ccd8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161c; --fg:#e6ecf3; --muted:#9aa8ba;
+      --line:#8aa6c8; --accent:#ffab7a; --ok:#7bd6a6; --bad:#ff8095;
+      --box:#1b222c; --boxstroke:#38424f;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:16px;margin:0 0 6px;font-weight:600;}
+  svg{width:100%;height:auto;max-height:520px;display:block;}
+  .fail{font-size:14px;line-height:1.5;color:var(--fg);
+    background:var(--box);border:1px solid var(--boxstroke);
+    border-radius:6px;padding:10px;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Что на самом деле лежит в памяти вместо 0.1 и 0.2</h2>
+  <div id="slot"></div>
+</div>
+<script>
+(function(){
+  var slot = document.getElementById('slot');
+  try{
+    /* ---------- данные схемы ---------- */
+    var ROWS = [
+      {y:3, code:"0.1",       real:"0.100000001490116"},
+      {y:2, code:"0.2",       real:"0.200000002980232"},
+      {y:1, code:"0.1 + 0.2", real:"0.30000000000000004"}
+    ];
+    var TARGET = {y:1, code:"0.3", note:"ждали ровно 0.3"};
+
+    /* ---------- одна система координат ---------- */
+    var ORIGIN = {x:130, y:250};
+    var SCALE  = {x:150, y:62};
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y - y * SCALE.y; }
+
+    /* ---------- литералы-размеры ---------- */
+    var W = 900, H = 340;
+    var PAD = 8, FS = 15, FS_SM = 13, LW = 1.6;
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n, a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k, a[k]); return e; }
+    function txt(x, y, s, anchor, cls, size){
+      var t = el("text", {x:x, y:y, "text-anchor":anchor||"start",
+        "dominant-baseline":"middle", "font-size":size||FS,
+        "class":cls||"", fill:"currentColor"});
+      t.textContent = s; return t;
+    }
+
+    var svg = el("svg", {viewBox:"0 0 "+W+" "+H,
+      preserveAspectRatio:"xMidYMid meet", role:"img",
+      "aria-label":"Литералы 0.1 и 0.2 и то, что реально хранится в памяти"});
+    svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"}));
+
+    /* колонки в координатах данных */
+    var C_CODE = 0, C_ARR0 = 0.35, C_ARR1 = 0.95, C_REAL = 1.05, C_X = 4.35;
+
+    /* заголовки колонок — на строке y = 3.9 */
+    svg.appendChild(txt(sx(C_CODE), sy(3.9), "ты написал", "end", "", FS_SM))
+      .setAttribute("fill","var(--muted)");
+    svg.appendChild(txt(sx(C_REAL), sy(3.9), "что легло в память (float32)", "start", "", FS_SM))
+      .setAttribute("fill","var(--muted)");
+
+    /* линия под заголовками */
+    svg.appendChild(el("line",{x1:sx(-0.75), y1:sy(3.55), x2:sx(C_X+0.35), y2:sy(3.55),
+      stroke:"var(--boxstroke)", "stroke-width":LW}));
+
+    /* маркер стрелки */
+    var defs = el("defs",{});
+    var mk = el("marker",{id:"ah", markerWidth:"7", markerHeight:"7",
+      refX:"6", refY:"3.5", orient:"auto"});
+    mk.appendChild(el("path",{d:"M0,0 L7,3.5 L0,7 z", fill:"var(--line)"}));
+    defs.appendChild(mk);
+    svg.appendChild(defs);
+
+    ROWS.forEach(function(r, i){
+      var isSum = (i === 2);
+      var col = isSum ? "var(--accent)" : "currentColor";
+
+      /* левая колонка: литерал */
+      var c = txt(sx(C_CODE), sy(r.y), r.code, "end", "mono", FS);
+      c.setAttribute("fill", col);
+      svg.appendChild(c);
+
+      /* стрелка «стало» */
+      svg.appendChild(el("line",{x1:sx(C_ARR0), y1:sy(r.y), x2:sx(C_ARR1), y2:sy(r.y),
+        stroke:"var(--line)", "stroke-width":LW, "marker-end":"url(#ah)"}));
+
+      /* подпись у хвоста стрелки, снизу — чтобы не лезть к наконечнику */
+      if(i === 0){
+        var lab = txt(sx(C_ARR0), sy(r.y) - PAD*1.6, "округление", "start", "", FS_SM);
+        lab.setAttribute("fill","var(--muted)");
+        lab.setAttribute("dominant-baseline","auto");
+        svg.appendChild(lab);
+      }
+
+      /* правая колонка: реальное значение */
+      var v = txt(sx(C_REAL), sy(r.y), r.real, "start", "mono", FS);
+      v.setAttribute("fill", col);
+      svg.appendChild(v);
+    });
+
+    /* разделитель перед суммой */
+    svg.appendChild(el("line",{x1:sx(-0.75), y1:sy(1.55), x2:sx(C_X+0.35), y2:sy(1.55),
+      stroke:"var(--boxstroke)", "stroke-width":LW}));
+
+    /* правый блок: ожидаемое 0.3 с крестиком */
+    var xc = sx(C_X), yc = sy(TARGET.y);
+    var t3 = txt(xc, yc, TARGET.code, "start", "mono", FS);
+    t3.setAttribute("fill","var(--ok)");
+    svg.appendChild(t3);
+
+    /* крестик — правее подписи 0.3, обе точки через sx/sy */
+    var kx = sx(C_X + 0.32), ky = sy(TARGET.y), r = SCALE.y * 0.18;
+    svg.appendChild(el("line",{x1:kx-r, y1:ky-r, x2:kx+r, y2:ky+r,
+      stroke:"var(--bad)", "stroke-width":LW*1.7, "stroke-linecap":"round"}));
+    svg.appendChild(el("line",{x1:kx-r, y1:ky+r, x2:kx+r, y2:ky-r,
+      stroke:"var(--bad)", "stroke-width":LW*1.7, "stroke-linecap":"round"}));
+
+    /* подпись к крестику — снизу, middle, внутри поля */
+    var nt = txt(sx(C_X + 0.16), sy(TARGET.y) + PAD*2.4, TARGET.note, "middle", "", FS_SM);
+    nt.setAttribute("fill","var(--muted)");
+    svg.appendChild(nt);
+
+    /* нижняя строка-легенда */
+    var lg = txt(sx(-0.75), sy(0.25),
+      "промах есть уже в литерале — до первой операции", "start", "", FS_SM);
+    lg.setAttribute("fill","var(--muted)");
+    svg.appendChild(lg);
+
+    slot.appendChild(svg);
+  }catch(e){
+    slot.innerHTML =
+      '<div class="fail"><b>Схема не построилась.</b> Она должна показывать три строки: '+
+      '<span class="mono">0.1</span> хранится как <span class="mono">0.100000001490116</span>, '+
+      '<span class="mono">0.2</span> — как <span class="mono">0.200000002980232</span>, '+
+      'их сумма — <span class="mono">0.30000000000000004</span>; справа ожидаемое '+
+      '<span class="mono">0.3</span> перечёркнуто крестиком.</div>';
+  }
+})();
+</script>
+</body>
+</html>

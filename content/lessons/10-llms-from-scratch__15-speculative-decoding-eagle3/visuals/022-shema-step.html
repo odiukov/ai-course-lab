@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Один спекулятивный шаг по позициям</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#6b6b6b; --axis:#8a8a8a;
+    --ok:#1f8b4c; --okf:#d6f0e0; --bad:#c0392b; --badf:#fadbd6;
+    --gray:#9aa0a6; --grayf:#e8eaed; --res:#1a5fb4; --resf:#d7e3f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e8e8e8; --muted:#a0a4aa; --axis:#7d838c;
+      --ok:#5fd18a; --okf:#1e3a2b; --bad:#f0776a; --badf:#3d2020;
+      --gray:#7d838c; --grayf:#24272c; --res:#7fb2f0; --resf:#16294a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);}
+  .wrap{background:var(--bg);padding:8px 10px 10px;box-sizing:border-box;}
+  h2{font:600 15px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;margin:0 0 6px;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .fallback{font:14px/1.5 system-ui,sans-serif;color:var(--fg);white-space:pre-wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Один проход verifier: приняли 2, отказ на позиции 2, хвост отброшен</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById("host");
+  try{
+    // ---------- данные схемы ----------
+    var COLS = [
+      {i:1, p:0.6, q:0.7, state:"ok",   note:"0.7 / 0.6 > 1"},
+      {i:2, p:0.5, q:0.4, state:"bad",  note:"0.4 / 0.5 = 0.8, u = 0.91"},
+      {i:3, p:null,q:null,state:"drop", note:"опирался на токен 2"},
+      {i:4, p:null,q:null,state:"drop", note:"опирался на токен 2"}
+    ];
+    var RESIDUAL = {h:0.35, label:"residual"};
+
+    // ---------- холст ----------
+    var VBW = 900, VBH = 470;
+
+    // ---------- единая система координат ----------
+    var ORIGIN = {x:110, y:392};   // пиксель точки (0,0)
+    var SCALE  = {x:150, y:230};   // пикселей на единицу
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y - y * SCALE.y; }
+
+    var NS = "http://www.w3.org/2000/svg";
+    function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size||13,fill:cls});
+      t.appendChild(document.createTextNode(s)); return t;
+    }
+
+    var svg = el("svg",{viewBox:"0 0 "+VBW+" "+VBH,preserveAspectRatio:"xMidYMid meet",role:"img"});
+    svg.appendChild(el("rect",{x:0,y:0,width:VBW,height:VBH,fill:"var(--bg)"}));
+
+    var PAD = 6;      // отступ подписи от точки привязки
+    var LW  = 1.6;    // толщина линий
+    var FS  = 13;     // базовый кегль
+
+    var COL = {
+      ok:{s:"var(--ok)",f:"var(--okf)"},
+      bad:{s:"var(--bad)",f:"var(--badf)"},
+      drop:{s:"var(--gray)",f:"var(--grayf)"},
+      res:{s:"var(--res)",f:"var(--resf)"}
+    };
+
+    // геометрия колонок в координатах данных
+    var colW = 0.62, halfW = colW/2;
+    function cx(i){ return (i-1) * 1.0 + 0.5; }   // центр колонки i
+
+    // ---------- базовая линия (ось позиций) ----------
+    var x0 = sx(cx(1) - halfW - 0.22), x1 = sx(cx(4) + halfW + 0.34);
+    svg.appendChild(el("line",{x1:x0,y1:sy(0),x2:x1,y2:sy(0),stroke:"var(--axis)","stroke-width":LW}));
+    svg.appendChild(txt(sx(-0.28), sy(0)+PAD+FS, "позиция", "start", "var(--muted)", 12));
+
+    // ---------- ряд токенов черновика (верх) ----------
+    var TOK_Y = 1.42, TOK_H = 0.20;
+    svg.appendChild(txt(sx(cx(1)-halfW)-PAD, sy(TOK_Y+TOK_H/2)+4, "черновик", "end", "var(--muted)", 12));
+    svg.appendChild(txt(sx(cx(1)-halfW)-PAD, sy(0.55)+4, "verifier", "end", "var(--muted)", 12));
+
+    COLS.forEach(function(c){
+      var s = COL[c.state];
+      // токен черновика
+      svg.appendChild(el("rect",{
+        x:sx(cx(c.i)-halfW), y:sy(TOK_Y+TOK_H),
+        width:sx(cx(c.i)+halfW)-sx(cx(c.i)-halfW),
+        height:sy(TOK_Y)-sy(TOK_Y+TOK_H),
+        rx:4, fill:s.f, stroke:s.s, "stroke-width":LW,
+        "stroke-dasharray": c.state==="drop" ? "5 4" : "0"
+      }));
+      svg.appendChild(txt(sx(cx(c.i)), sy(TOK_Y+TOK_H/2)+4, "d"+c.i, "middle", s.s, FS));
+
+      // столбик verifier q_i
+      var h = c.q !== null ? c.q : 0.30;
+      svg.appendChild(el("rect",{
+        x:sx(cx(c.i)-halfW), y:sy(h),
+        width:sx(cx(c.i)+halfW)-sx(cx(c.i)-halfW),
+        height:sy(0)-sy(h),
+        rx:3, fill:s.f, stroke:s.s, "stroke-width":LW,
+        "stroke-dasharray": c.state==="drop" ? "5 4" : "0"
+      }));
+      svg.appendChild(txt(sx(cx(c.i)), sy(h)-PAD, "q"+c.i, "middle", s.s, FS));
+
+      // номер позиции под осью
+      svg.appendChild(txt(sx(cx(c.i)), sy(0)+PAD+FS, String(c.i), "middle", "var(--muted)", 12));
+
+      // числа p/q только там, где они есть в тексте шага
+      if(c.p !== null){
+        svg.appendChild(txt(sx(cx(c.i)), sy(TOK_Y)-PAD-2, "p = "+c.p.toFixed(1), "middle", "var(--muted)", 12));
+        svg.appendChild(txt(sx(cx(c.i)), sy(h)-PAD-FS-3, "q = "+c.q.toFixed(1), "middle", s.s, 12));
+      }
+    });
+
+    // ---------- вертикальная граница отсечения хвоста ----------
+    var cutX = sx(cx(2)+halfW+0.19);
+    svg.appendChild(el("line",{x1:cutX,y1:sy(0),x2:cutX,y2:sy(TOK_Y+TOK_H+0.10),
+      stroke:"var(--bad)","stroke-width":LW,"stroke-dasharray":"6 5"}));
+
+    // ---------- третий, короткий столбик: residual ----------
+    var rX = cx(2) + 0.42;
+    svg.appendChild(el("rect",{
+      x:sx(rX-0.16), y:sy(RESIDUAL.h),
+      width:sx(rX+0.16)-sx(rX-0.16),
+      height:sy(0)-sy(RESIDUAL.h),
+      rx:3, fill:COL.res.f, stroke:COL.res.s, "stroke-width":LW
+    }));
+    svg.appendChild(txt(sx(rX), sy(RESIDUAL.h)-PAD, "r", "middle", COL.res.s, FS));
+
+    // стрелка от колонки 2 к residual: подпись у хвоста
+    var aY = 0.92;
+    var ax0 = sx(cx(2)+halfW), ax1 = sx(rX-0.17);
+    svg.appendChild(el("line",{x1:ax0,y1:sy(aY),x2:ax1,y2:sy(aY),stroke:COL.res.s,"stroke-width":LW}));
+    svg.appendChild(el("polygon",{points:
+      sx(rX-0.17)+","+sy(aY)+" "+
+      sx(rX-0.245)+","+sy(aY+0.035)+" "+
+      sx(rX-0.245)+","+sy(aY-0.035),
+      fill:COL.res.s}));
+    svg.appendChild(txt(ax0-PAD, sy(aY)-PAD, "отказ", "end", "var(--bad)", 12));
+
+    // ---------- итоговые скобки-подписи ----------
+    // слева от границы: получено даром
+    svg.appendChild(txt(sx(cx(1)), sy(TOK_Y+TOK_H)+ -PAD - FS - 14, "принято", "middle", "var(--ok)", 12));
+    svg.appendChild(txt(sx(cx(3)+0.5), sy(TOK_Y+TOK_H) - PAD - FS - 14, "отброшено", "middle", "var(--gray)", 12));
+
+    host.appendChild(svg);
+
+    // ---------- легенда ----------
+    var LEG_Y = 448;
+    var leg = el("svg",{viewBox:"0 0 "+VBW+" 1",style:"display:none"});
+    var lg = el("g",{});
+    function chip(px, color, fill, label, dash){
+      lg.appendChild(el("rect",{x:px,y:LEG_Y-11,width:14,height:14,rx:3,
+        fill:fill,stroke:color,"stroke-width":LW,"stroke-dasharray":dash||"0"}));
+      lg.appendChild(txt(px+20, LEG_Y, label, "start", "var(--muted)", 12));
+    }
+    chip(sx(-0.60), COL.ok.s,  COL.ok.f,  "принят: q/p ≥ 1");
+    chip(sx(0.86),  COL.bad.s, COL.bad.f, "отказ: u = 0.91 > 0.8");
+    chip(sx(2.52),  COL.res.s, COL.res.f, "r — токен из residual");
+    chip(sx(4.10),  COL.drop.s,COL.drop.f,"отброшено (q₃, q₄)", "5 4");
+    svg.appendChild(lg);
+    leg.remove();
+  }catch(e){
+    var d = document.createElement("div");
+    d.className = "fallback";
+    d.textContent =
+      "Схема (не отрисовалась): один проход verifier даёт q₁…q₅ сразу.\n" +
+      "Позиция 1: черновик p = 0.6, verifier q = 0.7 — отношение > 1, токен принят.\n" +
+      "Позиция 2: p = 0.5, q = 0.4 — отношение 0.8, u = 0.91, отказ; из residual сэмплируется один токен-поправка.\n" +
+      "Позиции 3 и 4: q₃ и q₄ опирались на отброшенный второй черновой токен — отброшены.\n" +
+      "Бонусный пятый токен не выдан: он только при полном принятии всех четырёх.";
+    host.appendChild(d);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шкала от одного агента до роя</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #182235;
+    --muted: #59677d;
+    --axis: #738299;
+    --guide-a: #5574d8;
+    --guide-b: #b56838;
+    --node: #3565c5;
+    --node-fill: #e8efff;
+    --glyph: #294f9a;
+    --glyph-fill: #f3f6ff;
+    --shared: #e9f6ef;
+    --shared-line: #32815d;
+    --note: #eef2f7;
+    --border: #d7deea;
+    --danger: #a23c3c;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2c;
+      --ink: #eef3fb;
+      --muted: #adb9ca;
+      --axis: #8492a8;
+      --guide-a: #8ca8ff;
+      --guide-b: #e7a26f;
+      --node: #86a7ff;
+      --node-fill: #223251;
+      --glyph: #a9beff;
+      --glyph-fill: #1d2a43;
+      --shared: #18382c;
+      --shared-line: #76c8a2;
+      --note: #202b3b;
+      --border: #354156;
+      --danger: #ff9c9c;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: 0;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .heading {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: bold;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: var(--panel);
+  }
+
+  .axis,
+  .connector,
+  .metric,
+  .glyph-line,
+  .shared-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .axis {
+    stroke: var(--axis);
+    stroke-width: 3px;
+  }
+
+  .connector,
+  .glyph-line {
+    stroke: var(--glyph);
+    stroke-width: 2px;
+  }
+
+  .metric {
+    stroke-width: 3px;
+  }
+
+  .contexts { stroke: var(--guide-a); }
+  .messages { stroke: var(--guide-b); }
+
+  .point {
+    fill: var(--node);
+    stroke: var(--panel);
+    stroke-width: 3px;
+  }
+
+  .agent-box,
+  .role-box {
+    fill: var(--glyph-fill);
+    stroke: var(--glyph);
+    stroke-width: 2px;
+  }
+
+  .agent-dot {
+    fill: var(--glyph-fill);
+    stroke: var(--glyph);
+    stroke-width: 2px;
+  }
+
+  .shared-box {
+    fill: var(--shared);
+    stroke: var(--shared-line);
+    stroke-width: 2px;
+  }
+
+  .shared-line {
+    stroke: var(--shared-line);
+    stroke-width: 2px;
+  }
+
+  .footer-box {
+    fill: var(--note);
+    stroke: var(--border);
+    stroke-width: 1px;
+  }
+
+  text {
+    fill: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .metric-label {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .contexts-label { fill: var(--guide-a); }
+  .messages-label { fill: var(--guide-b); }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .kind {
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  .inside {
+    fill: var(--glyph);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .inside-shared {
+    fill: var(--shared-line);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .detail {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .footer {
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .fallback {
+    fill: var(--danger);
+    font-size: 17px;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-heading diagram-caption">
+  <h2 class="heading" id="diagram-heading">Шкала: от одного агента до роя</h2>
+  <svg id="diagram" viewBox="0 0 1080 460" width="1080" height="460"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-heading diagram-caption">
+    <title>Пять архитектур на шкале растущей сложности</title>
+    <desc id="diagram-caption">Слева направо расположены один агент, субагенты, конвейер, команда и рой. Вправо растут число контекстов и количество сообщений.</desc>
+    <g id="plot"></g>
+  </svg>
+</figure>
+
+<script>
+const DATA = [
+  {
+    zero: 0,
+    origin: { x: 60, y: 0 },
+    scale: { x: 1, y: 1 },
+    bounds: { left: -60, top: 0, right: 1020, bottom: 460 },
+    pad: 8,
+    axis: { x1: 110, x2: 930, tip: 970, y: 198 },
+    arrow: { length: 15, half: 7 },
+    pointRadius: 10,
+    metrics: [
+      {
+        x1: 110, y1: 88, x2: 970, y2: 45,
+        label: "Число контекстов растёт",
+        className: "contexts",
+        labelClass: "contexts-label",
+        dx: 0, dy: -1, anchor: "start"
+      },
+      {
+        x1: 110, y1: 137, x2: 970, y2: 94,
+        label: "Количество сообщений растёт",
+        className: "messages",
+        labelClass: "messages-label",
+        dx: 0, dy: -1, anchor: "start"
+      }
+    ],
+    edge: {
+      left: "ПРОЩЕ",
+      right: "СЛОЖНЕЕ",
+      leftDx: 0, rightDx: 0, dy: -1
+    },
+    titleDy: 4,
+    detailY: 378,
+    detailGap: 20,
+    footer: {
+      left: 90, top: 416, right: 990, bottom: 450,
+      x: 540, y: 433,
+      text: "Выбирай самый левый вариант, который ещё справляется с задачей"
+    },
+    fallback: {
+      x: 540, y: 215,
+      lines: [
+        "Шкала должна была показать: один агент → субагенты → конвейер → команда → рой.",
+        "Вправо растут число контекстов, количество сообщений и сложность координации."
+      ],
+      gap: 28
+    },
+    single: {
+      half: 34, top: 260, bottom: 319
+    },
+    sub: {
+      parentHalf: 34, parentTop: 254, parentBottom: 282,
+      childDx: 42, childHalf: 27, childTop: 316, childBottom: 344,
+      joinY: 299
+    },
+    pipeline: {
+      y: 297, radius: 18, offsets: [-48, 0, 48],
+      gap: 10
+    },
+    team: {
+      y: 272, radius: 16, offsets: [-42, 0, 42],
+      joinY: 309, busLeft: -68, busRight: 68,
+      busTop: 324, busBottom: 350
+    },
+    swarm: {
+      y: 270, radius: 11, offsets: [-52, -26, 0, 26, 52],
+      sharedLeft: -66, sharedRight: 66,
+      sharedTop: 322, sharedBottom: 351
+    }
+  },
+  {
+    type: "single", x: 130, title: "Один агент",
+    details: ["один цикл", "один контекст"]
+  },
+  {
+    type: "subagents", x: 335, title: "Субагенты",
+    details: ["главный и дети", "узкие поручения"]
+  },
+  {
+    type: "pipeline", x: 540, title: "Конвейер",
+    details: ["выход становится входом", "этап за этапом"]
+  },
+  {
+    type: "team", x: 745, title: "Команда",
+    details: ["явные роли", "есть оркестратор"]
+  },
+  {
+    type: "swarm", x: 950, title: "Рой",
+    details: ["общая доска", "без начальника"]
+  }
+];
+
+const [cfg, ...items] = DATA;
+const origin = cfg.origin;
+const scale = cfg.scale;
+
+function sx(x) { return origin.x + x * scale.x; }
+function sy(y) { return origin.y + y * scale.y; }
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const plot = document.getElementById("plot");
+
+function add(tag, attrs, parent = plot) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attrs)) {
+    el.setAttribute(name, value);
+  }
+  parent.appendChild(el);
+  return el;
+}
+
+function line(x1, y1, x2, y2, className, parent = plot) {
+  return add("line", {
+    x1: sx(x1), y1: sy(y1), x2: sx(x2), y2: sy(y2),
+    class: className
+  }, parent);
+}
+
+function arrow(x1, y1, x2, y2, className, parent = plot) {
+  line(x1, y1, x2, y2, className, parent);
+  const vx = x2 - x1;
+  const vy = y2 - y1;
+  const length = Math.hypot(vx, vy);
+  const ux = vx / length;
+  const uy = vy / length;
+  const bx = x2 - ux * cfg.arrow.length;
+  const by = y2 - uy * cfg.arrow.length;
+  const px = -uy * cfg.arrow.half;
+  const py = ux * cfg.arrow.half;
+  line(x2, y2, bx + px, by + py, className, parent);
+  line(x2, y2, bx - px, by - py, className, parent);
+}
+
+function box(x1, y1, x2, y2, className, parent = plot) {
+  return add("rect", {
+    x: sx(x1),
+    y: sy(y1),
+    width: sx(x2) - sx(x1),
+    height: sy(y2) - sy(y1),
+    class: className
+  }, parent);
+}
+
+function circle(x, y, radius, className, parent = plot) {
+  return add("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(radius) - sx(cfg.zero),
+    class: className
+  }, parent);
+}
+
+function textAt(x, y, content, className, anchor = "middle", parent = plot) {
+  const el = add("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  }, parent);
+  el.textContent = content;
+  return el;
+}
+
+function label(x, y, dx, dy, content, className, anchor) {
+  const el = add("text", {
+    x: sx(x) + dx * cfg.pad,
+    y: sy(y) + dy * cfg.pad,
+    class: className,
+    "text-anchor": anchor,
+    "dominant-baseline": "middle"
+  });
+  el.textContent = content;
+  return el;
+}
+
+function drawSingle(x) {
+  const g = cfg.single;
+  box(x - g.half, g.top, x + g.half, g.bottom, "agent-box");
+  textAt(x, (g.top + g.bottom) / cfg.pointRadius, "агент", "inside");
+}
+
+function drawSubagents(x) {
+  const g = cfg.sub;
+  box(x - g.parentHalf, g.parentTop, x + g.parentHalf, g.parentBottom, "agent-box");
+  textAt(x, (g.parentTop + g.parentBottom) / cfg.pointRadius, "главный", "inside");
+  line(x, g.parentBottom, x, g.joinY, "connector");
+  line(x - g.childDx, g.joinY, x + g.childDx, g.joinY, "connector");
+  line(x - g.childDx, g.joinY, x - g.childDx, g.childTop, "connector");
+  line(x + g.childDx, g.joinY, x + g.childDx, g.childTop, "connector");
+  box(x - g.childDx - g.childHalf, g.childTop,
+      x - g.childDx + g.childHalf, g.childBottom, "role-box");
+  box(x + g.childDx - g.childHalf, g.childTop,
+      x + g.childDx + g.childHalf, g.childBottom, "role-box");
+  textAt(x - g.childDx, (g.childTop + g.childBottom) / cfg.pointRadius, "дитя", "inside");
+  textAt(x + g.childDx, (g.childTop + g.childBottom) / cfg.pointRadius, "дитя", "inside");
+}
+
+function drawPipeline(x) {
+  const g = cfg.pipeline;
+  const positions = g.offsets.map(offset => x + offset);
+  for (const position of positions) {
+    circle(position, g.y, g.radius, "agent-dot");
+  }
+  const [left, middle, right] = positions;
+  arrow(left + g.radius + g.gap, g.y, middle - g.radius - g.gap, g.y, "glyph-line");
+  arrow(middle + g.radius + g.gap, g.y, right - g.radius - g.gap, g.y, "glyph-line");
+  textAt(left, g.y, "А", "inside");
+  textAt(middle, g.y, "Б", "inside");
+  textAt(right, g.y, "В", "inside");
+}
+
+function drawTeam(x) {
+  const g = cfg.team;
+  for (const offset of g.offsets) {
+    circle(x + offset, g.y, g.radius, "agent-dot");
+    line(x + offset, g.y + g.radius, x + offset, g.joinY, "connector");
+  }
+  line(x + g.offsets.at(cfg.zero), g.joinY,
+       x + g.offsets.at(-cfg.scale.x), g.joinY, "connector");
+  box(x + g.busLeft, g.busTop, x + g.busRight, g.busBottom, "agent-box");
+  for (const offset of g.offsets) {
+    line(x + offset, g.joinY, x + offset, g.busTop, "connector");
+  }
+  textAt(x, (g.busTop + g.busBottom) / cfg.pointRadius, "сообщения", "inside");
+}
+
+function drawSwarm(x) {
+  const g = cfg.swarm;
+  for (const offset of g.offsets) {
+    circle(x + offset, g.y, g.radius, "agent-dot");
+    line(x + offset, g.y + g.radius, x, g.sharedTop, "shared-line");
+  }
+  box(x + g.sharedLeft, g.sharedTop, x + g.sharedRight, g.sharedBottom, "shared-box");
+  textAt(x, (g.sharedTop + g.sharedBottom) / cfg.pointRadius,
+         "общее состояние", "inside-shared");
+}
+
+function drawGlyph(item) {
+  if (item.type === "single") drawSingle(item.x);
+  if (item.type === "subagents") drawSubagents(item.x);
+  if (item.type === "pipeline") drawPipeline(item.x);
+  if (item.type === "team") drawTeam(item.x);
+  if (item.type === "swarm") drawSwarm(item.x);
+}
+
+try {
+  box(cfg.bounds.left, cfg.bounds.top, cfg.bounds.right, cfg.bounds.bottom, "canvas");
+
+  for (const metric of cfg.metrics) {
+    arrow(metric.x1, metric.y1, metric.x2, metric.y2,
+          `metric ${metric.className}`);
+    label(metric.x1, metric.y1, metric.dx, metric.dy, metric.label,
+          `metric-label ${metric.labelClass}`, metric.anchor);
+  }
+
+  arrow(cfg.axis.x1, cfg.axis.y, cfg.axis.tip, cfg.axis.y, "axis");
+  label(cfg.axis.x1, cfg.axis.y, cfg.edge.leftDx, cfg.edge.dy,
+        cfg.edge.left, "edge-label", "start");
+  label(cfg.axis.tip, cfg.axis.y, cfg.edge.rightDx, cfg.edge.dy,
+        cfg.edge.right, "edge-label", "end");
+
+  for (const item of items) {
+    circle(item.x, cfg.axis.y, cfg.pointRadius, "point");
+    label(item.x, cfg.axis.y, cfg.zero, cfg.titleDy,
+          item.title, "kind", "middle");
+    drawGlyph(item);
+    textAt(item.x, cfg.detailY, item.details.shift(), "detail");
+    textAt(item.x, cfg.detailY + cfg.detailGap, item.details.pop(), "detail");
+  }
+
+  box(cfg.footer.left, cfg.footer.top, cfg.footer.right,
+      cfg.footer.bottom, "footer-box");
+  textAt(cfg.footer.x, cfg.footer.y, cfg.footer.text, "footer");
+} catch (error) {
+  while (plot.firstChild) plot.removeChild(plot.firstChild);
+  box(cfg.bounds.left, cfg.bounds.top, cfg.bounds.right, cfg.bounds.bottom, "footer-box");
+  for (const fallbackLine of cfg.fallback.lines) {
+    textAt(cfg.fallback.x, cfg.fallback.y, fallbackLine, "fallback");
+    cfg.fallback.y += cfg.fallback.gap;
+  }
+}
+</script>
+</body>
+</html>

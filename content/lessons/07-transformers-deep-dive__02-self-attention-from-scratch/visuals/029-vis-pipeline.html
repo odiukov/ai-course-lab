@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Конвейер self-attention</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c1e21; --muted:#5b6470;
+    --line:#3b4a5a; --qk:#1f6fb2; --v:#b5651d; --box:#eef2f7; --boxs:#8ea3b8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e6e9ee; --muted:#9aa5b1;
+      --line:#9fb2c6; --qk:#63b3ed; --v:#e8a35c; --box:#1e242c; --boxs:#4a5765;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 10px;}
+  h2{font-size:15px;margin:0 0 6px;text-align:center;font-weight:600;}
+  svg{display:block;width:100%;max-height:520px;height:auto;margin:0 auto;}
+  .lbl{font-size:11px;fill:var(--fg);}
+  .sub{font-size:9.5px;fill:var(--muted);}
+  .fail{font-size:12px;color:var(--fg);padding:8px 14px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Конвейер: X → Q, K, V → scores → softmax → выход</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные величины кроме холста) ----
+    var NODES = [
+      {id:'X',    x:0,  y:0,  w:5, h:1.4, t:'X',            s:'n × d'},
+      {id:'Q',    x:-6, y:3,  w:4, h:1.4, t:'Q = X·Wq',     s:'n × dk'},
+      {id:'K',    x:-1, y:3,  w:4, h:1.4, t:'K = X·Wk',     s:'n × dk'},
+      {id:'V',    x:7,  y:3,  w:4, h:1.4, t:'V = X·Wv',     s:'n × dv'},
+      {id:'S',    x:-6, y:6,  w:9, h:1.4, t:'Q·Kᵀ / √dk',   s:'n × n'},
+      {id:'A',    x:-6, y:9,  w:9, h:1.4, t:'softmax по строке', s:'n × n'},
+      {id:'O',    x:-1, y:12, w:9, h:1.4, t:'веса · V',     s:'n × dv'},
+      {id:'OUT',  x:0,  y:15, w:7, h:1.4, t:'выход',        s:'n × dv'}
+    ];
+    // рёбра: from-порт, to-порт
+    var EDGES = [
+      {a:'X', b:'Q',  kind:'qk'},
+      {a:'X', b:'K',  kind:'qk'},
+      {a:'X', b:'V',  kind:'v'},
+      {a:'Q', b:'S',  kind:'qk'},
+      {a:'K', b:'S',  kind:'qk'},
+      {a:'S', b:'A',  kind:'qk'},
+      {a:'A', b:'O',  kind:'qk'},
+      {a:'V', b:'O',  kind:'v'},
+      {a:'O', b:'OUT',kind:'line'}
+    ];
+
+    // ---- один origin, один scale, одна пара sx/sy ----
+    var ORIGIN = {x:210, y:24};
+    var SCALE  = {x:17, y:29};
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y + y * SCALE.y; }
+
+    var W = 420, H = 520;                       // холст (литерал разрешён)
+    var PAD = 5, FS = 11, SW = 1.4;             // отступ подписи, кегль, толщина
+
+    var byId = {};
+    NODES.forEach(function(n){ byId[n.id] = n; });
+
+    function cx(n){ return n.x + n.w/2; }
+    function top(n){ return n.y - n.h/2; }
+    function bot(n){ return n.y + n.h/2; }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(name, attrs){
+      var e = document.createElementNS(NS, name);
+      for(var k in attrs){ e.setAttribute(k, attrs[k]); }
+      return e;
+    }
+    var svg = el('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H,
+                         preserveAspectRatio:'xMidYMid meet'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    var gEdge = el('g',{}), gNode = el('g',{}), gTxt = el('g',{});
+
+    function colorOf(kind){
+      return kind==='qk' ? 'var(--qk)' : (kind==='v' ? 'var(--v)' : 'var(--line)');
+    }
+
+    // стрелка: ломаная вниз с горизонтальным коленом на полпути + наконечник
+    function arrow(x0,y0,x1,y1,kind){
+      var ym = (y0 + y1)/2;
+      var pts = [[x0,y0],[x0,ym],[x1,ym],[x1,y1]];
+      var d = pts.map(function(p,i){
+        return (i?'L':'M') + sx(p[0]) + ' ' + sy(p[1]);
+      }).join(' ');
+      gEdge.appendChild(el('path',{d:d, fill:'none', stroke:colorOf(kind),
+        'stroke-width':SW, 'stroke-linejoin':'round'}));
+      // наконечник — вершины тоже через sx/sy
+      var hw = 0.32, hh = 0.28;
+      var head = [[x1, y1],[x1-hw, y1-hh],[x1+hw, y1-hh]]
+        .map(function(p){ return sx(p[0])+','+sy(p[1]); }).join(' ');
+      gEdge.appendChild(el('polygon',{points:head, fill:colorOf(kind)}));
+    }
+
+    EDGES.forEach(function(e){
+      var a = byId[e.a], b = byId[e.b];
+      arrow(cx(a), bot(a), cx(b), top(b), e.kind);
+    });
+
+    NODES.forEach(function(n){
+      var x = sx(n.x), y = sy(top(n)),
+          w = sx(n.x + n.w) - sx(n.x),
+          h = sy(bot(n)) - sy(top(n));
+      gNode.appendChild(el('rect',{x:x, y:y, width:w, height:h, rx:4,
+        fill:'var(--box)', stroke:'var(--boxs)', 'stroke-width':SW}));
+      var t1 = el('text',{x:sx(cx(n)), y:sy(n.y) - PAD*0.2,
+        'text-anchor':'middle', 'class':'lbl'});
+      t1.textContent = n.t;
+      gTxt.appendChild(t1);
+      var t2 = el('text',{x:sx(cx(n)), y:sy(n.y) + FS - PAD*0.4,
+        'text-anchor':'middle', 'class':'sub'});
+      t2.textContent = n.s;
+      gTxt.appendChild(t2);
+    });
+
+    // подписи веток: у хвоста стрелки, разведены в разные стороны
+    function note(x, y, anchor, dx, dy, text){
+      var t = el('text',{x:sx(x)+dx, y:sy(y)+dy, 'text-anchor':anchor, 'class':'sub'});
+      t.textContent = text;
+      gTxt.appendChild(t);
+    }
+    note(byId['Q'].x, 2, 'start', 0, -PAD, 'левая ветка: кто на кого смотрит');
+    note(byId['V'].x + byId['V'].w, 2, 'end', 0, -PAD, 'V ждёт до конца');
+    note(byId['A'].x, byId['A'].y, 'end', -PAD, FS, 'форма не меняется');
+    note(byId['O'].x + byId['O'].w, byId['O'].y, 'start', PAD, 0, 'веса → содержимое');
+
+    svg.appendChild(gEdge); svg.appendChild(gNode); svg.appendChild(gTxt);
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML = '<div class="fail">Схема не построилась. Она должна показывать: ' +
+      'X (n × d) ветвится на три стрелки — Q = X·Wq (n × dk), K = X·Wk (n × dk), ' +
+      'V = X·Wv (n × dv). Q и K сходятся в Q·Kᵀ / √dk (n × n), дальше softmax по каждой ' +
+      'строке (n × n, форма не меняется), затем веса умножаются на V и получается ' +
+      'выход n × dv. V не участвует в подсчёте оценок и подключается только на последнем шаге.</div>';
+  }
+})();
+</script>
+</body>
+</html>

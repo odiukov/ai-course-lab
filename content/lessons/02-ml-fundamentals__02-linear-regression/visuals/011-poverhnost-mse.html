@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSE как чаша с минимумом</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --ink: #172033;
+    --muted: #526078;
+    --axis: #34445f;
+    --grid: #7891ad;
+    --high: #d9e6f3;
+    --middle: #b8d5e9;
+    --low: #8fc9df;
+    --contour: #367da2;
+    --accent: #d8445a;
+    --point: #235f85;
+    --leader: #536c86;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --ink: #edf4ff;
+      --muted: #b7c4d8;
+      --axis: #d4dfef;
+      --grid: #7890aa;
+      --high: #263b53;
+      --middle: #24506a;
+      --low: #176b82;
+      --contour: #75cbe8;
+      --accent: #ff7082;
+      --point: #9fdcf2;
+      --leader: #a7b8ca;
+    }
+  }
+
+  html,
+  body {
+    margin: initial;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: initial;
+    background: var(--page);
+  }
+
+  .diagram-title {
+    margin: initial;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 750;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 430px;
+    background: var(--page);
+    shape-rendering: geometricPrecision;
+  }
+
+  .surface-cell {
+    stroke: var(--grid);
+    stroke-width: 1px;
+    stroke-linejoin: round;
+  }
+
+  .surface-high { fill: var(--high); }
+  .surface-middle { fill: var(--middle); }
+  .surface-low { fill: var(--low); }
+
+  .mesh {
+    fill: none;
+    stroke: var(--grid);
+    stroke-width: 1px;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .contour {
+    fill: none;
+    stroke: var(--contour);
+    stroke-width: 2px;
+    stroke-linejoin: round;
+  }
+
+  .axis {
+    fill: none;
+    stroke: var(--axis);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .arrowhead {
+    fill: var(--axis);
+    stroke: var(--axis);
+    stroke-width: 1px;
+  }
+
+  .tick {
+    stroke: var(--axis);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .leader {
+    fill: none;
+    stroke: var(--leader);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .sample {
+    fill: var(--point);
+    stroke: var(--page);
+    stroke-width: 3px;
+  }
+
+  .minimum-halo {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3px;
+  }
+
+  .minimum {
+    fill: var(--accent);
+    stroke: var(--page);
+    stroke-width: 3px;
+  }
+
+  text {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .axis-label {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .tick-label {
+    fill: var(--muted);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .sample-label {
+    font-size: 16px;
+    font-weight: 750;
+  }
+
+  .minimum-label {
+    fill: var(--accent);
+  }
+
+  .note {
+    fill: var(--muted);
+    font-size: 15px;
+    font-weight: 550;
+  }
+
+  #fallback {
+    color: var(--ink);
+    font-size: 17px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 class="diagram-title" id="diagram-title">MSE как чаша с минимумом</h1>
+  <svg
+    id="scene"
+    viewBox="0 0 900 430"
+    width="900"
+    height="430"
+    preserveAspectRatio="xMidYMid meet"
+    role="img"
+    aria-label="Поверхность MSE над осями w и b в форме чаши. Минимум отмечен при w равно 3 и b равно 7."
+  ></svg>
+  <p id="fallback" hidden>
+    Схема должна была показать чашеобразную поверхность MSE и её минимум около w = 3 и b = 7.
+  </p>
+</figure>
+
+<script>
+const DATA = [{
+  zero: 0,
+  one: 1,
+  two: 2,
+  four: 4,
+  origin: [340, 360],
+  scale: [58, 39],
+  projection: [-0.48, 0.22],
+  center: [3, 7],
+  surface: {
+    w: [0, 7],
+    b: [4, 10],
+    base: 0.5,
+    curveW: 0.22,
+    curveB: 0.12,
+    stepsW: 11,
+    stepsB: 10,
+    lowBand: 1.35,
+    middleBand: 2.9
+  },
+  axes: [
+    {
+      start: [0, 0, 0],
+      end: [8, 0, 0],
+      wings: [[7.62, 0.14, 0], [7.62, -0.14, 0]],
+      labelPoint: [6.35, 0, 0],
+      offset: [0, 25],
+      text: "вес w",
+      anchor: "middle"
+    },
+    {
+      start: [0, 0, 0],
+      end: [0, 10, 0],
+      wings: [[0.18, 9.58, 0], [-0.18, 9.58, 0]],
+      labelPoint: [0, 5.35, 0],
+      offset: [-11, -10],
+      text: "смещение b",
+      anchor: "end"
+    },
+    {
+      start: [0, 0, 0],
+      end: [0, 0, 6.7],
+      wings: [[0.18, 0, 6.28], [-0.18, 0, 6.28]],
+      labelPoint: [0, 0, 5.7],
+      offset: [13, -7],
+      text: "высота: MSE",
+      anchor: "start"
+    }
+  ],
+  ticks: [
+    {
+      ends: [[3, -0.14, 0], [3, 0.14, 0]],
+      labelPoint: [3, -0.32, 0],
+      offset: [0, 17],
+      text: "3",
+      anchor: "middle"
+    },
+    {
+      ends: [[-0.14, 7, 0], [0.14, 7, 0]],
+      labelPoint: [-0.28, 7, 0],
+      offset: [-12, -5],
+      text: "7",
+      anchor: "end"
+    }
+  ],
+  rings: [
+    [1.05, 1.42],
+    [1.85, 2.5],
+    [2.72, 3.68]
+  ],
+  ringSteps: 42,
+  samples: [
+    {
+      point: [6.6, 4.2],
+      labelPoint: [7.2, 3.8, 4.8],
+      offset: [11, -6],
+      label: "MSE = 40",
+      anchor: "start",
+      kind: "sample"
+    },
+    {
+      point: [5.4, 7.1],
+      labelPoint: [6, 7.1, 2.15],
+      offset: [11, -6],
+      label: "MSE = 12",
+      anchor: "start",
+      kind: "sample"
+    },
+    {
+      point: [3, 7],
+      labelPoint: [4.08, 7.68, 0.45],
+      offset: [11, 20],
+      label: "минимум · MSE = 3",
+      anchor: "start",
+      kind: "minimum"
+    }
+  ],
+  dotRadius: 0.105,
+  haloRadius: 0.19,
+  footerPoint: [3, -1.08, -0.76],
+  footerOffset: [0, 0],
+  footer: "Каждая точка — отдельная пара w и b; ниже значит меньше ошибка"
+}];
+
+const [cfg] = DATA;
+const [originX, originY] = cfg.origin;
+const [scaleX, scaleY] = cfg.scale;
+const [projectionX, projectionY] = cfg.projection;
+const origin = Object.freeze({ x: originX, y: originY });
+const scale = Object.freeze({ x: scaleX, y: scaleY });
+
+function toPx(point) {
+  const [x, y, z] = point;
+  return {
+    x: origin.x + scale.x * (x + projectionX * y),
+    y: origin.y - scale.y * (z + projectionY * y)
+  };
+}
+
+try {
+  const scene = document.getElementById("scene");
+  const make = (name, attributes, content) => {
+    const node = document.createElementNS(scene.namespaceURI, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, value);
+    }
+    if (content !== undefined) node.textContent = content;
+    return node;
+  };
+
+  const pointList = points => points.map(point => {
+    const pixel = toPx(point);
+    return `${pixel.x},${pixel.y}`;
+  }).join(" ");
+
+  const pathData = points => points.map((point, index) => {
+    const pixel = toPx(point);
+    return `${index === cfg.zero ? "M" : "L"} ${pixel.x} ${pixel.y}`;
+  }).join(" ");
+
+  const addLine = (parent, from, to, className) => {
+    const first = toPx(from);
+    const second = toPx(to);
+    parent.append(make("line", {
+      x1: first.x,
+      y1: first.y,
+      x2: second.x,
+      y2: second.y,
+      class: className
+    }));
+  };
+
+  const addText = (parent, point, offset, text, anchor, className) => {
+    const pixel = toPx(point);
+    const [dx, dy] = offset;
+    parent.append(make("text", {
+      x: pixel.x,
+      y: pixel.y,
+      transform: `translate(${dx} ${dy})`,
+      "text-anchor": anchor,
+      class: className
+    }, text));
+  };
+
+  const [centerW, centerB] = cfg.center;
+  const surfaceZ = (w, b) =>
+    cfg.surface.base +
+    cfg.surface.curveW * (w - centerW) * (w - centerW) +
+    cfg.surface.curveB * (b - centerB) * (b - centerB);
+
+  const surfacePoint = (w, b) => [w, b, surfaceZ(w, b)];
+  const [minW, maxW] = cfg.surface.w;
+  const [minB, maxB] = cfg.surface.b;
+  const grid = [];
+
+  for (let row = cfg.zero; row <= cfg.surface.stepsB; row += cfg.one) {
+    const b = minB + (maxB - minB) * row / cfg.surface.stepsB;
+    const points = [];
+    for (let column = cfg.zero; column <= cfg.surface.stepsW; column += cfg.one) {
+      const w = minW + (maxW - minW) * column / cfg.surface.stepsW;
+      points.push(surfacePoint(w, b));
+    }
+    grid.push(points);
+  }
+
+  const cells = make("g", { "aria-hidden": "true" });
+  for (let row = cfg.surface.stepsB - cfg.one; row >= cfg.zero; row -= cfg.one) {
+    for (let column = cfg.zero; column < cfg.surface.stepsW; column += cfg.one) {
+      const nextRow = row + cfg.one;
+      const nextColumn = column + cfg.one;
+      const polygon = [
+        grid[row][column],
+        grid[row][nextColumn],
+        grid[nextRow][nextColumn],
+        grid[nextRow][column]
+      ];
+      const average =
+        polygon.reduce((sum, point) => sum + point[cfg.two], cfg.zero) / cfg.four;
+      const band = average < cfg.surface.lowBand
+        ? "surface-low"
+        : average < cfg.surface.middleBand
+          ? "surface-middle"
+          : "surface-high";
+      cells.append(make("polygon", {
+        points: pointList(polygon),
+        class: `surface-cell ${band}`
+      }));
+    }
+  }
+  scene.append(cells);
+
+  const mesh = make("g", { "aria-hidden": "true" });
+  for (const row of grid) {
+    mesh.append(make("path", { d: pathData(row), class: "mesh" }));
+  }
+  for (let column = cfg.zero; column <= cfg.surface.stepsW; column += cfg.one) {
+    const points = grid.map(row => row[column]);
+    mesh.append(make("path", { d: pathData(points), class: "mesh" }));
+  }
+  scene.append(mesh);
+
+  const contours = make("g", { "aria-hidden": "true" });
+  for (const [radiusW, radiusB] of cfg.rings) {
+    const ring = [];
+    for (let step = cfg.zero; step <= cfg.ringSteps; step += cfg.one) {
+      const angle = cfg.two * Math.PI * step / cfg.ringSteps;
+      const w = centerW + radiusW * Math.cos(angle);
+      const b = centerB + radiusB * Math.sin(angle);
+      ring.push(surfacePoint(w, b));
+    }
+    contours.append(make("path", {
+      d: `${pathData(ring)} Z`,
+      class: "contour"
+    }));
+  }
+  scene.append(contours);
+
+  const axes = make("g", {});
+  for (const axis of cfg.axes) {
+    addLine(axes, axis.start, axis.end, "axis");
+    axes.append(make("polygon", {
+      points: pointList([axis.end, ...axis.wings]),
+      class: "arrowhead"
+    }));
+    addText(
+      axes,
+      axis.labelPoint,
+      axis.offset,
+      axis.text,
+      axis.anchor,
+      "axis-label"
+    );
+  }
+
+  for (const tick of cfg.ticks) {
+    const [from, to] = tick.ends;
+    addLine(axes, from, to, "tick");
+    addText(
+      axes,
+      tick.labelPoint,
+      tick.offset,
+      tick.text,
+      tick.anchor,
+      "tick-label"
+    );
+  }
+  scene.append(axes);
+
+  const samples = make("g", {});
+  for (const sample of cfg.samples) {
+    const [w, b] = sample.point;
+    const point = surfacePoint(w, b);
+    addLine(samples, sample.labelPoint, point, "leader");
+    const pixel = toPx(point);
+
+    if (sample.kind === "minimum") {
+      samples.append(make("circle", {
+        cx: pixel.x,
+        cy: pixel.y,
+        r: scale.x * cfg.haloRadius,
+        class: "minimum-halo"
+      }));
+    }
+
+    samples.append(make("circle", {
+      cx: pixel.x,
+      cy: pixel.y,
+      r: scale.x * cfg.dotRadius,
+      class: sample.kind
+    }));
+
+    addText(
+      samples,
+      sample.labelPoint,
+      sample.offset,
+      sample.label,
+      sample.anchor,
+      `sample-label ${sample.kind}-label`
+    );
+  }
+  scene.append(samples);
+
+  addText(
+    scene,
+    cfg.footerPoint,
+    cfg.footerOffset,
+    cfg.footer,
+    "middle",
+    "note"
+  );
+} catch (error) {
+  const scene = document.getElementById("scene");
+  const fallback = document.getElementById("fallback");
+  scene.replaceChildren();
+  scene.hidden = true;
+  fallback.hidden = false;
+}
+</script>
+</body>
+</html>

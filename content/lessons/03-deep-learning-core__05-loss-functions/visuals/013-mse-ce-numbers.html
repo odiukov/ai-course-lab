@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Одинаковый прогноз — разные штрафы</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f4ee;
+      --panel: #ffffff;
+      --card: #f8fafc;
+      --ink: #182032;
+      --muted: #536077;
+      --border: #cbd5e1;
+      --track: #dbe2ec;
+      --mse: #2563eb;
+      --ce: #b423c7;
+      --probability: #182032;
+      --probability-text: #ffffff;
+      --highlight: #fff7ed;
+      --highlight-border: #ea580c;
+      --footer: #eef2ff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10131a;
+        --panel: #161b25;
+        --card: #1f2937;
+        --ink: #f3f4f6;
+        --muted: #bac3d3;
+        --border: #475569;
+        --track: #374151;
+        --mse: #60a5fa;
+        --ce: #e879f9;
+        --probability: #f3f4f6;
+        --probability-text: #111827;
+        --highlight: #2a211b;
+        --highlight-border: #fb923c;
+        --footer: #1b2330;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family:
+        system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    figure {
+      max-width: 960px;
+      margin: auto;
+    }
+
+    figcaption {
+      color: var(--ink);
+      font-size: 23px;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 438px;
+      overflow: visible;
+      background: var(--panel);
+      font-family:
+        system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-rendering: geometricPrecision;
+    }
+
+    .badge {
+      fill: var(--footer);
+      stroke: var(--border);
+    }
+
+    .badge-text {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .column-title {
+      fill: var(--ink);
+      font-size: 21px;
+      font-weight: bold;
+    }
+
+    .column-note {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .divider,
+    .connector {
+      stroke: var(--border);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .card {
+      fill: var(--card);
+      stroke: var(--border);
+    }
+
+    .card.emphasis {
+      fill: var(--highlight);
+      stroke: var(--highlight-border);
+    }
+
+    .metric-label {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .loss-value {
+      fill: var(--ink);
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .track {
+      stroke: var(--track);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .mse-bar {
+      stroke: var(--mse);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .ce-bar {
+      stroke: var(--ce);
+      fill: none;
+      stroke-linecap: round;
+    }
+
+    .mse-dot {
+      fill: var(--mse);
+    }
+
+    .ce-dot {
+      fill: var(--ce);
+    }
+
+    .probability-pill {
+      fill: var(--probability);
+      stroke: var(--panel);
+    }
+
+    .probability-text {
+      fill: var(--probability-text);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .footer-box {
+      fill: var(--footer);
+      stroke: var(--border);
+    }
+
+    .footer-main {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .footer-note {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .error-text {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-title">
+    <figcaption id="diagram-title">Одинаковый прогноз — разные штрафы</figcaption>
+
+    <svg
+      id="loss-diagram"
+      viewBox="0 0 960 438"
+      width="960"
+      height="438"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="diagram-title diagram-desc"
+    >
+      <desc id="diagram-desc">
+        Для истинной метки 1 сравниваются штрафы MSE и cross-entropy
+        при прогнозах 0,9, 0,5 и 0,1.
+      </desc>
+      <g id="diagram-root"></g>
+    </svg>
+  </figure>
+
+  <script>
+    "use strict";
+
+    /*
+     * Все числовые данные и логическая геометрия объявлены здесь.
+     * Далее положение каждого элемента получается только через sx и sy.
+     */
+    const diagramData = [
+      {
+        kind: "config",
+        zero: 0,
+        one: 1,
+        originX: 30,
+        originY: 10,
+        scale: 9,
+
+        thinLine: 1.5,
+        regularLine: 2,
+        strongLine: 5,
+        dotRadius: 0.42,
+
+        badgeX: 38,
+        badgeY: 0.7,
+        badgeW: 24,
+        badgeH: 3.5,
+        badgeRadius: 1.75,
+        badgeTextY: 3.05,
+
+        leftCenter: 24,
+        rightCenter: 76,
+        titleY: 6.5,
+        noteY: 8.8,
+
+        dividerX: 50,
+        dividerTop: 5.2,
+        dividerBottom: 37.6,
+
+        leftCardX: 3,
+        rightCardX: 55,
+        cardW: 42,
+        cardH: 6.8,
+        cardRadius: 1.15,
+
+        connectorLeft: 45,
+        connectorRight: 55,
+        pillX: 45.4,
+        pillW: 9.2,
+        pillH: 3.4,
+        pillRadius: 1.7,
+
+        leftTextX: 6,
+        leftValueX: 42,
+        rightTextX: 58,
+        rightValueX: 94,
+        textYInside: 2.35,
+
+        leftBarStart: 6,
+        leftBarEnd: 42,
+        rightBarStart: 58,
+        rightBarEnd: 94,
+        barYInside: 5.15,
+        barSpan: 36,
+        maxLoss: 2.303,
+
+        footerX: 3,
+        footerY: 38.7,
+        footerW: 94,
+        footerH: 6.2,
+        footerRadius: 1.2,
+        footerMainY: 41.25,
+        footerNoteY: 43.55,
+        footerCenterX: 50,
+
+        errorCenterX: 50,
+        errorFirstY: 21,
+        errorSecondY: 24
+      },
+      {
+        kind: "row",
+        p: 0.9,
+        pLabel: "0,9",
+        mse: 0.01,
+        mseLabel: "0,01",
+        ce: 0.105,
+        ceLabel: "0,105",
+        y: 11.1,
+        emphasis: false
+      },
+      {
+        kind: "row",
+        p: 0.5,
+        pLabel: "0,5",
+        mse: 0.25,
+        mseLabel: "0,25",
+        ce: 0.693,
+        ceLabel: "0,693",
+        y: 19.9,
+        emphasis: false
+      },
+      {
+        kind: "row",
+        p: 0.1,
+        pLabel: "0,1",
+        mse: 0.81,
+        mseLabel: "0,81",
+        ce: 2.303,
+        ceLabel: "2,303",
+        y: 28.7,
+        emphasis: true
+      }
+    ];
+
+    const [config, ...rows] = diagramData;
+
+    const origin = Object.freeze({
+      x: config.originX,
+      y: config.originY
+    });
+
+    const scale = config.scale;
+
+    const sx = (x) => origin.x + x * scale;
+    const sy = (y) => origin.y + y * scale;
+
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    const root = document.getElementById("diagram-root");
+
+    function node(tag, attributes, className) {
+      const element = document.createElementNS(svgNamespace, tag);
+
+      Object.entries(attributes).forEach(([name, value]) => {
+        element.setAttribute(name, String(value));
+      });
+
+      if (className) {
+        element.setAttribute("class", className);
+      }
+
+      return element;
+    }
+
+    function rectangle(parent, x, y, width, height, radius, className, lineWidth) {
+      const element = node(
+        "rect",
+        {
+          x: sx(x),
+          y: sy(y),
+          width: sx(width) - sx(config.zero),
+          height: sy(height) - sy(config.zero),
+          rx: sx(radius) - sx(config.zero),
+          ry: sy(radius) - sy(config.zero),
+          "stroke-width": lineWidth,
+          "vector-effect": "non-scaling-stroke"
+        },
+        className
+      );
+
+      parent.appendChild(element);
+      return element;
+    }
+
+    function line(parent, xStart, yStart, xEnd, yEnd, className, lineWidth) {
+      const element = node(
+        "line",
+        {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          "stroke-width": lineWidth,
+          "vector-effect": "non-scaling-stroke"
+        },
+        className
+      );
+
+      parent.appendChild(element);
+      return element;
+    }
+
+    function circle(parent, x, y, radius, className) {
+      const element = node(
+        "circle",
+        {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(config.zero)
+        },
+        className
+      );
+
+      parent.appendChild(element);
+      return element;
+    }
+
+    function label(parent, x, y, content, anchor, className) {
+      const element = node(
+        "text",
+        {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": anchor,
+          "dominant-baseline": "alphabetic"
+        },
+        className
+      );
+
+      element.textContent = content;
+      parent.appendChild(element);
+      return element;
+    }
+
+    function drawHeader(parent) {
+      rectangle(
+        parent,
+        config.badgeX,
+        config.badgeY,
+        config.badgeW,
+        config.badgeH,
+        config.badgeRadius,
+        "badge",
+        config.thinLine
+      );
+
+      label(
+        parent,
+        config.dividerX,
+        config.badgeTextY,
+        "истинная метка: 1",
+        "middle",
+        "badge-text"
+      );
+
+      label(
+        parent,
+        config.leftCenter,
+        config.titleY,
+        "MSE",
+        "middle",
+        "column-title"
+      );
+
+      label(
+        parent,
+        config.leftCenter,
+        config.noteY,
+        "квадрат ошибки: (1 − p)²",
+        "middle",
+        "column-note"
+      );
+
+      label(
+        parent,
+        config.rightCenter,
+        config.titleY,
+        "CROSS-ENTROPY",
+        "middle",
+        "column-title"
+      );
+
+      label(
+        parent,
+        config.rightCenter,
+        config.noteY,
+        "логарифмический штраф: −ln(p)",
+        "middle",
+        "column-note"
+      );
+
+      line(
+        parent,
+        config.dividerX,
+        config.dividerTop,
+        config.dividerX,
+        config.dividerBottom,
+        "divider",
+        config.thinLine
+      );
+    }
+
+    function drawLossBar(parent, startX, endX, y, value, className, dotClass) {
+      line(
+        parent,
+        startX,
+        y,
+        endX,
+        y,
+        "track",
+        config.regularLine
+      );
+
+      const valueEnd =
+        startX + config.barSpan * (value / config.maxLoss);
+
+      line(
+        parent,
+        startX,
+        y,
+        valueEnd,
+        y,
+        className,
+        config.strongLine
+      );
+
+      circle(
+        parent,
+        valueEnd,
+        y,
+        config.dotRadius,
+        dotClass
+      );
+    }
+
+    function drawRow(parent, row) {
+      const cardClass = row.emphasis ? "card emphasis" : "card";
+      const centerY = row.y + config.cardH * config.p;
+      const pillY = centerY - config.p * config.pillH;
+
+      line(
+        parent,
+        config.connectorLeft,
+        centerY,
+        config.connectorRight,
+        centerY,
+        "connector",
+        config.regularLine
+      );
+
+      rectangle(
+        parent,
+        config.leftCardX,
+        row.y,
+        config.cardW,
+        config.cardH,
+        config.cardRadius,
+        cardClass,
+        config.thinLine
+      );
+
+      rectangle(
+        parent,
+        config.rightCardX,
+        row.y,
+        config.cardW,
+        config.cardH,
+        config.cardRadius,
+        cardClass,
+        config.thinLine
+      );
+
+      label(
+        parent,
+        config.leftTextX,
+        row.y + config.textYInside,
+        "штраф MSE",
+        "start",
+        "metric-label"
+      );
+
+      label(
+        parent,
+        config.leftValueX,
+        row.y + config.textYInside,
+        row.mseLabel,
+        "end",
+        "loss-value"
+      );
+
+      label(
+        parent,
+        config.rightTextX,
+        row.y + config.textYInside,
+        "штраф cross-entropy",
+        "start",
+        "metric-label"
+      );
+
+      label(
+        parent,
+        config.rightValueX,
+        row.y + config.textYInside,
+        row.ceLabel,
+        "end",
+        "loss-value"
+      );
+
+      drawLossBar(
+        parent,
+        config.leftBarStart,
+        config.leftBarEnd,
+        row.y + config.barYInside,
+        row.mse,
+        "mse-bar",
+        "mse-dot"
+      );
+
+      drawLossBar(
+        parent,
+        config.rightBarStart,
+        config.rightBarEnd,
+        row.y + config.barYInside,
+        row.ce,
+        "ce-bar",
+        "ce-dot"
+      );
+
+      rectangle(
+        parent,
+        config.pillX,
+        pillY,
+        config.pillW,
+        config.pillH,
+        config.pillRadius,
+        "probability-pill",
+        config.regularLine
+      );
+
+      label(
+        parent,
+        config.dividerX,
+        centerY + config.p * config.one,
+        "p = " + row.pLabel,
+        "middle",
+        "probability-text"
+      );
+    }
+
+    function drawFooter(parent) {
+      rectangle(
+        parent,
+        config.footerX,
+        config.footerY,
+        config.footerW,
+        config.footerH,
+        config.footerRadius,
+        "footer-box",
+        config.thinLine
+      );
+
+      label(
+        parent,
+        config.footerCenterX,
+        config.footerMainY,
+        "При p = 0,1: MSE даёт 0,81, а cross-entropy — 2,303",
+        "middle",
+        "footer-main"
+      );
+
+      label(
+        parent,
+        config.footerCenterX,
+        config.footerNoteY,
+        "Чем ближе p к 0, тем быстрее растёт штраф −ln(p).",
+        "middle",
+        "footer-note"
+      );
+    }
+
+    function showFallback() {
+      root.replaceChildren();
+
+      label(
+        root,
+        config.errorCenterX,
+        config.errorFirstY,
+        "Схема должна была показать разные штрафы",
+        "middle",
+        "error-text"
+      );
+
+      label(
+        root,
+        config.errorCenterX,
+        config.errorSecondY,
+        "MSE и cross-entropy для одних и тех же вероятностей.",
+        "middle",
+        "error-text"
+      );
+    }
+
+    try {
+      drawHeader(root);
+      rows.forEach((row) => drawRow(root, row));
+      drawFooter(root);
+    } catch (error) {
+      showFallback();
+    }
+  </script>
+</body>
+</html>

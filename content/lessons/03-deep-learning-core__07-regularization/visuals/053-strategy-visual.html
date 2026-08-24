@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Стратегия регуляризации по величине gap</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --surface: #ffffff;
+      --surface-soft: #f1f4fa;
+      --ink: #182033;
+      --muted: #59657a;
+      --line: #8c98ab;
+      --root-fill: #e9edff;
+      --root-stroke: #5b66c9;
+      --heavy: #b83d54;
+      --heavy-soft: #fff0f2;
+      --medium: #a86608;
+      --medium-soft: #fff6df;
+      --light: #24775f;
+      --light-soft: #eaf8f2;
+      --notice: #eaf1ff;
+      --notice-stroke: #5577ad;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --surface: #191f2d;
+        --surface-soft: #222a3a;
+        --ink: #f2f4fa;
+        --muted: #b5bfd1;
+        --line: #758198;
+        --root-fill: #292f57;
+        --root-stroke: #aeb6ff;
+        --heavy: #ff9cac;
+        --heavy-soft: #3b222a;
+        --medium: #ffc66d;
+        --medium-soft: #3a2e1d;
+        --light: #7ce0bc;
+        --light-soft: #18372e;
+        --notice: #202d45;
+        --notice-stroke: #8fb4ee;
+      }
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .frame {
+      background: var(--page);
+    }
+
+    h1 {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 750;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--page);
+    }
+
+    .canvas-bg {
+      fill: var(--page);
+    }
+
+    .notice {
+      fill: var(--notice);
+      stroke: var(--notice-stroke);
+      stroke-width: 2;
+    }
+
+    .notice-text {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .root {
+      fill: var(--root-fill);
+      stroke: var(--root-stroke);
+      stroke-width: 3;
+    }
+
+    .root-main {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: 760;
+    }
+
+    .root-sub {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 550;
+    }
+
+    .edge {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow {
+      stroke: none;
+    }
+
+    .edge-label-box {
+      fill: var(--surface);
+      stroke-width: 2;
+    }
+
+    .edge-label {
+      font-size: 15px;
+      font-weight: 780;
+    }
+
+    .card {
+      stroke-width: 2;
+    }
+
+    .card-heavy {
+      fill: var(--heavy-soft);
+      stroke: var(--heavy);
+    }
+
+    .card-medium {
+      fill: var(--medium-soft);
+      stroke: var(--medium);
+    }
+
+    .card-light {
+      fill: var(--light-soft);
+      stroke: var(--light);
+    }
+
+    .header-heavy {
+      fill: var(--heavy);
+    }
+
+    .header-medium {
+      fill: var(--medium);
+    }
+
+    .header-light {
+      fill: var(--light);
+    }
+
+    .header-text-heavy,
+    .header-text-medium,
+    .header-text-light {
+      font-size: 16px;
+      font-weight: 780;
+    }
+
+    .header-text-heavy,
+    .header-text-medium {
+      fill: #ffffff;
+    }
+
+    .header-text-light {
+      fill: #ffffff;
+    }
+
+    .item {
+      fill: var(--surface);
+      stroke: var(--line);
+      stroke-width: 2;
+    }
+
+    .item-text {
+      fill: var(--ink);
+      font-size: 14px;
+      font-weight: 620;
+    }
+
+    .accent-heavy {
+      fill: var(--heavy);
+    }
+
+    .accent-medium {
+      fill: var(--medium);
+    }
+
+    .accent-light {
+      fill: var(--light);
+    }
+
+    .branch-note {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 550;
+    }
+
+    #fallback {
+      background: var(--page);
+      color: var(--ink);
+      font-size: 18px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <h1>Стратегия регуляризации по величине gap</h1>
+
+    <div id="fallback" hidden>
+      Схема должна была показать дерево выбора: gap больше 10% требует сильной
+      комбинации мер, gap 5–10% — умеренной регуляризации, а gap меньше 5% —
+      осторожной регуляризации.
+    </div>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 480"
+      width="1200"
+      height="480"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svgTitle svgDescription"
+    >
+      <title id="svgTitle">Дерево выбора силы регуляризации по train-test gap</title>
+      <desc id="svgDescription">
+        После проверки общего качества величина train-test gap направляет к
+        сильной, умеренной или осторожной регуляризации.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = {
+      zero: 0,
+      unit: 1,
+      previous: 1,
+      canvas: { width: 1200, height: 480 },
+      radius: 12,
+      arrow: { length: 13, halfWidth: 7 },
+      notice: {
+        x: 110, y: 12, width: 980, height: 42,
+        text: {
+          x: 600, y: 33,
+          value: "Сначала проверь качество: одинаково низкие train и test означают недообучение"
+        }
+      },
+      root: {
+        points: [
+          { x: 600, y: 68 },
+          { x: 770, y: 116 },
+          { x: 600, y: 164 },
+          { x: 430, y: 116 }
+        ],
+        labels: [
+          { x: 600, y: 105, value: "Каков train-test gap?", className: "root-main" },
+          { x: 600, y: 130, value: "после проверки общего качества", className: "root-sub" }
+        ]
+      },
+      edges: [
+        {
+          tone: "heavy",
+          points: [
+            { x: 500, y: 144 },
+            { x: 500, y: 181 },
+            { x: 190, y: 181 },
+            { x: 190, y: 207 }
+          ],
+          labelBox: { x: 340, y: 164, width: 92, height: 30 },
+          label: { x: 386, y: 179, value: "> 10%" }
+        },
+        {
+          tone: "medium",
+          points: [
+            { x: 600, y: 164 },
+            { x: 600, y: 207 }
+          ],
+          labelBox: { x: 615, y: 169, width: 94, height: 30 },
+          label: { x: 662, y: 184, value: "5–10%" }
+        },
+        {
+          tone: "light",
+          points: [
+            { x: 700, y: 144 },
+            { x: 700, y: 181 },
+            { x: 1010, y: 181 },
+            { x: 1010, y: 207 }
+          ],
+          labelBox: { x: 768, y: 164, width: 92, height: 30 },
+          label: { x: 814, y: 179, value: "< 5%" }
+        }
+      ],
+      cards: [
+        {
+          tone: "heavy",
+          x: 25, y: 207, width: 330, height: 258,
+          headerHeight: 49,
+          title: { x: 190, y: 232, value: "Сильная комбинация мер" },
+          note: { x: 190, y: 276, value: "заметное переобучение" },
+          items: [
+            { x: 48, y: 295, width: 284, height: 34, textX: 190, textY: 312, value: "Dropout 0.3–0.5" },
+            { x: 48, y: 337, width: 284, height: 34, textX: 190, textY: 354, value: "Weight decay 0.01–0.1" },
+            { x: 48, y: 379, width: 284, height: 34, textX: 190, textY: 396, value: "Активная аугментация" },
+            { x: 48, y: 421, width: 284, height: 34, textX: 190, textY: 438, value: "Early stopping" }
+          ]
+        },
+        {
+          tone: "medium",
+          x: 435, y: 207, width: 330, height: 258,
+          headerHeight: 49,
+          title: { x: 600, y: 232, value: "Умеренная регуляризация" },
+          note: { x: 600, y: 282, value: "стартовые диапазоны для validation" },
+          items: [
+            { x: 458, y: 307, width: 284, height: 38, textX: 600, textY: 326, value: "Dropout 0.1–0.2" },
+            { x: 458, y: 356, width: 284, height: 38, textX: 600, textY: 375, value: "Weight decay 0.001–0.01" },
+            { x: 458, y: 405, width: 284, height: 38, textX: 600, textY: 424, value: "BatchNorm или LayerNorm" }
+          ]
+        },
+        {
+          tone: "light",
+          x: 845, y: 207, width: 330, height: 258,
+          headerHeight: 49,
+          title: { x: 1010, y: 232, value: "Осторожный режим" },
+          note: { x: 1010, y: 305, value: "не дави на модель сильнее нужного" },
+          items: [
+            { x: 868, y: 337, width: 284, height: 42, textX: 1010, textY: 358, value: "Dropout 0.05–0.1" },
+            { x: 868, y: 394, width: 284, height: 42, textX: 1010, textY: 415, value: "Weight decay 1e-4" }
+          ]
+        }
+      ]
+    };
+
+    const origin = Object.freeze({ x: DATA.zero, y: DATA.zero });
+    const scale = Object.freeze({ x: DATA.unit, y: DATA.unit });
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      const make = (tag, attributes, parent = svg) => {
+        const node = document.createElementNS(ns, tag);
+        for (const [name, value] of Object.entries(attributes)) {
+          node.setAttribute(name, String(value));
+        }
+        parent.appendChild(node);
+        return node;
+      };
+
+      const widthOf = value => sx(value) - sx(DATA.zero);
+      const heightOf = value => sy(value) - sy(DATA.zero);
+
+      const rect = (box, className, parent = svg) =>
+        make("rect", {
+          x: sx(box.x),
+          y: sy(box.y),
+          width: widthOf(box.width),
+          height: heightOf(box.height),
+          rx: widthOf(DATA.radius),
+          ry: heightOf(DATA.radius),
+          class: className
+        }, parent);
+
+      const label = (spec, className, parent = svg) => {
+        const node = make("text", {
+          x: sx(spec.x),
+          y: sy(spec.y),
+          "text-anchor": "middle",
+          "dominant-baseline": "middle",
+          class: className
+        }, parent);
+        node.textContent = spec.value;
+        return node;
+      };
+
+      make("rect", {
+        x: sx(DATA.zero),
+        y: sy(DATA.zero),
+        width: widthOf(DATA.canvas.width),
+        height: heightOf(DATA.canvas.height),
+        class: "canvas-bg"
+      });
+
+      rect(DATA.notice, "notice");
+      label(DATA.notice.text, "notice-text");
+
+      make("polygon", {
+        points: DATA.root.points.map(point =>
+          `${sx(point.x)},${sy(point.y)}`
+        ).join(" "),
+        class: "root"
+      });
+
+      for (const rootLabel of DATA.root.labels) {
+        label(rootLabel, rootLabel.className);
+      }
+
+      for (const edge of DATA.edges) {
+        make("polyline", {
+          points: edge.points.map(point =>
+            `${sx(point.x)},${sy(point.y)}`
+          ).join(" "),
+          class: "edge"
+        });
+
+        const tip = edge.points[edge.points.length - DATA.previous];
+        const before = edge.points[edge.points.length - DATA.previous - DATA.previous];
+        const deltaX = tip.x - before.x;
+        const deltaY = tip.y - before.y;
+        const distance = Math.hypot(deltaX, deltaY) || DATA.unit;
+        const unitX = deltaX / distance;
+        const unitY = deltaY / distance;
+        const baseX = tip.x - unitX * DATA.arrow.length;
+        const baseY = tip.y - unitY * DATA.arrow.length;
+        const normalX = -unitY * DATA.arrow.halfWidth;
+        const normalY = unitX * DATA.arrow.halfWidth;
+
+        make("polygon", {
+          points: [
+            `${sx(tip.x)},${sy(tip.y)}`,
+            `${sx(baseX + normalX)},${sy(baseY + normalY)}`,
+            `${sx(baseX - normalX)},${sy(baseY - normalY)}`
+          ].join(" "),
+          class: `arrow accent-${edge.tone}`
+        });
+
+        rect(
+          edge.labelBox,
+          `edge-label-box card-${edge.tone}`
+        );
+        label(
+          edge.label,
+          `edge-label accent-${edge.tone}`
+        );
+      }
+
+      for (const card of DATA.cards) {
+        const group = make("g", {
+          "aria-label": `${card.title.value}: ${card.items.map(item => item.value).join(", ")}`
+        });
+
+        rect(card, `card card-${card.tone}`, group);
+
+        rect({
+          x: card.x,
+          y: card.y,
+          width: card.width,
+          height: card.headerHeight
+        }, `header-${card.tone}`, group);
+
+        label(
+          card.title,
+          `header-text-${card.tone}`,
+          group
+        );
+
+        label(
+          card.note,
+          "branch-note",
+          group
+        );
+
+        for (const item of card.items) {
+          rect(item, "item", group);
+
+          make("rect", {
+            x: sx(item.x),
+            y: sy(item.y),
+            width: widthOf(DATA.radius),
+            height: heightOf(item.height),
+            rx: widthOf(DATA.radius),
+            ry: heightOf(DATA.radius),
+            class: `accent-${card.tone}`
+          }, group);
+
+          label({
+            x: item.textX,
+            y: item.textY,
+            value: item.value
+          }, "item-text", group);
+        }
+      }
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.hidden = true;
+      fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

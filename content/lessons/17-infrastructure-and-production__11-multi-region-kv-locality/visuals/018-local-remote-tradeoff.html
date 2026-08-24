@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Когда удалённый горячий префикс выгоднее локального промаха</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --panel-soft: #f1f4f9;
+      --ink: #182033;
+      --muted: #59657a;
+      --grid: #cbd3e1;
+      --local: #6d5bd0;
+      --local-soft: #e8e4ff;
+      --network: #e59b36;
+      --network-soft: #fff0d8;
+      --remote: #168b68;
+      --remote-soft: #dff5ec;
+      --outline: #d6dce7;
+      --shadow: rgba(26, 35, 55, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111622;
+        --panel: #191f2d;
+        --panel-soft: #222a3a;
+        --ink: #f1f4fa;
+        --muted: #abb5c7;
+        --grid: #49546a;
+        --local: #a99cff;
+        --local-soft: #302a57;
+        --network: #f0b35d;
+        --network-soft: #49371f;
+        --remote: #58d0a9;
+        --remote-soft: #173e34;
+        --outline: #343e52;
+        --shadow: rgba(0, 0, 0, 0.24);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      padding: 12px;
+    }
+
+    .figure {
+      width: 100%;
+      max-width: 1040px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--outline);
+      box-shadow: 0 8px 24px var(--shadow);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 13px 18px 10px;
+      font-size: 20px;
+      line-height: 1.25;
+      font-weight: 750;
+      letter-spacing: -0.015em;
+    }
+
+    .subtitle {
+      margin: 0;
+      padding: 0 18px 10px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 455px;
+      background: var(--panel);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .small {
+      font-size: 12px;
+    }
+
+    .label {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .value {
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .inside-dark {
+      fill: #ffffff;
+    }
+
+    .muted {
+      fill: var(--muted);
+    }
+
+    .local-text {
+      fill: var(--local);
+    }
+
+    .remote-text {
+      fill: var(--remote);
+    }
+
+    .network-text {
+      fill: var(--network);
+    }
+
+    .axis,
+    .tick,
+    .bracket {
+      stroke: var(--grid);
+      stroke-width: 1.5;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .bracket {
+      stroke: var(--remote);
+      stroke-width: 2;
+    }
+
+    .local-fill {
+      fill: var(--local);
+    }
+
+    .local-soft {
+      fill: var(--local-soft);
+    }
+
+    .network-fill {
+      fill: var(--network);
+    }
+
+    .network-soft {
+      fill: var(--network-soft);
+    }
+
+    .remote-fill {
+      fill: var(--remote);
+    }
+
+    .remote-soft {
+      fill: var(--remote-soft);
+    }
+
+    .remote-outline {
+      stroke: var(--remote);
+      stroke-width: 2.5;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .stream-line {
+      stroke: var(--remote);
+      stroke-width: 3;
+      stroke-linecap: round;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .local-line {
+      stroke: var(--local);
+      stroke-width: 3;
+      stroke-linecap: round;
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .separator {
+      stroke: var(--panel);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    #fallback {
+      display: none;
+      margin: 0;
+      padding: 18px;
+      color: var(--ink);
+      background: var(--panel-soft);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="figure">
+    <h1>Когда удалённый горячий префикс выгоднее локального промаха</h1>
+    <p class="subtitle">Сравниваем время до первого токена, а затем отдельно проверяем, что происходит со стримом.</p>
+
+    <svg id="diagram"
+         viewBox="0 0 1040 455"
+         width="1040"
+         height="455"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-label="Локальный холодный prefill занимает 800 миллисекунд. Удалённое попадание в Европе добавляет RTT 150 миллисекунд к prefill 80 миллисекунд. Для АТР дорога занимает два раза по 220 миллисекунд, поэтому первый токен приходит через 520 миллисекунд — на 280 миллисекунд раньше локального. Длинный стрим продолжает зависеть от дальней сети.">
+    </svg>
+
+    <p id="fallback">
+      Схема должна была показать: локальный холодный prefill занимает 800 мс; удалённый горячий prefill — 80 мс плюс сеть. Для США—ЕС сетевой RTT равен 150 мс, а для АТР дорога равна 2 × 220 мс. В случае АТР первый токен приходит через 520 мс, то есть на 280 мс раньше локального, но длинный стрим продолжает ощущать дальнюю сеть.
+    </p>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      canvas: { width: 1040, height: 455 },
+      origin: { x: 184, y: 10 },
+      scale: { x: 1, y: 1 },
+      zero: 0,
+      geometry: {
+        leftLabel: -22,
+        right: 800,
+        barHeight: 34,
+        corner: 7,
+        dot: 5,
+        smallDot: 3,
+        tickHalf: 6,
+        rowLocal: 31,
+        rowEu: 117,
+        rowApac: 203,
+        bracket: 254,
+        bracketLabel: 278,
+        axis: 306,
+        axisLabel: 327,
+        tokenLabel: 350,
+        stream: 374,
+        streamNote: 408,
+        legend: 435,
+        heading: 9
+      },
+      timing: {
+        hot: 80,
+        euRtt: 150,
+        apacOneWay: 220,
+        apacHotEnd: 300,
+        apacTotal: 520,
+        local: 800,
+        saving: 280
+      },
+      streamDots: [560, 600, 640, 680, 720, 760],
+      rows: [
+        {
+          name: "Локальный промах",
+          detail: "рядом, но холодно",
+          y: 31,
+          parts: [
+            { from: 0, to: 800, kind: "local-fill", text: "холодный prefill 800 мс", textKind: "inside-dark" }
+          ]
+        },
+        {
+          name: "США—ЕС",
+          detail: "удалённое попадание",
+          y: 117,
+          parts: [
+            { from: 0, to: 150, kind: "network-fill", text: "RTT 150 мс", textKind: "inside-dark" },
+            { from: 150, to: 230, kind: "remote-fill", text: "80 мс", textKind: "inside-dark" }
+          ]
+        },
+        {
+          name: "США—АТР",
+          detail: "удалённое попадание",
+          y: 203,
+          parts: [
+            { from: 0, to: 220, kind: "network-fill", text: "220 мс", textKind: "inside-dark" },
+            { from: 220, to: 300, kind: "remote-fill", text: "80 мс", textKind: "inside-dark" },
+            { from: 300, to: 520, kind: "network-fill", text: "220 мс", textKind: "inside-dark" }
+          ]
+        }
+      ]
+    });
+
+    const origin = Object.freeze(DATA.origin);
+    const scale = Object.freeze(DATA.scale);
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    (() => {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      try {
+        const make = (tag, attrs = {}, className = "") => {
+          const node = document.createElementNS(NS, tag);
+          Object.entries(attrs).forEach(([name, value]) => node.setAttribute(name, String(value)));
+          if (className) node.setAttribute("class", className);
+          return node;
+        };
+
+        const group = className => make("g", {}, className);
+
+        const line = (x1, y1, x2, y2, className) =>
+          make("line", {
+            x1: sx(x1),
+            y1: sy(y1),
+            x2: sx(x2),
+            y2: sy(y2)
+          }, className);
+
+        const rect = (x1, y1, x2, y2, className, rounded = false) => {
+          const attrs = {
+            x: sx(x1),
+            y: sy(y1),
+            width: sx(x2) - sx(x1),
+            height: sy(y2) - sy(y1)
+          };
+          if (rounded) {
+            attrs.rx = sx(DATA.geometry.corner) - sx(DATA.zero);
+            attrs.ry = sy(DATA.geometry.corner) - sy(DATA.zero);
+          }
+          return make("rect", attrs, className);
+        };
+
+        const circle = (x, y, radius, className) =>
+          make("circle", {
+            cx: sx(x),
+            cy: sy(y),
+            r: sx(radius) - sx(DATA.zero)
+          }, className);
+
+        const label = (value, x, y, anchor, className = "") => {
+          const node = make("text", {
+            x: sx(x),
+            y: sy(y),
+            "text-anchor": anchor,
+            "dominant-baseline": "middle"
+          }, className);
+          node.textContent = value;
+          return node;
+        };
+
+        const twoLineLabel = (first, second, x, y) => {
+          const g = group("");
+          g.appendChild(label(first, x, y, "end", "label"));
+          g.appendChild(label(second, x, y + DATA.geometry.barHeight, "end", "small muted"));
+          return g;
+        };
+
+        const g = group("plot");
+
+        g.appendChild(label(
+          "Время до первого токена →",
+          DATA.zero,
+          DATA.geometry.heading,
+          "start",
+          "small muted"
+        ));
+
+        DATA.rows.forEach(row => {
+          g.appendChild(twoLineLabel(
+            row.name,
+            row.detail,
+            DATA.geometry.leftLabel,
+            row.y
+          ));
+
+          g.appendChild(rect(
+            DATA.zero,
+            row.y,
+            DATA.geometry.right,
+            row.y + DATA.geometry.barHeight,
+            "local-soft",
+            true
+          ));
+
+          row.parts.forEach((part, index) => {
+            const piece = rect(
+              part.from,
+              row.y,
+              part.to,
+              row.y + DATA.geometry.barHeight,
+              part.kind,
+              index === DATA.zero
+            );
+            g.appendChild(piece);
+
+            g.appendChild(label(
+              part.text,
+              (part.from + part.to) / (sx(DATA.geometry.tickHalf) - sx(DATA.zero) - (sx(DATA.geometry.dot) - sx(DATA.zero))),
+              row.y + DATA.geometry.barHeight / (sy(DATA.geometry.tickHalf) - sy(DATA.zero) - (sy(DATA.geometry.dot) - sy(DATA.zero))),
+              "middle",
+              "value " + part.textKind
+            ));
+
+            if (index !== row.parts.length - (sx(DATA.geometry.smallDot) - sx(DATA.zero))) {
+              g.appendChild(line(
+                part.to,
+                row.y,
+                part.to,
+                row.y + DATA.geometry.barHeight,
+                "separator"
+              ));
+            }
+          });
+        });
+
+        g.appendChild(rect(
+          DATA.zero,
+          DATA.geometry.rowApac,
+          DATA.timing.apacTotal,
+          DATA.geometry.rowApac + DATA.geometry.barHeight,
+          "remote-outline",
+          true
+        ));
+
+        g.appendChild(label(
+          "АТР: 2 × 220 мс + 80 мс = 520 мс",
+          DATA.timing.apacTotal,
+          DATA.geometry.rowApac - DATA.geometry.tickHalf,
+          "end",
+          "small remote-text"
+        ));
+
+        g.appendChild(line(
+          DATA.timing.apacTotal,
+          DATA.geometry.bracket,
+          DATA.timing.local,
+          DATA.geometry.bracket,
+          "bracket"
+        ));
+        g.appendChild(line(
+          DATA.timing.apacTotal,
+          DATA.geometry.bracket - DATA.geometry.tickHalf,
+          DATA.timing.apacTotal,
+          DATA.geometry.bracket + DATA.geometry.tickHalf,
+          "bracket"
+        ));
+        g.appendChild(line(
+          DATA.timing.local,
+          DATA.geometry.bracket - DATA.geometry.tickHalf,
+          DATA.timing.local,
+          DATA.geometry.bracket + DATA.geometry.tickHalf,
+          "bracket"
+        ));
+        g.appendChild(label(
+          "выигрыш до первого токена: 280 мс",
+          DATA.timing.apacTotal + DATA.timing.saving / (sx(DATA.geometry.tickHalf) - sx(DATA.zero) - (sx(DATA.geometry.dot) - sx(DATA.zero)),
+          DATA.geometry.bracketLabel,
+          "middle",
+          "label remote-text"
+        ));
+
+        g.appendChild(line(
+          DATA.zero,
+          DATA.geometry.axis,
+          DATA.geometry.right,
+          DATA.geometry.axis,
+          "axis"
+        ));
+
+        [DATA.timing.apacTotal, DATA.timing.local].forEach(value => {
+          g.appendChild(line(
+            value,
+            DATA.geometry.axis - DATA.geometry.tickHalf,
+            value,
+            DATA.geometry.axis + DATA.geometry.tickHalf,
+            "tick"
+          ));
+        });
+
+        g.appendChild(label(
+          "520 мс",
+          DATA.timing.apacTotal,
+          DATA.geometry.axisLabel,
+          "middle",
+          "value remote-text"
+        ));
+        g.appendChild(label(
+          "800 мс",
+          DATA.timing.local,
+          DATA.geometry.axisLabel,
+          "middle",
+          "value local-text"
+        ));
+
+        g.appendChild(label(
+          "первый токен из АТР",
+          DATA.timing.apacTotal - DATA.geometry.tickHalf,
+          DATA.geometry.tokenLabel,
+          "end",
+          "small remote-text"
+        ));
+        g.appendChild(label(
+          "первый локальный токен",
+          DATA.timing.local,
+          DATA.geometry.tokenLabel,
+          "end",
+          "small local-text"
+        ));
+
+        g.appendChild(label(
+          "Ответ",
+          DATA.geometry.leftLabel,
+          DATA.geometry.stream,
+          "end",
+          "label"
+        ));
+
+        g.appendChild(line(
+          DATA.timing.apacTotal,
+          DATA.geometry.stream,
+          DATA.timing.local,
+          DATA.geometry.stream,
+          "stream-line"
+        ));
+        g.appendChild(circle(
+          DATA.timing.apacTotal,
+          DATA.geometry.stream,
+          DATA.geometry.dot,
+          "remote-fill"
+        ));
+        DATA.streamDots.forEach(x => {
+          g.appendChild(circle(
+            x,
+            DATA.geometry.stream,
+            DATA.geometry.smallDot,
+            "remote-fill"
+          ));
+        });
+        g.appendChild(circle(
+          DATA.timing.local,
+          DATA.geometry.stream,
+          DATA.geometry.dot,
+          "local-fill"
+        ));
+        g.appendChild(line(
+          DATA.timing.local - DATA.geometry.tickHalf,
+          DATA.geometry.stream,
+          DATA.timing.local,
+          DATA.geometry.stream,
+          "local-line"
+        ));
+
+        g.appendChild(label(
+          "Стрим уже начался, но каждый фрагмент всё ещё идёт через дальнюю сеть",
+          DATA.timing.apacTotal + DATA.timing.saving / (sx(DATA.geometry.tickHalf) - sx(DATA.zero) - (sx(DATA.geometry.dot) - sx(DATA.zero)),
+          DATA.geometry.streamNote,
+          "middle",
+          "small muted"
+        ));
+
+        g.appendChild(circle(
+          DATA.zero,
+          DATA.geometry.legend,
+          DATA.geometry.smallDot,
+          "remote-fill"
+        ));
+        g.appendChild(label(
+          "Зелёный результат означает «быстрее первый токен», а не «быстрее весь ответ».",
+          DATA.geometry.tickHalf + DATA.geometry.smallDot,
+          DATA.geometry.legend,
+          "start",
+          "label remote-text"
+        ));
+
+        svg.appendChild(g);
+      } catch (error) {
+        svg.style.display = "none";
+        fallback.style.display = "block";
+      }
+    })();
+  </script>
+</body>
+</html>

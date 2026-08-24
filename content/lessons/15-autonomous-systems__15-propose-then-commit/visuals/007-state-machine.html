@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Машина состояний propose-then-commit</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #536179;
+    --line: #718096;
+    --blue: #2f6feb;
+    --blue-fill: #eaf2ff;
+    --violet: #7557d3;
+    --violet-fill: #f1edff;
+    --green: #18794e;
+    --green-fill: #e7f6ee;
+    --amber: #9a6700;
+    --amber-fill: #fff4d6;
+    --red: #c23434;
+    --red-fill: #ffebeb;
+    --store: #187b86;
+    --store-fill: #e3f5f6;
+    --shadow: #d8deea;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111722;
+      --panel: #182131;
+      --ink: #eef3fb;
+      --muted: #b0bdd0;
+      --line: #8794a8;
+      --blue: #78a9ff;
+      --blue-fill: #172e50;
+      --violet: #b4a0ff;
+      --violet-fill: #2b244b;
+      --green: #67d69e;
+      --green-fill: #173a2b;
+      --amber: #f1c75b;
+      --amber-fill: #3d3218;
+      --red: #ff8a8a;
+      --red-fill: #482323;
+      --store: #72d4dc;
+      --store-fill: #17383c;
+      --shadow: #0b1018;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: unset;
+    padding: unset;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    margin: unset;
+    padding: 16px;
+    background: var(--bg);
+  }
+
+  h1 {
+    margin: unset;
+    padding: 4px 8px 12px;
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: .01em;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    background: var(--panel);
+    border: 1px solid var(--shadow);
+  }
+
+  .node, .terminal, .fallback {
+    fill: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .propose { fill: var(--blue-fill); stroke: var(--blue); }
+  .surface { fill: var(--violet-fill); stroke: var(--violet); }
+  .commit { fill: var(--amber-fill); stroke: var(--amber); }
+  .verify { fill: var(--green-fill); stroke: var(--green); }
+  .store { fill: var(--store-fill); stroke: var(--store); stroke-width: 2px; }
+  .noop { fill: var(--panel); stroke: var(--line); }
+  .alert, .rollback { fill: var(--red-fill); stroke: var(--red); }
+  .success { fill: var(--green-fill); stroke: var(--green); }
+
+  .flow {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 3px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .storage-flow { stroke: var(--store); }
+  .repeat-flow { stroke: var(--amber); }
+  .failure-flow { stroke: var(--red); }
+  .success-flow { stroke: var(--green); }
+
+  .arrow-head { fill: var(--line); }
+  .arrow-head.storage { fill: var(--store); }
+  .arrow-head.repeat { fill: var(--amber); }
+  .arrow-head.failure { fill: var(--red); }
+  .arrow-head.success { fill: var(--green); }
+
+  text {
+    fill: var(--ink);
+    font-size: 15px;
+  }
+
+  .phase {
+    font-size: 17px;
+    font-weight: bold;
+    letter-spacing: .04em;
+  }
+
+  .description {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .edge-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .store-title {
+    fill: var(--store);
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .danger-title {
+    fill: var(--red);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .success-title {
+    fill: var(--green);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .legend-rule {
+    stroke: var(--shadow);
+    stroke-width: 1px;
+  }
+
+  .legend {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .fallback {
+    stroke: var(--red);
+  }
+
+  noscript {
+    display: block;
+    padding: 16px;
+    color: var(--red);
+    background: var(--panel);
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Машина состояний propose-then-commit</h1>
+  <svg id="diagram" viewBox="0 0 1000 440"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">Предложение сохраняется неизменяемым, показывается человеку, выполняется один раз и проверяется. Повторное выполнение становится no-op, а ошибка проверки вызывает тревогу и откат.</desc>
+    <g id="stage"></g>
+  </svg>
+  <noscript>Схема: Propose → Surface → Commit → Verify; предложение хранится неизменяемым, повторный Commit становится no-op, ошибка Verify вызывает alert и rollback.</noscript>
+</figure>
+
+<script>
+(() => {
+  "use strict";
+
+  const [data] = [{
+    map: {
+      zero: 0,
+      originX: 28,
+      originY: 8,
+      scaleX: .94,
+      scaleY: .94
+    },
+    nodes: [
+      {
+        x1: 40, y1: 70, x2: 200, y2: 150, radius: 12,
+        titleX: 120, titleY: 102, noteX: 120, noteY: 128,
+        title: "PROPOSE", note: "зафиксировать версию", className: "propose"
+      },
+      {
+        x1: 280, y1: 70, x2: 440, y2: 150, radius: 12,
+        titleX: 360, titleY: 102, noteX: 360, noteY: 128,
+        title: "SURFACE", note: "показать человеку", className: "surface"
+      },
+      {
+        x1: 520, y1: 70, x2: 680, y2: 150, radius: 12,
+        titleX: 600, titleY: 102, noteX: 600, noteY: 128,
+        title: "COMMIT", note: "выполнить один раз", className: "commit"
+      },
+      {
+        x1: 760, y1: 70, x2: 920, y2: 150, radius: 12,
+        titleX: 840, titleY: 102, noteX: 840, noteY: 128,
+        title: "VERIFY", note: "перечитать результат", className: "verify"
+      }
+    ],
+    mainFlows: [
+      {
+        points: [{x: 200, y: 110}, {x: 280, y: 110}],
+        head: [{x: 280, y: 110}, {x: 268, y: 103}, {x: 268, y: 117}],
+        labelX: 212, labelY: 55, anchor: "start", label: "версия сохранена"
+      },
+      {
+        points: [{x: 440, y: 110}, {x: 520, y: 110}],
+        head: [{x: 520, y: 110}, {x: 508, y: 103}, {x: 508, y: 117}],
+        labelX: 452, labelY: 55, anchor: "start", label: "одобрено человеком"
+      },
+      {
+        points: [{x: 680, y: 110}, {x: 760, y: 110}],
+        head: [{x: 760, y: 110}, {x: 748, y: 103}, {x: 748, y: 117}],
+        labelX: 692, labelY: 55, anchor: "start", label: "побочный эффект"
+      }
+    ],
+    store: {
+      x1: 140, x2: 470, top: 220, lip: 238, lowerLip: 256, bottom: 300,
+      c1x: 140, c2x: 470,
+      titleX: 305, titleY: 265,
+      noteX: 305, noteY: 287,
+      title: "НАДЁЖНОЕ ХРАНИЛИЩЕ",
+      note: "неизменяемая версия • ключ идемпотентности"
+    },
+    storageFlows: [
+      {
+        points: [{x: 120, y: 150}, {x: 120, y: 270}, {x: 140, y: 270}],
+        head: [{x: 140, y: 270}, {x: 128, y: 263}, {x: 128, y: 277}],
+        labelX: 106, labelY: 196, anchor: "end", label: "фиксация"
+      },
+      {
+        points: [{x: 470, y: 270}, {x: 495, y: 270}, {x: 600, y: 150}],
+        head: [{x: 600, y: 150}, {x: 585, y: 156}, {x: 596, y: 166}],
+        labelX: 482, labelY: 250, anchor: "start", label: "только эта версия"
+      }
+    ],
+    repeat: {
+      points: [{x: 625, y: 150}, {x: 625, y: 330}],
+      head: [{x: 625, y: 330}, {x: 618, y: 318}, {x: 632, y: 318}],
+      labelX: 642, labelY: 210, anchor: "start", label: "повторный Commit",
+      box: {x1: 535, y1: 330, x2: 715, y2: 385, radius: 12},
+      titleX: 625, titleY: 355, noteX: 625, noteY: 375,
+      title: "NO-OP", note: "второго эффекта нет"
+    },
+    success: {
+      points: [{x: 840, y: 70}, {x: 840, y: 42}],
+      head: [{x: 840, y: 42}, {x: 833, y: 54}, {x: 847, y: 54}],
+      labelX: 855, labelY: 61, anchor: "start", label: "успех",
+      box: {x1: 760, y1: 8, x2: 920, y2: 42, radius: 10},
+      titleX: 840, titleY: 30, title: "ПОДТВЕРЖДЕНО"
+    },
+    failure: {
+      verifyPoints: [{x: 840, y: 150}, {x: 840, y: 235}],
+      verifyHead: [{x: 840, y: 235}, {x: 833, y: 223}, {x: 847, y: 223}],
+      verifyLabelX: 855, verifyLabelY: 190,
+      verifyLabel: "проверка не прошла",
+      alertBox: {x1: 765, y1: 235, x2: 935, y2: 292, radius: 12},
+      alertTitleX: 850, alertTitleY: 260,
+      alertNoteX: 850, alertNoteY: 281,
+      alertTitle: "ALERT • ТРЕВОГА", alertNote: "известная неисправность",
+      rollbackPoints: [{x: 850, y: 292}, {x: 850, y: 345}],
+      rollbackHead: [{x: 850, y: 345}, {x: 843, y: 333}, {x: 857, y: 333}],
+      rollbackLabelX: 867, rollbackLabelY: 323,
+      rollbackLabel: "включить откат",
+      rollbackBox: {x1: 765, y1: 345, x2: 935, y2: 400, radius: 12},
+      rollbackTitleX: 850, rollbackTitleY: 370,
+      rollbackNoteX: 850, rollbackNoteY: 390,
+      rollbackTitle: "ROLLBACK • ОТКАТ", rollbackNote: "компенсировать действие"
+    },
+    legend: {
+      x1: 40, x2: 960, lineY: 412,
+      textX: 40, textY: 432,
+      text: "Кнопка лишь запускает переход; состояние и правила решают, допустим ли он."
+    },
+    fallback: {
+      x1: 40, y1: 80, x2: 960, y2: 180, radius: 12,
+      textX: 60, textY: 125,
+      text: "Propose → Surface → Commit → Verify; повтор — no-op, ошибка — alert и rollback."
+    }
+  }];
+
+  const origin = Object.freeze({
+    x: data.map.originX,
+    y: data.map.originY
+  });
+  const scale = Object.freeze({
+    x: data.map.scaleX,
+    y: data.map.scaleY
+  });
+
+  const sx = x => origin.x + x * scale.x;
+  const sy = y => origin.y + y * scale.y;
+
+  const stage = document.getElementById("stage");
+  const ns = "http://www.w3.org/2000/svg";
+
+  const make = (name, attrs, content) => {
+    const el = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+    if (content !== undefined) el.textContent = content;
+    return el;
+  };
+
+  const append = el => stage.appendChild(el);
+
+  const mappedPoints = points =>
+    points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ");
+
+  const rect = (box, className) => make("rect", {
+    x: sx(box.x1),
+    y: sy(box.y1),
+    width: sx(box.x2) - sx(box.x1),
+    height: sy(box.y2) - sy(box.y1),
+    rx: sx(box.radius) - sx(data.map.zero),
+    class: className
+  });
+
+  const text = (x, y, value, className, anchor = "middle") => make("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor
+  }, value);
+
+  const flow = (points, className) => make("polyline", {
+    points: mappedPoints(points),
+    class: `flow ${className}`
+  });
+
+  const head = (points, className) => make("polygon", {
+    points: mappedPoints(points),
+    class: `arrow-head ${className}`
+  });
+
+  try {
+    data.mainFlows.forEach(item => {
+      append(flow(item.points, ""));
+      append(head(item.head, ""));
+      append(text(
+        item.labelX, item.labelY, item.label,
+        "edge-label", item.anchor
+      ));
+    });
+
+    data.nodes.forEach(node => {
+      append(rect(node, `node ${node.className}`));
+      append(text(node.titleX, node.titleY, node.title, "phase"));
+      append(text(node.noteX, node.noteY, node.note, "description"));
+    });
+
+    const store = data.store;
+    append(make("path", {
+      d: [
+        `M ${sx(store.x1)} ${sy(store.lip)}`,
+        `C ${sx(store.c1x)} ${sy(store.top)},`,
+        `${sx(store.c2x)} ${sy(store.top)},`,
+        `${sx(store.x2)} ${sy(store.lip)}`,
+        `L ${sx(store.x2)} ${sy(store.bottom)}`,
+        `C ${sx(store.c2x)} ${sy(store.lowerLip)},`,
+        `${sx(store.c1x)} ${sy(store.lowerLip)},`,
+        `${sx(store.x1)} ${sy(store.bottom)}`,
+        "Z"
+      ].join(" "),
+      class: "store"
+    }));
+    append(make("path", {
+      d: [
+        `M ${sx(store.x1)} ${sy(store.lip)}`,
+        `C ${sx(store.c1x)} ${sy(store.top)},`,
+        `${sx(store.c2x)} ${sy(store.top)},`,
+        `${sx(store.x2)} ${sy(store.lip)}`,
+        `C ${sx(store.c2x)} ${sy(store.lowerLip)},`,
+        `${sx(store.c1x)} ${sy(store.lowerLip)},`,
+        `${sx(store.x1)} ${sy(store.lip)}`
+      ].join(" "),
+      class: "store"
+    }));
+    append(text(store.titleX, store.titleY, store.title, "store-title"));
+    append(text(store.noteX, store.noteY, store.note, "description"));
+
+    data.storageFlows.forEach(item => {
+      append(flow(item.points, "storage-flow"));
+      append(head(item.head, "storage"));
+      append(text(
+        item.labelX, item.labelY, item.label,
+        "edge-label", item.anchor
+      ));
+    });
+
+    const repeat = data.repeat;
+    append(flow(repeat.points, "repeat-flow"));
+    append(head(repeat.head, "repeat"));
+    append(text(
+      repeat.labelX, repeat.labelY, repeat.label,
+      "edge-label", repeat.anchor
+    ));
+    append(rect(repeat.box, "terminal noop"));
+    append(text(repeat.titleX, repeat.titleY, repeat.title, "phase"));
+    append(text(repeat.noteX, repeat.noteY, repeat.note, "description"));
+
+    const success = data.success;
+    append(flow(success.points, "success-flow"));
+    append(head(success.head, "success"));
+    append(text(
+      success.labelX, success.labelY, success.label,
+      "edge-label", success.anchor
+    ));
+    append(rect(success.box, "terminal success"));
+    append(text(
+      success.titleX, success.titleY, success.title,
+      "success-title"
+    ));
+
+    const failure = data.failure;
+    append(flow(failure.verifyPoints, "failure-flow"));
+    append(head(failure.verifyHead, "failure"));
+    append(text(
+      failure.verifyLabelX, failure.verifyLabelY,
+      failure.verifyLabel, "edge-label", "start"
+    ));
+    append(rect(failure.alertBox, "terminal alert"));
+    append(text(
+      failure.alertTitleX, failure.alertTitleY,
+      failure.alertTitle, "danger-title"
+    ));
+    append(text(
+      failure.alertNoteX, failure.alertNoteY,
+      failure.alertNote, "description"
+    ));
+
+    append(flow(failure.rollbackPoints, "failure-flow"));
+    append(head(failure.rollbackHead, "failure"));
+    append(text(
+      failure.rollbackLabelX, failure.rollbackLabelY,
+      failure.rollbackLabel, "edge-label", "start"
+    ));
+    append(rect(failure.rollbackBox, "terminal rollback"));
+    append(text(
+      failure.rollbackTitleX, failure.rollbackTitleY,
+      failure.rollbackTitle, "danger-title"
+    ));
+    append(text(
+      failure.rollbackNoteX, failure.rollbackNoteY,
+      failure.rollbackNote, "description"
+    ));
+
+    append(make("line", {
+      x1: sx(data.legend.x1),
+      y1: sy(data.legend.lineY),
+      x2: sx(data.legend.x2),
+      y2: sy(data.legend.lineY),
+      class: "legend-rule"
+    }));
+    append(text(
+      data.legend.textX, data.legend.textY,
+      data.legend.text, "legend", "start"
+    ));
+  } catch (error) {
+    stage.replaceChildren();
+    append(rect(data.fallback, "fallback"));
+    append(text(
+      data.fallback.textX,
+      data.fallback.textY,
+      data.fallback.text,
+      "danger-title",
+      "start"
+    ));
+  }
+})();
+</script>
+</body>
+</html>

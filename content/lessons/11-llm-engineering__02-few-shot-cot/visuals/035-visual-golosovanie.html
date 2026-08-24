@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Self-consistency: пять путей, ответ 24</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a2e; --muted:#5a5a72;
+    --ok:#2f9e44; --bad:#d6336c; --q:#e8860c; --line:#8a8aa0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12121c; --fg:#e9e9f2; --muted:#a2a2bb;
+      --ok:#51cf66; --bad:#e94560; --q:#ffa500; --line:#6a6a86;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 10px;}
+  h1{font-size:15px;margin:0 0 6px;text-align:center;font-weight:600;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:470px;margin:0 auto;}
+  .fail{padding:10px;font-size:14px;line-height:1.5;color:var(--fg);}
+  text{font-family:inherit;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Один вопрос — пять путей — голосование</h1>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные схемы ----------
+    var DATA = {
+      problem: ["48 яблок.", "В понедельник продали треть,", "во вторник — четверть остатка.", "Сколько осталось?"],
+      paths: [
+        {tag:"путь 1", lines:["48 − 16 = 32", "32 − 8 = 24"], ans:"24", ok:true},
+        {tag:"путь 2", lines:["треть от 48 = 16", "32 − 8 = 24"], ans:"24", ok:true},
+        {tag:"путь 3", lines:["48 / 3 = 16", "32 / 4 = 8"], ans:"24", ok:true},
+        {tag:"путь 4", lines:["48 − 12 = 36", "36 − 9 = 27"], ans:"27", ok:false},
+        {tag:"путь 5", lines:["48 · 2/3 = 32", "32 · 3/4 = 24"], ans:"24", ok:true}
+      ],
+      vote: ["Голосование", "24 — четыре голоса", "27 — один голос"],
+      result: "Ответ: 24"
+    };
+
+    // ---------- одна система координат ----------
+    var ORIGIN = {x: 60, y: 26};   // пиксели точки (0,0) схемы
+    var SCALE  = 30;               // пикселей на единицу схемы
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y + y * SCALE; }
+
+    // ---------- сетка в единицах схемы ----------
+    var G = {
+      colStep: 5.4,        // шаг между колонками путей
+      col0: 0,             // центр первой колонки
+      boxW: 4.9,           // ширина карточки пути
+      boxH: 3.0,           // высота карточки пути
+      probW: 12.0, probH: 3.2,
+      voteW: 12.0, voteH: 2.5,
+      resW: 5.6, resH: 1.5,
+      yProb: 0,            // верх карточки задачи
+      yPath: 5.2,          // верх карточек путей
+      yVote: 10.2,         // верх карточки голосования
+      yRes:  13.6          // верх карточки ответа
+    };
+    var n = DATA.paths.length;
+    function colX(i){ return G.col0 + i * G.colStep; }
+    var centerX = colX((n - 1) / 2);
+
+    var W = 840, H = 470;
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS,"svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","Задача о 48 яблоках разветвляется на пять путей: четыре дают 24, один 27; голосование выбирает 24");
+
+    function el(name, attrs){
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      svg.appendChild(e);
+      return e;
+    }
+    // фон
+    el("rect",{x:0,y:0,width:W,height:H,fill:"var(--bg)"});
+
+    var PAD = 6;           // отступ подписи от точки привязки, px
+    var STROKE = 1.6;      // толщина линий
+    var FS = 13;           // базовый размер шрифта
+
+    function box(cx, top, w, h, stroke, dash){
+      var a = el("rect",{
+        x: sx(cx - w/2), y: sy(top),
+        width: sx(cx + w/2) - sx(cx - w/2),
+        height: sy(top + h) - sy(top),
+        rx: sy(0.35) - sy(0), fill:"var(--bg)",
+        stroke: stroke, "stroke-width": STROKE
+      });
+      if (dash) a.setAttribute("stroke-dasharray", dash);
+      return a;
+    }
+    function label(x, y, str, anchor, dy, size, color, weight){
+      var t = el("text",{
+        x: sx(x), y: sy(y) + (dy||0),
+        "text-anchor": anchor || "middle",
+        "font-size": size || FS,
+        fill: color || "var(--fg)"
+      });
+      if (weight) t.setAttribute("font-weight", weight);
+      t.textContent = str;
+      return t;
+    }
+    // стрелка: наконечник строится из координат схемы
+    function arrow(x1, y1, x2, y2, color){
+      el("line",{x1:sx(x1), y1:sy(y1), x2:sx(x2), y2:sy(y2),
+        stroke:color, "stroke-width":STROKE, "stroke-linecap":"round"});
+      var hx = 0.22, hy = 0.42;       // полуширина и длина наконечника, единицы схемы
+      var dx = sx(x2) - sx(x1), dy2 = sy(y2) - sy(y1);
+      var len = Math.sqrt(dx*dx + dy2*dy2) || 1;
+      var ux = dx/len, uy = dy2/len;                 // направление в пикселях
+      var px = sx(x2), py = sy(y2);
+      var hL = sy(hy) - sy(0), hW = sx(hx) - sx(0);
+      var bx = px - ux*hL, by = py - uy*hL;
+      var pts = [px, py, bx - uy*hW, by + ux*hW, bx + uy*hW, by - ux*hW].join(" ");
+      el("polygon",{points:pts, fill:color});
+    }
+
+    // ---------- задача ----------
+    box(centerX, G.yProb, G.probW, G.probH, "var(--q)");
+    label(centerX, G.yProb, "Один и тот же вопрос", "middle", 0 - PAD, 12, "var(--q)", "600");
+    for (var i=0;i<DATA.problem.length;i++){
+      label(centerX, G.yProb + 0.75 + i*0.62, DATA.problem[i], "middle", 0, FS, "var(--fg)");
+    }
+
+    // ---------- пути ----------
+    for (var j=0;j<n;j++){
+      var p = DATA.paths[j], cx = colX(j);
+      var col = p.ok ? "var(--ok)" : "var(--bad)";
+      arrow(centerX, G.yProb + G.probH, cx, G.yPath - 0.12, "var(--line)");
+      box(cx, G.yPath, G.boxW, G.boxH, col);
+      label(cx, G.yPath, p.tag, "middle", 0 - PAD, 11, "var(--muted)");
+      label(cx, G.yPath + 0.75, p.lines[0], "middle", 0, 12, "var(--fg)");
+      label(cx, G.yPath + 1.4, p.lines[1], "middle", 0, 12, "var(--fg)");
+      label(cx, G.yPath + 2.35, p.ans, "middle", 0, 17, col, "700");
+      arrow(cx, G.yPath + G.boxH, centerX, G.yVote - 0.12, col);
+    }
+
+    // ---------- голосование ----------
+    box(centerX, G.yVote, G.voteW, G.voteH, "var(--ok)");
+    label(centerX, G.yVote + 0.85, DATA.vote[0], "middle", 0, 14, "var(--fg)", "600");
+    label(centerX - G.voteW/2 + 0.5, G.yVote + 1.75, DATA.vote[1], "start", 0, 13, "var(--ok)");
+    label(centerX + G.voteW/2 - 0.5, G.yVote + 1.75, DATA.vote[2], "end", 0, 13, "var(--bad)");
+
+    // ---------- ответ ----------
+    arrow(centerX, G.yVote + G.voteH, centerX, G.yRes - 0.12, "var(--ok)");
+    label(centerX + G.resW/2 + 0.4, G.yVote + G.voteH + 0.42, "большинство", "start", 0, 12, "var(--muted)");
+    box(centerX, G.yRes, G.resW, G.resH, "var(--ok)");
+    label(centerX, G.yRes + 1.05, DATA.result, "middle", 0, 16, "var(--ok)", "700");
+
+    // ---------- легенда ----------
+    label(G.col0 - G.boxW/2, G.yRes + G.resH + 0.75, "цена: пять запросов вместо одного", "start", 0, 12, "var(--muted)");
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она показывает: вопрос про 48 яблок ' +
+      'уходит в модель пятью путями. Пути 1, 2, 3, 5 дают 24, путь 4 ошибается в начале (48 − 12 = 36) и даёт 27. ' +
+      'Голосование: 24 — четыре голоса, 27 — один. Итог: 24. Цена — пять запросов вместо одного.</div>';
+  }
+})();
+</script>
+</body>
+</html>

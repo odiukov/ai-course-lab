@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Когда грузится каждый слой</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1c20; --muted:#5b6270;
+    --on:#2d5bd7; --on-fg:#ffffff;
+    --off:#e6eaf3; --off-line:#9aa4bb;
+    --axis:#7b8496;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --fg:#e6e8ec; --muted:#a3aab8;
+      --on:#5f8dff; --on-fg:#0e1116;
+      --off:#22262e; --off-line:#5a6274;
+      --axis:#7c869a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{padding:10px 12px 14px}
+  h1{font-size:15px;margin:0 0 6px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:520px}
+  #fallback{font-size:14px;line-height:1.5;color:var(--fg)}
+</style>
+<div class="wrap">
+  <h1>Когда грузится каждый слой: три полосы времени сессии</h1>
+  <svg id="fig" viewBox="0 0 800 430" role="img"
+       aria-label="Три полосы времени сессии: AGENTS.md, SKILL.md, MCP-сервер"></svg>
+  <div id="fallback" hidden>
+    AGENTS.md читается при старте сессии, каждый раз, и платит токенами всю сессию.
+    SKILL.md до вызова показывает только description (десяток слов), тело едет в промпт
+    в момент вызова навыка. MCP-сервер живёт в отдельном процессе, не в промпте, и
+    стоит токенов только на вызов инструмента.
+  </div>
+</div>
+<script>
+(function(){
+  try{
+    /* ---- данные схемы (единицы данных) ---- */
+    var D = {
+      rows:[
+        {name:"AGENTS.md", v:4, segs:[
+          {t0:0,  t1:100, on:true,  label:"в системном промпте всю сессию"}
+        ]},
+        {name:"SKILL.md", v:16, segs:[
+          {t0:0,  t1:45,  on:false, label:"только description"},
+          {t0:45, t1:100, on:true,  label:"тело навыка в промпте"}
+        ]},
+        {name:"MCP-сервер", v:28, segs:[
+          {t0:0,  t1:70,  on:false, label:"живёт снаружи, не в промпте"},
+          {t0:70, t1:78,  on:true,  label:""},
+          {t0:78, t1:100, on:false, label:""}
+        ]}
+      ],
+      events:[
+        {t:0,  label:"старт сессии",      anchor:"start"},
+        {t:45, label:"вызов навыка",      anchor:"middle"},
+        {t:70, label:"вызов инструмента", anchor:"middle"}
+      ],
+      spike:{t:74, v:35, label:"токены"},
+      halfBar:4, axisV:42, tickV:43.6, tickTextV:45.6,
+      tEnd:100, tArrow:102, arrowW:2.6,
+      nameX:-2, legendX:-23,
+      legend:[
+        {v:50,   text:"AGENTS.md — читается при старте сессии, каждый раз: токены платятся всегда"},
+        {v:55.5, text:"SKILL.md — до вызова видно только description (десяток слов), тело едет в промпт при вызове"},
+        {v:61,   text:"MCP-сервер — отдельный процесс, не в промпте: токены только на вызов инструмента"},
+        {v:67.5, text:"Склеить всё в один AGENTS.md — те самые 2000 токенов лежат в контексте с первой секунды"}
+      ]
+    };
+
+    /* ---- один origin, один scale, одна пара sx/sy ---- */
+    var origin = {x:150, y:12};
+    var scale = 6;
+    function sx(u){ return origin.x + u*scale; }
+    function sy(v){ return origin.y + v*scale; }
+
+    var NS="http://www.w3.org/2000/svg";
+    var svg=document.getElementById("fig");
+    function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);svg.appendChild(e);return e;}
+    function txt(x,y,s,cls,anchor,dx,dy,size){
+      var t=el("text",{x:x,y:y,"text-anchor":anchor,"font-size":size,fill:"currentColor"});
+      if(dx)t.setAttribute("dx",dx); if(dy)t.setAttribute("dy",dy);
+      t.setAttribute("class",cls); t.textContent=s; return t;
+    }
+    var C={fg:"var(--fg)",muted:"var(--muted)",on:"var(--on)",onfg:"var(--on-fg)",
+           off:"var(--off)",offline:"var(--off-line)",axis:"var(--axis)"};
+
+    el("rect",{x:0,y:0,width:800,height:430,fill:"var(--bg)"});
+
+    /* вертикальные линии событий */
+    D.events.forEach(function(ev){
+      el("line",{x1:sx(ev.t),y1:sy(0),x2:sx(ev.t),y2:sy(D.axisV),
+        stroke:C.offline,"stroke-width":1,"stroke-dasharray":"3 3"});
+    });
+
+    /* полосы */
+    D.rows.forEach(function(r){
+      var yTop=sy(r.v-D.halfBar), h=sy(r.v+D.halfBar)-yTop;
+      r.segs.forEach(function(s){
+        var x=sx(s.t0), w=sx(s.t1)-x;
+        var a={x:x,y:yTop,width:w,height:h,rx:2};
+        if(s.on){ a.fill=C.on; a.stroke=C.on; a["stroke-width"]=1; }
+        else { a.fill=C.off; a.stroke=C.offline; a["stroke-width"]=1; a["stroke-dasharray"]="5 4"; }
+        el("rect",a);
+        if(s.label){
+          var t=txt(sx((s.t0+s.t1)/2), sy(r.v), s.label,"","middle",0,0,12);
+          t.setAttribute("fill", s.on?C.onfg:C.muted);
+          t.setAttribute("dominant-baseline","middle");
+        }
+      });
+      var n=txt(sx(D.nameX), sy(r.v), r.name,"","end",-4,0,13);
+      n.setAttribute("fill",C.fg);
+      n.setAttribute("font-weight","600");
+      n.setAttribute("dominant-baseline","middle");
+    });
+
+    /* подпись к короткому всплеску MCP — под полосой, чтобы не давить строку выше */
+    var sp=txt(sx(D.spike.t), sy(D.spike.v), D.spike.label,"","middle",0,0,11);
+    sp.setAttribute("fill",C.on);
+
+    /* ось времени */
+    el("line",{x1:sx(0),y1:sy(D.axisV),x2:sx(D.tEnd),y2:sy(D.axisV),
+      stroke:C.axis,"stroke-width":1.5});
+    el("polygon",{fill:C.axis,points:
+      sx(D.tArrow)+","+sy(D.axisV)+" "+
+      sx(D.tEnd)+","+sy(D.axisV-D.arrowW)+" "+
+      sx(D.tEnd)+","+sy(D.axisV+D.arrowW)});
+
+    D.events.forEach(function(ev){
+      el("line",{x1:sx(ev.t),y1:sy(D.axisV),x2:sx(ev.t),y2:sy(D.tickV),
+        stroke:C.axis,"stroke-width":1.5});
+      var t=txt(sx(ev.t), sy(D.tickTextV), ev.label,"",ev.anchor,
+        ev.anchor==="start"?2:0,0,12);
+      t.setAttribute("fill",C.fg);
+    });
+    var ax=txt(sx(D.tEnd), sy(D.tickTextV-2.6), "время сессии","","end",0,0,11);
+    ax.setAttribute("fill",C.muted);
+
+    /* легенда отдельными строками под схемой */
+    D.legend.forEach(function(l){
+      var t=txt(sx(D.legendX), sy(l.v), l.text,"","start",0,0,12.5);
+      t.setAttribute("fill", C.muted);
+    });
+  }catch(e){
+    var s=document.getElementById("fig");
+    if(s) s.setAttribute("hidden","hidden");
+    var f=document.getElementById("fallback");
+    if(f) f.removeAttribute("hidden");
+  }
+})();
+</script>
+</html>

@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Прогноз превращается в сумму небольших поправок</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --panel-strong: #eef4ff;
+      --text: #172033;
+      --muted: #59657a;
+      --axis: #6d7789;
+      --guide: #aab3c2;
+      --residual: #e07a36;
+      --step: #3978d4;
+      --updated: #198754;
+      --truth: #c43d55;
+      --border: #d6dce7;
+      --shadow: rgba(31, 45, 70, 0.12);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141c;
+        --panel: #171d28;
+        --panel-strong: #1c2940;
+        --text: #eef2fa;
+        --muted: #aeb8ca;
+        --axis: #9ca8bb;
+        --guide: #58657a;
+        --residual: #f2a061;
+        --step: #72a9ff;
+        --updated: #56c98a;
+        --truth: #ff7087;
+        --border: #354055;
+        --shadow: rgba(0, 0, 0, 0.3);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      margin: 0;
+      padding: 18px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 24px var(--shadow);
+    }
+
+    .diagram__header {
+      margin: 0 0 12px;
+    }
+
+    .diagram__title {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.25;
+      font-weight: 750;
+      letter-spacing: -0.015em;
+    }
+
+    .diagram__subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      overflow: visible;
+      background: var(--panel);
+      font-family: inherit;
+    }
+
+    .axis {
+      stroke: var(--axis);
+      stroke-width: 2px;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .tick {
+      stroke: var(--axis);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-width: 1.5px;
+      fill: none;
+    }
+
+    .residual {
+      stroke: var(--residual);
+      stroke-width: 3px;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .residual-head {
+      fill: var(--residual);
+    }
+
+    .step {
+      stroke: var(--step);
+      stroke-width: 5px;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .step-head {
+      fill: var(--step);
+    }
+
+    .axis-head {
+      fill: var(--axis);
+    }
+
+    .point-initial {
+      fill: var(--panel);
+      stroke: var(--step);
+      stroke-width: 3px;
+    }
+
+    .point-updated {
+      fill: var(--updated);
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .point-truth {
+      fill: var(--truth);
+      stroke: var(--panel);
+      stroke-width: 3px;
+    }
+
+    .panel {
+      fill: var(--panel-strong);
+      stroke: var(--border);
+      stroke-width: 1.5px;
+    }
+
+    .panel-divider {
+      stroke: var(--border);
+      stroke-width: 1.5px;
+    }
+
+    .label {
+      fill: var(--text);
+      font-size: 17px;
+    }
+
+    .label-muted {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .label-residual {
+      fill: var(--residual);
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .label-step {
+      fill: var(--step);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .label-truth {
+      fill: var(--truth);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .panel-title {
+      fill: var(--text);
+      font-size: 19px;
+      font-weight: 750;
+    }
+
+    .panel-label {
+      fill: var(--muted);
+      font-size: 15px;
+    }
+
+    .panel-value {
+      fill: var(--text);
+      font-size: 17px;
+      font-weight: 650;
+    }
+
+    .panel-result {
+      fill: var(--updated);
+      font-size: 21px;
+      font-weight: 800;
+    }
+
+    .fallback {
+      margin: 12px 0 0;
+      padding: 16px;
+      color: var(--text);
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    [hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure class="diagram" aria-labelledby="diagram-title">
+    <figcaption class="diagram__header">
+      <h1 class="diagram__title" id="diagram-title">
+        Прогноз превращается в сумму небольших поправок
+      </h1>
+      <p class="diagram__subtitle">
+        Остаток задаёт направление, а темп обучения ограничивает размер шага.
+      </p>
+    </figcaption>
+
+    <svg
+      id="chart"
+      viewBox="0 0 960 430"
+      width="960"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-desc"
+    >
+      <title id="svg-title">Обновление прогноза веса арбуза</title>
+      <desc id="svg-desc">
+        Истинный вес равен 7 килограммам, начальный прогноз равен 5
+        килограммам. Остаток плюс 2 килограмма умножается на темп обучения
+        0.1, поэтому прогноз обновляется до 5.2 килограмма.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+
+    <p class="fallback" id="fallback" hidden>
+      Схема должна была показать: истинный вес арбуза — 7 кг, начальный
+      прогноз — 5 кг, остаток — +2 кг. При темпе обучения 0.1 берётся
+      поправка +0.2 кг, поэтому новый прогноз равен 5.2 кг.
+    </p>
+  </figure>
+
+  <script>
+    const data = Object.freeze({
+      canvas: [960, 430],
+      zero: 0,
+      one: 1,
+      points: {
+        initial: { x: 0, value: "5 кг" },
+        updated: { x: 0.2, value: "5.2 кг" },
+        truth: { x: 2, value: "7 кг" }
+      },
+      values: {
+        residual: "+2 кг",
+        rate: "0.1",
+        applied: "+0.2 кг"
+      },
+      axis: {
+        start: 0,
+        end: 2.1,
+        y: 0,
+        tickTop: 0.045,
+        tickBottom: -0.045
+      },
+      residualArrow: {
+        start: 0,
+        end: 2,
+        y: 1.2,
+        labelY: 1.34,
+        truthLabelY: 1.06
+      },
+      stepArrow: {
+        start: 0,
+        end: 0.2,
+        y: 0.58,
+        labelY: 0.73
+      },
+      labels: {
+        initialY: -0.13,
+        updatedY: -0.25,
+        truthY: -0.13
+      },
+      guides: {
+        bottom: 0.08,
+        residualTop: 1.16,
+        updateTop: 0.54
+      },
+      panel: {
+        left: 2.3,
+        right: 3.63,
+        top: 1.23,
+        bottom: -0.28,
+        textX: 2.4,
+        titleY: 1.05,
+        rateLabelY: 0.86,
+        rateValueY: 0.72,
+        correctionLabelY: 0.54,
+        correctionValueY: 0.4,
+        dividerY: 0.29,
+        resultLabelY: 0.14,
+        resultY: -0.05
+      },
+      arrow: {
+        long: 0.075,
+        wide: 0.045,
+        smallLong: 0.055,
+        smallWide: 0.038
+      },
+      radius: {
+        point: 0.038,
+        truth: 0.046
+      },
+      pixels: {
+        labelGap: 10,
+        dash: [7, 7]
+      }
+    });
+
+    const origin = Object.freeze({ x: 72, y: 348 });
+    const scale = 240;
+
+    const sx = (x) => origin.x + x * scale;
+    const sy = (y) => origin.y - y * scale;
+
+    try {
+      const svg = document.getElementById("chart");
+      const drawing = document.getElementById("drawing");
+      const fallback = document.getElementById("fallback");
+      const NS = "http://www.w3.org/2000/svg";
+
+      function make(name, attributes, content) {
+        const element = document.createElementNS(NS, name);
+
+        Object.entries(attributes || {}).forEach(([key, value]) => {
+          element.setAttribute(key, String(value));
+        });
+
+        if (content !== undefined) {
+          element.textContent = content;
+        }
+
+        return element;
+      }
+
+      function add(name, attributes, content) {
+        const element = make(name, attributes, content);
+        drawing.appendChild(element);
+        return element;
+      }
+
+      function line(x1, y1, x2, y2, className, dashed) {
+        const element = add("line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+
+        if (dashed) {
+          element.setAttribute(
+            "stroke-dasharray",
+            data.pixels.dash.join(" ")
+          );
+        }
+
+        return element;
+      }
+
+      function arrow(startX, endX, y, className, headClass, headLength, headWidth) {
+        const direction =
+          endX >= startX ? data.one : -data.one;
+        const baseX = endX - direction * headLength;
+
+        line(startX, y, endX, y, className, false);
+
+        add("polygon", {
+          points: [
+            [sx(endX), sy(y)],
+            [sx(baseX), sy(y + headWidth)],
+            [sx(baseX), sy(y - headWidth)]
+          ].map((point) => point.join(",")).join(" "),
+          class: headClass
+        });
+      }
+
+      function circle(x, y, radius, className) {
+        add("circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(data.zero),
+          class: className
+        });
+      }
+
+      function text(x, y, content, className, anchor, dx) {
+        const attributes = {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor
+        };
+
+        if (dx !== undefined) {
+          attributes.dx = dx;
+        }
+
+        add("text", attributes, content);
+      }
+
+      add("rect", {
+        x: sx(data.panel.left),
+        y: sy(data.panel.top),
+        width: sx(data.panel.right) - sx(data.panel.left),
+        height: sy(data.panel.bottom) - sy(data.panel.top),
+        class: "panel"
+      });
+
+      line(
+        data.points.initial.x,
+        data.guides.bottom,
+        data.points.initial.x,
+        data.guides.residualTop,
+        "guide",
+        true
+      );
+
+      line(
+        data.points.truth.x,
+        data.guides.bottom,
+        data.points.truth.x,
+        data.guides.residualTop,
+        "guide",
+        true
+      );
+
+      line(
+        data.points.updated.x,
+        data.guides.bottom,
+        data.points.updated.x,
+        data.guides.updateTop,
+        "guide",
+        true
+      );
+
+      arrow(
+        data.axis.start,
+        data.axis.end,
+        data.axis.y,
+        "axis",
+        "axis-head",
+        data.arrow.long,
+        data.arrow.wide
+      );
+
+      [
+        data.points.initial.x,
+        data.points.updated.x,
+        data.points.truth.x
+      ].forEach((x) => {
+        line(
+          x,
+          data.axis.tickBottom,
+          x,
+          data.axis.tickTop,
+          "tick",
+          false
+        );
+      });
+
+      arrow(
+        data.residualArrow.start,
+        data.residualArrow.end,
+        data.residualArrow.y,
+        "residual",
+        "residual-head",
+        data.arrow.long,
+        data.arrow.wide
+      );
+
+      arrow(
+        data.stepArrow.start,
+        data.stepArrow.end,
+        data.stepArrow.y,
+        "step",
+        "step-head",
+        data.arrow.smallLong,
+        data.arrow.smallWide
+      );
+
+      circle(
+        data.points.initial.x,
+        data.axis.y,
+        data.radius.point,
+        "point-initial"
+      );
+
+      circle(
+        data.points.updated.x,
+        data.axis.y,
+        data.radius.point,
+        "point-updated"
+      );
+
+      circle(
+        data.points.truth.x,
+        data.axis.y,
+        data.radius.truth,
+        "point-truth"
+      );
+
+      text(
+        data.residualArrow.start,
+        data.residualArrow.labelY,
+        "Остаток: 7 − 5 = +2 кг",
+        "label-residual",
+        "start",
+        data.pixels.labelGap
+      );
+
+      text(
+        data.points.truth.x,
+        data.residualArrow.truthLabelY,
+        "Истинный вес: 7 кг",
+        "label-truth",
+        "end",
+        -data.pixels.labelGap
+      );
+
+      text(
+        data.stepArrow.start,
+        data.stepArrow.labelY,
+        "Берём только 0.1 остатка",
+        "label-step",
+        "start",
+        data.pixels.labelGap
+      );
+
+      text(
+        data.points.initial.x,
+        data.labels.initialY,
+        "5 кг — начальный прогноз",
+        "label",
+        "start",
+        data.pixels.labelGap
+      );
+
+      text(
+        data.points.updated.x,
+        data.labels.updatedY,
+        "5.2 кг — после шага",
+        "label",
+        "start",
+        data.pixels.labelGap
+      );
+
+      text(
+        data.points.truth.x,
+        data.labels.truthY,
+        "7 кг — истина",
+        "label-muted",
+        "middle"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.titleY,
+        "Обновление",
+        "panel-title",
+        "start"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.rateLabelY,
+        "Темп обучения",
+        "panel-label",
+        "start"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.rateValueY,
+        "learning rate = 0.1",
+        "panel-value",
+        "start"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.correctionLabelY,
+        "Фактическая поправка",
+        "panel-label",
+        "start"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.correctionValueY,
+        "0.1 × (+2 кг) = +0.2 кг",
+        "panel-value",
+        "start"
+      );
+
+      line(
+        data.panel.textX,
+        data.panel.dividerY,
+        data.panel.right - data.arrow.long,
+        data.panel.dividerY,
+        "panel-divider",
+        false
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.resultLabelY,
+        "Новый прогноз",
+        "panel-label",
+        "start"
+      );
+
+      text(
+        data.panel.textX,
+        data.panel.resultY,
+        "5 + 0.2 = 5.2 кг",
+        "panel-result",
+        "start"
+      );
+
+      fallback.hidden = true;
+      svg.hidden = false;
+    } catch (error) {
+      const svg = document.getElementById("chart");
+      const fallback = document.getElementById("fallback");
+
+      if (svg) {
+        svg.hidden = true;
+      }
+
+      if (fallback) {
+        fallback.hidden = false;
+      }
+    }
+  </script>
+</body>
+</html>

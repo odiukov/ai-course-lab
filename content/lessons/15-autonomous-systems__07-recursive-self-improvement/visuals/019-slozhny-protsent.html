@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Как сложный процент разгоняет misalignment gap</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #617089;
+      --axis: #7b879c;
+      --guide: #c8d0dc;
+      --capability: #d3484f;
+      --capability-soft: #f8d9dc;
+      --alignment: #2477bd;
+      --alignment-soft: #d9ebfa;
+      --gap: #7b4ab5;
+      --gap-soft: #eee4f8;
+      --border: #d6dce6;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #11151d;
+        --panel: #171d28;
+        --ink: #eef3fb;
+        --muted: #aab5c7;
+        --axis: #909db2;
+        --guide: #3b4658;
+        --capability: #ff777d;
+        --capability-soft: #512b32;
+        --alignment: #63b8fa;
+        --alignment-soft: #233f59;
+        --gap: #c49aef;
+        --gap-soft: #46345a;
+        --border: #354052;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .heading {
+      margin: 0;
+      padding: 14px 18px 2px;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    .subheading {
+      margin: 0;
+      padding: 4px 18px 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      background: var(--panel);
+    }
+
+    svg text {
+      font-family: inherit;
+      fill: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .axis,
+    .tick,
+    .guide,
+    .curve,
+    .gap-line,
+    .gap-link {
+      fill: none;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis,
+    .tick {
+      stroke: var(--axis);
+    }
+
+    .guide {
+      stroke: var(--guide);
+      stroke-dasharray: 8 8;
+    }
+
+    .curve {
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .curve.capability {
+      stroke: var(--capability);
+    }
+
+    .curve.alignment {
+      stroke: var(--alignment);
+    }
+
+    .point.capability {
+      fill: var(--panel);
+      stroke: var(--capability);
+    }
+
+    .point.alignment {
+      fill: var(--panel);
+      stroke: var(--alignment);
+    }
+
+    .start-point {
+      fill: var(--panel);
+      stroke: var(--axis);
+    }
+
+    .gap-line,
+    .gap-link,
+    .gap-head {
+      stroke: var(--gap);
+    }
+
+    .gap-head {
+      fill: var(--gap);
+      stroke-linejoin: round;
+    }
+
+    .axis-label,
+    .tick-label {
+      fill: var(--muted);
+    }
+
+    .series-label {
+      font-weight: 720;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+
+    .series-label.capability {
+      fill: var(--capability);
+    }
+
+    .series-label.alignment {
+      fill: var(--alignment);
+    }
+
+    .value-label {
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+
+    .gap-label {
+      fill: var(--gap);
+      font-weight: 760;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .summary {
+      fill: var(--ink);
+      font-weight: 650;
+    }
+
+    .summary-accent {
+      fill: var(--gap);
+      font-weight: 800;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-weight: 650;
+    }
+
+    .fallback-detail {
+      fill: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h1 class="heading">Как сложный процент разгоняет misalignment gap</h1>
+    <p class="subheading">Постоянная разница темпов создаёт всё больший абсолютный разрыв.</p>
+
+    <svg
+      id="chart"
+      viewBox="0 0 1000 470"
+      width="1000"
+      height="470"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Рост способностей и выравнивания сложным процентом</title>
+      <desc id="svg-description">
+        Способности растут в 1,15 раза за цикл, выравнивание — в 1,08 раза.
+        На пятом цикле значения равны 2,01 и 1,47, а на одиннадцатом —
+        4,65 и 2,33. Разрыв C минус A ускоряется.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const series = [
+        {
+          id: "C",
+          name: "Способности",
+          rate: 1.15,
+          className: "capability",
+          points: [
+            { cycle: 5, value: 2.01 },
+            { cycle: 11, value: 4.65 }
+          ]
+        },
+        {
+          id: "A",
+          name: "Выравнивание",
+          rate: 1.08,
+          className: "alignment",
+          points: [
+            { cycle: 5, value: 1.47 },
+            { cycle: 11, value: 2.33 }
+          ]
+        }
+      ];
+
+      const gaps = [
+        { cycle: 5, value: 0.54 },
+        { cycle: 11, value: 2.32 }
+      ];
+
+      const domain = [0, 11, 1, 5];
+
+      const layout = [
+        {
+          xAxisEnd: 11.85,
+          yAxisEnd: 5.02,
+          tickHalf: 0.09,
+          guideTop: 4.88,
+          gapOffsetX: 0.3,
+          arrowHalfWidth: 0.07,
+          arrowDepth: 0.11,
+          curveLabelCycle: 7.05,
+          legendX: 5.55,
+          legendY: -0.72,
+          axisNameX: 11.85,
+          axisNameY: -0.03,
+          valueNameX: 0,
+          valueNameY: 5.02,
+          startLabelX: 0,
+          startLabelY: 1,
+          samplesPerCycle: 6,
+          fallbackX: 5.8,
+          fallbackY: 3.15,
+          fallbackDetailY: 2.55
+        }
+      ];
+
+      const origin = Object.freeze({ x: 120, y: 390 });
+      const scale = Object.freeze({ x: 65, y: 67 });
+
+      const labelOffsets = [0, 8, 12, 16, 20, -8, -12, -16, -20];
+      const strokeWidths = [1, 1.5, 2.75, 4];
+      const fontSizes = [12, 13, 14, 15];
+
+      const sx = x => origin.x + x * scale.x;
+      const sy = y => origin.y - y * scale.y;
+
+      const [xMin, xMax, base, yMax] = domain;
+      const [cfg] = layout;
+      const [
+        noPad,
+        padTiny,
+        padSmall,
+        padMedium,
+        padLarge,
+        negTiny,
+        negSmall,
+        negMedium,
+        negLarge
+      ] = labelOffsets;
+      const [strokeFine, strokeGuide, strokeCurve, dotRadius] = strokeWidths;
+      const [fontSmall, fontAxis, fontValue, fontLabel] = fontSizes;
+
+      const svg = document.getElementById("chart");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      try {
+        if (!svg) {
+          throw new Error("chart unavailable");
+        }
+
+        const make = (tag, attrs, text) => {
+          const node = document.createElementNS(namespace, tag);
+          Object.entries(attrs || {}).forEach(([name, value]) => {
+            node.setAttribute(name, String(value));
+          });
+          if (text !== undefined) {
+            node.textContent = text;
+          }
+          return node;
+        };
+
+        const add = (parent, tag, attrs, text) => {
+          const node = make(tag, attrs, text);
+          parent.appendChild(node);
+          return node;
+        };
+
+        const format = value => String(value).replace(".", ",");
+
+        const valueAt = (item, cycle) => {
+          const checkpoint = item.points.find(point => point.cycle === cycle);
+          return checkpoint ? checkpoint.value : Math.pow(item.rate, cycle);
+        };
+
+        const textAt = (parent, text, x, y, options) => {
+          const settings = options || {};
+          return add(parent, "text", {
+            x: sx(x) + (settings.dx || noPad),
+            y: sy(y) + (settings.dy || noPad),
+            "text-anchor": settings.anchor || "middle",
+            "dominant-baseline": settings.baseline || "middle",
+            "font-size": settings.size || fontAxis,
+            class: settings.className || ""
+          }, text);
+        };
+
+        const guidesLayer = add(svg, "g", { "aria-hidden": "true" });
+        const axesLayer = add(svg, "g", { "aria-hidden": "true" });
+        const curvesLayer = add(svg, "g", { "aria-hidden": "true" });
+        const gapsLayer = add(svg, "g", { "aria-hidden": "true" });
+        const labelsLayer = add(svg, "g", { "aria-hidden": "true" });
+
+        gaps.forEach(gap => {
+          add(guidesLayer, "line", {
+            x1: sx(gap.cycle),
+            y1: sy(xMin),
+            x2: sx(gap.cycle),
+            y2: sy(cfg.guideTop),
+            class: "guide",
+            "stroke-width": strokeGuide
+          });
+        });
+
+        add(axesLayer, "line", {
+          x1: sx(xMin),
+          y1: sy(xMin),
+          x2: sx(cfg.xAxisEnd),
+          y2: sy(xMin),
+          class: "axis",
+          "stroke-width": strokeGuide
+        });
+
+        add(axesLayer, "line", {
+          x1: sx(xMin),
+          y1: sy(xMin),
+          x2: sx(xMin),
+          y2: sy(cfg.yAxisEnd),
+          class: "axis",
+          "stroke-width": strokeGuide
+        });
+
+        gaps.forEach(gap => {
+          add(axesLayer, "line", {
+            x1: sx(gap.cycle),
+            y1: sy(xMin - cfg.tickHalf),
+            x2: sx(gap.cycle),
+            y2: sy(xMin + cfg.tickHalf),
+            class: "tick",
+            "stroke-width": strokeGuide
+          });
+
+          textAt(labelsLayer, format(gap.cycle), gap.cycle, xMin, {
+            dy: padLarge,
+            anchor: "middle",
+            size: fontAxis,
+            className: "tick-label"
+          });
+        });
+
+        textAt(labelsLayer, "цикл", cfg.axisNameX, cfg.axisNameY, {
+          dx: negTiny,
+          dy: padLarge,
+          anchor: "end",
+          size: fontAxis,
+          className: "axis-label"
+        });
+
+        textAt(labelsLayer, "значение", cfg.valueNameX, cfg.valueNameY, {
+          dx: padSmall,
+          anchor: "start",
+          size: fontAxis,
+          className: "axis-label"
+        });
+
+        add(curvesLayer, "circle", {
+          cx: sx(xMin),
+          cy: sy(base),
+          r: dotRadius,
+          class: "start-point",
+          "stroke-width": strokeCurve
+        });
+
+        textAt(labelsLayer, "общий старт: 1", cfg.startLabelX, cfg.startLabelY, {
+          dx: padSmall,
+          dy: negSmall,
+          anchor: "start",
+          size: fontSmall,
+          className: "axis-label"
+        });
+
+        series.forEach(item => {
+          const sampleCount = (xMax - xMin) * cfg.samplesPerCycle + base;
+          const samples = Array.from({ length: sampleCount }, (_, position) => {
+            const cycle = xMin + position / cfg.samplesPerCycle;
+            return { cycle, value: valueAt(item, cycle) };
+          });
+
+          const pathData = samples.map((sample, position) => {
+            const command = position === xMin ? "M" : "L";
+            return `${command}${sx(sample.cycle)} ${sy(sample.value)}`;
+          }).join(" ");
+
+          add(curvesLayer, "path", {
+            d: pathData,
+            class: `curve ${item.className}`,
+            "stroke-width": strokeCurve
+          });
+
+          const directLabelY = valueAt(item, cfg.curveLabelCycle);
+          const isCapability = item.id === "C";
+
+          textAt(
+            labelsLayer,
+            `${item.name} × ${format(item.rate)}`,
+            cfg.curveLabelCycle,
+            directLabelY,
+            {
+              dx: padSmall,
+              dy: isCapability ? negMedium : padMedium,
+              anchor: "start",
+              size: fontLabel,
+              className: `series-label ${item.className}`
+            }
+          );
+
+          item.points.forEach(point => {
+            add(curvesLayer, "circle", {
+              cx: sx(point.cycle),
+              cy: sy(point.value),
+              r: dotRadius,
+              class: `point ${item.className}`,
+              "stroke-width": strokeCurve
+            });
+
+            const isLastCycle = point.cycle === xMax;
+            const anchor = isCapability || isLastCycle ? "end" : "start";
+            const dx = anchor === "end" ? negSmall : padSmall;
+            const dy = isCapability ? negMedium : padLarge;
+
+            textAt(
+              labelsLayer,
+              `${item.id} = ${format(point.value)}`,
+              point.cycle,
+              point.value,
+              {
+                dx,
+                dy,
+                anchor,
+                size: fontValue,
+                className: "value-label"
+              }
+            );
+          });
+        });
+
+        gaps.forEach(gap => {
+          const capability = series.find(item => item.id === "C");
+          const alignment = series.find(item => item.id === "A");
+          const high = valueAt(capability, gap.cycle);
+          const low = valueAt(alignment, gap.cycle);
+          const midpoint = (high + low) / (base + base);
+          const gapX = gap.cycle + cfg.gapOffsetX;
+
+          add(gapsLayer, "line", {
+            x1: sx(gap.cycle),
+            y1: sy(high),
+            x2: sx(gapX),
+            y2: sy(high),
+            class: "gap-link",
+            "stroke-width": strokeFine
+          });
+
+          add(gapsLayer, "line", {
+            x1: sx(gap.cycle),
+            y1: sy(low),
+            x2: sx(gapX),
+            y2: sy(low),
+            class: "gap-link",
+            "stroke-width": strokeFine
+          });
+
+          add(gapsLayer, "line", {
+            x1: sx(gapX),
+            y1: sy(low),
+            x2: sx(gapX),
+            y2: sy(high),
+            class: "gap-line",
+            "stroke-width": strokeCurve
+          });
+
+          const topHead = [
+            [gapX, high],
+            [gapX - cfg.arrowHalfWidth, high - cfg.arrowDepth],
+            [gapX + cfg.arrowHalfWidth, high - cfg.arrowDepth]
+          ].map(point => `${sx(point.shift())},${sy(point.pop())}`).join(" ");
+
+          const bottomHead = [
+            [gapX, low],
+            [gapX - cfg.arrowHalfWidth, low + cfg.arrowDepth],
+            [gapX + cfg.arrowHalfWidth, low + cfg.arrowDepth]
+          ].map(point => `${sx(point.shift())},${sy(point.pop())}`).join(" ");
+
+          add(gapsLayer, "polygon", {
+            points: topHead,
+            class: "gap-head",
+            "stroke-width": strokeFine
+          });
+
+          add(gapsLayer, "polygon", {
+            points: bottomHead,
+            class: "gap-head",
+            "stroke-width": strokeFine
+          });
+
+          const isLastGap = gap.cycle === xMax;
+
+          textAt(
+            labelsLayer,
+            `C − A = ${format(gap.value)}`,
+            gapX,
+            midpoint,
+            {
+              dx: isLastGap ? padSmall : negSmall,
+              anchor: isLastGap ? "start" : "end",
+              size: fontValue,
+              className: "gap-label"
+            }
+          );
+        });
+
+        const summary = textAt(
+          labelsLayer,
+          "",
+          cfg.legendX,
+          cfg.legendY,
+          {
+            anchor: "middle",
+            size: fontLabel,
+            className: "summary"
+          }
+        );
+
+        const summaryStart = make("tspan", {}, "Разрыв C − A ускоряется: ");
+        const summaryValues = make("tspan", {
+          class: "summary-accent"
+        }, "0,54 → 2,32");
+        summary.appendChild(summaryStart);
+        summary.appendChild(summaryValues);
+
+      } catch (error) {
+        svg.replaceChildren();
+
+        const fallback = document.createElementNS(namespace, "text");
+        fallback.setAttribute("x", String(sx(cfg.fallbackX)));
+        fallback.setAttribute("y", String(sy(cfg.fallbackY)));
+        fallback.setAttribute("text-anchor", "middle");
+        fallback.setAttribute("dominant-baseline", "middle");
+        fallback.setAttribute("font-size", String(fontLabel));
+        fallback.setAttribute("class", "fallback");
+        fallback.textContent =
+          "Схема должна показать, как темпы 1,15 и 1,08 увеличивают разрыв C − A.";
+        svg.appendChild(fallback);
+
+        const detail = document.createElementNS(namespace, "text");
+        detail.setAttribute("x", String(sx(cfg.fallbackX)));
+        detail.setAttribute("y", String(sy(cfg.fallbackDetailY)));
+        detail.setAttribute("text-anchor", "middle");
+        detail.setAttribute("dominant-baseline", "middle");
+        detail.setAttribute("font-size", String(fontAxis));
+        detail.setAttribute("class", "fallback-detail");
+        detail.textContent =
+          "Цикл 5: 2,01 и 1,47; цикл 11: 4,65 и 2,33.";
+        svg.appendChild(detail);
+      }
+    })();
+  </script>
+</body>
+</html>

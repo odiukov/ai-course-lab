@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import matter from "gray-matter";
 import { z } from "zod";
 import type { AgentEvent } from "../agent/events";
@@ -14,10 +16,23 @@ import {
   type StepMeta,
 } from "../content/step-file";
 import type { LessonSource } from "../source/lesson-source";
+import { parseExerciseTargets } from "../source/written-functions";
 import { drawVisual } from "./draw-visual";
 import type { GenerateDeps } from "./plan-lesson";
 
 const MAX_EXCERPT = 6000;
+
+function exerciseCodeForStep(source: LessonSource, meta: StepMeta): string {
+  if (!meta.exercise_fn || !source.exercise) return "(этот экран не относится к конкретному шву кода)";
+  const file = meta.exercise_file ?? source.exercise.functions.find((item) => item.fn === meta.exercise_fn)?.file;
+  if (!file) return "(файл шва не найден)";
+  const solution = path.join(source.exercise.dir, "solution", file);
+  if (!fs.existsSync(solution)) return "(эталон шва не найден)";
+  const code = fs.readFileSync(solution, "utf8");
+  const block = parseExerciseTargets(code).find((item) => item.symbol === meta.exercise_fn);
+  if (!block) return "(реализация шва не найдена)";
+  return code.split("\n").slice(block.startLine - 1, block.endLine).join("\n");
+}
 
 // Finds `anchor` at or after `offset`, requiring it to start a line (so a
 // heading string can't match inside a code block or a sentence), and skips
@@ -260,6 +275,7 @@ export async function ensureSteps(opts: {
         beforeStepId: meta.id,
       }),
       source_excerpt: excerpt,
+      exercise_code: exerciseCodeForStep(source, meta),
       clarifications: buildClarificationContext({
         contentDir,
         slug: plan.slug,

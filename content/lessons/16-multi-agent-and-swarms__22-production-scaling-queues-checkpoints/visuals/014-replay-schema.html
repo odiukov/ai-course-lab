@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Падение и продолжение с последнего чекпоинта</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5f6b7c;
+      --lane: #9aa7b8;
+      --grid: #d5dde8;
+      --saved-fill: #e4f7ed;
+      --saved-stroke: #168354;
+      --saved-ink: #0d6240;
+      --failed-fill: #fff0ee;
+      --failed-stroke: #c33f32;
+      --failed-ink: #9d2f26;
+      --resumed-fill: #e8f1ff;
+      --resumed-stroke: #2c68bd;
+      --resumed-ink: #24569a;
+      --lease: #8a5ac2;
+      --note-fill: #f1f4f8;
+      --note-stroke: #c4cedb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #18202d;
+        --ink: #eef3fb;
+        --muted: #b2bece;
+        --lane: #718096;
+        --grid: #364255;
+        --saved-fill: #163d30;
+        --saved-stroke: #55d39a;
+        --saved-ink: #b6f4d7;
+        --failed-fill: #482522;
+        --failed-stroke: #ff8277;
+        --failed-ink: #ffd0cb;
+        --resumed-fill: #203757;
+        --resumed-stroke: #7eb1ff;
+        --resumed-ink: #d4e5ff;
+        --lease: #c39aef;
+        --note-fill: #202a39;
+        --note-stroke: #47556a;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1120px;
+      margin-inline: auto;
+    }
+
+    h1 {
+      font-size: 22px;
+    }
+
+    .figure {
+      background: var(--panel);
+      border: 2px solid var(--grid);
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--panel);
+    }
+
+    svg text {
+      fill: var(--ink);
+      font-size: 16px;
+      dominant-baseline: middle;
+    }
+
+    .worker-label {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .block-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .block-detail,
+    .axis-label,
+    .annotation {
+      font-size: 14px;
+    }
+
+    .axis-label,
+    .annotation {
+      fill: var(--muted);
+    }
+
+    .lane,
+    .axis,
+    .tick,
+    .leader,
+    .transfer,
+    .lease-line,
+    .checkpoint-mark,
+    .crash-mark {
+      fill: none;
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .lane {
+      stroke: var(--lane);
+      stroke-width: 2px;
+    }
+
+    .axis,
+    .tick {
+      stroke: var(--muted);
+      stroke-width: 2px;
+    }
+
+    .leader {
+      stroke: var(--failed-stroke);
+      stroke-width: 2px;
+    }
+
+    .transfer {
+      stroke: var(--lease);
+      stroke-width: 3px;
+    }
+
+    .lease-line {
+      stroke: var(--lease);
+      stroke-width: 2px;
+    }
+
+    .saved-block {
+      fill: var(--saved-fill);
+      stroke: var(--saved-stroke);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .failed-block {
+      fill: var(--failed-fill);
+      stroke: var(--failed-stroke);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .resumed-block {
+      fill: var(--resumed-fill);
+      stroke: var(--resumed-stroke);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .saved-text {
+      fill: var(--saved-ink);
+    }
+
+    .failed-text {
+      fill: var(--failed-ink);
+    }
+
+    .resumed-text {
+      fill: var(--resumed-ink);
+    }
+
+    .checkpoint {
+      fill: var(--saved-stroke);
+      stroke: var(--panel);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .checkpoint-mark {
+      stroke: var(--panel);
+      stroke-width: 2px;
+    }
+
+    .crash-mark {
+      stroke: var(--failed-stroke);
+      stroke-width: 3px;
+    }
+
+    .arrow-head {
+      fill: var(--muted);
+    }
+
+    .transfer-head {
+      fill: var(--lease);
+    }
+
+    .note {
+      fill: var(--note-fill);
+      stroke: var(--note-stroke);
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    #fallback {
+      color: var(--ink);
+      background: var(--panel);
+      font-size: 16px;
+    }
+
+    #fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Падение и продолжение с последнего чекпоинта</h1>
+
+    <div class="figure">
+      <svg
+        id="diagram"
+        viewBox="0 0 1120 480"
+        width="1120"
+        height="480"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-labelledby="diagram-title diagram-desc"
+      >
+        <title id="diagram-title">Worker A падает, worker B продолжает с последнего чекпоинта</title>
+        <desc id="diagram-desc">
+          Worker A сохраняет super-step 1 и 2, падает во время super-step 3.
+          После истечения аренды worker B повторяет super-step 3 и завершает super-step 4.
+        </desc>
+        <g id="plot"></g>
+      </svg>
+
+      <div id="fallback" hidden>
+        Схема должна была показать: worker A сохраняет super-step 1 и 2,
+        падает во время super-step 3; после истечения lease worker B повторяет
+        super-step 3 и завершает super-step 4.
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const DATA = [
+      {
+        origin: { x: 28, y: 28 },
+        scale: { x: 92, y: 49 },
+        zero: 0,
+        radius: 0.12,
+        corner: 0.12,
+        dashA: 0.10,
+        dashB: 0.07
+      },
+      [
+        {
+          label: "worker A",
+          labelAt: { x: 0.12, y: 2.05 },
+          line: { x1: 1.42, y1: 2.05, x2: 11.45, y2: 2.05 }
+        },
+        {
+          label: "worker B",
+          labelAt: { x: 0.12, y: 4.85 },
+          line: { x1: 1.42, y1: 4.85, x2: 11.45, y2: 4.85 }
+        }
+      ],
+      [
+        {
+          box: { x1: 1.55, y1: 1.45, x2: 2.80, y2: 2.65 },
+          title: "super-step 1",
+          titleAt: { x: 2.175, y: 1.88 },
+          detail: "сохранён",
+          detailAt: { x: 2.175, y: 2.28 },
+          kind: "saved"
+        },
+        {
+          box: { x1: 2.98, y1: 1.45, x2: 4.23, y2: 2.65 },
+          title: "super-step 2",
+          titleAt: { x: 3.605, y: 1.88 },
+          detail: "сохранён",
+          detailAt: { x: 3.605, y: 2.28 },
+          kind: "saved"
+        },
+        {
+          box: { x1: 4.41, y1: 1.45, x2: 6.05, y2: 2.65 },
+          title: "super-step 3",
+          titleAt: { x: 5.23, y: 1.88 },
+          detail: "без записи",
+          detailAt: { x: 5.23, y: 2.28 },
+          kind: "failed"
+        },
+        {
+          box: { x1: 7.42, y1: 4.25, x2: 9.06, y2: 5.45 },
+          title: "super-step 3",
+          titleAt: { x: 8.24, y: 4.68 },
+          detail: "повтор + сохранение",
+          detailAt: { x: 8.24, y: 5.08 },
+          kind: "resumed"
+        },
+        {
+          box: { x1: 9.30, y1: 4.25, x2: 11.15, y2: 5.45 },
+          title: "super-step 4",
+          titleAt: { x: 10.225, y: 4.68 },
+          detail: "завершён",
+          detailAt: { x: 10.225, y: 5.08 },
+          kind: "resumed"
+        }
+      ],
+      [
+        {
+          center: { x: 2.82, y: 2.05 },
+          check: [
+            { x: 2.765, y: 2.05 },
+            { x: 2.805, y: 2.10 },
+            { x: 2.885, y: 1.98 }
+          ]
+        },
+        {
+          center: { x: 4.25, y: 2.05 },
+          check: [
+            { x: 4.195, y: 2.05 },
+            { x: 4.235, y: 2.10 },
+            { x: 4.315, y: 1.98 }
+          ]
+        },
+        {
+          center: { x: 9.08, y: 4.85 },
+          check: [
+            { x: 9.025, y: 4.85 },
+            { x: 9.065, y: 4.90 },
+            { x: 9.145, y: 4.78 }
+          ]
+        },
+        {
+          center: { x: 11.17, y: 4.85 },
+          check: [
+            { x: 11.115, y: 4.85 },
+            { x: 11.155, y: 4.90 },
+            { x: 11.235, y: 4.78 }
+          ]
+        }
+      ],
+      {
+        mark: [
+          { x1: 5.96, y1: 1.84, x2: 6.22, y2: 2.26 },
+          { x1: 6.22, y1: 1.84, x2: 5.96, y2: 2.26 }
+        ],
+        label: "сбой до чекпоинта",
+        labelAt: { x: 6.28, y: 0.72 },
+        leader: { x1: 6.20, y1: 0.94, x2: 6.10, y2: 1.70 }
+      },
+      {
+        line: { x1: 6.95, y1: 1.70, x2: 6.95, y2: 5.64 },
+        label: "lease истёк",
+        labelAt: { x: 6.95, y: 1.38 }
+      },
+      {
+        path: {
+          start: { x: 6.18, y: 2.70 },
+          controlA: { x: 6.30, y: 3.23 },
+          controlB: { x: 6.72, y: 3.80 },
+          end: { x: 7.42, y: 4.12 }
+        },
+        head: [
+          { x: 7.42, y: 4.12 },
+          { x: 7.22, y: 4.08 },
+          { x: 7.30, y: 3.91 }
+        ],
+        label: "тот же thread_id",
+        labelAt: { x: 6.30, y: 3.35 }
+      },
+      {
+        line: { x1: 1.42, y1: 6.35, x2: 11.45, y2: 6.35 },
+        head: [
+          { x: 11.45, y: 6.35 },
+          { x: 11.22, y: 6.23 },
+          { x: 11.22, y: 6.47 }
+        ],
+        label: "время",
+        labelAt: { x: 1.32, y: 6.35 },
+        ticks: [
+          { x: 2.175, top: 6.23, bottom: 6.47, label: "1", labelY: 6.76 },
+          { x: 3.605, top: 6.23, bottom: 6.47, label: "2", labelY: 6.76 },
+          { x: 6.95, top: 6.23, bottom: 6.47, label: "3: повтор", labelY: 6.76 },
+          { x: 10.225, top: 6.23, bottom: 6.47, label: "4", labelY: 6.76 }
+        ]
+      },
+      {
+        box: { x1: 1.42, y1: 7.16, x2: 11.45, y2: 8.56 },
+        lines: [
+          {
+            text: "Чекпоинты super-step 1 и 2 остаются подтверждёнными",
+            at: { x: 6.435, y: 7.63 }
+          },
+          {
+            text: "Незавершённый super-step 3 выполняется снова",
+            at: { x: 6.435, y: 8.10 }
+          }
+        ]
+      }
+    ];
+
+    const [
+      settings,
+      lanes,
+      blocks,
+      checkpoints,
+      crash,
+      lease,
+      transfer,
+      timeline,
+      note
+    ] = DATA;
+
+    const origin = settings.origin;
+    const scale = settings.scale;
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const element = (name, attributes, className) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, value);
+        });
+        if (className) node.setAttribute("class", className);
+        return node;
+      };
+
+      const add = node => {
+        plot.appendChild(node);
+        return node;
+      };
+
+      const addText = (label, point, anchor, className) => {
+        const node = element(
+          "text",
+          {
+            x: sx(point.x),
+            y: sy(point.y),
+            "text-anchor": anchor
+          },
+          className
+        );
+        node.textContent = label;
+        return add(node);
+      };
+
+      const addLine = (line, className) => add(
+        element(
+          "line",
+          {
+            x1: sx(line.x1),
+            y1: sy(line.y1),
+            x2: sx(line.x2),
+            y2: sy(line.y2)
+          },
+          className
+        )
+      );
+
+      const addPolygon = (points, className) => add(
+        element(
+          "polygon",
+          {
+            points: points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")
+          },
+          className
+        )
+      );
+
+      const addBox = (box, className) => add(
+        element(
+          "rect",
+          {
+            x: sx(box.x1),
+            y: sy(box.y1),
+            width: sx(box.x2) - sx(box.x1),
+            height: sy(box.y2) - sy(box.y1),
+            rx: sx(settings.corner) - sx(settings.zero),
+            ry: sy(settings.corner) - sy(settings.zero)
+          },
+          className
+        )
+      );
+
+      lanes.forEach(lane => {
+        addLine(lane.line, "lane");
+        addText(lane.label, lane.labelAt, "start", "worker-label");
+      });
+
+      blocks.forEach(block => {
+        const blockClass =
+          block.kind === "saved"
+            ? "saved-block"
+            : block.kind === "failed"
+              ? "failed-block"
+              : "resumed-block";
+
+        const textClass =
+          block.kind === "saved"
+            ? "saved-text"
+            : block.kind === "failed"
+              ? "failed-text"
+              : "resumed-text";
+
+        const shape = addBox(block.box, blockClass);
+
+        if (block.kind === "failed") {
+          shape.setAttribute(
+            "stroke-dasharray",
+            `${sx(settings.dashA) - sx(settings.zero)} ${sx(settings.dashB) - sx(settings.zero)}`
+          );
+        }
+
+        addText(block.title, block.titleAt, "middle", `block-title ${textClass}`);
+        addText(block.detail, block.detailAt, "middle", `block-detail ${textClass}`);
+      });
+
+      checkpoints.forEach(checkpoint => {
+        add(
+          element(
+            "circle",
+            {
+              cx: sx(checkpoint.center.x),
+              cy: sy(checkpoint.center.y),
+              r: sx(settings.radius) - sx(settings.zero)
+            },
+            "checkpoint"
+          )
+        );
+
+        add(
+          element(
+            "polyline",
+            {
+              points: checkpoint.check
+                .map(point => `${sx(point.x)},${sy(point.y)}`)
+                .join(" ")
+            },
+            "checkpoint-mark"
+          )
+        );
+      });
+
+      crash.mark.forEach(mark => addLine(mark, "crash-mark"));
+      addLine(crash.leader, "leader");
+      addText(crash.label, crash.labelAt, "end", "failed-text annotation");
+
+      const leaseLine = addLine(lease.line, "lease-line");
+      leaseLine.setAttribute(
+        "stroke-dasharray",
+        `${sy(settings.dashA) - sy(settings.zero)} ${sy(settings.dashB) - sy(settings.zero)}`
+      );
+      addText(lease.label, lease.labelAt, "middle", "annotation");
+
+      add(
+        element(
+          "path",
+          {
+            d: [
+              "M", sx(transfer.path.start.x), sy(transfer.path.start.y),
+              "C", sx(transfer.path.controlA.x), sy(transfer.path.controlA.y),
+              sx(transfer.path.controlB.x), sy(transfer.path.controlB.y),
+              sx(transfer.path.end.x), sy(transfer.path.end.y)
+            ].join(" ")
+          },
+          "transfer"
+        )
+      );
+      addPolygon(transfer.head, "transfer-head");
+      addText(transfer.label, transfer.labelAt, "end", "annotation");
+
+      addLine(timeline.line, "axis");
+      addPolygon(timeline.head, "arrow-head");
+      addText(timeline.label, timeline.labelAt, "end", "axis-label");
+
+      timeline.ticks.forEach(tick => {
+        addLine(
+          {
+            x1: tick.x,
+            y1: tick.top,
+            x2: tick.x,
+            y2: tick.bottom
+          },
+          "tick"
+        );
+        addText(
+          tick.label,
+          { x: tick.x, y: tick.labelY },
+          "middle",
+          "axis-label"
+        );
+      });
+
+      addBox(note.box, "note");
+      note.lines.forEach(line => {
+        addText(line.text, line.at, "middle", "annotation");
+      });
+
+      fallback.hidden = true;
+    } catch (error) {
+      const plot = document.getElementById("plot");
+      const fallback = document.getElementById("fallback");
+      if (plot) plot.replaceChildren();
+      if (fallback) fallback.hidden = false;
+    }
+  </script>
+</body>
+</html>

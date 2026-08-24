@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Почему после репараметризации градиент снова может течь</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: white;
+      --panel: aliceblue;
+      --node: white;
+      --ink: midnightblue;
+      --muted: slategray;
+      --forward: steelblue;
+      --good: seagreen;
+      --bad: crimson;
+      --noise: darkorange;
+      --divider: lightsteelblue;
+      --thin: 2px;
+      --strong: 3px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: midnightblue;
+        --panel: darkslateblue;
+        --node: darkslategray;
+        --ink: whitesmoke;
+        --muted: lightsteelblue;
+        --forward: lightskyblue;
+        --good: lightgreen;
+        --bad: lightsalmon;
+        --noise: moccasin;
+        --divider: slategray;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .diagram {
+      width: 100%;
+      background: var(--bg);
+    }
+
+    .diagram-title {
+      margin: 0;
+      padding: 10px 16px 8px;
+      font-size: 20px;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 470px;
+      background: var(--bg);
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--divider);
+      stroke-width: var(--thin);
+    }
+
+    .divider {
+      fill: none;
+      stroke: var(--divider);
+      stroke-width: var(--thin);
+      stroke-dasharray: var(--dash);
+    }
+
+    .node {
+      fill: var(--node);
+      stroke: var(--forward);
+      stroke-width: var(--strong);
+    }
+
+    .noise-node {
+      fill: var(--node);
+      stroke: var(--noise);
+      stroke-width: var(--strong);
+    }
+
+    .sample-node {
+      fill: var(--node);
+      stroke: var(--bad);
+      stroke-width: var(--strong);
+    }
+
+    .forward {
+      fill: none;
+      stroke: var(--forward);
+      stroke-width: var(--strong);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .backward {
+      fill: none;
+      stroke: var(--good);
+      stroke-width: var(--strong);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: var(--dash);
+    }
+
+    .blocked {
+      fill: none;
+      stroke: var(--bad);
+      stroke-width: var(--strong);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .forward-head {
+      fill: var(--forward);
+    }
+
+    .backward-head {
+      fill: var(--good);
+    }
+
+    .blocked-head {
+      fill: var(--bad);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 16px;
+      dominant-baseline: middle;
+    }
+
+    .panel-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .formula {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .small {
+      font-size: 14px;
+      fill: var(--muted);
+    }
+
+    .good-label {
+      font-size: 16px;
+      font-weight: 700;
+      fill: var(--good);
+    }
+
+    .bad-label {
+      font-size: 16px;
+      font-weight: 700;
+      fill: var(--bad);
+    }
+
+    .noise-label {
+      font-size: 14px;
+      fill: var(--noise);
+    }
+
+    .parameter {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .fallback {
+      margin: 0;
+      padding: 16px;
+      font-size: 16px;
+      background: var(--bg);
+      color: var(--ink);
+    }
+  </style>
+</head>
+<body>
+  <main class="diagram">
+    <h2 class="diagram-title">Почему после репараметризации градиент снова может течь</h2>
+
+    <svg id="scheme"
+         viewBox="0 0 1200 470"
+         width="1200"
+         height="470"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Сравнение обычной выборки и репараметризации</title>
+      <desc id="svg-description">Слева случайная выборка блокирует обратный градиент. Справа фиксированный шум входит в дифференцируемую формулу, поэтому градиент возвращается к мю и сигме.</desc>
+    </svg>
+
+    <p id="fallback" class="fallback" hidden>
+      Слева: случайный узел z ~ N(μ, σ²) разрывает путь градиента.
+      Справа: ε ~ N(0, 1) фиксируется внутри прохода, а z = μ + σ × ε,
+      поэтому ∂z/∂μ = 1 и ∂z/∂σ = ε.
+    </p>
+  </main>
+
+  <script>
+    const data = [
+      {
+        origin: [0, 0],
+        scale: 10,
+        zero: 0,
+        dash: 0.7,
+        panels: [
+          [1.5, 1, 57.5, 45],
+          [60.5, 1, 118.5, 45]
+        ],
+        divider: [[59.2, 3], [59.2, 43.5]],
+        radius: 1.2
+      },
+      {
+        rectangles: [
+          { box: [19, 14, 45, 30], radius: 1.5, className: "sample-node" },
+          { box: [85, 20, 105, 34], radius: 1.5, className: "node" },
+          { box: [77, 7, 96, 14], radius: 1.2, className: "noise-node" }
+        ],
+        circles: [
+          { center: [8, 17.5], radius: 2.2, className: "node" },
+          { center: [8, 27], radius: 2.2, className: "node" },
+          { center: [52, 22], radius: 2.4, className: "sample-node" },
+          { center: [68, 22.5], radius: 2.2, className: "node" },
+          { center: [68, 31.5], radius: 2.2, className: "node" },
+          { center: [113, 27], radius: 2.4, className: "node" }
+        ]
+      },
+      [
+        {
+          kind: "poly",
+          points: [[10.2, 17.5], [15, 17.5], [19, 19]],
+          head: [[19, 19], [17.5, 17.9], [17.4, 19.8]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[10.2, 27], [15, 27], [19, 25]],
+          head: [[19, 25], [17.3, 24.4], [17.7, 26.3]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[45, 22], [49.5, 22]],
+          head: [[49.5, 22], [47.7, 20.9], [47.7, 23.1]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[49.3, 25.2], [46.2, 25.2]],
+          head: [[46.2, 25.2], [48, 24.1], [48, 26.3]],
+          className: "blocked",
+          headClass: "blocked-head"
+        },
+        {
+          kind: "poly",
+          points: [[70.2, 22.5], [78, 22.5], [85, 24]],
+          head: [[85, 24], [83.3, 22.7], [83, 24.7]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[70.2, 31.5], [78, 31.5], [85, 30]],
+          head: [[85, 30], [83, 29.3], [83.3, 31.3]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[86.5, 14], [92, 20]],
+          head: [[92, 20], [90.1, 19.1], [91.5, 17.8]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "poly",
+          points: [[105, 27], [110.5, 27]],
+          head: [[110.5, 27], [108.7, 25.9], [108.7, 28.1]],
+          className: "forward",
+          headClass: "forward-head"
+        },
+        {
+          kind: "curve",
+          points: [[109.5, 23.5], [99, 15.5], [79, 15.5], [70, 21]],
+          head: [[70, 21], [71.2, 19.2], [72, 21.1]],
+          className: "backward",
+          headClass: "backward-head"
+        },
+        {
+          kind: "curve",
+          points: [[109.5, 30.5], [99, 39], [79, 39], [70, 33]],
+          head: [[70, 33], [72, 33], [71.2, 34.8]],
+          className: "backward",
+          headClass: "backward-head"
+        }
+      ],
+      {
+        barriers: [
+          [[45.8, 23.4], [46.7, 24.3]],
+          [[46.7, 24.3], [45.8, 25.2]],
+          [[45.8, 25.2], [46.7, 26.1]],
+          [[46.7, 26.1], [45.8, 27]]
+        ],
+        texts: [
+          { at: [29.5, 4.2], text: "Обычная выборка", anchor: "middle", className: "panel-title" },
+          { at: [89.5, 4.2], text: "Репараметризация", anchor: "middle", className: "panel-title" },
+
+          { at: [8, 17.5], text: "μ", anchor: "middle", className: "parameter" },
+          { at: [8, 27], text: "σ", anchor: "middle", className: "parameter" },
+          { at: [15.5, 12], text: "параметры распределения", anchor: "middle", className: "small" },
+
+          { at: [32, 19], text: "случайный узел", anchor: "middle", className: "small" },
+          { at: [32, 23.5], text: "z ~ N(μ, σ²)", anchor: "middle", className: "formula" },
+          { at: [52, 22], text: "z", anchor: "middle", className: "parameter" },
+          { at: [48.5, 30.8], text: "градиент не проходит", anchor: "end", className: "bad-label" },
+          { at: [30, 39], text: "новый жребий смешан с изменением параметров", anchor: "middle", className: "small" },
+
+          { at: [68, 22.5], text: "μ", anchor: "middle", className: "parameter" },
+          { at: [68, 31.5], text: "σ", anchor: "middle", className: "parameter" },
+          { at: [86.5, 10.4], text: "ε ~ N(0, 1)", anchor: "middle", className: "formula" },
+          { at: [98, 12.4], text: "фиксирован: ε = −0,4", anchor: "start", className: "noise-label" },
+
+          { at: [95, 27], text: "z = μ + σ × ε", anchor: "middle", className: "formula" },
+          { at: [113, 27], text: "z", anchor: "middle", className: "parameter" },
+          { at: [89.5, 16.8], text: "∂z/∂μ = 1", anchor: "middle", className: "good-label" },
+          { at: [89.5, 41.8], text: "∂z/∂σ = ε", anchor: "middle", className: "good-label" },
+          { at: [89.5, 44], text: "градиент течёт назад по непрерывной арифметике", anchor: "middle", className: "small" }
+        ]
+      }
+    ];
+
+    const [config, shapes, arrows, annotations] = data;
+    const origin = Object.freeze({ x: config.origin.shift(), y: config.origin.shift() });
+    const scale = config.scale;
+
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("scheme");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      const make = (name, attributes, parent = svg) => {
+        const element = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+        parent.appendChild(element);
+        return element;
+      };
+
+      const pointList = points =>
+        points.map(point => `${sx(point.shift())},${sy(point.shift())}`).join(" ");
+
+      const roundedRect = (box, radius, className) => {
+        const [left, top, right, bottom] = box;
+        make("rect", {
+          x: sx(left),
+          y: sy(top),
+          width: sx(right) - sx(left),
+          height: sy(bottom) - sy(top),
+          rx: sx(radius) - sx(config.zero),
+          ry: sy(radius) - sy(config.zero),
+          class: className
+        });
+      };
+
+      const line = (points, className) => {
+        const [start, end] = points;
+        make("line", {
+          x1: sx(start.shift()),
+          y1: sy(start.shift()),
+          x2: sx(end.shift()),
+          y2: sy(end.shift()),
+          class: className
+        });
+      };
+
+      document.documentElement.style.setProperty(
+        "--dash",
+        `${sx(config.dash) - sx(config.zero)}px ${sx(config.dash) - sx(config.zero)}px`
+      );
+
+      config.panels.forEach(box => roundedRect(box, config.radius, "panel"));
+      line(config.divider, "divider");
+
+      shapes.rectangles.forEach(shape =>
+        roundedRect(shape.box, shape.radius, shape.className)
+      );
+
+      shapes.circles.forEach(shape => {
+        const [cx, cy] = shape.center;
+        make("circle", {
+          cx: sx(cx),
+          cy: sy(cy),
+          r: sx(shape.radius) - sx(config.zero),
+          class: shape.className
+        });
+      });
+
+      arrows.forEach(arrow => {
+        if (arrow.kind === "curve") {
+          const [start, controlA, controlB, end] = arrow.points;
+          make("path", {
+            d: [
+              "M", sx(start.shift()), sy(start.shift()),
+              "C", sx(controlA.shift()), sy(controlA.shift()),
+              sx(controlB.shift()), sy(controlB.shift()),
+              sx(end.shift()), sy(end.shift())
+            ].join(" "),
+            class: arrow.className
+          });
+        } else {
+          make("polyline", {
+            points: pointList(arrow.points),
+            class: arrow.className
+          });
+        }
+
+        make("polygon", {
+          points: pointList(arrow.head),
+          class: arrow.headClass
+        });
+      });
+
+      annotations.barriers.forEach(points => line(points, "blocked"));
+
+      annotations.texts.forEach(label => {
+        const [x, y] = label.at;
+        const text = make("text", {
+          x: sx(x),
+          y: sy(y),
+          "text-anchor": label.anchor,
+          class: label.className
+        });
+        text.textContent = label.text;
+      });
+
+      fallback.hidden = true;
+    } catch (error) {
+      document.getElementById("scheme").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

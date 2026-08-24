@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Схема StateGraph</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5d6470;
+    --node:#eef2f8; --nodeStroke:#2f6fb8;
+    --store:#f4efe4; --storeStroke:#b08a2e;
+    --line:#3a3f46; --dash:#a0521c;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ebef; --muted:#a3acba;
+      --node:#1e2732; --nodeStroke:#6aa9e8;
+      --store:#2a2418; --storeStroke:#d8ab3d;
+      --line:#c3cad4; --dash:#e2924f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:6px 0 2px;}
+  h2{font-size:14px;font-weight:600;margin:0 0 4px;text-align:center;color:var(--fg);}
+  svg{display:block;width:100%;height:auto;max-height:470px;margin:0 auto;}
+  .lbl{font-size:12px;fill:var(--fg);}
+  .sub{font-size:11px;fill:var(--muted);}
+  .code{font-size:12.5px;fill:var(--fg);font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .legend{font-size:11px;color:var(--muted);text-align:center;margin:2px 8px 6px;}
+  .fail{font-size:12px;color:var(--fg);padding:8px 12px;line-height:1.45;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>StateGraph: узлы сверху, чекпоинтер снизу</h2>
+  <div id="host"></div>
+  <div class="legend">Пунктир — условное ребро (одна стрелка, два адреса). Тонкие стрелки вниз — запись снимка после каждого перехода.</div>
+</div>
+<script>
+(function(){
+  var host=document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var D={
+      nodes:[
+        {id:'agent', x:2,  y:6, w:5, h:2, label:'agent',       sub:'модель думает'},
+        {id:'tools', x:12, y:6, w:5, h:2, label:'tools',       sub:'выполняется инструмент'},
+        {id:'end',   x:12, y:2, w:5, h:2, label:'END',         sub:'ответ готов'}
+      ],
+      fork:{x:9.5, y:7},
+      store:{x:1, y:11, w:17, h:2},
+      taps:[{x:4.5,label:'после agent'},{x:14.5,label:'после tools'}],
+      axisY:9.6
+    };
+    var origin={x:26, y:16}, scale=26;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    var W=520, H=400, S='';
+    function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+    function line(x1,y1,x2,y2,extra){
+      return '<line x1="'+sx(x1)+'" y1="'+sy(y1)+'" x2="'+sx(x2)+'" y2="'+sy(y2)+'" '+extra+'/>';
+    }
+    function txt(x,y,dx,dy,anchor,cls,s){
+      return '<text x="'+(sx(x)+dx)+'" y="'+(sy(y)+dy)+'" text-anchor="'+anchor+'" class="'+cls+'">'+esc(s)+'</text>';
+    }
+    function poly(pts){
+      return '<polygon points="'+pts.map(function(p){return sx(p[0])+','+sy(p[1]);}).join(' ')+'" fill="var(--line)"/>';
+    }
+
+    // хранилище (нижний слой)
+    var st=D.store;
+    S+='<rect x="'+sx(st.x)+'" y="'+sy(st.y)+'" width="'+(sx(st.x+st.w)-sx(st.x))+
+       '" height="'+(sy(st.y+st.h)-sy(st.y))+'" rx="'+(sx(0.4)-sx(0))+
+       '" fill="var(--store)" stroke="var(--storeStroke)" stroke-width="1.5"/>';
+    S+=txt(st.x+0.5, st.y+0.85, 0, 0, 'start','code','checkpointer');
+    S+=txt(st.x+0.5, st.y+1.55, 0, 0, 'start','sub','журнал снимков: (thread_id, checkpoint_id)');
+
+    // узлы
+    D.nodes.forEach(function(n){
+      S+='<rect x="'+sx(n.x)+'" y="'+sy(n.y)+'" width="'+(sx(n.x+n.w)-sx(n.x))+
+         '" height="'+(sy(n.y+n.h)-sy(n.y))+'" rx="'+(sx(0.3)-sx(0))+
+         '" fill="var(--node)" stroke="var(--nodeStroke)" stroke-width="1.5"/>';
+      S+=txt(n.x+n.w/2, n.y+0.85, 0, 0, 'middle','code',n.label);
+      S+=txt(n.x+n.w/2, n.y+1.55, 0, 0, 'middle','sub',n.sub);
+    });
+
+    var A=D.nodes[0], T=D.nodes[1], E=D.nodes[2], F=D.fork;
+
+    // условное ребро: agent -> развилка (пунктир)
+    S+=line(A.x+A.w, F.y, F.x-0.35, F.y,
+      'stroke="var(--dash)" stroke-width="2" stroke-dasharray="5 4"');
+    S+='<circle cx="'+sx(F.x)+'" cy="'+sy(F.y)+'" r="'+(sx(0.35)-sx(0))+
+       '" fill="var(--bg)" stroke="var(--dash)" stroke-width="2"/>';
+    S+=txt(A.x+A.w+0.2, F.y, 0, -sy(0.45)+sy(0), 'start','sub','условное ребро');
+
+    // развилка -> tools
+    S+=line(F.x+0.35, F.y, T.x-0.5, F.y, 'stroke="var(--dash)" stroke-width="2"');
+    S+=poly([[T.x,F.y],[T.x-0.55,F.y-0.28],[T.x-0.55,F.y+0.28]]);
+
+    // развилка -> END (вверх, затем вправо)
+    S+=line(F.x, F.y-0.35, F.x, E.y+E.h/2, 'stroke="var(--dash)" stroke-width="2"');
+    S+=line(F.x, E.y+E.h/2, E.x-0.5, E.y+E.h/2, 'stroke="var(--dash)" stroke-width="2"');
+    S+=poly([[E.x,E.y+E.h/2],[E.x-0.55,E.y+E.h/2-0.28],[E.x-0.55,E.y+E.h/2+0.28]]);
+
+    // статическое ребро tools -> agent (снизу узлов, над хранилищем)
+    S+=line(T.x+T.w/2, T.y+T.h, T.x+T.w/2, D.axisY, 'stroke="var(--line)" stroke-width="2"');
+    S+=line(T.x+T.w/2, D.axisY, A.x+A.w/2, D.axisY, 'stroke="var(--line)" stroke-width="2"');
+    S+=line(A.x+A.w/2, D.axisY, A.x+A.w/2, A.y+A.h+0.5, 'stroke="var(--line)" stroke-width="2"');
+    S+=poly([[A.x+A.w/2,A.y+A.h],[A.x+A.w/2-0.28,A.y+A.h+0.55],[A.x+A.w/2+0.28,A.y+A.h+0.55]]);
+    S+=txt((A.x+A.w/2+T.x+T.w/2)/2, D.axisY, 0, -sy(0.35)+sy(0), 'middle','sub','статическое ребро tools→agent');
+
+    // записи снимков: от рёбер вниз в хранилище
+    D.taps.forEach(function(t,i){
+      S+=line(t.x, D.axisY+0.25, t.x, st.y-0.5,
+        'stroke="var(--storeStroke)" stroke-width="1.5" stroke-dasharray="3 3"');
+      S+='<polygon points="'+
+         sx(t.x)+','+sy(st.y)+' '+
+         (sx(t.x)-(sx(0.26)-sx(0)))+','+sy(st.y-0.55)+' '+
+         (sx(t.x)+(sx(0.26)-sx(0)))+','+sy(st.y-0.55)+
+         '" fill="var(--storeStroke)"/>';
+      S+=txt(t.x, st.y-0.75, (i===0? -(sx(0.15)-sx(0)) : (sx(0.15)-sx(0))), 0,
+             i===0?'end':'start','sub','снимок '+t.label);
+    });
+
+    host.innerHTML='<svg viewBox="0 0 '+W+' '+H+
+      '" preserveAspectRatio="xMidYMid meet" role="img" '+
+      'aria-label="Узлы agent и tools, условное ребро в tools или END, статическое ребро tools в agent, чекпоинтер записывает снимок после каждого перехода">'+
+      '<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="var(--bg)"/>'+S+'</svg>';
+  }catch(e){
+    host.innerHTML='<div class="fail">Схема должна показать: узлы <b>agent</b> и <b>tools</b> в один слой; '+
+      'пунктирное условное ребро из <b>agent</b> в развилку с двумя выходами — в <b>tools</b> либо в <b>END</b>; '+
+      'статическое ребро <b>tools→agent</b> обратно; ниже узлов — отдельная полоса чекпоинтера, '+
+      'куда после каждого перехода падает снимок состояния с ключом (thread_id, checkpoint_id).</div>';
+  }
+})();
+</script>
+</body>
+</html>

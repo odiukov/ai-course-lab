@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пайплайн планировщика поездки</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1c20; --muted:#5d6470;
+    --line:#3a4250; --box:#f2f4f8; --edge:#98a2b3;
+    --a:#1f6feb; --b:#b8590b; --c:#0f8a6a; --loop:#b3266e;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf2; --muted:#a3adbb;
+      --line:#c3ccd8; --box:#1d222a; --edge:#5a6472;
+      --a:#68a8ff; --b:#f0a65a; --c:#4fd0aa; --loop:#ff7ab8;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);}
+  .wrap{max-width:1000px;margin:0 auto;padding:8px 10px 4px;
+    font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);}
+  h2{font-size:15px;margin:0 0 4px;font-weight:650;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .lg{font-size:12px;color:var(--muted);margin:2px 0 0;}
+  .lg b{color:var(--fg);font-weight:600;}
+  text{font:12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--fg);}
+  text.s{font-size:11px;fill:var(--muted);}
+  .err{font-size:13px;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2>Пайплайн планировщика поездки: три головы поиска → слияние → top-k → VLM со ссылками</h2>
+<div id="host"></div>
+<p class="lg" id="lg"><b>u₁</b> отзывы (текстовый ретривер) · <b>u₂</b> фото заведений (общее пространство текст–картинка, шаг&nbsp;4) · <b>u₃</b> аудиоклипы (пара текст–звук) · <b>v</b> составной балл после нормализации и взвешенной суммы</p>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единицы схемы, не пиксели) ----
+    var D = {
+      query: {x:0, y:0, w:8, h:4, t:"запрос: «тихий веганский", t2:"поздний завтрак", t3:"с естественным светом»"},
+      heads: [
+        {id:"u1", x:11, y:6,  w:8, h:3, t:"u₁ отзывы", c:"var(--a)"},
+        {id:"u2", x:11, y:0,  w:8, h:3, t:"u₂ фото залов", c:"var(--b)"},
+        {id:"u3", x:11, y:-6, w:8, h:3, t:"u₃ аудиоклипы", c:"var(--c)"}
+      ],
+      norm:  {x:23, y:0, w:5, h:9,  t:"норма-", t2:"лизация", t3:"шаг 10"},
+      sum:   {x:30, y:0, w:7, h:5,  t:"взвешенная", t2:"сумма → v", t3:"шаг 12"},
+      topk:  {x:39, y:0, w:6, h:4,  t:"top-k", t2:"k = 5", t3:"шаг 15"},
+      gen:   {x:47, y:0, w:9, h:5,  t:"VLM-генератор", t2:"[img 3], [audio 2 at 0:34]", t3:"шаг 24"},
+      check: {x:47, y:-7, w:9, h:4, t:"проверка: шаг 28", t2:"«данных не хватает»"},
+      loopY: -12
+    };
+    var origin = {x:52, y:150}, scale = 9.4;
+    function sx(x){ return origin.x + x*scale; }
+    function sy(y){ return origin.y + y*scale; }
+
+    var W = 640, H = 300, S = [];
+    function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+    function box(b, stroke){
+      S.push('<rect x="'+sx(b.x)+'" y="'+sy(b.y)+'" width="'+(sx(b.x+b.w)-sx(b.x))+
+        '" height="'+(sy(b.y+b.h)-sy(b.y))+'" rx="'+(sx(0.7)-sx(0))+
+        '" fill="var(--box)" stroke="'+(stroke||'var(--edge)')+'" stroke-width="1.5"/>');
+    }
+    function lbl(x,y,txt,anchor,dx,dy,cls){
+      S.push('<text x="'+(sx(x)+dx)+'" y="'+(sy(y)+dy)+'" text-anchor="'+anchor+
+        '"'+(cls?' class="'+cls+'"':'')+'>'+esc(txt)+'</text>');
+    }
+    function arrow(x1,y1,x2,y2,color,dash){
+      S.push('<path d="M '+sx(x1)+' '+sy(y1)+' L '+sx(x2)+' '+sy(y2)+
+        '" fill="none" stroke="'+color+'" stroke-width="1.6"'+
+        (dash?' stroke-dasharray="5 4"':'')+' marker-end="url(#ah'+(dash?'L':'N')+')"/>');
+    }
+    function elbow(x1,y1,xm,x2,y2,color,dash){
+      S.push('<path d="M '+sx(x1)+' '+sy(y1)+' L '+sx(xm)+' '+sy(y1)+' L '+sx(xm)+' '+sy(y2)+
+        ' L '+sx(x2)+' '+sy(y2)+'" fill="none" stroke="'+color+'" stroke-width="1.6"'+
+        (dash?' stroke-dasharray="5 4"':'')+' marker-end="url(#ah'+(dash?'L':'N')+')"/>');
+    }
+
+    // запрос
+    var q = D.query;
+    box(q, 'var(--line)');
+    lbl(q.x+q.w/2, q.y+1.3, q.t, 'middle', 0, 0);
+    lbl(q.x+q.w/2, q.y+2.4, q.t2, 'middle', 0, 0);
+    lbl(q.x+q.w/2, q.y+3.5, q.t3, 'middle', 0, 0);
+
+    // ветвление на три головы + сведение к нормализации
+    var qx = q.x+q.w, qy = q.y+q.h/2, nx = D.norm.x, nc = D.norm.y+D.norm.h/2;
+    D.heads.forEach(function(h){
+      var hy = h.y+h.h/2;
+      elbow(qx, qy, q.x+q.w+1.5, h.x, hy, h.c, false);
+      box(h, h.c);
+      lbl(h.x+h.w/2, hy, h.t, 'middle', 0, 4);
+      elbow(h.x+h.w, hy, h.x+h.w+2, nx, nc, h.c, false);
+    });
+    lbl(qx+1.5, D.heads[2].y-0.6, 'три ветки параллельно', 'middle', 0, -6, 's');
+
+    // нормализация → сумма → top-k → генератор
+    var n = D.norm, su = D.sum, tk = D.topk, g = D.gen;
+    box(n); box(su); box(tk); box(g, 'var(--line)');
+    lbl(n.x+n.w/2, n.y+3.3, n.t,  'middle', 0, 0, 's');
+    lbl(n.x+n.w/2, n.y+4.4, n.t2, 'middle', 0, 0, 's');
+    lbl(n.x+n.w/2, n.y+5.9, n.t3, 'middle', 0, 0, 's');
+    lbl(su.x+su.w/2, su.y+1.6, su.t,  'middle', 0, 0);
+    lbl(su.x+su.w/2, su.y+2.9, su.t2, 'middle', 0, 0);
+    lbl(su.x+su.w/2, su.y+4.2, su.t3, 'middle', 0, 0, 's');
+    lbl(tk.x+tk.w/2, tk.y+1.6, tk.t,  'middle', 0, 0);
+    lbl(tk.x+tk.w/2, tk.y+2.7, tk.t2, 'middle', 0, 0);
+    lbl(tk.x+tk.w/2, tk.y+3.8, tk.t3, 'middle', 0, 0, 's');
+    lbl(g.x+g.w/2, g.y+1.6, g.t,  'middle', 0, 0);
+    lbl(g.x+g.w/2, g.y+2.9, g.t2, 'middle', 0, 0, 's');
+    lbl(g.x+g.w/2, g.y+4.2, g.t3, 'middle', 0, 0, 's');
+
+    arrow(n.x+n.w, nc, su.x, su.y+su.h/2, 'var(--line)', false);
+    lbl(n.x+n.w, nc, 'вес в пользу фото', 'start', 4, -6, 's');
+    arrow(su.x+su.w, su.y+su.h/2, tk.x, tk.y+tk.h/2, 'var(--line)', false);
+    lbl(su.x+su.w+0.9, su.y+su.h/2, 'v', 'middle', 0, -6, 's');
+    arrow(tk.x+tk.w, tk.y+tk.h/2, g.x, g.y+g.h/2, 'var(--line)', false);
+    lbl(tk.x+tk.w+1, tk.y+tk.h/2, '5 кандидатов', 'middle', 0, -6, 's');
+
+    // проверка и обратная петля к головам поиска
+    var ch = D.check;
+    box(ch, 'var(--loop)');
+    lbl(ch.x+ch.w/2, ch.y+1.6, ch.t,  'middle', 0, 0);
+    lbl(ch.x+ch.w/2, ch.y+2.9, ch.t2, 'middle', 0, 0, 's');
+    S.push('<path d="M '+sx(g.x+g.w/2)+' '+sy(g.y)+' L '+sx(ch.x+ch.w/2)+' '+sy(ch.y+ch.h)+
+      '" fill="none" stroke="var(--loop)" stroke-width="1.6" marker-end="url(#ahL)"/>');
+
+    var head2 = D.heads[2], ly = D.loopY;
+    S.push('<path d="M '+sx(ch.x)+' '+sy(ch.y+ch.h/2)+' L '+sx(ch.x-2)+' '+sy(ch.y+ch.h/2)+
+      ' L '+sx(ch.x-2)+' '+sy(ly)+' L '+sx(head2.x+head2.w/2)+' '+sy(ly)+
+      ' L '+sx(head2.x+head2.w/2)+' '+sy(head2.y)+
+      '" fill="none" stroke="var(--loop)" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ahL)"/>');
+    lbl(head2.x+head2.w/2+1, ly, 'уточнённый запрос → новый раунд (шаг 31)', 'start', 6, -5, 's');
+
+    var vb = [sx(-1.5), sy(ly-2.6), 0, 0];
+    vb[2] = sx(g.x+g.w+1.5) - vb[0];
+    vb[3] = sy(D.heads[0].y+D.heads[0].h+2) - vb[1];
+
+    host.innerHTML =
+      '<svg viewBox="'+vb.join(' ')+'" preserveAspectRatio="xMidYMid meet" role="img" '+
+      'aria-label="Запрос ветвится на три ретривера, баллы нормализуются и складываются, top-k=5 идёт в VLM-генератор со ссылками, петля проверки возвращает уточнённый запрос к головам поиска">'+
+      '<defs>'+
+      '<marker id="ahN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)"/></marker>'+
+      '<marker id="ahL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--loop)"/></marker>'+
+      '</defs>'+ S.join('') + '</svg>';
+    void W; void H;
+  }catch(e){
+    host.innerHTML = '<p class="err">Схема должна показывать: запрос «тихий веганский поздний завтрак '+
+      'с естественным светом» расходится на три параллельные головы поиска — отзывы (текст), '+
+      'фото залов (шаг 4), аудиоклипы (текст–звук). Их баллы идут в нормализацию (шаг 10), '+
+      'затем во взвешенную сумму с перевесом в пользу картинок (шаг 12), затем отсечка top-k = 5 '+
+      '(шаг 15). Пятёрка кандидатов уходит в VLM-генератор, который пишет ответ со ссылками '+
+      'вида [img 3] и [audio 2 at 0:34] (шаг 24). Обратная линия: проверка шага 28 говорит '+
+      '«данных не хватает» и возвращает уточнённый запрос к головам поиска — это цикл шага 31.</p>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как текст и изображение встречаются внутри attention</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f8fafc;
+    --surface: #ffffff;
+    --panel: #f1f5f9;
+    --ink: #172033;
+    --muted: #526074;
+    --border: #94a3b8;
+    --text-token: #f59e0b;
+    --text-token-soft: #fef3c7;
+    --image-token: #3b82f6;
+    --image-token-soft: #dbeafe;
+    --joint: #8b5cf6;
+    --joint-soft: #ede9fe;
+    --single: #16a34a;
+    --single-soft: #dcfce7;
+    --link: #64748b;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #0b1020;
+      --surface: #111827;
+      --panel: #172033;
+      --ink: #f1f5f9;
+      --muted: #b8c2d1;
+      --border: #64748b;
+      --text-token: #fbbf24;
+      --text-token-soft: #493514;
+      --image-token: #60a5fa;
+      --image-token-soft: #17365f;
+      --joint: #a78bfa;
+      --joint-soft: #34265e;
+      --single: #4ade80;
+      --single-soft: #153d29;
+      --link: #94a3b8;
+    }
+  }
+
+  html, body, figure, h1, p {
+    margin: unset;
+  }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    background: var(--surface);
+  }
+
+  h1 {
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 450px;
+    background: var(--surface);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 2px;
+  }
+
+  .separator {
+    stroke: var(--border);
+    stroke-width: 1px;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--link);
+    stroke-width: 2px;
+  }
+
+  .arrowhead {
+    fill: var(--link);
+  }
+
+  .input-text,
+  .node-text {
+    fill: var(--text-token-soft);
+    stroke: var(--text-token);
+    stroke-width: 2px;
+  }
+
+  .input-image,
+  .node-image {
+    fill: var(--image-token-soft);
+    stroke: var(--image-token);
+    stroke-width: 2px;
+  }
+
+  .weight-text {
+    fill: var(--text-token-soft);
+    stroke: var(--text-token);
+    stroke-width: 2px;
+  }
+
+  .weight-image {
+    fill: var(--image-token-soft);
+    stroke: var(--image-token);
+    stroke-width: 2px;
+  }
+
+  .joint {
+    fill: var(--joint-soft);
+    stroke: var(--joint);
+    stroke-width: 2px;
+  }
+
+  .single {
+    fill: var(--single-soft);
+    stroke: var(--single);
+    stroke-width: 2px;
+  }
+
+  .attention-link {
+    stroke: var(--joint);
+    stroke-width: 2px;
+  }
+
+  .flow-link {
+    stroke: var(--single);
+    stroke-width: 2px;
+  }
+
+  .junction {
+    fill: var(--ink);
+  }
+
+  .title {
+    fill: var(--ink);
+    font-size: 19px;
+    font-weight: bold;
+  }
+
+  .subtitle {
+    fill: var(--muted);
+    font-size: 13px;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 13px;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .block-title {
+    fill: var(--ink);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .token-letter {
+    fill: var(--ink);
+    font-size: 11px;
+    font-weight: bold;
+  }
+
+  .footer {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  #fallback {
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-heading">
+  <h1 id="diagram-heading">Как текст и изображение встречаются внутри attention</h1>
+  <svg id="diagram" viewBox="0 0 1200 450" width="1200" height="450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Сравнение потоков MMDiT, FLUX и Z-Image</title>
+    <desc id="svg-desc">MMDiT сохраняет два потока с раздельными весами перед совместным attention. FLUX начинает с double-stream и переходит к single-stream. Z-Image использует единый поток.</desc>
+    <g id="plot"></g>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать: MMDiT — два потока с раздельными весами и совместным attention; FLUX — сначала double-stream, затем single-stream; Z-Image — единый поток.</p>
+</figure>
+
+<script>
+const data = {
+  canvas: { w: 1200, h: 450 },
+  arrow: { head: 10, wing: 6 },
+  panels: [
+    { x: 18, y: 22, w: 362, h: 350 },
+    { x: 400, y: 22, w: 398, h: 350 },
+    { x: 818, y: 22, w: 364, h: 350 }
+  ],
+  rects: [
+    { x: 40, y: 112, w: 72, h: 38, cls: "input-text" },
+    { x: 40, y: 250, w: 72, h: 38, cls: "input-image" },
+    { x: 132, y: 102, w: 78, h: 58, cls: "weight-text" },
+    { x: 132, y: 240, w: 78, h: 58, cls: "weight-image" },
+    { x: 238, y: 102, w: 120, h: 196, cls: "joint" },
+
+    { x: 422, y: 112, w: 68, h: 36, cls: "input-text" },
+    { x: 422, y: 246, w: 68, h: 36, cls: "input-image" },
+    { x: 514, y: 96, w: 116, h: 202, cls: "joint" },
+    { x: 674, y: 112, w: 102, h: 170, cls: "single" },
+
+    { x: 840, y: 122, w: 72, h: 38, cls: "input-text" },
+    { x: 840, y: 244, w: 72, h: 38, cls: "input-image" },
+    { x: 974, y: 104, w: 178, h: 194, cls: "single" }
+  ],
+  separators: [
+    { x1: 514, y1: 196, x2: 630, y2: 196 },
+    { x1: 18, y1: 388, x2: 1182, y2: 388 }
+  ],
+  connectors: [
+    { points: [{ x: 112, y: 131 }, { x: 132, y: 131 }] },
+    { points: [{ x: 112, y: 269 }, { x: 132, y: 269 }] },
+    { points: [{ x: 210, y: 131 }, { x: 238, y: 154 }] },
+    { points: [{ x: 210, y: 269 }, { x: 238, y: 246 }] },
+
+    { points: [{ x: 490, y: 130 }, { x: 514, y: 146 }] },
+    { points: [{ x: 490, y: 264 }, { x: 514, y: 246 }] },
+    { points: [{ x: 630, y: 146 }, { x: 650, y: 196 }] },
+    { points: [{ x: 630, y: 246 }, { x: 650, y: 196 }] },
+    { points: [{ x: 650, y: 196 }, { x: 674, y: 196 }] },
+
+    { points: [{ x: 912, y: 141 }, { x: 944, y: 201 }] },
+    { points: [{ x: 912, y: 263 }, { x: 944, y: 201 }] },
+    { points: [{ x: 944, y: 201 }, { x: 974, y: 201 }] }
+  ],
+  arrows: [
+    { x1: 112, y1: 131, x2: 132, y2: 131 },
+    { x1: 112, y1: 269, x2: 132, y2: 269 },
+    { x1: 210, y1: 131, x2: 238, y2: 154 },
+    { x1: 210, y1: 269, x2: 238, y2: 246 },
+
+    { x1: 490, y1: 130, x2: 514, y2: 146 },
+    { x1: 490, y1: 264, x2: 514, y2: 246 },
+    { x1: 630, y1: 146, x2: 650, y2: 196 },
+    { x1: 630, y1: 246, x2: 650, y2: 196 },
+    { x1: 650, y1: 196, x2: 674, y2: 196 },
+
+    { x1: 912, y1: 141, x2: 944, y2: 201 },
+    { x1: 912, y1: 263, x2: 944, y2: 201 },
+    { x1: 944, y1: 201, x2: 974, y2: 201 }
+  ],
+  links: [
+    { x1: 268, y1: 174, x2: 328, y2: 174, cls: "attention-link" },
+    { x1: 268, y1: 174, x2: 328, y2: 238, cls: "attention-link" },
+    { x1: 268, y1: 238, x2: 328, y2: 174, cls: "attention-link" },
+    { x1: 268, y1: 238, x2: 328, y2: 238, cls: "attention-link" },
+
+    { x1: 701, y1: 194, x2: 748, y2: 232, cls: "flow-link" },
+    { x1: 701, y1: 232, x2: 748, y2: 194, cls: "flow-link" },
+
+    { x1: 1012, y1: 188, x2: 1109, y2: 236, cls: "flow-link" },
+    { x1: 1012, y1: 236, x2: 1109, y2: 188, cls: "flow-link" },
+    { x1: 1012, y1: 188, x2: 1012, y2: 236, cls: "flow-link" },
+    { x1: 1109, y1: 188, x2: 1109, y2: 236, cls: "flow-link" }
+  ],
+  nodes: [
+    { x: 268, y: 174, r: 15, cls: "node-text", text: "Т" },
+    { x: 328, y: 174, r: 15, cls: "node-text", text: "Т" },
+    { x: 268, y: 238, r: 15, cls: "node-image", text: "И" },
+    { x: 328, y: 238, r: 15, cls: "node-image", text: "И" },
+
+    { x: 701, y: 194, r: 14, cls: "node-text", text: "Т" },
+    { x: 748, y: 194, r: 14, cls: "node-text", text: "Т" },
+    { x: 701, y: 232, r: 14, cls: "node-image", text: "И" },
+    { x: 748, y: 232, r: 14, cls: "node-image", text: "И" },
+
+    { x: 1012, y: 188, r: 15, cls: "node-text", text: "Т" },
+    { x: 1109, y: 188, r: 15, cls: "node-text", text: "Т" },
+    { x: 1012, y: 236, r: 15, cls: "node-image", text: "И" },
+    { x: 1109, y: 236, r: 15, cls: "node-image", text: "И" }
+  ],
+  junctions: [
+    { x: 650, y: 196, r: 5 },
+    { x: 944, y: 201, r: 5 }
+  ],
+  texts: [
+    { x: 38, y: 54, dx: 0, dy: 0, text: "MMDiT", cls: "title", anchor: "start" },
+    { x: 38, y: 78, dx: 0, dy: 0, text: "два потока · раздельные веса", cls: "subtitle", anchor: "start" },
+    { x: 76, y: 136, dx: 0, dy: 0, text: "текст", cls: "label", anchor: "middle" },
+    { x: 76, y: 274, dx: 0, dy: 0, text: "патчи", cls: "label", anchor: "middle" },
+    { x: 171, y: 124, dx: 0, dy: 0, text: "веса текста", cls: "small", anchor: "middle" },
+    { x: 171, y: 146, dx: 0, dy: 0, text: "Q · K · V", cls: "block-title", anchor: "middle" },
+    { x: 171, y: 262, dx: 0, dy: 0, text: "веса патчей", cls: "small", anchor: "middle" },
+    { x: 171, y: 284, dx: 0, dy: 0, text: "Q · K · V", cls: "block-title", anchor: "middle" },
+    { x: 298, y: 126, dx: 0, dy: 0, text: "совместное attention", cls: "block-title", anchor: "middle" },
+    { x: 298, y: 280, dx: 0, dy: 0, text: "все слышат всех", cls: "small", anchor: "middle" },
+    { x: 199, y: 330, dx: 0, dy: 0, text: "разные способы говорить → одно поле сравнения", cls: "footer", anchor: "middle" },
+
+    { x: 420, y: 54, dx: 0, dy: 0, text: "FLUX", cls: "title", anchor: "start" },
+    { x: 420, y: 78, dx: 0, dy: 0, text: "первые double-stream → последующие single-stream", cls: "subtitle", anchor: "start" },
+    { x: 456, y: 135, dx: 0, dy: 0, text: "текст", cls: "label", anchor: "middle" },
+    { x: 456, y: 269, dx: 0, dy: 0, text: "патчи", cls: "label", anchor: "middle" },
+    { x: 572, y: 119, dx: 0, dy: 0, text: "double-stream", cls: "block-title", anchor: "middle" },
+    { x: 572, y: 143, dx: 0, dy: 0, text: "веса текста", cls: "small", anchor: "middle" },
+    { x: 572, y: 167, dx: 0, dy: 0, text: "Q · K · V", cls: "label", anchor: "middle" },
+    { x: 572, y: 225, dx: 0, dy: 0, text: "веса патчей", cls: "small", anchor: "middle" },
+    { x: 572, y: 249, dx: 0, dy: 0, text: "Q · K · V", cls: "label", anchor: "middle" },
+    { x: 572, y: 280, dx: 0, dy: 0, text: "раздельные веса", cls: "small", anchor: "middle" },
+    { x: 725, y: 137, dx: 0, dy: 0, text: "single-stream", cls: "block-title", anchor: "middle" },
+    { x: 725, y: 160, dx: 0, dy: 0, text: "общие веса", cls: "small", anchor: "middle" },
+    { x: 725, y: 264, dx: 0, dy: 0, text: "единая последовательность", cls: "small", anchor: "middle" },
+    { x: 599, y: 330, dx: 0, dy: 0, text: "сначала две дорожки → затем одна", cls: "footer", anchor: "middle" },
+
+    { x: 838, y: 54, dx: 0, dy: 0, text: "Z-Image", cls: "title", anchor: "start" },
+    { x: 838, y: 78, dx: 0, dy: 0, text: "единый поток с самого начала", cls: "subtitle", anchor: "start" },
+    { x: 876, y: 146, dx: 0, dy: 0, text: "текст", cls: "label", anchor: "middle" },
+    { x: 876, y: 268, dx: 0, dy: 0, text: "патчи", cls: "label", anchor: "middle" },
+    { x: 1063, y: 130, dx: 0, dy: 0, text: "единый поток", cls: "block-title", anchor: "middle" },
+    { x: 1063, y: 154, dx: 0, dy: 0, text: "общие веса Q · K · V", cls: "small", anchor: "middle" },
+    { x: 1063, y: 276, dx: 0, dy: 0, text: "совместное attention", cls: "small", anchor: "middle" },
+    { x: 1000, y: 330, dx: 0, dy: 0, text: "текст и патчи сразу едут по одной дорожке", cls: "footer", anchor: "middle" },
+
+    { x: 24, y: 418, dx: 0, dy: 0, text: "Т", cls: "token-letter", anchor: "middle" },
+    { x: 44, y: 418, dx: 8, dy: 0, text: "текстовый токен", cls: "footer", anchor: "start" },
+    { x: 232, y: 418, dx: 0, dy: 0, text: "И", cls: "token-letter", anchor: "middle" },
+    { x: 252, y: 418, dx: 8, dy: 0, text: "патч изображения", cls: "footer", anchor: "start" },
+    { x: 488, y: 418, dx: 0, dy: 0, text: "Линии между Т и И: запрос патча может выбрать ключ слова — и наоборот", cls: "footer", anchor: "start" }
+  ],
+  legendNodes: [
+    { x: 24, y: 414, r: 13, cls: "node-text" },
+    { x: 232, y: 414, r: 13, cls: "node-image" }
+  ]
+};
+
+const origin = { x: 0, y: 0 };
+const scale = { x: 1, y: 1 };
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const plot = document.getElementById("plot");
+
+  const make = (tag, attrs, text) => {
+    const node = document.createElementNS(svg.namespaceURI, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      node.setAttribute(name, value);
+    }
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const drawRect = item => {
+    plot.appendChild(make("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.w) - sx(0),
+      height: sy(item.h) - sy(0),
+      class: item.cls
+    }));
+  };
+
+  const drawLine = item => {
+    plot.appendChild(make("line", {
+      x1: sx(item.x1),
+      y1: sy(item.y1),
+      x2: sx(item.x2),
+      y2: sy(item.y2),
+      class: item.cls
+    }));
+  };
+
+  const drawArrowhead = item => {
+    const vx = item.x2 - item.x1;
+    const vy = item.y2 - item.y1;
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const bx = item.x2 - ux * data.arrow.head;
+    const by = item.y2 - uy * data.arrow.head;
+    const lx = bx - uy * data.arrow.wing;
+    const ly = by + ux * data.arrow.wing;
+    const rx = bx + uy * data.arrow.wing;
+    const ry = by - ux * data.arrow.wing;
+    plot.appendChild(make("polygon", {
+      points: [
+        `${sx(item.x2)},${sy(item.y2)}`,
+        `${sx(lx)},${sy(ly)}`,
+        `${sx(rx)},${sy(ry)}`
+      ].join(" "),
+      class: "arrowhead"
+    }));
+  };
+
+  for (const panel of data.panels) {
+    drawRect({ ...panel, cls: "panel" });
+  }
+
+  for (const item of data.separators) {
+    drawLine({ ...item, cls: "separator" });
+  }
+
+  for (const item of data.connectors) {
+    plot.appendChild(make("polyline", {
+      points: item.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: "connector"
+    }));
+  }
+
+  for (const item of data.arrows) drawArrowhead(item);
+  for (const item of data.rects) drawRect(item);
+  for (const item of data.links) drawLine(item);
+
+  for (const item of data.junctions) {
+    plot.appendChild(make("circle", {
+      cx: sx(item.x),
+      cy: sy(item.y),
+      r: sx(item.r) - sx(0),
+      class: "junction"
+    }));
+  }
+
+  for (const item of [...data.nodes, ...data.legendNodes]) {
+    plot.appendChild(make("circle", {
+      cx: sx(item.x),
+      cy: sy(item.y),
+      r: sx(item.r) - sx(0),
+      class: item.cls
+    }));
+    if (item.text) {
+      plot.appendChild(make("text", {
+        x: sx(item.x),
+        y: sy(item.y),
+        class: "token-letter",
+        "text-anchor": "middle",
+        "dominant-baseline": "central"
+      }, item.text));
+    }
+  }
+
+  for (const item of data.texts) {
+    plot.appendChild(make("text", {
+      x: sx(item.x) + item.dx,
+      y: sy(item.y) + item.dy,
+      class: item.cls,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "central"
+    }, item.text));
+  }
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const fallback = document.getElementById("fallback");
+  if (svg) svg.hidden = true;
+  if (fallback) fallback.hidden = false;
+}
+</script>
+</body>
+</html>

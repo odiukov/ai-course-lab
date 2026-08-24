@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Два маршрута рендера одного пикселя</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f4ed;
+    --panel: #fffdf8;
+    --ink: #202536;
+    --muted: #657083;
+    --line: #8792a5;
+    --nerf: #6656d9;
+    --nerf-soft: #e5e1ff;
+    --gs: #007f78;
+    --gs-soft: #d5f3ed;
+    --pink: #e46b91;
+    --pink-soft: #f8c8d7;
+    --gold: #d89521;
+    --gold-soft: #f8df9f;
+    --blue: #3c78d8;
+    --blue-soft: #c9dcfb;
+    --result: #7558b3;
+    --white: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #151821;
+      --panel: #202531;
+      --ink: #eef1f7;
+      --muted: #abb4c4;
+      --line: #77839a;
+      --nerf: #a99cff;
+      --nerf-soft: #37305f;
+      --gs: #54d2c3;
+      --gs-soft: #183f3d;
+      --pink: #ff8bae;
+      --pink-soft: #613344;
+      --gold: #f4bd55;
+      --gold-soft: #59451f;
+      --blue: #82aeff;
+      --blue-soft: #29446f;
+      --result: #b49af3;
+      --white: #ffffff;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  h1 {
+    color: var(--ink);
+    font-size: 22px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 470px;
+    background: var(--bg);
+  }
+
+  .panel {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .divider {
+    stroke: var(--line);
+    stroke-width: 2;
+  }
+
+  .route {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .nerf-route { stroke: var(--nerf); }
+  .gs-route { stroke: var(--gs); }
+  .guide { stroke: var(--line); stroke-width: 2; fill: none; }
+  .sample-link { stroke: var(--nerf); stroke-width: 2; fill: none; }
+
+  .heading {
+    fill: var(--ink);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .label {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .small {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .inside {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .final-label {
+    fill: var(--ink);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .nerf-fill { fill: var(--nerf); }
+  .nerf-soft { fill: var(--nerf-soft); stroke: var(--nerf); stroke-width: 2; }
+  .gs-fill { fill: var(--gs); }
+  .gs-soft { fill: var(--gs-soft); stroke: var(--gs); stroke-width: 2; }
+  .pink { fill: var(--pink); }
+  .pink-soft { fill: var(--pink-soft); stroke: var(--pink); stroke-width: 2; }
+  .gold { fill: var(--gold); }
+  .gold-soft { fill: var(--gold-soft); stroke: var(--gold); stroke-width: 2; }
+  .blue { fill: var(--blue); }
+  .blue-soft { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 2; }
+  .result { fill: var(--result); stroke: var(--ink); stroke-width: 2; }
+  .screen { fill: var(--panel); stroke: var(--gs); stroke-width: 2; }
+  .camera { fill: var(--nerf-soft); stroke: var(--nerf); stroke-width: 2; }
+
+  #fallback {
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<h1 id="diagram-title">Два маршрута рендера одного пикселя</h1>
+
+<svg
+  viewBox="0 0 1200 470"
+  width="1200"
+  height="470"
+  preserveAspectRatio="xMidYMid meet"
+  role="img"
+  aria-labelledby="diagram-title diagram-description">
+  <desc id="diagram-description">
+    Слева NeRF выпускает луч через пиксель, делает сотни запросов к MLP
+    и собирает ответы. Справа явные 3D-гауссианы проецируются в сплэты,
+    сортируются и смешиваются. Оба маршрута дают цвет одного пикселя.
+  </desc>
+  <g id="scene"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать два пути к цвету одного пикселя: сотни
+  запросов NeRF к MLP вдоль луча и проекцию, сортировку и смешивание
+  явных 3D-гауссиан.
+</p>
+
+<script>
+const DATA = Object.freeze({
+  panels: [
+    { x1: 0, y1: 0, x2: 52, y2: 32.5 },
+    { x1: 58, y1: 0, x2: 110, y2: 32.5 }
+  ],
+  lines: [
+    { a: [55, 1.5], b: [55, 31], cls: "divider" },
+    { a: [10.8, 8.5], b: [10.8, 15.5], cls: "guide" },
+    { a: [84, 7.5], b: [84, 20.5], cls: "guide" },
+    { a: [98, 7.5], b: [98, 20.5], cls: "guide" }
+  ],
+  polygons: [
+    {
+      points: [[2.5, 10], [6.2, 10], [8.2, 12], [6.2, 14], [2.5, 14]],
+      cls: "camera"
+    }
+  ],
+  rects: [
+    { x1: 10.1, y1: 11.1, x2: 11.5, y2: 12.9, rx: 0.2, cls: "nerf-fill" },
+    { x1: 15.5, y1: 22, x2: 44.5, y2: 26.2, rx: 1.1, cls: "nerf-soft" },
+    { x1: 27, y1: 28.1, x2: 43.5, y2: 31.2, rx: 1.2, cls: "nerf-soft" },
+    { x1: 84, y1: 7.5, x2: 98, y2: 20.5, rx: 0.5, cls: "screen" },
+    { x1: 81.5, y1: 23.1, x2: 99.5, y2: 26.3, rx: 1.1, cls: "gs-soft" },
+    { x1: 75, y1: 28.1, x2: 94, y2: 31.2, rx: 1.2, cls: "gs-soft" },
+    { x1: 52.5, y1: 34, x2: 57.5, y2: 39, rx: 0.5, cls: "result" }
+  ],
+  samples: [
+    [14, 12.7], [16.8, 13.2], [19.6, 13.7], [22.4, 14.2],
+    [25.2, 14.7], [28, 15.2], [30.8, 15.7], [33.6, 16.2],
+    [36.4, 16.7], [39.2, 17.2], [42, 17.7], [44.8, 18.2]
+  ],
+  sampleLinks: [
+    { a: [19.6, 13.7], b: [19.6, 22] },
+    { a: [28, 15.2], b: [28, 22] },
+    { a: [36.4, 16.7], b: [36.4, 22] },
+    { a: [42, 17.7], b: [42, 22] }
+  ],
+  mlpNodes: [
+    [18.4, 24.1], [22.3, 24.1], [26.2, 24.1],
+    [33.8, 24.1], [37.7, 24.1], [41.6, 24.1]
+  ],
+  gaussians: [
+    { c: [64.5, 10.3], r: [2.7, 1.5], cls: "pink-soft" },
+    { c: [69.5, 14.6], r: [3.3, 2], cls: "gold-soft" },
+    { c: [74.5, 9.4], r: [2.5, 1.8], cls: "blue-soft" },
+    { c: [76, 17.8], r: [3, 1.6], cls: "pink-soft" },
+    { c: [65.5, 19], r: [2.4, 1.4], cls: "blue-soft" }
+  ],
+  splats: [
+    { c: [88, 11], r: [3, 2.2], cls: "blue-soft" },
+    { c: [93.5, 13.8], r: [3.2, 2.6], cls: "pink-soft" },
+    { c: [90.5, 17], r: [3.4, 2], cls: "gold-soft" }
+  ],
+  depthSplats: [
+    { c: [85, 24.7], r: [1.5, 0.8], cls: "blue-soft" },
+    { c: [90.5, 24.7], r: [1.5, 0.8], cls: "gold-soft" },
+    { c: [96, 24.7], r: [1.5, 0.8], cls: "pink-soft" }
+  ],
+  arrows: [
+    {
+      a: [6.2, 12], b: [10.1, 12], cls: "nerf-route",
+      head: [[9.35, 11.45], [10.1, 12], [9.35, 12.55]]
+    },
+    {
+      a: [11.5, 12], b: [47, 18.6], cls: "nerf-route",
+      head: [[45.9, 17.7], [47, 18.6], [45.55, 19]]
+    },
+    {
+      a: [40.8, 17.5], b: [40.8, 22], cls: "nerf-route",
+      head: [[40.15, 21.15], [40.8, 22], [41.45, 21.15]]
+    },
+    {
+      a: [35.8, 26.2], b: [35.8, 28.1], cls: "nerf-route",
+      head: [[35.15, 27.25], [35.8, 28.1], [36.45, 27.25]]
+    },
+    {
+      a: [43.5, 29.7], b: [52.5, 35.6], cls: "nerf-route",
+      head: [[51.05, 35.35], [52.5, 35.6], [51.65, 34.4]]
+    },
+    {
+      a: [78.7, 14], b: [84, 14], cls: "gs-route",
+      head: [[83.1, 13.35], [84, 14], [83.1, 14.65]]
+    },
+    {
+      a: [91, 20.5], b: [91, 23.1], cls: "gs-route",
+      head: [[90.35, 22.25], [91, 23.1], [91.65, 22.25]]
+    },
+    {
+      a: [89, 26.3], b: [89, 28.1], cls: "gs-route",
+      head: [[88.35, 27.25], [89, 28.1], [89.65, 27.25]]
+    },
+    {
+      a: [75, 29.7], b: [57.5, 35.6], cls: "gs-route",
+      head: [[58.4, 34.35], [57.5, 35.6], [58.95, 35.25]]
+    }
+  ],
+  labels: [
+    { p: [2, 3], dx: 0, dy: 0, anchor: "start", text: "NeRF · исследование луча", cls: "heading" },
+    { p: [60, 3], dx: 0, dy: 0, anchor: "start", text: "3DGS · сборка из примитивов", cls: "heading" },
+    { p: [4.8, 16.5], dx: 0, dy: 0, anchor: "middle", text: "камера", cls: "small" },
+    { p: [11, 8.2], dx: 0, dy: -6, anchor: "middle", text: "выбранный пиксель", cls: "small" },
+    { p: [28.5, 11.2], dx: 0, dy: -8, anchor: "middle", text: "сотни точек на луче", cls: "label" },
+    { p: [30, 24.65], dx: 0, dy: 0, anchor: "middle", text: "сотни запросов к MLP", cls: "inside" },
+    { p: [35.25, 30.15], dx: 0, dy: 0, anchor: "middle", text: "сбор ответов", cls: "inside" },
+    { p: [70.5, 6.7], dx: 0, dy: -6, anchor: "middle", text: "явные 3D-гауссианы", cls: "label" },
+    { p: [79, 12.3], dx: 0, dy: -8, anchor: "middle", text: "проекция", cls: "small" },
+    { p: [91, 7], dx: 0, dy: -5, anchor: "middle", text: "сплэты на кадре", cls: "label" },
+    { p: [90.5, 25.15], dx: 0, dy: 0, anchor: "middle", text: "сортировка по глубине", cls: "inside" },
+    { p: [84.5, 30.15], dx: 0, dy: 0, anchor: "middle", text: "α-смешивание", cls: "inside" },
+    { p: [55, 41], dx: 0, dy: 3, anchor: "middle", text: "один итог: цвет пикселя", cls: "final-label" }
+  ],
+  sampleRadius: 0.36,
+  nodeRadius: 0.42
+});
+
+const origin = Object.freeze({ x: 40, y: 35 });
+const scale = Object.freeze({ x: 10.2, y: 10 });
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const NS = "http://www.w3.org/2000/svg";
+  const scene = document.getElementById("scene");
+
+  const make = (name, attrs, cls) => {
+    const node = document.createElementNS(NS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, value);
+    }
+    if (cls) node.setAttribute("class", cls);
+    scene.appendChild(node);
+    return node;
+  };
+
+  const drawRect = item => make("rect", {
+    x: sx(item.x1),
+    y: sy(item.y1),
+    width: sx(item.x2) - sx(item.x1),
+    height: sy(item.y2) - sy(item.y1),
+    rx: sx(item.x1 + item.rx) - sx(item.x1),
+    ry: sy(item.y1 + item.rx) - sy(item.y1)
+  }, item.cls);
+
+  const drawLine = item => make("line", {
+    x1: sx(item.a[0]),
+    y1: sy(item.a[1]),
+    x2: sx(item.b[0]),
+    y2: sy(item.b[1])
+  }, item.cls);
+
+  const drawEllipse = item => make("ellipse", {
+    cx: sx(item.c[0]),
+    cy: sy(item.c[1]),
+    rx: sx(item.c[0] + item.r[0]) - sx(item.c[0]),
+    ry: sy(item.c[1] + item.r[1]) - sy(item.c[1])
+  }, item.cls);
+
+  const drawCircle = (point, radius, cls) => make("circle", {
+    cx: sx(point[0]),
+    cy: sy(point[1]),
+    r: sx(point[0] + radius) - sx(point[0])
+  }, cls);
+
+  const drawPolygon = item => make("polygon", {
+    points: item.points.map(point => `${sx(point[0])},${sy(point[1])}`).join(" ")
+  }, item.cls);
+
+  const drawArrow = item => {
+    drawLine(item);
+    drawPolygon({ points: item.head, cls: item.cls.replace("route", "fill") });
+  };
+
+  const drawText = item => {
+    const text = make("text", {
+      x: sx(item.p[0]),
+      y: sy(item.p[1]),
+      dx: item.dx,
+      dy: item.dy,
+      "text-anchor": item.anchor,
+      "dominant-baseline": "middle"
+    }, item.cls);
+    text.textContent = item.text;
+  };
+
+  DATA.panels.forEach(item => drawRect({ ...item, rx: 1.4, cls: "panel" }));
+  DATA.lines.forEach(drawLine);
+  DATA.polygons.forEach(drawPolygon);
+  DATA.sampleLinks.forEach(item => drawLine({ ...item, cls: "sample-link" }));
+  DATA.arrows.forEach(drawArrow);
+  DATA.rects.forEach(drawRect);
+  DATA.gaussians.forEach(drawEllipse);
+  DATA.splats.forEach(drawEllipse);
+  DATA.depthSplats.forEach(drawEllipse);
+  DATA.samples.forEach(point => drawCircle(point, DATA.sampleRadius, "nerf-fill"));
+  DATA.mlpNodes.forEach(point => drawCircle(point, DATA.nodeRadius, "nerf-fill"));
+  DATA.labels.forEach(drawText);
+} catch (error) {
+  document.getElementById("scene").textContent = "";
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

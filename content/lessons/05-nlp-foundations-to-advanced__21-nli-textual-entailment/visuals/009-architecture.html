@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Путь пары текстов через NLI-классификатор</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f9fc;
+    --panel: #ffffff;
+    --panel-soft: #eef3f8;
+    --text: #182230;
+    --muted: #607083;
+    --line: #9bacbd;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
+    --green: #16845b;
+    --green-soft: #dcfce7;
+    --orange: #c56a16;
+    --orange-soft: #ffedd5;
+    --red: #b44343;
+    --red-soft: #fee2e2;
+    --shadow: #dbe3ec;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111720;
+      --panel: #18212d;
+      --panel-soft: #202c3a;
+      --text: #edf3fa;
+      --muted: #a8b6c6;
+      --line: #617286;
+      --blue: #78a9ff;
+      --blue-soft: #203b65;
+      --violet: #b79aff;
+      --violet-soft: #382d5c;
+      --green: #62d4a6;
+      --green-soft: #193f34;
+      --orange: #ffb86b;
+      --orange-soft: #4b3321;
+      --red: #ff9999;
+      --red-soft: #4a292d;
+      --shadow: #0b1017;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+  }
+
+  .figure {
+    width: 100%;
+    background: var(--bg);
+    padding: 12px 14px 10px;
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: bold;
+    letter-spacing: .01em;
+  }
+
+  .subtitle {
+    margin: 0 0 6px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+
+  .stage {
+    fill: var(--panel-soft);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .stage-strong {
+    fill: var(--panel);
+    stroke: var(--violet);
+    stroke-width: 2px;
+  }
+
+  .token-special {
+    fill: var(--violet-soft);
+    stroke: var(--violet);
+    stroke-width: 1.5px;
+  }
+
+  .token-premise {
+    fill: var(--blue-soft);
+    stroke: var(--blue);
+    stroke-width: 1.5px;
+  }
+
+  .token-hypothesis {
+    fill: var(--orange-soft);
+    stroke: var(--orange);
+    stroke-width: 1.5px;
+  }
+
+  .output {
+    fill: var(--panel);
+    stroke: var(--line);
+    stroke-width: 1.5px;
+  }
+
+  .output-selected {
+    fill: var(--green-soft);
+    stroke: var(--green);
+    stroke-width: 2px;
+  }
+
+  .softmax {
+    fill: var(--violet-soft);
+    stroke: var(--violet);
+    stroke-width: 1.5px;
+  }
+
+  .connector {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .connector-main {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 2.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .attention {
+    fill: none;
+    stroke: var(--violet);
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+  }
+
+  .arrow-head { fill: var(--blue); }
+  .branch-head { fill: var(--line); }
+
+  .bar-track { fill: var(--shadow); }
+  .bar-entailment { fill: var(--green); }
+  .bar-contradiction { fill: var(--red); }
+  .bar-neutral { fill: var(--orange); }
+
+  .vector-dot { fill: var(--violet); }
+  .encoder-line { stroke: var(--line); stroke-width: 2px; stroke-linecap: round; }
+  .encoder-node { fill: var(--blue); }
+
+  text {
+    fill: var(--text);
+    font-size: 14px;
+    dominant-baseline: middle;
+  }
+
+  .small { font-size: 12px; }
+  .micro { font-size: 11px; }
+  .label { fill: var(--muted); font-size: 12px; }
+  .heading { font-size: 14px; font-weight: bold; }
+  .token-text { font-size: 12px; font-weight: bold; }
+  .probability { font-size: 16px; font-weight: bold; }
+  .selected-text { fill: var(--green); font-weight: bold; }
+  .fallback { fill: var(--red); font-size: 16px; }
+</style>
+</head>
+<body>
+<main class="figure">
+  <h1>Путь пары текстов через NLI-классификатор</h1>
+  <p class="subtitle">Оба текста читаются вместе, а решение принимается по представлению специального токена [CLS].</p>
+  <svg id="diagram" viewBox="0 0 1200 450" preserveAspectRatio="xMidYMid meet"
+       role="img" aria-labelledby="svgTitle svgDesc">
+    <title id="svgTitle">Путь пары premise и hypothesis через NLI-классификатор</title>
+    <desc id="svgDesc">Последовательность CLS, premise, SEP, hypothesis, SEP проходит через энкодер. Представление CLS поступает в softmax, который выдаёт вероятности entailment 0,96, contradiction 0,01 и neutral 0,03.</desc>
+  </svg>
+</main>
+
+<script>
+const D = {
+  zero: 0,
+  canvas: [0, 0, 1200, 450],
+  radius: 1.2,
+  arrow: { dx: 1.4, dy: 0.9 },
+  inputFrame: [1, 5, 74, 23],
+  tokens: [
+    [2, 9, 9, 18, "token-special", "[CLS]"],
+    [9, 9, 35, 18, "token-premise", "На столе стоят три чашки"],
+    [35, 9, 42, 18, "token-special", "[SEP]"],
+    [42, 9, 66, 18, "token-hypothesis", "На столе есть посуда"],
+    [66, 9, 73, 18, "token-special", "[SEP]"]
+  ],
+  inputLabels: [
+    [1, 2.5, "start", "heading", "Единый вход"],
+    [22, 21.2, "middle", "label", "premise"],
+    [54, 21.2, "middle", "label", "hypothesis"]
+  ],
+  inputArrow: [74.5, 13.5, 78, 13.5],
+  inputArrowLabel: [76, 10.5, "middle", "micro", "вся пара"],
+  encoder: [78, 5, 102, 23],
+  encoderTitle: [90, 2.5, "middle", "heading", "Encoder"],
+  encoderCaption: [90, 26, "middle", "label", "слова учитывают контекст пары"],
+  encoderLines: [
+    [81, 10, 99, 10],
+    [81, 14, 99, 14],
+    [81, 18, 99, 18]
+  ],
+  encoderNodes: [
+    [83, 10], [89, 10], [97, 10],
+    [82, 14], [91, 14], [98, 14],
+    [84, 18], [90, 18], [96, 18]
+  ],
+  attentionCurves: [
+    [83, 10, 90, 6.5, 96, 18],
+    [89, 10, 91, 20.5, 98, 14],
+    [82, 14, 88, 8, 97, 10]
+  ],
+  clsArrow: [102.5, 13.5, 106, 13.5],
+  clsArrowLabel: [104, 10.5, "middle", "micro", "[CLS]"],
+  clsCard: [106, 7, 120, 20],
+  clsTitle: [113, 3.5, "middle", "heading", "Представление [CLS]"],
+  clsCaption: [113, 23.5, "middle", "label", "признаки всей пары"],
+  vectorDots: [
+    [109, 11], [113, 11], [117, 11],
+    [109, 15], [113, 15], [117, 15]
+  ],
+  classifierArrow: [120.5, 13.5, 124, 13.5],
+  classifierArrowLabel: [122, 10.5, "middle", "micro", "признаки"],
+  classifier: [124, 1.5, 164, 54],
+  classifierTitle: [144, 4.5, "middle", "heading", "Классификатор"],
+  softmax: [135, 7, 153, 14],
+  softmaxText: [144, 10.5, "middle", "heading", "softmax"],
+  sumText: [144, 16.8, "middle", "label", "оценки складываются в единицу"],
+  trunk: [
+    [144, 14.5, 144, 19],
+    [127, 19, 127, 47],
+    [127, 19, 144, 19]
+  ],
+  rows: [
+    {
+      box: [130, 20, 161, 29],
+      cls: "output-selected",
+      label: [132, 23, "start", "heading selected-text", "entailment"],
+      value: [158, 23, "end", "probability selected-text", "0,96"],
+      track: [132, 26.5, 156, 27.5],
+      fill: [132, 26.5, 155, 27.5],
+      fillClass: "bar-entailment",
+      branch: [127, 24.5, 130, 24.5]
+    },
+    {
+      box: [130, 31, 161, 40],
+      cls: "output",
+      label: [132, 34, "start", "heading", "contradiction"],
+      value: [158, 34, "end", "probability", "0,01"],
+      track: [132, 37.5, 156, 38.5],
+      fill: [132, 37.5, 133, 38.5],
+      fillClass: "bar-contradiction",
+      branch: [127, 35.5, 130, 35.5]
+    },
+    {
+      box: [130, 42, 161, 51],
+      cls: "output",
+      label: [132, 45, "start", "heading", "neutral"],
+      value: [158, 45, "end", "probability", "0,03"],
+      track: [132, 48.5, 156, 49.5],
+      fill: [132, 48.5, 134, 49.5],
+      fillClass: "bar-neutral",
+      branch: [127, 46.5, 130, 46.5]
+    }
+  ],
+  chosen: [145.5, 53, "middle", "small selected-text", "максимум → итоговая метка"],
+  fallback: [4, 26, "start", "fallback",
+    "Схема должна показать: входная пара → encoder → [CLS] → softmax → три класса."]
+};
+const origin = { x: 20, y: 20 };
+const scale = 7.05;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function node(tag, attrs, content) {
+    const item = document.createElementNS(ns, tag);
+    for (const [name, value] of Object.entries(attrs)) item.setAttribute(name, value);
+    if (content !== undefined) item.textContent = content;
+    return item;
+  }
+
+  function group(label) {
+    return node("g", { "aria-label": label });
+  }
+
+  function rect(parent, box, cls) {
+    const [x1, y1, x2, y2] = box;
+    parent.appendChild(node("rect", {
+      x: sx(x1),
+      y: sy(y1),
+      width: sx(x2) - sx(x1),
+      height: sy(y2) - sy(y1),
+      rx: sx(D.radius) - sx(D.zero),
+      ry: sy(D.radius) - sy(D.zero),
+      class: cls
+    }));
+  }
+
+  function line(parent, points, cls) {
+    const [x1, y1, x2, y2] = points;
+    parent.appendChild(node("line", {
+      x1: sx(x1), y1: sy(y1),
+      x2: sx(x2), y2: sy(y2),
+      class: cls
+    }));
+  }
+
+  function text(parent, spec) {
+    const [x, y, anchor, cls, content] = spec;
+    parent.appendChild(node("text", {
+      x: sx(x),
+      y: sy(y),
+      "text-anchor": anchor,
+      class: cls
+    }, content));
+  }
+
+  function circle(parent, point, cls) {
+    const [x, y] = point;
+    parent.appendChild(node("circle", {
+      cx: sx(x),
+      cy: sy(y),
+      r: sx(D.radius) - sx(D.zero),
+      class: cls
+    }));
+  }
+
+  function arrowRight(parent, points, lineClass, headClass) {
+    const [x1, y1, x2, y2] = points;
+    line(parent, [x1, y1, x2 - D.arrow.dx, y2], lineClass);
+    parent.appendChild(node("polygon", {
+      points: [
+        `${sx(x2)},${sy(y2)}`,
+        `${sx(x2 - D.arrow.dx)},${sy(y2 - D.arrow.dy)}`,
+        `${sx(x2 - D.arrow.dx)},${sy(y2 + D.arrow.dy)}`
+      ].join(" "),
+      class: headClass
+    }));
+  }
+
+  const input = group("Единый вход из premise и hypothesis");
+  rect(input, D.inputFrame, "stage");
+  for (const token of D.tokens) {
+    const [x1, y1, x2, y2, cls, label] = token;
+    rect(input, [x1, y1, x2, y2], cls);
+    text(input, [(x1 + x2) / (D.radius + D.radius), (y1 + y2) / (D.radius + D.radius),
+      "middle", "token-text", label]);
+  }
+  for (const label of D.inputLabels) text(input, label);
+  svg.appendChild(input);
+
+  const encoder = group("Трансформер-энкодер");
+  rect(encoder, D.encoder, "stage-strong");
+  text(encoder, D.encoderTitle);
+  text(encoder, D.encoderCaption);
+  for (const item of D.encoderLines) line(encoder, item, "encoder-line");
+  for (const item of D.encoderNodes) circle(encoder, item, "encoder-node");
+  for (const curve of D.attentionCurves) {
+    const [x1, y1, cx, cy, x2, y2] = curve;
+    encoder.appendChild(node("path", {
+      d: `M ${sx(x1)} ${sy(y1)} Q ${sx(cx)} ${sy(cy)} ${sx(x2)} ${sy(y2)}`,
+      class: "attention"
+    }));
+  }
+  svg.appendChild(encoder);
+
+  const cls = group("Итоговое представление CLS");
+  rect(cls, D.clsCard, "softmax");
+  text(cls, D.clsTitle);
+  text(cls, D.clsCaption);
+  for (const item of D.vectorDots) circle(cls, item, "vector-dot");
+  svg.appendChild(cls);
+
+  const classifier = group("Softmax-классификатор из трёх классов");
+  rect(classifier, D.classifier, "stage");
+  text(classifier, D.classifierTitle);
+  rect(classifier, D.softmax, "softmax");
+  text(classifier, D.softmaxText);
+  text(classifier, D.sumText);
+  for (const item of D.trunk) line(classifier, item, "connector");
+
+  for (const row of D.rows) {
+    rect(classifier, row.box, row.cls);
+    arrowRight(classifier, row.branch, "connector", "branch-head");
+    text(classifier, row.label);
+    text(classifier, row.value);
+    rect(classifier, row.track, "bar-track");
+    rect(classifier, row.fill, row.fillClass);
+  }
+  text(classifier, D.chosen);
+  svg.appendChild(classifier);
+
+  const flow = group("Направление обработки");
+  arrowRight(flow, D.inputArrow, "connector-main", "arrow-head");
+  text(flow, D.inputArrowLabel);
+  arrowRight(flow, D.clsArrow, "connector-main", "arrow-head");
+  text(flow, D.clsArrowLabel);
+  arrowRight(flow, D.classifierArrow, "connector-main", "arrow-head");
+  text(flow, D.classifierArrowLabel);
+  svg.appendChild(flow);
+} catch (error) {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const [x, y, anchor, cls, message] = D.fallback;
+  const fallback = document.createElementNS(ns, "text");
+  fallback.setAttribute("x", sx(x));
+  fallback.setAttribute("y", sy(y));
+  fallback.setAttribute("text-anchor", anchor);
+  fallback.setAttribute("class", cls);
+  fallback.textContent = message;
+  svg.appendChild(fallback);
+}
+</script>
+</body>
+</html>

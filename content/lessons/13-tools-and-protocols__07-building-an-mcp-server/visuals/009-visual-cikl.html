@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Схема цикла разбора</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --fg:#232323; --muted:#6b6b6b;
+    --line:#3a3a3a; --box:#ffffff; --boxst:#3a3a3a;
+    --ok:#1d6f42; --okbg:#e8f5ec;
+    --no:#8a4b12; --nobg:#fbeee0;
+    --err:#8f2f4a; --errbg:#f9e9ee;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16181c; --fg:#e9e9e6; --muted:#a2a2a2;
+      --line:#c8c8c8; --box:#22252b; --boxst:#c8c8c8;
+      --ok:#7fd6a0; --okbg:#1b2c22;
+      --no:#e0a86a; --nobg:#2c231a;
+      --err:#e58fa8; --errbg:#2c1a21;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:760px;margin:0 auto;padding:8px 10px 12px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:480px;background:var(--bg);}
+  .lbl{font-size:11px;fill:var(--fg);}
+  .box{font-size:11.5px;fill:var(--fg);}
+  .mut{font-size:10.5px;fill:var(--muted);}
+  .legend{font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.5;}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.95em;}
+  .fallback{font-size:12.5px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2>Цикл разбора: одна строка — один круг</h2>
+<div id="host"></div>
+<p class="legend" id="lg"></p>
+</div>
+<script>
+(function(){
+  var host=document.getElementById("host");
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var NODES=[
+      {id:"read", x:0,  y:9,  w:15, h:2.2, kind:"box",  t:["stdin.readline()"], s:"ждёт строку"},
+      {id:"parse",x:0,  y:6,  w:15, h:2.2, kind:"box",  t:["json.loads(line)"]},
+      {id:"fork", x:0,  y:2.6,w:16, h:3.0, kind:"diam", t:["есть id?"]},
+      {id:"req",  x:-11,y:-1.6,w:15,h:2.6, kind:"box",  t:["обработать запрос"],cls:"ok"},
+      {id:"note", x:11, y:-1.6,w:15,h:2.6, kind:"box",  t:["обработать уведомление"],cls:"no"},
+      {id:"out",  x:-11,y:-5.6,w:15,h:2.6, kind:"box",  t:["stdout: 1 ответ, id 7"],cls:"ok"},
+      {id:"nil",  x:11, y:-5.6,w:15,h:2.6, kind:"box",  t:["ответа нет"],cls:"no"},
+      {id:"errl", x:24, y:6,  w:11, h:2.2, kind:"box",  t:["stderr: логи"],cls:"err"}
+    ];
+    var JOIN={x:0,y:-8.4};
+    var LOOPX=-23, LOOPY=9;
+
+    // ---- один origin, один scale ----
+    var VBW=740, VBH=470;
+    var origin={x:370, y:250};
+    var scale=13.4;
+    function sx(x){return origin.x + x*scale;}
+    function sy(y){return origin.y - y*scale;}
+
+    var svgns="http://www.w3.org/2000/svg";
+    var svg=document.createElementNS(svgns,"svg");
+    svg.setAttribute("viewBox","0 0 "+VBW+" "+VBH);
+    svg.setAttribute("preserveAspectRatio","xMidYMid meet");
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","Цикл: чтение строки, разбор JSON, развилка по наличию id");
+
+    var defs=document.createElementNS(svgns,"defs");
+    defs.innerHTML=
+      '<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+      '<path d="M0 0 L10 5 L0 10 z" fill="var(--line)"/></marker>'+
+      '<marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'+
+      '<path d="M0 0 L10 5 L0 10 z" fill="var(--err)"/></marker>';
+    svg.appendChild(defs);
+
+    function el(n,at){var e=document.createElementNS(svgns,n);for(var k in at)e.setAttribute(k,at[k]);svg.appendChild(e);return e;}
+    function N(id){for(var i=0;i<NODES.length;i++)if(NODES[i].id===id)return NODES[i];}
+    function top(n){return {x:n.x, y:n.y+n.h/2};}
+    function bot(n){return {x:n.x, y:n.y-n.h/2};}
+    function left(n){return {x:n.x-n.w/2, y:n.y};}
+    function right(n){return {x:n.x+n.w/2, y:n.y};}
+
+    function path(pts,st){
+      var d="";
+      for(var i=0;i<pts.length;i++) d+=(i?" L":"M")+sx(pts[i].x)+" "+sy(pts[i].y);
+      var a={d:d,fill:"none",stroke:st&&st.c||"var(--line)","stroke-width":st&&st.w||1.6,
+             "marker-end":st&&st.m||"url(#a)"};
+      if(st&&st.dash)a["stroke-dasharray"]=st.dash;
+      el("path",a);
+    }
+    function txt(p,s,anchor,dx,dy,cls){
+      var t=el("text",{x:sx(p.x)+dx,y:sy(p.y)+dy,"text-anchor":anchor,class:cls||"lbl"});
+      t.textContent=s;
+    }
+
+    // ---- узлы ----
+    NODES.forEach(function(n){
+      var fill="var(--box)", stroke="var(--boxst)";
+      if(n.cls==="ok"){fill="var(--okbg)";stroke="var(--ok)";}
+      if(n.cls==="no"){fill="var(--nobg)";stroke="var(--no)";}
+      if(n.cls==="err"){fill="var(--errbg)";stroke="var(--err)";}
+      if(n.kind==="diam"){
+        var t=top(n),b=bot(n),l=left(n),r=right(n);
+        el("polygon",{points:[t,r,b,l].map(function(p){return sx(p.x)+","+sy(p.y);}).join(" "),
+          fill:fill,stroke:stroke,"stroke-width":1.6});
+      }else{
+        el("rect",{x:sx(n.x-n.w/2),y:sy(n.y+n.h/2),
+          width:sx(n.x+n.w/2)-sx(n.x-n.w/2),height:sy(n.y-n.h/2)-sy(n.y+n.h/2),
+          rx:5,fill:fill,stroke:stroke,"stroke-width":1.6});
+      }
+      var mid={x:n.x,y:n.y};
+      txt(mid,n.t[0],"middle",0,4,"box");
+      if(n.s) txt(bot(n),n.s,"middle",0,13,"mut");
+    });
+
+    var read=N("read"),parse=N("parse"),fork=N("fork"),
+        req=N("req"),note=N("note"),out=N("out"),nil=N("nil"),errl=N("errl");
+
+    // ---- основной поток ----
+    path([bot(read),top(parse)]);
+    path([bot(parse),top(fork)]);
+
+    // левая ветка: есть id
+    path([left(fork),{x:req.x,y:fork.y},top(req)]);
+    path([bot(req),top(out)]);
+    // правая ветка: нет id
+    path([right(fork),{x:note.x,y:fork.y},top(note)]);
+    path([bot(note),top(nil)]);
+
+    // сход в одну стрелку наверх
+    path([bot(out),{x:out.x,y:JOIN.y},JOIN],{m:"none"});
+    path([bot(nil),{x:nil.x,y:JOIN.y},JOIN],{m:"none"});
+    path([JOIN,{x:LOOPX,y:JOIN.y},{x:LOOPX,y:LOOPY},left(read)]);
+
+    // отладочные логи сбоку
+    path([right(parse),left(errl)],{c:"var(--err)",m:"url(#ae)",dash:"5 4"});
+
+    // ---- подписи (каждая свой якорь и своя сторона) ----
+    txt(left(fork),"есть id (7)","end",-8,-2);
+    txt(right(fork),"нет id","start",8,-2);
+    txt(top(parse),"строка","middle",0,-9,"mut");
+    txt({x:LOOPX,y:(JOIN.y+LOOPY)/2},"новый круг","start",8,0,"mut");
+    txt({x:(parse.x+errl.x)/2,y:parse.y},"не в stdout","middle",14,-9,"mut");
+    txt(top(nil),"молча","start",8,12,"mut");
+
+    svg.setAttribute("style","max-height:"+VBH+"px");
+    host.appendChild(svg);
+    document.getElementById("lg").innerHTML=
+      "Развилка одна: сортировка по <code>id</code> идёт раньше сортировки по <code>method</code>. "+
+      "Обе ветки сходятся в одну стрелку наверх — цикл возвращается на <code>readline()</code> и ждёт.";
+  }catch(e){
+    host.innerHTML='<p class="fallback">Схема должна показывать цикл: '+
+      '<code>stdin.readline()</code> → <code>json.loads(line)</code> → ромб «есть id?». '+
+      'Есть id (например 7) — левая ветка: обработать запрос и записать в stdout ровно один ответ с тем же id 7. '+
+      'Нет id — правая ветка: обработать уведомление, ответа нет. '+
+      'Обе ветки сходятся в одну стрелку наверх, на новый круг чтения. '+
+      'Сбоку — отдельная стрелка отладочных логов в stderr, не в stdout.</p>';
+  }
+})();
+</script>
+</body>
+</html>

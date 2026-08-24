@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>От ломаного блуждания к непрерывному дрожанию</title>
+  <style>
+    :root {
+      --page: #f7f4ec;
+      --panel: #fffdf8;
+      --ink: #25272b;
+      --muted: #656a73;
+      --axis: #9da3ad;
+      --grid: #dfe2e6;
+      --coarse: #d44f45;
+      --middle: #237ca6;
+      --fine: #6654b8;
+      --start: #25272b;
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    h1 {
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      font-family: inherit;
+    }
+
+    .panel-band {
+      fill: var(--panel);
+    }
+
+    .axis {
+      fill: none;
+      stroke: var(--axis);
+      stroke-width: 1.2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .guide {
+      fill: none;
+      stroke: var(--grid);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .trajectory {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .coarse {
+      stroke: var(--coarse);
+      stroke-width: 3;
+    }
+
+    .middle {
+      stroke: var(--middle);
+      stroke-width: 2.2;
+    }
+
+    .fine {
+      stroke: var(--fine);
+      stroke-width: 1.35;
+    }
+
+    .start-dot {
+      fill: var(--start);
+      stroke: var(--panel);
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .panel-label {
+      fill: var(--ink);
+      font-size: 17px;
+      font-weight: 650;
+    }
+
+    .step-label,
+    .tick-label {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .formula {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .caption {
+      fill: var(--muted);
+      font-size: 14px;
+    }
+
+    .fallback {
+      fill: var(--ink);
+      font-size: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #17191d;
+        --panel: #202329;
+        --ink: #f0f1f3;
+        --muted: #b4b8c0;
+        --axis: #777e89;
+        --grid: #393e47;
+        --coarse: #ff766b;
+        --middle: #58b9e5;
+        --fine: #a997ff;
+        --start: #f0f1f3;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>От ломаного блуждания к непрерывному дрожанию</h1>
+
+  <svg id="diagram"
+       viewBox="0 0 960 430"
+       width="960"
+       height="430"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Три приближения броуновского пути</title>
+    <desc id="svg-description">
+      Один случайный путь на времени от нуля до единицы показан с десятью,
+      ста и десятью тысячами шагов. Приращение каждого шага имеет масштаб,
+      равный квадратному корню из интервала времени.
+    </desc>
+  </svg>
+
+  <script>
+    const diagramData = {
+      steps: [10, 100, 10000],
+      centers: [2, 0, -2],
+      classes: ["coarse", "middle", "fine"],
+      labels: ["10 шагов", "100 шагов", "10000 шагов"],
+      intervals: ["Δt = 1 / 10", "Δt = 1 / 100", "Δt = 1 / 10000"],
+      bounds: {
+        timeStart: 0,
+        timeEnd: 1,
+        labelX: 0.18,
+        plotLeft: 1.72,
+        plotRight: 10.78,
+        panelLeft: 0.08,
+        panelRight: 11.12,
+        panelHalf: 0.76,
+        labelAbove: 0.18,
+        labelBelow: -0.15,
+        tickBelow: -0.36,
+        formulaY: -2.78,
+        captionY: -3.06,
+        formulaX: 6.25,
+        captionX: 6.25
+      },
+      constants: {
+        zero: 0,
+        one: 1,
+        two: 2,
+        half: 0.5,
+        fullTurn: 6.283185307179586,
+        seed: 19,
+        hashA: 12.9898,
+        hashB: 78.233,
+        hashScale: 43758.5453,
+        uniformFloor: 0.000001,
+        gain: 0.39,
+        precision: 2,
+        dotRadius: 3.4
+      },
+      offsets: {
+        none: 0,
+        labelRight: 4,
+        labelUp: -2,
+        intervalDown: 3,
+        tickDown: 2
+      }
+    };
+
+    const canvas = { width: 960, height: 430 };
+    const origin = { x: 75, y: 207 };
+    const scale = { x: 76.5, y: 65 };
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+      const { zero, one, two, half, fullTurn, seed, hashA, hashB,
+        hashScale, uniformFloor, gain, precision, dotRadius } =
+        diagramData.constants;
+      const {
+        timeStart, timeEnd, labelX, plotLeft, plotRight, panelLeft,
+        panelRight, panelHalf, labelAbove, labelBelow, tickBelow,
+        formulaY, captionY, formulaX, captionX
+      } = diagramData.bounds;
+      const [coarseSteps, middleSteps, fineSteps] = diagramData.steps;
+      const [coarseCenter, middleCenter, fineCenter] = diagramData.centers;
+      const [coarseClass, middleClass, fineClass] = diagramData.classes;
+      const [coarseLabel, middleLabel, fineLabel] = diagramData.labels;
+      const [coarseInterval, middleInterval, fineInterval] =
+        diagramData.intervals;
+
+      const make = (name, attributes, parent = svg) => {
+        const node = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        parent.appendChild(node);
+        return node;
+      };
+
+      const text = (value, x, y, className, anchor, dx, dy, parent = svg) => {
+        const node = make("text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle",
+          dx,
+          dy
+        }, parent);
+        node.textContent = value;
+        return node;
+      };
+
+      const line = (xStart, yStart, xEnd, yEnd, className, parent = svg) =>
+        make("line", {
+          x1: sx(xStart),
+          y1: sy(yStart),
+          x2: sx(xEnd),
+          y2: sy(yEnd),
+          class: className
+        }, parent);
+
+      const fraction = value => value - Math.floor(value);
+
+      const uniform = (index, shift) => {
+        const wave = Math.sin(
+          (index + seed + shift * hashB) * hashA
+        ) * hashScale;
+        return Math.max(uniformFloor, fraction(Math.abs(wave)));
+      };
+
+      const gaussian = index => {
+        const first = uniform(index, zero);
+        const second = uniform(index, one);
+        return Math.sqrt(-two * Math.log(first)) *
+          Math.cos(fullTurn * second);
+      };
+
+      const fineDt = one / fineSteps;
+      const fineIncrement = Math.sqrt(fineDt);
+      const fineWalk = [{ t: timeStart, value: zero }];
+      let position = zero;
+
+      for (let index = one; index <= fineSteps; index += one) {
+        position += fineIncrement * gaussian(index);
+        fineWalk.push({
+          t: index * fineDt,
+          value: position
+        });
+      }
+
+      const sample = count => {
+        const stride = fineSteps / count;
+        return Array.from({ length: count + one }, (_, index) => {
+          const source = fineWalk[index * stride];
+          return { t: source.t, value: source.value };
+        });
+      };
+
+      const timeX = time =>
+        plotLeft + (plotRight - plotLeft) *
+        ((time - timeStart) / (timeEnd - timeStart));
+
+      const defs = make("defs", {});
+      const panels = [
+        {
+          steps: coarseSteps,
+          center: coarseCenter,
+          className: coarseClass,
+          label: coarseLabel,
+          interval: coarseInterval
+        },
+        {
+          steps: middleSteps,
+          center: middleCenter,
+          className: middleClass,
+          label: middleLabel,
+          interval: middleInterval
+        },
+        {
+          steps: fineSteps,
+          center: fineCenter,
+          className: fineClass,
+          label: fineLabel,
+          interval: fineInterval
+        }
+      ];
+
+      panels.forEach(panel => {
+        const clip = make("clipPath", {
+          id: `clip-${panel.steps}`
+        }, defs);
+
+        make("rect", {
+          x: sx(plotLeft),
+          y: sy(panel.center + panelHalf),
+          width: Math.abs(sx(plotRight) - sx(plotLeft)),
+          height: Math.abs(
+            sy(panel.center - panelHalf) -
+            sy(panel.center + panelHalf)
+          )
+        }, clip);
+      });
+
+      panels.forEach(panel => {
+        make("rect", {
+          x: sx(panelLeft),
+          y: sy(panel.center + panelHalf),
+          width: Math.abs(sx(panelRight) - sx(panelLeft)),
+          height: Math.abs(
+            sy(panel.center - panelHalf) -
+            sy(panel.center + panelHalf)
+          ),
+          class: "panel-band"
+        });
+
+        line(
+          plotLeft,
+          panel.center,
+          plotRight,
+          panel.center,
+          "axis"
+        );
+
+        line(
+          plotLeft,
+          panel.center - panelHalf,
+          plotLeft,
+          panel.center + panelHalf,
+          "guide"
+        );
+
+        line(
+          plotRight,
+          panel.center - panelHalf,
+          plotRight,
+          panel.center + panelHalf,
+          "guide"
+        );
+
+        const points = sample(panel.steps);
+        const pathData = points.map((point, index) => {
+          const command = index === zero ? "M" : "L";
+          const x = sx(timeX(point.t)).toFixed(precision);
+          const y = sy(
+            panel.center + point.value * gain
+          ).toFixed(precision);
+          return `${command}${x},${y}`;
+        }).join(" ");
+
+        make("path", {
+          d: pathData,
+          class: `trajectory ${panel.className}`,
+          "clip-path": `url(#clip-${panel.steps})`
+        });
+
+        make("circle", {
+          cx: sx(timeX(timeStart)),
+          cy: sy(panel.center),
+          r: dotRadius,
+          class: "start-dot"
+        });
+
+        text(
+          panel.label,
+          labelX,
+          panel.center + labelAbove,
+          "panel-label",
+          "start",
+          diagramData.offsets.labelRight,
+          diagramData.offsets.labelUp
+        );
+
+        text(
+          panel.interval,
+          labelX,
+          panel.center + labelBelow,
+          "step-label",
+          "start",
+          diagramData.offsets.labelRight,
+          diagramData.offsets.intervalDown
+        );
+      });
+
+      const bottomAxisY = fineCenter;
+
+      line(
+        plotLeft,
+        bottomAxisY + tickBelow * half,
+        plotLeft,
+        bottomAxisY - tickBelow * half,
+        "axis"
+      );
+
+      line(
+        plotRight,
+        bottomAxisY + tickBelow * half,
+        plotRight,
+        bottomAxisY - tickBelow * half,
+        "axis"
+      );
+
+      text(
+        "0",
+        plotLeft,
+        bottomAxisY + tickBelow,
+        "tick-label",
+        "middle",
+        diagramData.offsets.none,
+        diagramData.offsets.tickDown
+      );
+
+      text(
+        "1",
+        plotRight,
+        bottomAxisY + tickBelow,
+        "tick-label",
+        "middle",
+        diagramData.offsets.none,
+        diagramData.offsets.tickDown
+      );
+
+      text(
+        "время t",
+        plotRight,
+        bottomAxisY + tickBelow,
+        "tick-label",
+        "end",
+        diagramData.offsets.none,
+        diagramData.offsets.tickDown
+      );
+
+      text(
+        "B(t + Δt) = B(t) + √Δt · z",
+        formulaX,
+        formulaY,
+        "formula",
+        "middle",
+        diagramData.offsets.none,
+        diagramData.offsets.none
+      );
+
+      text(
+        "меньше Δt → короче шаги, но дрожание остаётся",
+        captionX,
+        captionY,
+        "caption",
+        "middle",
+        diagramData.offsets.none,
+        diagramData.offsets.none
+      );
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const ns = "http://www.w3.org/2000/svg";
+
+      while (svg.lastChild) {
+        svg.removeChild(svg.lastChild);
+      }
+
+      const fallback = document.createElementNS(ns, "text");
+      fallback.setAttribute("x", sx(diagramData.bounds.formulaX));
+      fallback.setAttribute("y", sy(diagramData.centers[1]));
+      fallback.setAttribute("class", "fallback");
+      fallback.setAttribute("text-anchor", "middle");
+      fallback.setAttribute("dominant-baseline", "middle");
+      fallback.textContent =
+        "Здесь должны быть траектории с 10, 100 и 10000 шагами: приращение равно √Δt.";
+      svg.appendChild(fallback);
+    }
+  </script>
+</body>
+</html>

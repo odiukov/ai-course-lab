@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Один проход GAN и итеративный маршрут диффузии</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fb;
+    --panel: #ffffff;
+    --panel-alt: #eef3ff;
+    --ink: #172033;
+    --muted: #59657a;
+    --line: #34425d;
+    --gan: #d65b45;
+    --gan-soft: #fde9e4;
+    --diff: #356fd1;
+    --diff-soft: #e5efff;
+    --guide: #8b4bc1;
+    --guide-soft: #f1e6fb;
+    --image: #f2c86b;
+    --n1: #27324a;
+    --n2: #69758b;
+    --n3: #aab2c1;
+    --n4: #e3e6ec;
+  }
+  * { box-sizing: border-box; }
+  html, body, .figure { background: var(--page); color: var(--ink); }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .figure { width: 100%; max-width: 1200px; margin: auto; }
+  .figure-title {
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    background: var(--page);
+  }
+  .panel { fill: var(--panel); stroke: var(--line); stroke-width: 1px; }
+  .panel.diff { fill: var(--panel-alt); }
+  .frame { fill: var(--panel); stroke: var(--line); stroke-width: 2px; }
+  .generator { fill: var(--gan-soft); stroke: var(--gan); stroke-width: 2px; }
+  .constraint { fill: var(--guide-soft); stroke: var(--guide); stroke-width: 2px; }
+  .route { fill: none; stroke: var(--line); stroke-width: 2px; stroke-linecap: round; }
+  .route.gan { stroke: var(--gan); }
+  .route.diff { stroke: var(--diff); }
+  .route.guide { stroke: var(--guide); }
+  .head.gan { fill: var(--gan); }
+  .head.diff { fill: var(--diff); }
+  .head.guide { fill: var(--guide); }
+  .heading { fill: var(--ink); font-size: 18px; font-weight: bold; }
+  .label { fill: var(--ink); font-size: 14px; }
+  .small { fill: var(--muted); font-size: 12px; }
+  .emphasis { fill: var(--ink); font-size: 13px; font-weight: bold; }
+  .guide-text { fill: var(--guide); font-size: 13px; font-weight: bold; }
+  .noise.n1 { fill: var(--n1); }
+  .noise.n2 { fill: var(--n2); }
+  .noise.n3 { fill: var(--n3); }
+  .noise.n4 { fill: var(--n4); }
+  .blob-a { fill: var(--diff-soft); stroke: var(--diff); stroke-width: 1px; }
+  .blob-b { fill: var(--image); stroke: var(--line); stroke-width: 1px; }
+  .cat-fill { fill: var(--image); stroke: var(--line); stroke-width: 2px; }
+  .cat-line { fill: none; stroke: var(--line); stroke-width: 1px; stroke-linecap: round; }
+  .cat-eye { fill: var(--line); }
+  #fallback { font-size: 15px; text-align: center; color: var(--ink); }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #182131;
+      --panel-alt: #16243b;
+      --ink: #edf2fb;
+      --muted: #b2bdd0;
+      --line: #aebbd1;
+      --gan: #ff8a72;
+      --gan-soft: #40251f;
+      --diff: #75a7ff;
+      --diff-soft: #203b66;
+      --guide: #d49aff;
+      --guide-soft: #38234b;
+      --image: #e8b95b;
+      --n1: #dce2ec;
+      --n2: #9aa6ba;
+      --n3: #5e6b80;
+      --n4: #283348;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="figure">
+  <div class="figure-title" id="diagram-title">Один проход GAN и итеративный маршрут диффузии</div>
+  <svg id="diagram" width="1200" height="450" viewBox="0 0 1200 450"
+       preserveAspectRatio="xMidYMid meet" role="img"
+       aria-labelledby="diagram-title diagram-desc">
+    <desc id="diagram-desc">Слева GAN превращает шум в изображение одним проходом. Справа диффузия постепенно улучшает одно состояние и принимает ограничение на промежуточном шаге.</desc>
+  </svg>
+  <div id="fallback" hidden>Схема должна была показать один прямой проход GAN и цепочку небольших шагов диффузии с промежуточным ограничением «сделай тут кота».</div>
+</main>
+<script>
+const data = [
+  {id:"map",origin:{x:20,y:10},scale:{x:10,y:10}},
+  {id:"scene",canvas:{x1:-2,y1:-1,x2:118,y2:44},
+   panels:[
+    {x1:2,y1:3,x2:48,y2:40,cls:"panel",title:"GAN",tx:4,ty:7},
+    {x1:50,y1:3,x2:112,y2:40,cls:"panel diff",title:"Диффузия",tx:52,ty:7}
+   ],
+   notes:[
+    {text:"между шумом и пикселями нет черновика",x:25,y:38,dx:0,dy:0,anchor:"middle"},
+    {text:"промежуточные состояния — это одна и та же картинка",x:81,y:38,dx:0,dy:0,anchor:"middle"}
+   ]},
+  {id:"frames",items:[
+    {id:"gan-noise",kind:"noise",x1:6,y1:17,x2:15,y2:27,label:"шум",lx:10.5,ly:30},
+    {id:"gan-image",kind:"cat",x1:37,y1:17,x2:46,y2:27,label:"изображение",lx:41.5,ly:30},
+    {id:"diff-noise",kind:"noise",x1:53,y1:17,x2:62,y2:27,label:"шум",lx:57.5,ly:30},
+    {id:"diff-rough",kind:"rough",x1:66,y1:17,x2:75,y2:27},
+    {id:"diff-outline",kind:"outline",x1:85,y1:17,x2:94,y2:27},
+    {id:"diff-image",kind:"cat",x1:101,y1:17,x2:110,y2:27,label:"изображение",lx:105.5,ly:30}
+   ]},
+  {id:"noise",cell:{w:2.45,h:2.6},cells:[
+    {x:.4,y:.4,c:"n2"},{x:3.2,y:.4,c:"n4"},{x:6,y:.4,c:"n1"},
+    {x:.4,y:3.2,c:"n3"},{x:3.2,y:3.2,c:"n1"},{x:6,y:3.2,c:"n3"},
+    {x:.4,y:6,c:"n1"},{x:3.2,y:6,c:"n2"},{x:6,y:6,c:"n4"}
+   ]},
+  {id:"generator",x1:21,y1:19,x2:31,y2:25,
+   labels:[
+    {text:"генератор",x:26,y:21.8,dx:0,dy:0},
+    {text:"один проход",x:26,y:23.7,dx:0,dy:0}
+   ]},
+  {id:"constraint",x1:79,y1:9,x2:99,y2:13,
+   label:{text:"сделай тут кота",x:89,y:11.4,dx:0,dy:0}},
+  {id:"arrows",head:.65,items:[
+    {x1:15.5,y1:22,x2:20.5,y2:22,dir:"right",cls:"gan"},
+    {x1:31.5,y1:22,x2:36.5,y2:22,dir:"right",cls:"gan"},
+    {x1:62.5,y1:22,x2:65.5,y2:22,dir:"right",cls:"diff"},
+    {x1:75.5,y1:22,x2:84.5,y2:22,dir:"right",cls:"diff"},
+    {x1:94.5,y1:22,x2:100.5,y2:22,dir:"right",cls:"diff"},
+    {x1:89,y1:13.3,x2:89,y2:16.4,dir:"down",cls:"guide"}
+   ],
+   labels:[
+    {text:"один прямой проход",x:16,y:15,dx:0,dy:0,anchor:"start",cls:"emphasis"},
+    {text:"1000 небольших шагов",x:81.5,y:32.5,dx:0,dy:0,anchor:"middle",cls:"emphasis"},
+    {text:"один большой прыжок",x:26,y:35,dx:0,dy:0,anchor:"middle",cls:"small"},
+    {text:"цепочка маленьких исправлений",x:81.5,y:35,dx:0,dy:0,anchor:"middle",cls:"small"}
+   ]},
+  {id:"rough",ellipses:[
+    {cx:4.5,cy:6.5,rx:3.2,ry:2.1,cls:"blob-a"},
+    {cx:4.5,cy:3.3,rx:2.2,ry:1.7,cls:"blob-b"},
+    {cx:2.5,cy:2,rx:1.1,ry:.7,cls:"blob-a"},
+    {cx:6.6,cy:2.2,rx:1.2,ry:.8,cls:"blob-a"}
+   ]},
+  {id:"cat",head:{cx:4.5,cy:3.7,r:2.1},body:{cx:4.5,cy:7,rx:2.5,ry:2.2},
+   ears:[
+    [{x:2.8,y:2.6},{x:2.9,y:.8},{x:4,y:2}],
+    [{x:5,y:2},{x:6.2,y:.8},{x:6.2,y:2.8}]
+   ],
+   eyes:[{cx:3.7,cy:3.6,r:.18},{cx:5.3,cy:3.6,r:.18}],
+   nose:[{x1:4.5,y1:4.1,x2:4.5,y2:4.5}],
+   whiskers:[
+    {x1:3.8,y1:4.4,x2:1.8,y2:4.1},{x1:3.8,y1:4.7,x2:1.7,y2:5},
+    {x1:5.2,y1:4.4,x2:7.2,y2:4.1},{x1:5.2,y1:4.7,x2:7.3,y2:5}
+   ],
+   outlineSpecks:[
+    {x:.7,y:1,w:.7,h:.8,c:"n3"},{x:7.5,y:6.7,w:.7,h:.8,c:"n2"},
+    {x:.8,y:7.7,w:.8,h:.7,c:"n4"}
+   ]}
+];
+
+const map = data.find(item => item.id === "map");
+const origin = Object.freeze(map.origin);
+const scale = Object.freeze(map.scale);
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svg = document.getElementById("diagram");
+  const ns = "http://www.w3.org/2000/svg";
+  const scene = data.find(item => item.id === "scene");
+  const frames = data.find(item => item.id === "frames");
+  const noise = data.find(item => item.id === "noise");
+  const generator = data.find(item => item.id === "generator");
+  const constraint = data.find(item => item.id === "constraint");
+  const arrows = data.find(item => item.id === "arrows");
+  const rough = data.find(item => item.id === "rough");
+  const cat = data.find(item => item.id === "cat");
+
+  const add = (name, attrs, cls, parent = svg) => {
+    const element = document.createElementNS(ns, name);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, String(value)));
+    if (cls) element.setAttribute("class", cls);
+    parent.appendChild(element);
+    return element;
+  };
+
+  const rect = (x1, y1, x2, y2, cls, parent = svg) =>
+    add("rect", {x:sx(x1), y:sy(y1), width:sx(x2)-sx(x1), height:sy(y2)-sy(y1)}, cls, parent);
+
+  const line = (x1, y1, x2, y2, cls, parent = svg) =>
+    add("line", {x1:sx(x1), y1:sy(y1), x2:sx(x2), y2:sy(y2)}, cls, parent);
+
+  const ellipse = (cx, cy, rx, ry, cls, parent = svg) =>
+    add("ellipse", {cx:sx(cx), cy:sy(cy), rx:sx(rx)-sx(0), ry:sy(ry)-sy(0)}, cls, parent);
+
+  const circle = (cx, cy, r, cls, parent = svg) =>
+    add("circle", {cx:sx(cx), cy:sy(cy), r:sx(r)-sx(0)}, cls, parent);
+
+  const polygon = (points, cls, parent = svg) =>
+    add("polygon", {points:points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" ")}, cls, parent);
+
+  const text = (label, defaultClass = "label", parent = svg) => {
+    const element = add("text", {
+      x:sx(label.x) + label.dx,
+      y:sy(label.y) + label.dy,
+      "text-anchor":label.anchor || "middle",
+      "dominant-baseline":"middle"
+    }, label.cls || defaultClass, parent);
+    element.textContent = label.text;
+    return element;
+  };
+
+  const drawNoise = frame => {
+    noise.cells.forEach(cell => {
+      rect(
+        frame.x1 + cell.x,
+        frame.y1 + cell.y,
+        frame.x1 + cell.x + noise.cell.w,
+        frame.y1 + cell.y + noise.cell.h,
+        `noise ${cell.c}`
+      );
+    });
+  };
+
+  const drawCat = (frame, outlined) => {
+    ellipse(frame.x1+cat.body.cx, frame.y1+cat.body.cy, cat.body.rx, cat.body.ry, "cat-fill");
+    circle(frame.x1+cat.head.cx, frame.y1+cat.head.cy, cat.head.r, "cat-fill");
+    cat.ears.forEach(ear => polygon(
+      ear.map(point => ({x:frame.x1+point.x, y:frame.y1+point.y})),
+      "cat-fill"
+    ));
+    if (outlined) {
+      cat.outlineSpecks.forEach(speck =>
+        rect(frame.x1+speck.x, frame.y1+speck.y,
+             frame.x1+speck.x+speck.w, frame.y1+speck.y+speck.h,
+             `noise ${speck.c}`)
+      );
+    } else {
+      cat.eyes.forEach(eye =>
+        circle(frame.x1+eye.cx, frame.y1+eye.cy, eye.r, "cat-eye")
+      );
+      cat.nose.forEach(part =>
+        line(frame.x1+part.x1, frame.y1+part.y1,
+             frame.x1+part.x2, frame.y1+part.y2, "cat-line")
+      );
+      cat.whiskers.forEach(part =>
+        line(frame.x1+part.x1, frame.y1+part.y1,
+             frame.x1+part.x2, frame.y1+part.y2, "cat-line")
+      );
+    }
+  };
+
+  const drawArrow = arrow => {
+    line(arrow.x1, arrow.y1, arrow.x2, arrow.y2, `route ${arrow.cls}`);
+    const h = arrows.head;
+    const points = arrow.dir === "right"
+      ? [{x:arrow.x2,y:arrow.y2},{x:arrow.x2-h,y:arrow.y2-h},{x:arrow.x2-h,y:arrow.y2+h}]
+      : [{x:arrow.x2,y:arrow.y2},{x:arrow.x2-h,y:arrow.y2-h},{x:arrow.x2+h,y:arrow.y2-h}];
+    polygon(points, `head ${arrow.cls}`);
+  };
+
+  rect(scene.canvas.x1, scene.canvas.y1, scene.canvas.x2, scene.canvas.y2, "page");
+  scene.panels.forEach(panel => {
+    rect(panel.x1, panel.y1, panel.x2, panel.y2, panel.cls);
+    text({text:panel.title,x:panel.tx,y:panel.ty,dx:0,dy:0,anchor:"start"}, "heading");
+  });
+
+  frames.items.forEach(frame => {
+    rect(frame.x1, frame.y1, frame.x2, frame.y2, "frame");
+    if (frame.kind === "noise") drawNoise(frame);
+    if (frame.kind === "rough") {
+      rough.ellipses.forEach(part =>
+        ellipse(frame.x1+part.cx, frame.y1+part.cy, part.rx, part.ry, part.cls)
+      );
+    }
+    if (frame.kind === "outline") drawCat(frame, true);
+    if (frame.kind === "cat") drawCat(frame, false);
+    if (frame.label) text({text:frame.label,x:frame.lx,y:frame.ly,dx:0,dy:0}, "small");
+  });
+
+  rect(generator.x1, generator.y1, generator.x2, generator.y2, "generator");
+  generator.labels.forEach(label => text({...label,anchor:"middle"}, "small"));
+
+  rect(constraint.x1, constraint.y1, constraint.x2, constraint.y2, "constraint");
+  text({...constraint.label,anchor:"middle"}, "guide-text");
+
+  arrows.items.forEach(drawArrow);
+  arrows.labels.forEach(label => text(label));
+  scene.notes.forEach(note => text(note, "small"));
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

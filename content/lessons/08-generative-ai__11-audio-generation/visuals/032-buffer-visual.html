@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Как скорость генерации меняет аудиобуфер</title>
+<style>
+  :root{
+    color-scheme:light dark;
+    --bg:#f7f9fc;
+    --panel:#ffffff;
+    --panel-soft:#eef3f8;
+    --ink:#172033;
+    --muted:#5b667a;
+    --grid:#aeb9c8;
+    --border:#cbd4df;
+    --blue:#2878d0;
+    --blue-soft:#cfe8ff;
+    --green:#16845b;
+    --green-soft:#d8f3e8;
+    --amber:#b66b00;
+    --amber-soft:#fff0c9;
+    --red:#c43d4f;
+    --red-soft:#ffe0e5;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#111722;
+      --panel:#192231;
+      --panel-soft:#222e40;
+      --ink:#edf3fb;
+      --muted:#b6c1d0;
+      --grid:#607087;
+      --border:#3c4b60;
+      --blue:#69b7ff;
+      --blue-soft:#163f64;
+      --green:#55d6a0;
+      --green-soft:#153f34;
+      --amber:#ffc35c;
+      --amber-soft:#4c3817;
+      --red:#ff8291;
+      --red-soft:#55232d;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink)}
+  body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  .figure{
+    width:100%;
+    max-height:520px;
+    overflow:hidden;
+    background:var(--bg);
+    border:1px solid var(--border);
+    border-radius:14px;
+  }
+  .heading{
+    padding:14px 22px 4px;
+    font-size:20px;
+    font-weight:bold;
+  }
+  .heading span{color:var(--blue)}
+  svg{
+    display:block;
+    width:100%;
+    height:auto;
+    max-height:464px;
+  }
+  svg text{font-family:inherit;fill:var(--ink)}
+  .card{fill:var(--panel);stroke:var(--border)}
+  .soft{fill:var(--panel-soft);stroke:var(--border)}
+  .tank{fill:none;stroke:var(--ink)}
+  .water{fill:var(--blue-soft)}
+  .surface{stroke:var(--blue)}
+  .axis{stroke:var(--grid)}
+  .guide{stroke:var(--grid);stroke-dasharray:6 6}
+  .grow{stroke:var(--green)}
+  .drain{stroke:var(--amber)}
+  .danger{stroke:var(--red)}
+  .in-good{stroke:var(--green);fill:var(--green)}
+  .in-low{stroke:var(--amber);fill:var(--amber)}
+  .out{stroke:var(--blue);fill:var(--blue)}
+  .arrow-line,.trend,.axis,.guide,.surface,.tank,.danger{
+    fill:none;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    vector-effect:non-scaling-stroke;
+  }
+  .title{font-size:18px;font-weight:bold}
+  .label{font-size:15px}
+  .small{font-size:13px;fill:var(--muted)}
+  .strong{font-size:16px;font-weight:bold}
+  .equation{font-size:17px;font-weight:bold}
+  .good-text{fill:var(--green)}
+  .low-text{fill:var(--amber)}
+  .danger-text{fill:var(--red)}
+</style>
+</head>
+<body>
+<main class="figure">
+  <header class="heading"><span>Аудиобуфер:</span> порог кодека — 75 токенов/с</header>
+  <svg id="diagram" viewBox="0 0 1000 400"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-label="Поток 80 токенов в секунду наполняет аудиобуфер, поток 70 токенов в секунду опустошает его и вызывает паузу примерно каждые 15 секунд. Для 100 пользователей серверу требуется не меньше 7500 токенов в секунду.">
+  </svg>
+</main>
+
+<script>
+const data=[{
+  zero:0,
+  corner:12,
+  arrow:{head:12,wing:7},
+  cards:[
+    {x1:0,y1:105,x2:430,y2:345},
+    {x1:470,y1:105,x2:900,y2:345},
+    {x1:0,y1:10,x2:900,y2:88}
+  ],
+  scenarios:[
+    {
+      kind:"grow",
+      title:"80 токенов/с — буфер наполняется",
+      titleAt:{x:20,y:321},
+      inputLabel:"80 токенов/с внутрь",
+      inputLabelAt:{x:20,y:286},
+      tank:{x1:30,y1:140,x2:150,y2:255,level:225},
+      input:{a:{x:90,y:292},b:{x:90,y:260}},
+      output:{a:{x:150,y:195},b:{x:205,y:195}},
+      outputLabelAt:{x:155,y:178},
+      tankLabelAt:{x:90,y:122},
+      chart:{x1:235,y1:140,x2:405,y2:255},
+      trend:{a:{x:245,y:150},b:{x:395,y:245}},
+      note:"запас постепенно растёт",
+      noteAt:{x:405,y:269},
+      timeAt:{x:395,y:122},
+      stockAt:{x:228,y:250}
+    },
+    {
+      kind:"drain",
+      title:"70 токенов/с — буфер опустошается",
+      titleAt:{x:490,y:321},
+      inputLabel:"70 токенов/с внутрь",
+      inputLabelAt:{x:490,y:286},
+      tank:{x1:500,y1:140,x2:620,y2:255,level:170},
+      input:{a:{x:560,y:292},b:{x:560,y:260}},
+      output:{a:{x:620,y:195},b:{x:680,y:195}},
+      outputLabelAt:{x:625,y:178},
+      tankLabelAt:{x:560,y:122},
+      chart:{x1:700,y1:140,x2:875,y2:255},
+      trend:{a:{x:710,y:245},b:{x:865,y:150}},
+      note:"пауза примерно каждые 15 с",
+      noteAt:{x:875,y:269},
+      timeAt:{x:865,y:122},
+      stockAt:{x:693,y:250},
+      pause:{x:865,y:150,r:6}
+    }
+  ],
+  footer:{
+    heading:{x:450,y:70},
+    boxes:[
+      {x1:15,y1:19,x2:210,y2:55,text:"100 пользователей",at:{x:112,y:35}},
+      {x1:250,y1:19,x2:500,y2:55,text:"75 токенов/с каждому",at:{x:375,y:35}},
+      {x1:540,y1:19,x2:885,y2:55,text:"≥ 7500 токенов/с с сервера",at:{x:712,y:35}}
+    ],
+    multiply:{x:230,y:35},
+    equals:{x:520,y:35}
+  },
+  fallback:[
+    {x:20,y:300,text:"80 токенов/с постепенно наполняет буфер."},
+    {x:20,y:250,text:"70 токенов/с опустошает его: пауза примерно каждые 15 с."},
+    {x:20,y:200,text:"100 пользователей требуют не меньше 7500 токенов/с."}
+  ]
+}];
+
+const origin={x:50,y:390};
+const scale={x:1,y:-1};
+const sx=x=>origin.x+x*scale.x;
+const sy=y=>origin.y+y*scale.y;
+
+try{
+  const d=data[0];
+  const svg=document.getElementById("diagram");
+  const ns="http://www.w3.org/2000/svg";
+
+  function node(name,attrs,parent=svg){
+    const item=document.createElementNS(ns,name);
+    Object.entries(attrs).forEach(([key,value])=>item.setAttribute(key,String(value)));
+    parent.appendChild(item);
+    return item;
+  }
+
+  function label(text,point,classes,anchor="start"){
+    const item=node("text",{
+      x:sx(point.x),
+      y:sy(point.y),
+      class:classes,
+      "text-anchor":anchor,
+      "dominant-baseline":"middle"
+    });
+    item.textContent=text;
+    return item;
+  }
+
+  function line(a,b,classes,width){
+    return node("line",{
+      x1:sx(a.x),y1:sy(a.y),
+      x2:sx(b.x),y2:sy(b.y),
+      class:classes,
+      "stroke-width":width
+    });
+  }
+
+  function rect(box,classes,width){
+    return node("rect",{
+      x:sx(box.x1),
+      y:sy(box.y2),
+      width:sx(box.x2)-sx(box.x1),
+      height:sy(box.y1)-sy(box.y2),
+      rx:sx(d.corner)-sx(d.zero),
+      class:classes,
+      "stroke-width":width
+    });
+  }
+
+  function arrow(a,b,classes,width){
+    const dx=b.x-a.x;
+    const dy=b.y-a.y;
+    const length=Math.hypot(dx,dy);
+    const ux=dx/length;
+    const uy=dy/length;
+    const base={
+      x:b.x-ux*d.arrow.head,
+      y:b.y-uy*d.arrow.head
+    };
+    const left={
+      x:base.x-uy*d.arrow.wing,
+      y:base.y+ux*d.arrow.wing
+    };
+    const right={
+      x:base.x+uy*d.arrow.wing,
+      y:base.y-ux*d.arrow.wing
+    };
+    line(a,b,"arrow-line "+classes,width);
+    node("polygon",{
+      points:[
+        sx(b.x)+","+sy(b.y),
+        sx(left.x)+","+sy(left.y),
+        sx(right.x)+","+sy(right.y)
+      ].join(" "),
+      class:classes
+    });
+  }
+
+  d.cards.forEach((card,index)=>{
+    rect(card,index===d.cards.length-1?"card footer":"card",2);
+  });
+
+  d.scenarios.forEach(s=>{
+    label(s.title,s.titleAt,"title "+(s.kind==="grow"?"good-text":"low-text"),"start");
+
+    const inputClass=s.kind==="grow"?"in-good":"in-low";
+    arrow(s.input.a,s.input.b,inputClass,3);
+    label(s.inputLabel,s.inputLabelAt,"label","start");
+
+    const water={
+      x1:s.tank.x1,
+      y1:s.tank.y1,
+      x2:s.tank.x2,
+      y2:s.tank.level
+    };
+    node("rect",{
+      x:sx(water.x1),
+      y:sy(water.y2),
+      width:sx(water.x2)-sx(water.x1),
+      height:sy(water.y1)-sy(water.y2),
+      class:"water"
+    });
+    line(
+      {x:s.tank.x1,y:s.tank.level},
+      {x:s.tank.x2,y:s.tank.level},
+      "surface",
+      3
+    );
+    rect(s.tank,"tank",3);
+
+    arrow(s.output.a,s.output.b,"out",3);
+    label("75 токенов/с в звук",s.outputLabelAt,"small","start");
+    label("аудиобуфер",s.tankLabelAt,"small","middle");
+
+    line(
+      {x:s.chart.x1,y:s.chart.y1},
+      {x:s.chart.x2,y:s.chart.y1},
+      "axis",
+      2
+    );
+    line(
+      {x:s.chart.x1,y:s.chart.y1},
+      {x:s.chart.x1,y:s.chart.y2},
+      "axis",
+      2
+    );
+    line(
+      {x:s.trend.b.x,y:s.chart.y1},
+      {x:s.trend.b.x,y:s.trend.b.y},
+      "guide",
+      2
+    );
+    line(
+      s.trend.a,
+      s.trend.b,
+      "trend "+(s.kind==="grow"?"grow":"drain"),
+      4
+    );
+
+    label("запас",s.stockAt,"small","end");
+    label("≈ 15 с",s.timeAt,"small","middle");
+    label(
+      s.note,
+      s.noteAt,
+      "small "+(s.kind==="grow"?"good-text":"danger-text"),
+      "end"
+    );
+
+    if(s.pause){
+      node("circle",{
+        cx:sx(s.pause.x),
+        cy:sy(s.pause.y),
+        r:sx(s.pause.r)-sx(d.zero),
+        class:"danger",
+        fill:"var(--red-soft)",
+        "stroke-width":3
+      });
+      label(
+        "пауза",
+        {x:s.pause.x,y:s.pause.y-20},
+        "strong danger-text",
+        "middle"
+      );
+    }
+  });
+
+  label(
+    "Минимальная пропускная способность сервера",
+    d.footer.heading,
+    "strong",
+    "middle"
+  );
+
+  d.footer.boxes.forEach((box,index)=>{
+    rect(box,index===d.footer.boxes.length-1?"soft danger":"soft",2);
+    label(
+      box.text,
+      box.at,
+      "equation "+(index===d.footer.boxes.length-1?"danger-text":""),
+      "middle"
+    );
+  });
+
+  label("×",d.footer.multiply,"equation","middle");
+  label("=",d.footer.equals,"equation","middle");
+}catch(error){
+  const svg=document.getElementById("diagram");
+  const ns="http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+  data[0].fallback.forEach(row=>{
+    const item=document.createElementNS(ns,"text");
+    item.setAttribute("x",String(sx(row.x)));
+    item.setAttribute("y",String(sy(row.y)));
+    item.setAttribute("class","strong");
+    item.textContent=row.text;
+    svg.appendChild(item);
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Схема ReWOO</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --ink:#1d2430; --muted:#5c6675; --line:#3b4757;
+    --llm:#dbe7fb; --llmEdge:#2f6bd0; --work:#eef1f5; --workEdge:#6b7789;
+    --ring:#c1441f; --dash:#b6bdc7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181f; --ink:#e8ecf2; --muted:#98a3b4; --line:#8b97a8;
+      --llm:#1d3050; --llmEdge:#6da2ee; --work:#232a35; --workEdge:#7d8a9c;
+      --ring:#f08a5d; --dash:#39424f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .wrap{padding:10px 12px 14px;}
+  h1{font-size:15px;margin:0 0 6px;font-weight:650;}
+  svg{display:block;width:100%;height:auto;max-height:460px;background:var(--bg);}
+  .fb{border:1px solid var(--dash);border-radius:6px;padding:10px;color:var(--muted);font-size:13px;}
+  text{fill:var(--ink);font-family:inherit;}
+  .t-title{font-size:14px;font-weight:650;}
+  .t-node{font-size:13px;}
+  .t-small{font-size:12px;fill:var(--muted);}
+  .t-leg{font-size:12.5px;fill:var(--muted);}
+  .t-ref{font-size:12.5px;fill:var(--llmEdge);font-weight:650;}
+  .flow{stroke:var(--line);fill:none;}
+  .head{fill:var(--line);stroke:none;}
+  .ringline{stroke:var(--ring);fill:none;}
+  .ringhead{fill:var(--ring);stroke:none;}
+  .t-ring{font-size:12px;fill:var(--ring);}
+  .divider{stroke:var(--dash);fill:none;}
+</style>
+<div class="wrap">
+  <h1>ReWOO: одна дорога Planner → веер воркеров → Solver (для сравнения — кольцо ReAct)</h1>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    /* ---------- данные схемы (логические координаты) ---------- */
+    var NODES = [
+      {id:'q',  cx:0.95, cy: 0.0, w:1.9, h:0.9, label:'Вопрос',   kind:'io'},
+      {id:'p',  cx:4.00, cy: 0.0, w:1.9, h:0.9, label:'Planner',  kind:'llm'},
+      {id:'w1', cx:8.00, cy: 2.6, w:1.9, h:0.9, label:'Воркер 1', kind:'work'},
+      {id:'w2', cx:8.00, cy: 0.0, w:1.9, h:0.9, label:'Воркер 2', kind:'work'},
+      {id:'w3', cx:8.00, cy:-2.6, w:1.9, h:0.9, label:'Воркер 3', kind:'work'},
+      {id:'s',  cx:11.50,cy: 0.0, w:1.9, h:0.9, label:'Solver',   kind:'llm'}
+    ];
+    var EDGES = [
+      {a:'q',  b:'p',  ao: 0.00, bo: 0.00},
+      {a:'p',  b:'w1', ao: 0.25, bo: 0.00},
+      {a:'p',  b:'w2', ao: 0.00, bo: 0.00},
+      {a:'p',  b:'w3', ao:-0.25, bo: 0.00},
+      {a:'w1', b:'s',  ao: 0.00, bo: 0.25},
+      {a:'w2', b:'s',  ao: 0.00, bo: 0.00},
+      {a:'w3', b:'s',  ao: 0.00, bo:-0.25},
+      {a:'w1', b:'w2', vertical:true}
+    ];
+    var RING = {cx:16.5, cy:0.0, r:1.9};
+    var DIV_X = 13.7, TOP_Y = 4.4;
+
+    /* ---------- один origin, один scale, одна пара sx/sy ---------- */
+    var ORIGIN = {x:60, y:230}, SCALE = 40;
+    function sx(x){ return ORIGIN.x + x * SCALE; }
+    function sy(y){ return ORIGIN.y - y * SCALE; }
+
+    /* ---------- каркас ---------- */
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 960 460');
+    svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.setAttribute('role','img');
+    svg.setAttribute('aria-label','Planner, три параллельных воркера, один Solver; рядом кольцо ReAct');
+
+    function el(n,at){var e=document.createElementNS(NS,n);
+      for(var k in at) e.setAttribute(k,at[k]); svg.appendChild(e); return e;}
+    function txt(x,y,dx,dy,cls,anchor,s){
+      var t=el('text',{x:x+dx, y:y+dy, 'class':cls, 'text-anchor':anchor});
+      t.textContent=s; return t;}
+    function byId(id){ for(var i=0;i<NODES.length;i++) if(NODES[i].id===id) return NODES[i]; }
+
+    /* стрелка: концы и наконечник — только через sx/sy */
+    function arrow(x1,y1,x2,y2,lineCls,headCls){
+      var dx=x2-x1, dy=y2-y1, L=Math.hypot(dx,dy);
+      if(!L) return;
+      var ux=dx/L, uy=dy/L, hl=0.26, hw=0.105;
+      var bx=x2-ux*hl, by=y2-uy*hl;
+      el('line',{x1:sx(x1),y1:sy(y1),x2:sx(bx),y2:sy(by),'class':lineCls,'stroke-width':1.6});
+      el('polygon',{'class':headCls, points:
+        sx(x2)+','+sy(y2)+' '+
+        sx(bx-uy*hw)+','+sy(by+ux*hw)+' '+
+        sx(bx+uy*hw)+','+sy(by-ux*hw)});
+    }
+
+    /* ---------- заголовки колонок ---------- */
+    txt(sx(0), sy(TOP_Y), 0, 0, 't-title','start','ReWOO — одна дорога, без стрелок назад');
+    txt(sx(RING.cx), sy(TOP_Y), 0, 0, 't-title','middle','ReAct — кольцо');
+
+    el('line',{x1:sx(DIV_X),y1:sy(TOP_Y-0.7),x2:sx(DIV_X),y2:sy(-3.4),
+      'class':'divider','stroke-width':1,'stroke-dasharray':'4 5'});
+
+    /* ---------- стрелки ReWOO ---------- */
+    EDGES.forEach(function(e){
+      var A=byId(e.a), B=byId(e.b);
+      if(e.vertical){
+        arrow(A.cx, A.cy-A.h/2, B.cx, B.cy+B.h/2, 'flow','head');
+      }else{
+        arrow(A.cx+A.w/2, A.cy+e.ao, B.cx-B.w/2, B.cy+e.bo, 'flow','head');
+      }
+    });
+
+    /* ---------- узлы ReWOO ---------- */
+    NODES.forEach(function(n){
+      var x=sx(n.cx-n.w/2), y=sy(n.cy+n.h/2);
+      var w=sx(n.cx+n.w/2)-x, h=sy(n.cy-n.h/2)-y;
+      var fill = n.kind==='llm' ? 'var(--llm)' : (n.kind==='work' ? 'var(--work)' : 'none');
+      var edge = n.kind==='llm' ? 'var(--llmEdge)' : 'var(--workEdge)';
+      var r=el('rect',{x:x,y:y,width:w,height:h,rx:6,fill:fill,stroke:edge,'stroke-width':1.4});
+      if(n.kind==='io') r.setAttribute('stroke-dasharray','4 4');
+      txt(sx(n.cx), sy(n.cy), 0, 4.5, 't-node','middle', n.label);
+    });
+
+    /* ---------- счётчики вызовов (числа из текста шага) ---------- */
+    txt(sx(4.00),  sy(0.85), 0, 0, 't-small','middle','1 вызов модели');
+    txt(sx(8.00),  sy(3.50), 0, 0, 't-small','middle','N вызовов инструментов');
+    txt(sx(11.50), sy(0.85), 0, 0, 't-small','middle','1 вызов модели');
+    txt(sx(8.00),  sy(1.30), 8, 4, 't-ref','start','#E1');
+
+    /* ---------- кольцо ReAct: круг + одна стрелка по кругу ---------- */
+    var rpx = sx(RING.cx + RING.r) - sx(RING.cx);
+    el('circle',{cx:sx(RING.cx), cy:sy(RING.cy), r:rpx,
+      'class':'ringline','stroke-width':1.6});
+
+    function onRing(deg){
+      var a=deg*Math.PI/180;
+      return [RING.cx + RING.r*Math.cos(a), RING.cy + RING.r*Math.sin(a)];
+    }
+    var t1=onRing(60), t2=onRing(45);
+    arrow(t1[0],t1[1],t2[0],t2[1],'ringline','ringhead');
+
+    var pTop=onRing(90), pRight=onRing(0), pBot=onRing(270);
+    txt(sx(pTop[0]),   sy(pTop[1]),   0, -9, 't-ring','middle','мысль');
+    txt(sx(pRight[0]), sy(pRight[1]), 9,  4, 't-ring','start','действие');
+    txt(sx(pBot[0]),   sy(pBot[1]),   0, 17, 't-ring','middle','наблюдение');
+    txt(sx(RING.cx),   sy(RING.cy),   0,  4, 't-ring','middle','10 кругов');
+
+    /* ---------- легенда ---------- */
+    txt(sx(0), sy(-4.30), 0, 0, 't-leg','start',
+      '1 вызов модели · N вызовов инструментов в веере · 1 вызов модели — ни одной стрелки назад.');
+    txt(sx(0), sy(-5.05), 0, 0, 't-leg','start',
+      '#E1: результат воркера 1 течёт вперёд — к воркеру 2 и в Solver. Наверх, в планирование, никогда.');
+
+    host.appendChild(svg);
+  }catch(err){
+    host.innerHTML='<div class="fb"><b>Схема не построилась.</b> Она должна показывать: '+
+      'слева блок Planner (1 вызов модели), от него веер стрелок вправо к трём воркерам, '+
+      'работающим параллельно (N вызовов инструментов), от всех трёх — стрелки в один Solver '+
+      '(1 вызов модели). Между воркером 1 и воркером 2 идёт стрелка вперёд с меткой #E1. '+
+      'Ни одной стрелки назад нет. Справа для сравнения — кольцо ReAct: мысль → действие → '+
+      'наблюдение и одна стрелка по кругу, 10 кругов.</div>';
+  }
+})();
+</script>
+</html>

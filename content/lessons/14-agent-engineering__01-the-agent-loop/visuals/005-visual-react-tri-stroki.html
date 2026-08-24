@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Одна тройка ReAct</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1c2330; --muted:#5c6675;
+    --model-fill:#e8f0fd; --model-stroke:#3f6fd0;
+    --code-fill:#fdeee2; --code-stroke:#c2711f;
+    --seam:#8a93a3; --arrow:#c2711f;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161d; --fg:#e6ebf3; --muted:#9aa5b5;
+      --model-fill:#1b2740; --model-stroke:#6f9cf0;
+      --code-fill:#3a2513; --code-stroke:#e0993f;
+      --seam:#78828f; --arrow:#e0993f;
+    }
+  }
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:-apple-system,Segoe UI,Roboto,sans-serif;}
+  .wrap{padding:10px 12px;background:var(--bg);}
+  h2{font-size:14px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fallback{font-size:13px;color:var(--muted);line-height:1.5;}
+  .row-model{fill:var(--model-fill);stroke:var(--model-stroke);}
+  .row-code{fill:var(--code-fill);stroke:var(--code-stroke);}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--fg);}
+  .lab{fill:var(--muted);font-size:12px;}
+  .brk{fill:none;stroke:var(--muted);}
+  .seam{stroke:var(--seam);fill:none;}
+  .arw{stroke:var(--arrow);fill:none;}
+  .arwhead{fill:var(--arrow);stroke:none;}
+</style>
+<div class="wrap">
+  <h2>Одна тройка ReAct: где обрывается ход модели</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы ----
+    var ROWS = [
+      { y: 0.00, text: 'Thought: I need to look up the capital of France.', kind: 'model' },
+      { y: 1.05, text: 'Action: search("capital of France")',               kind: 'model' },
+      { y: 2.35, text: 'Observation: Paris is the capital of France.',      kind: 'code'  },
+      { y: 3.55, text: 'Thought: The answer is Paris.',                     kind: 'model' }
+    ];
+    var GROUPS = [
+      { rows: [0, 1], label: 'модель' },
+      { rows: [2],    label: 'твой код' },
+      { rows: [3],    label: 'модель' }
+    ];
+    var GEO = {
+      boxLeft: 2.60, boxRight: 13.60, boxHalf: 0.36,
+      brkInner: 2.45, brkOuter: 2.25, brkLabel: 2.05,
+      seamY: 1.70,
+      arrowX: 14.80, arrowFrom: 2, arrowTo: 3, headBack: 0.30, headHalf: 0.09,
+      arrowLabel: 15.10,
+      legendY: [4.30, 4.65, 5.00]
+    };
+    var LEGEND = [
+      'Thought и Action — то, что написала модель: её ход обрывается на Action.',
+      'Observation — строку приклеил в буфер твой код, модель её не сочиняла.',
+      'Пунктир — шов: выше текст модели, ниже текст твоего кода.'
+    ];
+
+    // ---- одна пара функций перевода ----
+    var ORIGIN = { x: 20, y: 18 };
+    var SCALE = 40;
+    function sx(u){ return ORIGIN.x + u * SCALE; }
+    function sy(u){ return ORIGIN.y + u * SCALE; }
+
+    // пиксельные литералы: только отступы подписей, толщина, шрифт
+    var PAD = 10, DY = 4, LW = 1.4, FS_MONO = 12;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 800 228');
+    svg.setAttribute('role', 'img');
+
+    function el(tag, attrs, txt){
+      var n = document.createElementNS(NS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (txt != null) n.textContent = txt;
+      svg.appendChild(n);
+      return n;
+    }
+
+    var RX = sx(0.10) - sx(0);
+
+    // фон холста
+    el('rect', { x: sx(0), y: sy(-0.45), width: sx(19.5) - sx(0),
+                 height: sy(5.30) - sy(-0.45), fill: 'var(--bg)' });
+
+    // строки тройки
+    ROWS.forEach(function(r){
+      el('rect', {
+        x: sx(GEO.boxLeft), y: sy(r.y - GEO.boxHalf),
+        width: sx(GEO.boxRight) - sx(GEO.boxLeft),
+        height: sy(r.y + GEO.boxHalf) - sy(r.y - GEO.boxHalf),
+        rx: RX, 'stroke-width': LW,
+        'class': r.kind === 'model' ? 'row-model' : 'row-code'
+      });
+      el('text', {
+        x: sx(GEO.boxLeft) + PAD, y: sy(r.y) + DY,
+        'class': 'mono', 'font-size': FS_MONO, 'text-anchor': 'start'
+      }, r.text);
+    });
+
+    // шов между ходом модели и работой кода
+    el('path', {
+      d: 'M' + sx(GEO.boxLeft) + ' ' + sy(GEO.seamY) +
+         ' L' + sx(GEO.boxRight) + ' ' + sy(GEO.seamY),
+      'class': 'seam', 'stroke-width': LW, 'stroke-dasharray': '6 5'
+    });
+
+    // скобки слева: кто автор строки
+    GROUPS.forEach(function(g){
+      var top = ROWS[g.rows[0]].y - GEO.boxHalf;
+      var bot = ROWS[g.rows[g.rows.length - 1]].y + GEO.boxHalf;
+      el('path', {
+        d: 'M' + sx(GEO.brkInner) + ' ' + sy(top) +
+           ' L' + sx(GEO.brkOuter) + ' ' + sy(top) +
+           ' L' + sx(GEO.brkOuter) + ' ' + sy(bot) +
+           ' L' + sx(GEO.brkInner) + ' ' + sy(bot),
+        'class': 'brk', 'stroke-width': LW
+      });
+      el('text', {
+        x: sx(GEO.brkLabel), y: sy((top + bot) / 2) + DY,
+        'class': 'lab', 'text-anchor': 'end'
+      }, g.label);
+    });
+
+    // стрелка от Observation к следующему Thought
+    var yFrom = ROWS[GEO.arrowFrom].y, yTo = ROWS[GEO.arrowTo].y;
+    el('path', {
+      d: 'M' + sx(GEO.boxRight) + ' ' + sy(yFrom) +
+         ' L' + sx(GEO.arrowX) + ' ' + sy(yFrom) +
+         ' L' + sx(GEO.arrowX) + ' ' + sy(yTo) +
+         ' L' + sx(GEO.boxRight + GEO.headBack) + ' ' + sy(yTo),
+      'class': 'arw', 'stroke-width': LW
+    });
+    el('polygon', {
+      points: sx(GEO.boxRight) + ',' + sy(yTo) + ' ' +
+              sx(GEO.boxRight + GEO.headBack) + ',' + sy(yTo - GEO.headHalf) + ' ' +
+              sx(GEO.boxRight + GEO.headBack) + ',' + sy(yTo + GEO.headHalf),
+      'class': 'arwhead'
+    });
+    el('text', {
+      x: sx(GEO.arrowLabel), y: sy((yFrom + yTo) / 2) + DY,
+      'class': 'lab', 'text-anchor': 'start'
+    }, 'модель прочитает на следующем ходу');
+
+    // легенда
+    LEGEND.forEach(function(line, i){
+      el('text', {
+        x: sx(GEO.boxLeft), y: sy(GEO.legendY[i]),
+        'class': 'lab', 'text-anchor': 'start'
+      }, line);
+    });
+
+    host.appendChild(svg);
+  } catch (e){
+    host.innerHTML = '<p class="fallback">Схема не построилась. Она должна была показать ' +
+      'четыре строки одной тройки ReAct: «Thought: I need to look up the capital of France.», ' +
+      '«Action: search(&quot;capital of France&quot;)», ' +
+      '«Observation: Paris is the capital of France.», ' +
+      '«Thought: The answer is Paris.» — первые две и последнюю писала модель, ' +
+      'третью приклеил в буфер твой код; между Action и Observation проходит шов, ' +
+      'а от Observation идёт стрелка вниз к следующему Thought.</p>';
+  }
+})();
+</script>
+</html>

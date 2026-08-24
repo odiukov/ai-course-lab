@@ -1,0 +1,326 @@
+{
+  "slug": "10-llms-from-scratch__17-native-sparse-attention",
+  "title": "Native Sparse Attention",
+  "lang": "ru",
+  "sourcePath": "source/i18n/ru/phases/10-llms-from-scratch/17-native-sparse-attention/docs/ru.md",
+  "sourceHash": "65d9294c7fbc0ec6bb381a3ef28e64c5be504cc1680705c7c2655442a7b05edc",
+  "generatedAt": "2026-08-18T00:20:44.531Z",
+  "steps": [
+    {
+      "id": "001-attention-latency",
+      "type": "theory",
+      "title": "На 64k attention съедает 70-80 % времени",
+      "source_anchor": "## The Problem"
+    },
+    {
+      "id": "002-fixed-pattern",
+      "type": "theory",
+      "title": "Первая корзина: разреженность с фиксированным шаблоном",
+      "source_anchor": "## The Problem"
+    },
+    {
+      "id": "003-inference-sparsity",
+      "type": "theory",
+      "title": "Вторая корзина: обрезка KV на инференсе",
+      "source_anchor": "## The Problem"
+    },
+    {
+      "id": "004-check-buckets",
+      "type": "check",
+      "title": "Проверка: почему обе корзины проигрывают",
+      "source_anchor": "## The Problem"
+    },
+    {
+      "id": "005-nsa-idea",
+      "type": "theory",
+      "title": "NSA делает оба дела сразу",
+      "source_anchor": "## The Problem"
+    },
+    {
+      "id": "006-three-branches-map",
+      "type": "visual",
+      "title": "Карта трёх веток",
+      "source_anchor": "### Three parallel branches",
+      "visual_brief": "один запрос уходит в три ветки: сжатые блоки по l=32, top-k=4 выбранных блока с несжатыми токенами, окно w=128 последних токенов; три выхода сходятся в гейт"
+    },
+    {
+      "id": "007-compressed-branch",
+      "type": "theory",
+      "title": "Сжатая ветка: крупнозернистая картина всей последовательности",
+      "source_anchor": "### Three parallel branches"
+    },
+    {
+      "id": "008-selected-branch",
+      "type": "theory",
+      "title": "Выбранная ветка: мелкая детализация top-k блоков",
+      "source_anchor": "### Three parallel branches"
+    },
+    {
+      "id": "009-window-branch",
+      "type": "theory",
+      "title": "Оконная ветка: последние W токенов ради локальных связей",
+      "source_anchor": "### Three parallel branches"
+    },
+    {
+      "id": "010-gate",
+      "type": "theory",
+      "title": "Гейт: три веса, которые не обязаны суммироваться в 1",
+      "source_anchor": "### Three parallel branches"
+    },
+    {
+      "id": "011-check-branches",
+      "type": "check",
+      "title": "Проверка: какая ветка отвечает за что",
+      "source_anchor": "### Three parallel branches"
+    },
+    {
+      "id": "012-topk-discrete",
+      "type": "theory",
+      "title": "Почему дискретный top-k рвёт градиент",
+      "source_anchor": "### Why this is \"natively trainable\""
+    },
+    {
+      "id": "013-scores-differentiable",
+      "type": "theory",
+      "title": "Оценки сжатой ветки дифференцируемы сами по себе",
+      "source_anchor": "### Why this is \"natively trainable\""
+    },
+    {
+      "id": "014-topk-as-address",
+      "type": "theory",
+      "title": "top_k — это адрес, а не вычисление",
+      "source_anchor": "### Why this is \"natively trainable\""
+    },
+    {
+      "id": "015-check-gradient",
+      "type": "check",
+      "title": "Проверка: куда доходит градиент в NSA и в обрезке KV",
+      "source_anchor": "### Why this is \"natively trainable\""
+    },
+    {
+      "id": "016-kernel-loops",
+      "type": "theory",
+      "title": "Ядро: внешний цикл по группам GQA, внутренний по блокам",
+      "source_anchor": "### Hardware-aligned kernel"
+    },
+    {
+      "id": "017-per-group-not-head",
+      "type": "theory",
+      "title": "Выбор на группу, а не на голову: 512 блоков против 64",
+      "source_anchor": "### Hardware-aligned kernel"
+    },
+    {
+      "id": "018-budget-formula",
+      "type": "theory",
+      "title": "Формула бюджета: O(N × (N/l + k·b + w))",
+      "source_anchor": "### The compute budget"
+    },
+    {
+      "id": "019-budget-64k",
+      "type": "theory",
+      "title": "64k: 2536 ключей против 64000",
+      "source_anchor": "### The compute budget"
+    },
+    {
+      "id": "020-budget-128k",
+      "type": "theory",
+      "title": "128k: почему выигрыш растёт с длиной",
+      "source_anchor": "### The compute budget"
+    },
+    {
+      "id": "021-budget-visual",
+      "type": "visual",
+      "title": "Из чего складываются 2536 ключей",
+      "source_anchor": "### The compute budget",
+      "visual_brief": "столбик полного attention 64000 ключей рядом со столбиком NSA 2536, разбитым на 1000 (сжатая), 1024 (выбранная), 512 (окно)"
+    },
+    {
+      "id": "022-check-budget",
+      "type": "check",
+      "title": "Проверка: посчитайте ключи для l=64, k=8, w=256",
+      "source_anchor": "### The compute budget"
+    },
+    {
+      "id": "023-compare-methods",
+      "type": "theory",
+      "title": "Сравнение с окном, strided, H2O и MoBA",
+      "source_anchor": "### How does it compare"
+    },
+    {
+      "id": "024-build-plan",
+      "type": "theory",
+      "title": "Что строим: игрушечная последовательность 1024 токена",
+      "source_anchor": "## Build It"
+    },
+    {
+      "id": "025-softmax-theory",
+      "type": "theory",
+      "title": "Устойчивый softmax: вычитаем максимум",
+      "source_anchor": "### Step 2: compressed-branch attention"
+    },
+    {
+      "id": "026-softmax",
+      "type": "code",
+      "title": "Пишем softmax",
+      "source_anchor": "### Step 2: compressed-branch attention",
+      "exercise_fn": "softmax"
+    },
+    {
+      "id": "027-scores-theory",
+      "type": "theory",
+      "title": "Оценки attention и деление на sqrt(d)",
+      "source_anchor": "### Step 2: compressed-branch attention"
+    },
+    {
+      "id": "028-attention-weights",
+      "type": "code",
+      "title": "Пишем attention_weights",
+      "source_anchor": "### Step 2: compressed-branch attention",
+      "exercise_fn": "attention_weights"
+    },
+    {
+      "id": "029-attend-theory",
+      "type": "theory",
+      "title": "Веса умножаются на V: взвешенная сумма значений",
+      "source_anchor": "### Step 2: compressed-branch attention"
+    },
+    {
+      "id": "030-attend",
+      "type": "code",
+      "title": "Пишем attend",
+      "source_anchor": "### Step 2: compressed-branch attention",
+      "exercise_fn": "attend"
+    },
+    {
+      "id": "031-compress-theory",
+      "type": "theory",
+      "title": "Mean-pool блока: l токенов превращаются в один вектор",
+      "source_anchor": "### Step 1: compress tokens into blocks"
+    },
+    {
+      "id": "032-compress-tail",
+      "type": "theory",
+      "title": "Хвостовой блок короче: делим на len(block), а не на l",
+      "source_anchor": "### Step 1: compress tokens into blocks"
+    },
+    {
+      "id": "033-compress-blocks",
+      "type": "code",
+      "title": "Пишем compress_blocks",
+      "source_anchor": "### Step 1: compress tokens into blocks",
+      "exercise_fn": "compress_blocks"
+    },
+    {
+      "id": "034-compressed-attention",
+      "type": "theory",
+      "title": "Один расчёт, две работы: ответ и указатель",
+      "source_anchor": "### Step 2: compressed-branch attention"
+    },
+    {
+      "id": "035-check-compressed",
+      "type": "check",
+      "title": "Проверка: сколько сжатых ключей при N=1024 и l=32",
+      "source_anchor": "### Step 2: compressed-branch attention"
+    },
+    {
+      "id": "036-topk-theory",
+      "type": "theory",
+      "title": "Берём индексы k блоков с наибольшими оценками",
+      "source_anchor": "### Step 3: top-k block selection"
+    },
+    {
+      "id": "037-top-k-blocks",
+      "type": "code",
+      "title": "Пишем top_k_blocks",
+      "source_anchor": "### Step 3: top-k block selection",
+      "exercise_fn": "top_k_blocks"
+    },
+    {
+      "id": "038-selected-theory",
+      "type": "theory",
+      "title": "От номера блока к диапазону несжатых токенов",
+      "source_anchor": "### Step 3: top-k block selection"
+    },
+    {
+      "id": "039-selected-branch",
+      "type": "code",
+      "title": "Пишем selected_branch",
+      "source_anchor": "### Step 3: top-k block selection",
+      "exercise_fn": "selected_branch"
+    },
+    {
+      "id": "040-window-theory",
+      "type": "theory",
+      "title": "Оконная ветка: обычный attention по последним w токенам",
+      "source_anchor": "### Step 4: sliding-window attention"
+    },
+    {
+      "id": "041-gate-mlp",
+      "type": "theory",
+      "title": "Гейт как крошечная MLP по запросу",
+      "source_anchor": "### Step 5: gate + combine"
+    },
+    {
+      "id": "042-nsa-attention",
+      "type": "code",
+      "title": "Пишем nsa_attention",
+      "source_anchor": "### Step 5: gate + combine",
+      "exercise_fn": "nsa_attention"
+    },
+    {
+      "id": "043-counting-theory",
+      "type": "theory",
+      "title": "Считаем ключи на запрос: 32 + 128 + 128",
+      "source_anchor": "### Step 6: compute counting"
+    },
+    {
+      "id": "044-keys-per-query",
+      "type": "code",
+      "title": "Пишем keys_per_query",
+      "source_anchor": "### Step 6: compute counting",
+      "exercise_fn": "keys_per_query"
+    },
+    {
+      "id": "045-toy-vs-real",
+      "type": "theory",
+      "title": "Почему на игрушке 3.5×, а на 64k — 25×",
+      "source_anchor": "### Step 6: compute counting"
+    },
+    {
+      "id": "046-check-counts",
+      "type": "check",
+      "title": "Проверка: разложите 288 ключей по веткам",
+      "source_anchor": "### Step 6: compute counting"
+    },
+    {
+      "id": "047-integration-status",
+      "type": "theory",
+      "title": "Где NSA работает: DeepSeek, vLLM, SGLang, llama.cpp",
+      "source_anchor": "## Use It"
+    },
+    {
+      "id": "048-when-not",
+      "type": "theory",
+      "title": "Когда NSA не подходит: готовые плотные веса и контекст до 16k",
+      "source_anchor": "## Use It"
+    },
+    {
+      "id": "049-kv-memory-trap",
+      "type": "theory",
+      "title": "Ловушка: вычисления режутся, а KV-кэш остаётся полным",
+      "source_anchor": "## Exercises"
+    },
+    {
+      "id": "050-ship-skill",
+      "type": "theory",
+      "title": "Скилл-интегратор NSA: что он должен выдать",
+      "source_anchor": "## Ship It"
+    },
+    {
+      "id": "051-quiz",
+      "type": "quiz",
+      "title": "Итоговая проверка: три ветки, гейт, поток градиента и бюджет вычислений",
+      "source_anchor": "## Key Terms"
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Дерево мыслей: оценка и отсечение</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a2e; --muted:#5b6070;
+    --line:#8a8fa0; --node:#f5f6f8; --stroke:#9aa0b0;
+    --accent:#b45309; --bad:#d92b45; --good:#2f9e44;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12121c; --fg:#e9e9f2; --muted:#a8adbd;
+      --line:#8a8aa0; --node:#1a1a2e; --stroke:#808090;
+      --accent:#ffa500; --bad:#e94560; --good:#51cf66;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg); color:var(--fg); padding:12px 10px 14px;
+        font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .head{max-width:860px;margin:0 auto 6px;font-weight:600}
+  .fig{max-width:860px;margin:0 auto}
+  svg{display:block;width:100%;height:auto}
+  .fallback{max-width:860px;margin:0 auto;color:var(--muted)}
+  text{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;fill:var(--fg)}
+  text.num{font-size:12.5px}
+  text.tag{font-size:12.5px}
+  text.legend{font-size:12px;fill:var(--muted)}
+  rect.node{fill:var(--node);stroke:var(--stroke)}
+  circle.node{fill:var(--node);stroke:var(--stroke)}
+  .root rect{stroke:var(--accent)}
+  .bad rect,.bad circle{stroke:var(--bad)}
+  .good rect,.good circle{stroke:var(--good)}
+  path.edge{fill:none;stroke:var(--line)}
+  polygon.edge{fill:var(--line);stroke:none}
+  path.edge.bad,polygon.edge.bad{stroke:var(--bad);fill:var(--bad)}
+  path.edge.bad{fill:none}
+  path.edge.good,polygon.edge.good{stroke:var(--good);fill:var(--good)}
+  path.edge.good{fill:none}
+  line.cross{stroke:var(--bad)}
+  text.bad{fill:var(--bad)} text.good{fill:var(--good)}
+</style>
+<div class="wrap">
+  <div class="head">Дерево мыслей: оценка ветки и отсечение слабой</div>
+  <div class="fig" id="fig"></div>
+  <p class="fallback" id="fb" hidden></p>
+</div>
+<script>
+(function(){
+  var W = 860, H = 406, LBL = 14, SW = 1.6;
+
+  // ---- данные схемы (координаты в условных единицах сетки) ----
+  var D = {
+    headLen: 0.26, headHalf: 0.095, corner: 0.12, crossArm: 0.19,
+    nodes: [
+      {id:'root', x: 0.0, y:0.00, w:1.70, h:0.46, t:'Задача', cls:'root'},
+      {id:'t1',   x:-3.6, y:1.05, w:1.20, h:0.42, t:'Шаг 1а'},
+      {id:'t2',   x: 0.0, y:1.05, w:1.20, h:0.42, t:'Шаг 1б'},
+      {id:'t3',   x: 3.6, y:1.05, w:1.20, h:0.42, t:'Шаг 1в'},
+      {id:'e1',   x:-3.6, y:2.00, r:0.30, t:'0.8', num:1},
+      {id:'e2',   x: 0.0, y:2.00, r:0.30, t:'0.3', num:1, cls:'bad'},
+      {id:'e3',   x: 3.6, y:2.00, r:0.30, t:'0.9', num:1},
+      {id:'c1',   x:-5.0, y:3.05, w:1.20, h:0.42, t:'Шаг 2а'},
+      {id:'c2',   x:-2.4, y:3.05, w:1.20, h:0.42, t:'Шаг 2б'},
+      {id:'c3',   x: 2.4, y:3.05, w:1.20, h:0.42, t:'Шаг 2а'},
+      {id:'c4',   x: 5.0, y:3.05, w:1.20, h:0.42, t:'Шаг 2б'},
+      {id:'xx',   x: 0.0, y:3.05, r:0.19, cross:1},
+      {id:'e4',   x:-5.0, y:4.00, r:0.30, t:'0.7', num:1},
+      {id:'e5',   x: 2.4, y:4.00, r:0.30, t:'0.95', num:1, cls:'good'},
+      {id:'sol',  x: 2.4, y:5.00, w:1.60, h:0.46, t:'Решение', cls:'good'}
+    ],
+    edges: [
+      {a:'root',b:'t1'}, {a:'root',b:'t2'}, {a:'root',b:'t3'},
+      {a:'t1',b:'e1'}, {a:'t2',b:'e2'}, {a:'t3',b:'e3'},
+      {a:'e1',b:'c1'}, {a:'e1',b:'c2'}, {a:'e3',b:'c3'}, {a:'e3',b:'c4'},
+      {a:'e2',b:'xx', cls:'bad', tag:'Отсечь', side:1},
+      {a:'c1',b:'e4'}, {a:'c3',b:'e5'},
+      {a:'e5',b:'sol', cls:'good', tag:'Лучший путь', side:1}
+    ],
+    legend: {x:0.0, y:5.62,
+      t:'кружок — оценка ветки · красный крест — ветка отсечена · зелёная стрелка — путь к решению'}
+  };
+
+  // ---- единственный перевод координат ----
+  var ORIGIN = {x: 430, y: 26}, SCALE = 66;
+  function toPx(p){ return {x: ORIGIN.x + p.x * SCALE, y: ORIGIN.y + p.y * SCALE}; }
+  function len(u){ return toPx({x:u, y:0}).x - toPx({x:0, y:0}).x; }
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function el(n, at){ var e = document.createElementNS(SVGNS, n);
+    for (var k in at) e.setAttribute(k, at[k]); return e; }
+
+  var byId = {};
+  D.nodes.forEach(function(n){ byId[n.id] = n; });
+
+  // точка выхода луча из границы узла
+  function edgePoint(n, ux, uy){
+    if (n.r) return {x: n.x + ux*n.r, y: n.y + uy*n.r};
+    var tx = ux ? (n.w/2)/Math.abs(ux) : Infinity,
+        ty = uy ? (n.h/2)/Math.abs(uy) : Infinity,
+        t = Math.min(tx, ty);
+    return {x: n.x + ux*t, y: n.y + uy*t};
+  }
+
+  var svg = el('svg', {viewBox:'0 0 '+W+' '+H, width:W, height:H,
+                       role:'img', 'aria-label':'Дерево мыслей с оценками и отсечением ветки'});
+
+  // ---- рёбра ----
+  D.edges.forEach(function(e){
+    var A = byId[e.a], B = byId[e.b];
+    var dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy);
+    var ux = dx/L, uy = dy/L, px = -uy, py = ux;
+    var s = edgePoint(A, ux, uy), t = edgePoint(B, -ux, -uy);
+    var base = {x: t.x - ux*D.headLen, y: t.y - uy*D.headLen};
+    var p1 = toPx(s), p2 = toPx(base), tip = toPx(t);
+    var l = toPx({x: base.x + px*D.headHalf, y: base.y + py*D.headHalf});
+    var r = toPx({x: base.x - px*D.headHalf, y: base.y - py*D.headHalf});
+    svg.appendChild(el('path', {class:'edge ' + (e.cls||''), 'stroke-width':SW,
+      d:'M'+p1.x+' '+p1.y+'L'+p2.x+' '+p2.y}));
+    svg.appendChild(el('polygon', {class:'edge ' + (e.cls||''),
+      points:[tip.x+','+tip.y, l.x+','+l.y, r.x+','+r.y].join(' ')}));
+    if (e.tag){
+      var m = toPx({x:(s.x+base.x)/2, y:(s.y+base.y)/2});
+      var tx = el('text', {class:'tag ' + (e.cls||''), x:m.x + LBL, y:m.y,
+        'text-anchor':'start', 'dominant-baseline':'central'});
+      tx.textContent = e.tag; svg.appendChild(tx);
+    }
+  });
+
+  // ---- узлы ----
+  D.nodes.forEach(function(n){
+    var g = el('g', {class:n.cls||''});
+    if (n.cross){
+      var a = toPx({x:n.x - D.crossArm, y:n.y - D.crossArm});
+      var b = toPx({x:n.x + D.crossArm, y:n.y + D.crossArm});
+      g.appendChild(el('line', {class:'cross', 'stroke-width':SW+0.6,
+        x1:a.x, y1:a.y, x2:b.x, y2:b.y}));
+      g.appendChild(el('line', {class:'cross', 'stroke-width':SW+0.6,
+        x1:a.x, y1:b.y, x2:b.x, y2:a.y}));
+    } else if (n.r){
+      var c = toPx({x:n.x, y:n.y});
+      g.appendChild(el('circle', {class:'node', 'stroke-width':SW,
+        cx:c.x, cy:c.y, r:len(n.r)}));
+    } else {
+      var p = toPx({x:n.x - n.w/2, y:n.y - n.h/2});
+      var q = toPx({x:n.x + n.w/2, y:n.y + n.h/2});
+      g.appendChild(el('rect', {class:'node', 'stroke-width':SW,
+        x:p.x, y:p.y, width:q.x - p.x, height:q.y - p.y,
+        rx:len(D.corner), ry:len(D.corner)}));
+    }
+    if (n.t){
+      var ct = toPx({x:n.x, y:n.y});
+      var tx = el('text', {class:(n.num ? 'num ' : '') + (n.cls||''),
+        x:ct.x, y:ct.y, 'text-anchor':'middle', 'dominant-baseline':'central'});
+      tx.textContent = n.t; g.appendChild(tx);
+    }
+    svg.appendChild(g);
+  });
+
+  // ---- легенда ----
+  var lp = toPx({x:D.legend.x, y:D.legend.y});
+  var lt = el('text', {class:'legend', x:lp.x, y:lp.y, 'text-anchor':'middle'});
+  lt.textContent = D.legend.t;
+  svg.appendChild(lt);
+
+  document.getElementById('fig').appendChild(svg);
+})();
+</script>
+<script>
+(function(){
+  var fig = document.getElementById('fig');
+  if (fig && fig.querySelector('svg')) return;
+  var fb = document.getElementById('fb');
+  fb.hidden = false;
+  fb.textContent = 'Схема: из «Задачи» выходят три первых шага с оценками 0.8, 0.3 и 0.9. '
+    + 'Ветка 0.3 отсекается красным крестом («Отсечь»), из веток 0.8 и 0.9 растут по два '
+    + 'новых шага. На втором уровне оценки 0.7 и 0.95; от 0.95 зелёная стрелка «Лучший путь» '
+    + 'ведёт к «Решению».';
+})();
+</script>
+</html>

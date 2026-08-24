@@ -18,12 +18,17 @@ export function ChatPanel({
   stepId,
   draft,
   onKept,
+  apiBase,
+  subject = "step",
 }: {
   slug: string;
   stepId: string;
   draft?: { text: string; at: number } | null;
   onKept: () => void;
+  apiBase?: string;
+  subject?: "step" | "milestone";
 }) {
+  const endpoint = apiBase ?? `/api/lesson/${slug}`;
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [streaming, setStreaming] = useState("");
@@ -56,10 +61,10 @@ export function ChatPanel({
   }, [draft]);
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/lesson/${slug}/chat?stepId=${encodeURIComponent(stepId)}`);
+    const response = await fetch(`${endpoint}/chat?stepId=${encodeURIComponent(stepId)}`);
     const body = (await response.json()) as { session: { messages: Message[] } | null };
     setMessages(body.session?.messages ?? []);
-  }, [slug, stepId]);
+  }, [endpoint, stepId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the saved chat of the current step
@@ -85,7 +90,7 @@ export function ChatPanel({
     setMessages((previous) => [...previous, { id: -1, role: "user", text, kept: false }]);
     setQuestion("");
 
-    const response = await fetch(`/api/lesson/${slug}/chat`, {
+    const response = await fetch(`${endpoint}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ stepId, question: text }),
@@ -124,7 +129,7 @@ export function ChatPanel({
     setStreaming("");
     setBusy(false);
     await load();
-  }, [busy, load, question, slug, stepId]);
+  }, [busy, endpoint, load, question, stepId]);
 
   const keep = useCallback(
     async (position: number) => {
@@ -134,7 +139,7 @@ export function ChatPanel({
       const asked = [...messages.slice(0, position)].reverse().find((item) => item.role === "user");
       if (!answer || !asked) return;
 
-      await fetch(`/api/lesson/${slug}/clarifications`, {
+      await fetch(`${endpoint}/clarifications`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -148,14 +153,14 @@ export function ChatPanel({
       await load();
       onKept();
     },
-    [load, messages, onKept, slug, stepId],
+    [endpoint, load, messages, onKept, stepId],
   );
 
   return (
     <section className="flex h-full flex-col gap-3 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
-          Спросить про этот шаг
+          {subject === "milestone" ? "Спросить про этот этап" : "Спросить про этот шаг"}
         </h2>
         <AgentPicker />
       </div>
@@ -163,7 +168,7 @@ export function ChatPanel({
       <div className="flex-1 space-y-4 overflow-y-auto">
         {messages.length === 0 && !streaming && (
           <p className="text-sm text-slate-400">
-            Непонятное место спрашивается прямо здесь — ответ придёт в контексте этого шага.
+            Непонятное место спрашивается прямо здесь — ответ придёт в контексте {subject === "milestone" ? "этого этапа" : "этого шага"}.
           </p>
         )}
 

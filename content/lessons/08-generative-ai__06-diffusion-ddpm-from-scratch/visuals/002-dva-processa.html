@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Два направления диффузии</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #657087;
+    --border: #cfd6e4;
+    --forward: #d85b36;
+    --forward-soft: #fff0e9;
+    --reverse: #2878c7;
+    --reverse-soft: #eaf4ff;
+    --signal: #354e78;
+    --signal-soft: #8da1c2;
+    --noise: #667085;
+    --noise-light: #aab2c0;
+    --fallback: #8b2432;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #171f2d;
+      --ink: #eef3ff;
+      --muted: #aab5ca;
+      --border: #445066;
+      --forward: #ff936f;
+      --forward-soft: #38231f;
+      --reverse: #78baff;
+      --reverse-soft: #182d43;
+      --signal: #b8cef5;
+      --signal-soft: #7088ae;
+      --noise: #c2cad8;
+      --noise-light: #778297;
+      --fallback: #ff9aa8;
+    }
+  }
+
+  html,
+  body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  figure {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  h1 {
+    font-size: 22px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+    overflow: visible;
+  }
+
+  .process-label {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .process-note {
+    font-size: 14px;
+    fill: var(--muted);
+  }
+
+  .state-label {
+    font-size: 16px;
+    font-weight: 650;
+    fill: var(--ink);
+  }
+
+  .state-note {
+    font-size: 12px;
+    fill: var(--muted);
+  }
+
+  .fallback {
+    font-size: 16px;
+    fill: var(--fallback);
+  }
+</style>
+</head>
+<body>
+<figure aria-labelledby="diagram-title">
+  <h1 id="diagram-title">Два направления диффузии</h1>
+  <svg id="diagram"
+       viewBox="0 0 1200 470"
+       width="1200"
+       height="470"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-desc">
+    <title id="svg-title">Прямой и обратный процессы диффузии</title>
+    <desc id="svg-desc">Сверху данные постепенно превращаются в шум по заданному процессу q. Снизу обучаемый процесс p тета восстанавливает данные из шума.</desc>
+    <g id="drawing"></g>
+  </svg>
+</figure>
+
+<script>
+"use strict";
+
+const D = Object.freeze({
+  zero: 0,
+  origin: Object.freeze({ x: 50, y: 18 }),
+  scale: Object.freeze({ x: 100, y: 100 }),
+  math: Object.freeze({ two: 2 }),
+  card: Object.freeze({
+    y: 1.28,
+    w: 1.58,
+    h: 1.48,
+    radius: 0.12,
+    inner: 0.08
+  }),
+  stages: Object.freeze([
+    Object.freeze({
+      x: 0.08,
+      symbol: "x₀",
+      note: "данные",
+      signal: 1,
+      noise: 0.05,
+      dotScale: 0.72
+    }),
+    Object.freeze({
+      x: 2.42,
+      symbol: "xₜ",
+      note: "детали слабеют",
+      signal: 0.78,
+      noise: 0.25,
+      dotScale: 0.82
+    }),
+    Object.freeze({
+      x: 4.76,
+      symbol: "xₜ",
+      note: "сигнал и шум",
+      signal: 0.5,
+      noise: 0.48,
+      dotScale: 0.92
+    }),
+    Object.freeze({
+      x: 7.10,
+      symbol: "xₜ",
+      note: "почти шум",
+      signal: 0.22,
+      noise: 0.72,
+      dotScale: 1
+    }),
+    Object.freeze({
+      x: 9.44,
+      symbol: "x_T",
+      note: "шум",
+      signal: 0.04,
+      noise: 0.96,
+      dotScale: 1.08
+    })
+  ]),
+  forward: Object.freeze({
+    arrowY: 0.86,
+    labelY: 0.20,
+    noteY: 0.47,
+    labelX: 5.52,
+    label: "Прямой процесс q  →",
+    note: "заданная случайная порча · учить нечего"
+  }),
+  reverse: Object.freeze({
+    arrowY: 3.38,
+    labelY: 3.83,
+    noteY: 4.10,
+    labelX: 5.52,
+    label: "←  Обратный процесс pθ",
+    note: "обучаемая нейросеть · шаг за шагом убирает шум"
+  }),
+  arrows: Object.freeze({
+    gap: 0.16,
+    headLength: 0.15,
+    headWidth: 0.09
+  }),
+  label: Object.freeze({
+    symbolY: 2.98,
+    noteY: 3.18
+  }),
+  scene: Object.freeze({
+    horizon: 0.96,
+    mountainLeft: Object.freeze({ x: 0.10, y: 0.86 }),
+    mountainPeak: Object.freeze({ x: 0.55, y: 0.34 }),
+    mountainMiddle: Object.freeze({ x: 0.86, y: 0.68 }),
+    mountainPeakTwo: Object.freeze({ x: 1.16, y: 0.45 }),
+    mountainRight: Object.freeze({ x: 1.48, y: 0.88 }),
+    sun: Object.freeze({ x: 1.18, y: 0.29, r: 0.12 }),
+    groundLeft: Object.freeze({ x: 0.10, y: 1.17 }),
+    groundRight: Object.freeze({ x: 1.48, y: 1.17 })
+  }),
+  dots: Object.freeze([
+    Object.freeze({ x: 0.13, y: 0.17, r: 0.025, tone: "noise" }),
+    Object.freeze({ x: 0.34, y: 0.26, r: 0.041, tone: "light" }),
+    Object.freeze({ x: 0.58, y: 0.14, r: 0.029, tone: "noise" }),
+    Object.freeze({ x: 0.82, y: 0.25, r: 0.052, tone: "light" }),
+    Object.freeze({ x: 1.06, y: 0.15, r: 0.034, tone: "noise" }),
+    Object.freeze({ x: 1.38, y: 0.23, r: 0.045, tone: "light" }),
+    Object.freeze({ x: 0.20, y: 0.48, r: 0.048, tone: "light" }),
+    Object.freeze({ x: 0.43, y: 0.58, r: 0.029, tone: "noise" }),
+    Object.freeze({ x: 0.70, y: 0.43, r: 0.042, tone: "noise" }),
+    Object.freeze({ x: 0.98, y: 0.55, r: 0.031, tone: "light" }),
+    Object.freeze({ x: 1.28, y: 0.48, r: 0.053, tone: "noise" }),
+    Object.freeze({ x: 1.48, y: 0.63, r: 0.027, tone: "light" }),
+    Object.freeze({ x: 0.12, y: 0.78, r: 0.032, tone: "noise" }),
+    Object.freeze({ x: 0.35, y: 0.87, r: 0.051, tone: "light" }),
+    Object.freeze({ x: 0.61, y: 0.73, r: 0.037, tone: "noise" }),
+    Object.freeze({ x: 0.88, y: 0.88, r: 0.047, tone: "light" }),
+    Object.freeze({ x: 1.12, y: 0.76, r: 0.028, tone: "noise" }),
+    Object.freeze({ x: 1.39, y: 0.91, r: 0.044, tone: "noise" }),
+    Object.freeze({ x: 0.22, y: 1.13, r: 0.046, tone: "light" }),
+    Object.freeze({ x: 0.50, y: 1.25, r: 0.032, tone: "noise" }),
+    Object.freeze({ x: 0.77, y: 1.08, r: 0.056, tone: "light" }),
+    Object.freeze({ x: 1.02, y: 1.28, r: 0.035, tone: "noise" }),
+    Object.freeze({ x: 1.30, y: 1.14, r: 0.049, tone: "light" }),
+    Object.freeze({ x: 1.48, y: 1.34, r: 0.026, tone: "noise" })
+  ]),
+  fallback: Object.freeze({
+    x: 0.34,
+    y: 1.85,
+    secondY: 2.22,
+    text: "Схема должна была показать две встречные цепочки:",
+    second: "данные x₀ → шум x_T по q; шум x_T → данные x₀ по обучаемому pθ."
+  })
+});
+
+const origin = Object.freeze(D.origin);
+const scale = Object.freeze(D.scale);
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+
+  const node = (name, attrs, text) => {
+    const item = document.createElementNS(svgNS, name);
+    for (const [key, value] of Object.entries(attrs)) {
+      item.setAttribute(key, String(value));
+    }
+    if (text !== undefined) item.textContent = text;
+    return item;
+  };
+
+  const addText = (parent, x, y, value, className, anchor) => {
+    parent.appendChild(node("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, value));
+  };
+
+  const addArrow = (parent, x1, y1, x2, y2, color) => {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const length = Math.hypot(dx, dy);
+    const ux = dx / length;
+    const uy = dy / length;
+    const baseX = x2 - ux * D.arrows.headLength;
+    const baseY = y2 - uy * D.arrows.headLength;
+    const sideX = -uy * D.arrows.headWidth;
+    const sideY = ux * D.arrows.headWidth;
+
+    parent.appendChild(node("line", {
+      x1: sx(x1),
+      y1: sy(y1),
+      x2: sx(baseX),
+      y2: sy(baseY),
+      stroke: color,
+      "stroke-width": "3",
+      "stroke-linecap": "round"
+    }));
+
+    const points = [
+      `${sx(x2)},${sy(y2)}`,
+      `${sx(baseX + sideX)},${sy(baseY + sideY)}`,
+      `${sx(baseX - sideX)},${sy(baseY - sideY)}`
+    ].join(" ");
+
+    parent.appendChild(node("polygon", {
+      points,
+      fill: color
+    }));
+  };
+
+  const drawCard = stage => {
+    const group = node("g", {
+      "aria-label": `${stage.symbol}: ${stage.note}`
+    });
+
+    group.appendChild(node("rect", {
+      x: sx(stage.x),
+      y: sy(D.card.y),
+      width: sx(D.card.w) - sx(D.zero),
+      height: sy(D.card.h) - sy(D.zero),
+      rx: sx(D.card.radius) - sx(D.zero),
+      ry: sy(D.card.radius) - sy(D.zero),
+      fill: "var(--panel)",
+      stroke: "var(--border)",
+      "stroke-width": "2"
+    }));
+
+    const scenePath = [
+      `M ${sx(stage.x + D.scene.mountainLeft.x)} ${sy(D.card.y + D.scene.mountainLeft.y)}`,
+      `L ${sx(stage.x + D.scene.mountainPeak.x)} ${sy(D.card.y + D.scene.mountainPeak.y)}`,
+      `L ${sx(stage.x + D.scene.mountainMiddle.x)} ${sy(D.card.y + D.scene.mountainMiddle.y)}`,
+      `L ${sx(stage.x + D.scene.mountainPeakTwo.x)} ${sy(D.card.y + D.scene.mountainPeakTwo.y)}`,
+      `L ${sx(stage.x + D.scene.mountainRight.x)} ${sy(D.card.y + D.scene.mountainRight.y)}`,
+      `L ${sx(stage.x + D.scene.mountainRight.x)} ${sy(D.card.y + D.scene.groundRight.y)}`,
+      `L ${sx(stage.x + D.scene.groundLeft.x)} ${sy(D.card.y + D.scene.groundLeft.y)}`,
+      "Z"
+    ].join(" ");
+
+    group.appendChild(node("path", {
+      d: scenePath,
+      fill: "var(--signal-soft)",
+      stroke: "var(--signal)",
+      "stroke-width": "2",
+      "stroke-linejoin": "round",
+      opacity: stage.signal
+    }));
+
+    group.appendChild(node("circle", {
+      cx: sx(stage.x + D.scene.sun.x),
+      cy: sy(D.card.y + D.scene.sun.y),
+      r: sx(D.scene.sun.r) - sx(D.zero),
+      fill: "var(--forward)",
+      opacity: stage.signal
+    }));
+
+    group.appendChild(node("line", {
+      x1: sx(stage.x + D.scene.groundLeft.x),
+      y1: sy(D.card.y + D.scene.groundLeft.y),
+      x2: sx(stage.x + D.scene.groundRight.x),
+      y2: sy(D.card.y + D.scene.groundRight.y),
+      stroke: "var(--signal)",
+      "stroke-width": "2",
+      opacity: stage.signal
+    }));
+
+    for (const dot of D.dots) {
+      group.appendChild(node("circle", {
+        cx: sx(stage.x + dot.x),
+        cy: sy(D.card.y + dot.y),
+        r: sx(dot.r * stage.dotScale) - sx(D.zero),
+        fill: dot.tone === "noise" ? "var(--noise)" : "var(--noise-light)",
+        opacity: stage.noise
+      }));
+    }
+
+    addText(
+      group,
+      stage.x + D.card.w / D.math.two,
+      D.label.symbolY,
+      stage.symbol,
+      "state-label",
+      "middle"
+    );
+
+    addText(
+      group,
+      stage.x + D.card.w / D.math.two,
+      D.label.noteY,
+      stage.note,
+      "state-note",
+      "middle"
+    );
+
+    root.appendChild(group);
+  };
+
+  addText(
+    root,
+    D.forward.labelX,
+    D.forward.labelY,
+    D.forward.label,
+    "process-label",
+    "middle"
+  );
+
+  addText(
+    root,
+    D.forward.labelX,
+    D.forward.noteY,
+    D.forward.note,
+    "process-note",
+    "middle"
+  );
+
+  addText(
+    root,
+    D.reverse.labelX,
+    D.reverse.labelY,
+    D.reverse.label,
+    "process-label",
+    "middle"
+  );
+
+  addText(
+    root,
+    D.reverse.labelX,
+    D.reverse.noteY,
+    D.reverse.note,
+    "process-note",
+    "middle"
+  );
+
+  for (const stage of D.stages) drawCard(stage);
+
+  let previous;
+  for (const stage of D.stages) {
+    if (previous !== undefined) {
+      const leftEnd = previous.x + D.card.w + D.arrows.gap;
+      const rightStart = stage.x - D.arrows.gap;
+
+      addArrow(
+        root,
+        leftEnd,
+        D.forward.arrowY,
+        rightStart,
+        D.forward.arrowY,
+        "var(--forward)"
+      );
+
+      addArrow(
+        root,
+        rightStart,
+        D.reverse.arrowY,
+        leftEnd,
+        D.reverse.arrowY,
+        "var(--reverse)"
+      );
+    }
+    previous = stage;
+  }
+} catch (error) {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("drawing");
+  root.replaceChildren();
+
+  const first = document.createElementNS(svgNS, "text");
+  first.setAttribute("x", String(sx(D.fallback.x)));
+  first.setAttribute("y", String(sy(D.fallback.y)));
+  first.setAttribute("class", "fallback");
+  first.textContent = D.fallback.text;
+  root.appendChild(first);
+
+  const second = document.createElementNS(svgNS, "text");
+  second.setAttribute("x", String(sx(D.fallback.x)));
+  second.setAttribute("y", String(sy(D.fallback.secondY)));
+  second.setAttribute("class", "fallback");
+  second.textContent = D.fallback.second;
+  root.appendChild(second);
+}
+</script>
+</body>
+</html>

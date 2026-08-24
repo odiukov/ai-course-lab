@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Как жадный фильтр удаляет коррелированные колонки</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #eef3f8;
+      --surface: #ffffff;
+      --panel: #f7f9fc;
+      --grid: #8391a3;
+      --text: #172033;
+      --muted: #536176;
+      --keep: #17784b;
+      --keep-bg: #e5f6ed;
+      --remove: #c4323f;
+      --remove-bg: #fde9eb;
+      --accent: #235fbd;
+      --accent-bg: #e8f0ff;
+      --neutral-bg: #eef2f6;
+      --shadow: #cbd4df;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --surface: #18202c;
+        --panel: #202a38;
+        --grid: #8492a6;
+        --text: #f2f5fa;
+        --muted: #bac5d4;
+        --keep: #66d49b;
+        --keep-bg: #173c2c;
+        --remove: #ff8490;
+        --remove-bg: #49242a;
+        --accent: #91b9ff;
+        --accent-bg: #21395f;
+        --neutral-bg: #293545;
+        --shadow: #0b1018;
+      }
+    }
+
+    html {
+      background: var(--page);
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .sheet {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 16px;
+      background: var(--surface);
+      border: 2px solid var(--shadow);
+    }
+
+    h1 {
+      margin: 0;
+      padding: 0 0 12px;
+      font-size: 22px;
+      line-height: normal;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 520px;
+      background: var(--surface);
+    }
+
+    .panel,
+    .cell,
+    .corner,
+    .header,
+    .status {
+      stroke-width: 2px;
+    }
+
+    .panel {
+      fill: var(--panel);
+      stroke: var(--grid);
+    }
+
+    .corner,
+    .header,
+    .cell {
+      stroke: var(--grid);
+    }
+
+    .corner {
+      fill: var(--neutral-bg);
+    }
+
+    .header.keep,
+    .cell.keep-tint {
+      fill: var(--keep-bg);
+    }
+
+    .header.remove,
+    .cell.remove-tint {
+      fill: var(--remove-bg);
+    }
+
+    .header.neutral,
+    .cell.neutral {
+      fill: var(--panel);
+    }
+
+    .cell.pair {
+      fill: var(--remove-bg);
+      stroke: var(--remove);
+    }
+
+    .cell.diagonal {
+      fill: var(--neutral-bg);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 16px;
+      pointer-events: none;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    .matrix-label {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .value {
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    .pair-value {
+      fill: var(--remove);
+    }
+
+    .keep-text {
+      fill: var(--keep);
+      font-weight: 750;
+    }
+
+    .remove-text {
+      fill: var(--remove);
+      font-weight: 750;
+    }
+
+    .accent-text {
+      fill: var(--accent);
+      font-weight: 750;
+    }
+
+    .compare-line,
+    .flow-line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .flow-line {
+      stroke: var(--grid);
+    }
+
+    .compare-head {
+      fill: var(--accent);
+    }
+
+    .flow-head {
+      fill: var(--grid);
+    }
+
+    .strike {
+      stroke: var(--remove);
+      stroke-width: 4px;
+      stroke-linecap: round;
+    }
+
+    .status {
+      fill: var(--panel);
+      stroke: var(--grid);
+    }
+
+    .status.keep-status {
+      fill: var(--keep-bg);
+      stroke: var(--keep);
+    }
+
+    .status.remove-status {
+      fill: var(--remove-bg);
+      stroke: var(--remove);
+    }
+
+    .threshold {
+      fill: var(--accent-bg);
+      stroke: var(--accent);
+      stroke-width: 2px;
+    }
+
+    #fallback,
+    noscript {
+      display: block;
+      padding: 16px;
+      color: var(--remove);
+      background: var(--remove-bg);
+      font-size: 16px;
+    }
+
+    #fallback[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <figure class="sheet">
+    <h1 id="diagram-title">Как жадный фильтр удаляет коррелированные колонки</h1>
+    <svg id="diagram"
+         viewBox="0 0 960 460"
+         width="960"
+         height="460"
+         preserveAspectRatio="xMidYMid meet"
+         role="img"
+         aria-labelledby="diagram-title diagram-description">
+      <desc id="diagram-description">
+        Матрица корреляций показывает корреляцию 1.0 между площадью в квадратных
+        метрах и площадью в квадратных футах. При пороге 0.9 левая колонка
+        сохраняется, а стоящая справа колонка площади в футах удаляется.
+      </desc>
+    </svg>
+    <div id="fallback" hidden>
+      Схема должна была показать: корреляция площади в м² и площади в фут² равна
+      1.0; при пороге 0.9 фильтр сохраняет левую колонку и удаляет правую.
+    </div>
+    <noscript>
+      Корреляция площади в м² и площади в фут² равна 1.0. При пороге 0.9
+      сохраняется левая колонка, а колонка справа удаляется.
+    </noscript>
+  </figure>
+
+  <script>
+    const data = [
+      {
+        zero: 0,
+        one: 1,
+        two: 2,
+        half: 2,
+        threshold: "0.9",
+        perfect: "1.0",
+        dash: "—"
+      },
+      {
+        matrix: { x: 34, y: 72, labelWidth: 132, cellWidth: 104, cellHeight: 66 },
+        arrowY: 46,
+        arrowBack: 14,
+        arrowHalf: 7,
+        innerPad: 12,
+        panel: { x: 552, y: 72, width: 374, height: 268 },
+        thresholdBox: { x: 580, y: 94, width: 318, height: 62 },
+        pairBox: { x: 580, y: 178, width: 318, height: 76 },
+        resultBox: { x: 580, y: 278, width: 318, height: 42 },
+        flowGap: 14,
+        statusesY: 374,
+        statusHeight: 58,
+        statusGap: 14,
+        statusStart: 88,
+        statusWidth: 248
+      },
+      [
+        { short: "м²", long: "площадь в м²", state: "keep" },
+        { short: "фут²", long: "площадь в фут²", state: "remove" },
+        { short: "комнаты", long: "число комнат", state: "neutral" }
+      ],
+      [
+        ["1.0", "1.0", "—"],
+        ["1.0", "1.0", "—"],
+        ["—", "—", "1.0"]
+      ],
+      {
+        topNote: "сравнение слева направо",
+        cornerTop: "колонки →",
+        cornerBottom: "строки ↓",
+        thresholdTitle: "Порог удаления",
+        pairTitle: "сравниваем сохранённую с правой",
+        outcome: "правую колонку — удалить",
+        keep: "ОСТАЁТСЯ",
+        remove: "УДАЛИТЬ",
+        later: "ПРОВЕРИТЬ ДАЛЬШЕ"
+      }
+    ];
+
+    const origin = { x: 0, y: 0 };
+    const scale = { x: 1, y: 1 };
+
+    const toPx = point => ({
+      x: origin.x + point.x * scale.x,
+      y: origin.y + point.y * scale.y
+    });
+
+    try {
+      const [numbers, layout, columns, matrix, words] = data;
+      const svg = document.getElementById("diagram");
+      const namespace = svg.namespaceURI;
+
+      const add = (name, attributes, content) => {
+        const node = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          node.setAttribute(key, String(value));
+        });
+        if (content !== undefined) {
+          node.textContent = content;
+        }
+        svg.appendChild(node);
+        return node;
+      };
+
+      const drawRect = (box, className) => {
+        const start = toPx({ x: box.x, y: box.y });
+        const end = toPx({
+          x: box.x + box.width,
+          y: box.y + box.height
+        });
+        return add("rect", {
+          x: start.x,
+          y: start.y,
+          width: end.x - start.x,
+          height: end.y - start.y,
+          class: className
+        });
+      };
+
+      const drawLine = (from, to, className) => {
+        const start = toPx(from);
+        const end = toPx(to);
+        return add("line", {
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          class: className
+        });
+      };
+
+      const drawText = (point, content, className, anchor) => {
+        const position = toPx(point);
+        return add("text", {
+          x: position.x,
+          y: position.y,
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "middle"
+        }, content);
+      };
+
+      const drawArrow = (from, to, lineClass, headClass, vertical) => {
+        drawLine(from, to, lineClass);
+        const tip = toPx(to);
+        const sideA = vertical
+          ? toPx({
+              x: to.x - layout.arrowHalf,
+              y: to.y - layout.arrowBack
+            })
+          : toPx({
+              x: to.x - layout.arrowBack,
+              y: to.y - layout.arrowHalf
+            });
+        const sideB = vertical
+          ? toPx({
+              x: to.x + layout.arrowHalf,
+              y: to.y - layout.arrowBack
+            })
+          : toPx({
+              x: to.x - layout.arrowBack,
+              y: to.y + layout.arrowHalf
+            });
+        add("polygon", {
+          points: [
+            `${tip.x},${tip.y}`,
+            `${sideA.x},${sideA.y}`,
+            `${sideB.x},${sideB.y}`
+          ].join(" "),
+          class: headClass
+        });
+      };
+
+      const m = layout.matrix;
+      const matrixWidth = m.labelWidth + columns.length * m.cellWidth;
+      const matrixHeight = (columns.length + numbers.one) * m.cellHeight;
+
+      drawRect({
+        x: m.x,
+        y: m.y,
+        width: m.labelWidth,
+        height: m.cellHeight
+      }, "corner");
+
+      drawText({
+        x: m.x + m.labelWidth / numbers.half,
+        y: m.y + m.cellHeight / numbers.half - layout.innerPad
+      }, words.cornerTop, "small", "middle");
+
+      drawText({
+        x: m.x + m.labelWidth / numbers.half,
+        y: m.y + m.cellHeight / numbers.half + layout.innerPad
+      }, words.cornerBottom, "small", "middle");
+
+      columns.forEach((column, index) => {
+        const x = m.x + m.labelWidth + index * m.cellWidth;
+
+        drawRect({
+          x,
+          y: m.y,
+          width: m.cellWidth,
+          height: m.cellHeight
+        }, `header ${column.state}`);
+
+        drawText({
+          x: x + m.cellWidth / numbers.half,
+          y: m.y + m.cellHeight / numbers.half
+        }, column.short, "matrix-label", "middle");
+
+        const rowY = m.y + m.cellHeight + index * m.cellHeight;
+
+        drawRect({
+          x: m.x,
+          y: rowY,
+          width: m.labelWidth,
+          height: m.cellHeight
+        }, `header ${column.state}`);
+
+        drawText({
+          x: m.x + m.labelWidth - layout.innerPad,
+          y: rowY + m.cellHeight / numbers.half
+        }, column.short, "matrix-label", "end");
+      });
+
+      matrix.forEach((row, rowIndex) => {
+        row.forEach((value, columnIndex) => {
+          const x = m.x + m.labelWidth + columnIndex * m.cellWidth;
+          const y = m.y + m.cellHeight + rowIndex * m.cellHeight;
+          const isPair =
+            (rowIndex === numbers.zero && columnIndex === numbers.one) ||
+            (rowIndex === numbers.one && columnIndex === numbers.zero);
+          const isDiagonal = rowIndex === columnIndex;
+          const tint = columnIndex === numbers.zero
+            ? "keep-tint"
+            : columnIndex === numbers.one
+              ? "remove-tint"
+              : "neutral";
+          const className = isPair
+            ? "cell pair"
+            : isDiagonal
+              ? "cell diagonal"
+              : `cell ${tint}`;
+
+          drawRect({
+            x,
+            y,
+            width: m.cellWidth,
+            height: m.cellHeight
+          }, className);
+
+          drawText({
+            x: x + m.cellWidth / numbers.half,
+            y: y + m.cellHeight / numbers.half
+          }, value, isPair ? "value pair-value" : "value", "middle");
+        });
+      });
+
+      const firstCenter = {
+        x: m.x + m.labelWidth + m.cellWidth / numbers.half,
+        y: layout.arrowY
+      };
+      const secondCenter = {
+        x: m.x + m.labelWidth + m.cellWidth + m.cellWidth / numbers.half,
+        y: layout.arrowY
+      };
+
+      drawArrow(
+        firstCenter,
+        secondCenter,
+        "compare-line",
+        "compare-head",
+        false
+      );
+
+      drawText({
+        x: firstCenter.x,
+        y: firstCenter.y - layout.innerPad
+      }, words.topNote, "small accent-text", "start");
+
+      const removedX = m.x + m.labelWidth + m.cellWidth;
+      drawLine({
+        x: removedX + layout.innerPad,
+        y: m.y + layout.innerPad
+      }, {
+        x: removedX + m.cellWidth - layout.innerPad,
+        y: m.y + matrixHeight - layout.innerPad
+      }, "strike");
+
+      drawLine({
+        x: removedX + layout.innerPad,
+        y: m.y + m.cellHeight / numbers.half
+      }, {
+        x: removedX + m.cellWidth - layout.innerPad,
+        y: m.y + m.cellHeight / numbers.half
+      }, "strike");
+
+      drawText({
+        x: m.x,
+        y: m.y + matrixHeight + layout.innerPad
+      }, "Матрица |корреляций|", "small", "start");
+
+      drawRect(layout.panel, "panel");
+      drawRect(layout.thresholdBox, "threshold");
+
+      drawText({
+        x: layout.thresholdBox.x + layout.innerPad,
+        y: layout.thresholdBox.y + layout.innerPad + layout.flowGap
+      }, words.thresholdTitle, "small", "start");
+
+      drawText({
+        x: layout.thresholdBox.x + layout.thresholdBox.width - layout.innerPad,
+        y: layout.thresholdBox.y + layout.thresholdBox.height / numbers.half
+      }, `|r| ≥ ${numbers.threshold}`, "value accent-text", "end");
+
+      const thresholdBottom = {
+        x: layout.thresholdBox.x + layout.thresholdBox.width / numbers.half,
+        y: layout.thresholdBox.y + layout.thresholdBox.height
+      };
+      const pairTop = {
+        x: thresholdBottom.x,
+        y: layout.pairBox.y - layout.flowGap
+      };
+
+      drawArrow(
+        thresholdBottom,
+        pairTop,
+        "flow-line",
+        "flow-head",
+        true
+      );
+
+      drawRect(layout.pairBox, "panel");
+
+      drawText({
+        x: layout.pairBox.x + layout.innerPad,
+        y: layout.pairBox.y + layout.innerPad + layout.flowGap
+      }, words.pairTitle, "small", "start");
+
+      drawText({
+        x: layout.pairBox.x + layout.innerPad,
+        y: layout.pairBox.y + layout.pairBox.height - layout.flowGap
+      }, "м² ↔ фут²", "matrix-label", "start");
+
+      drawText({
+        x: layout.pairBox.x + layout.pairBox.width - layout.innerPad,
+        y: layout.pairBox.y + layout.pairBox.height - layout.flowGap
+      }, `|r| = ${numbers.perfect}`, "value pair-value", "end");
+
+      const pairBottom = {
+        x: layout.pairBox.x + layout.pairBox.width / numbers.half,
+        y: layout.pairBox.y + layout.pairBox.height
+      };
+      const resultTop = {
+        x: pairBottom.x,
+        y: layout.resultBox.y - layout.flowGap
+      };
+
+      drawArrow(
+        pairBottom,
+        resultTop,
+        "flow-line",
+        "flow-head",
+        true
+      );
+
+      drawRect(layout.resultBox, "status remove-status");
+
+      drawText({
+        x: layout.resultBox.x + layout.innerPad,
+        y: layout.resultBox.y + layout.resultBox.height / numbers.half
+      }, `${numbers.perfect} ≥ ${numbers.threshold}`, "value remove-text", "start");
+
+      drawText({
+        x: layout.resultBox.x + layout.resultBox.width - layout.innerPad,
+        y: layout.resultBox.y + layout.resultBox.height / numbers.half
+      }, words.outcome, "remove-text", "end");
+
+      const statusWords = [words.keep, words.remove, words.later];
+
+      columns.forEach((column, index) => {
+        const x = layout.statusStart +
+          index * (layout.statusWidth + layout.statusGap);
+        const className = column.state === "keep"
+          ? "status keep-status"
+          : column.state === "remove"
+            ? "status remove-status"
+            : "status";
+
+        drawRect({
+          x,
+          y: layout.statusesY,
+          width: layout.statusWidth,
+          height: layout.statusHeight
+        }, className);
+
+        drawText({
+          x: x + layout.innerPad,
+          y: layout.statusesY + layout.innerPad + layout.flowGap
+        }, column.long, "matrix-label", "start");
+
+        drawText({
+          x: x + layout.statusWidth - layout.innerPad,
+          y: layout.statusesY + layout.statusHeight - layout.flowGap
+        }, statusWords[index],
+        column.state === "keep"
+          ? "small keep-text"
+          : column.state === "remove"
+            ? "small remove-text"
+            : "small",
+        "end");
+
+        if (column.state === "remove") {
+          drawLine({
+            x: x + layout.innerPad,
+            y: layout.statusesY + layout.statusHeight / numbers.half
+          }, {
+            x: x + layout.statusWidth - layout.innerPad,
+            y: layout.statusesY + layout.statusHeight / numbers.half
+          }, "strike");
+        }
+      });
+    } catch (error) {
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      svg.replaceChildren();
+      svg.setAttribute("hidden", "");
+      fallback.removeAttribute("hidden");
+    }
+  </script>
+</body>
+</html>

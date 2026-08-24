@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Обратный проход по двухслойной сети</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f8fafc;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5d687b;
+      --line: #7b879b;
+      --soft: #eef3f8;
+      --forward: #e9f3ff;
+      --forward-stroke: #3b82b8;
+      --gradient: #f0ebff;
+      --gradient-stroke: #7658c9;
+      --result: #e9f8f2;
+      --result-stroke: #27856b;
+      --accent: #6c4fd3;
+      --negative: #b33a52;
+      --shadow: #dce3ec;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #171f2d;
+        --text: #eef3fb;
+        --muted: #b4bfd0;
+        --line: #8d9aaf;
+        --soft: #202b3c;
+        --forward: #172d42;
+        --forward-stroke: #69b5e8;
+        --gradient: #28233f;
+        --gradient-stroke: #a994f0;
+        --result: #17372f;
+        --result-stroke: #62c9a8;
+        --accent: #b7a7ff;
+        --negative: #ff91a5;
+        --shadow: #0b1018;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .figure {
+      width: 100%;
+      max-height: 520px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+    }
+
+    .heading {
+      margin: 0;
+      padding: 12px 18px 6px;
+      font-size: 20px;
+      font-weight: bold;
+      letter-spacing: 0.01em;
+    }
+
+    .subheading {
+      margin: 0;
+      padding: 0 18px 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 430px;
+      background: var(--panel);
+    }
+
+    .card {
+      stroke-width: 2px;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .context-card {
+      fill: var(--forward);
+      stroke: var(--forward-stroke);
+    }
+
+    .gradient-card {
+      fill: var(--gradient);
+      stroke: var(--gradient-stroke);
+    }
+
+    .hub-card {
+      fill: var(--accent);
+      stroke: var(--accent);
+    }
+
+    .result-card {
+      fill: var(--result);
+      stroke: var(--result-stroke);
+    }
+
+    .flow-line {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .backward-line {
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .arrow-forward {
+      fill: var(--forward-stroke);
+    }
+
+    .arrow-backward {
+      fill: var(--accent);
+    }
+
+    .junction {
+      fill: var(--accent);
+    }
+
+    text {
+      fill: var(--text);
+      font-size: 14px;
+      text-rendering: geometricPrecision;
+    }
+
+    .small {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .label {
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .formula {
+      font-size: 14px;
+    }
+
+    .value {
+      fill: var(--negative);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .hub-text {
+      fill: #ffffff;
+    }
+
+    .hub-value {
+      fill: #ffffff;
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .fallback {
+      padding: 28px 18px;
+      color: var(--text);
+      background: var(--soft);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <figure class="figure" aria-labelledby="figure-title">
+    <h1 class="heading" id="figure-title">Обратный проход: ошибка оставляет градиенты у параметров</h1>
+    <p class="subheading">Стрелки показывают движение градиента справа налево и его разветвление после z₂.</p>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 1100 430"
+      width="1100"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="Обратный проход от ошибки L к градиентам W2 и b2 при a2 равном 0,8, y равном 1 и a1 равном 0,5"
+    >
+      <title>Числовой пример обратного прохода через выходной слой</title>
+      <desc>
+        Градиент ответа минус 0,4 умножается на производную сигмоиды 0,16.
+        Полученный градиент минус 0,064 передаётся смещению b2 и умножается
+        на a1, поэтому градиент W2 равен минус 0,032.
+      </desc>
+    </svg>
+
+    <div id="fallback" class="fallback" hidden>
+      Схема должна была показать: dL/da₂ = −0,4; после сигмоиды
+      dL/dz₂ = −0,064; для веса dL/dW₂ = −0,032, а для смещения
+      dL/db₂ = −0,064.
+    </div>
+
+    <noscript>
+      <div class="fallback">
+        Схема: dL/da₂ = −0,4 → dL/dz₂ = −0,064 →
+        dL/dW₂ = −0,032 и dL/db₂ = −0,064.
+      </div>
+    </noscript>
+  </figure>
+
+  <script>
+    const DIAGRAM = [{
+      origin: { x: 30, y: 10 },
+      scale: 10,
+      units: {
+        zero: 0,
+        half: 0.5,
+        radius: 0.8,
+        arrowLength: 1.4,
+        arrowHalfWidth: 0.65,
+        junctionRadius: 0.42
+      },
+      cards: [
+        {
+          x: 4, y: 1, w: 18, h: 7,
+          kind: "context-card",
+          lines: [
+            { dy: 2.5, text: "скрытый нейрон", kind: "small" },
+            { dy: 5.2, text: "a₁ = 0,5", kind: "label" }
+          ]
+        },
+        {
+          x: 29, y: 1, w: 17, h: 7,
+          kind: "context-card",
+          lines: [
+            { dy: 2.5, text: "вес связи", kind: "small" },
+            { dy: 5.2, text: "W₂ = 0,4", kind: "label" }
+          ]
+        },
+        {
+          x: 53, y: 1, w: 18, h: 7,
+          kind: "context-card",
+          lines: [
+            { dy: 2.5, text: "ответ сети", kind: "small" },
+            { dy: 5.2, text: "a₂ = 0,8", kind: "label" }
+          ]
+        },
+        {
+          x: 79, y: 1, w: 17, h: 7,
+          kind: "context-card",
+          lines: [
+            { dy: 2.5, text: "цель", kind: "small" },
+            { dy: 5.2, text: "y = 1", kind: "label" }
+          ]
+        },
+        {
+          x: 4, y: 14, w: 22, h: 10,
+          kind: "hub-card",
+          lines: [
+            { dy: 2.4, text: "градиент до входа", kind: "label hub-text" },
+            { dy: 5.3, text: "dL/dz₂ = −0,4 × 0,16", kind: "formula hub-text" },
+            { dy: 8.2, text: "= −0,064", kind: "hub-value" }
+          ]
+        },
+        {
+          x: 32, y: 14, w: 21, h: 10,
+          kind: "gradient-card",
+          lines: [
+            { dy: 2.4, text: "сигмоида", kind: "label" },
+            { dy: 5.3, text: "da₂/dz₂ = 0,8(1−0,8)", kind: "formula" },
+            { dy: 8.2, text: "= 0,16", kind: "value" }
+          ]
+        },
+        {
+          x: 59, y: 14, w: 23, h: 10,
+          kind: "gradient-card",
+          lines: [
+            { dy: 2.4, text: "градиент ответа", kind: "label" },
+            { dy: 5.3, text: "dL/da₂ = 2(0,8−1)", kind: "formula" },
+            { dy: 8.2, text: "= −0,4", kind: "value" }
+          ]
+        },
+        {
+          x: 89, y: 14, w: 14, h: 10,
+          kind: "gradient-card",
+          lines: [
+            { dy: 2.4, text: "ошибка", kind: "label" },
+            { dy: 5.3, text: "L = (a₂−y)²", kind: "formula" },
+            { dy: 8.2, text: "a₂=0,8 · y=1", kind: "small" }
+          ]
+        },
+        {
+          x: 2, y: 31, w: 32, h: 8,
+          kind: "result-card",
+          lines: [
+            { dy: 2.7, text: "вес W₂ получает значение через a₁ = 0,5", kind: "small" },
+            { dy: 5.8, text: "dL/dW₂ = −0,064 × 0,5 = −0,032", kind: "value" }
+          ]
+        },
+        {
+          x: 38, y: 31, w: 27, h: 8,
+          kind: "result-card",
+          lines: [
+            { dy: 2.7, text: "смещение b₂ получает градиент напрямую", kind: "small" },
+            { dy: 5.8, text: "dL/db₂ = −0,064", kind: "value" }
+          ]
+        },
+        {
+          x: 70, y: 31, w: 33, h: 8,
+          kind: "result-card",
+          lines: [
+            { dy: 2.7, text: "дальше назад через W₂ = 0,4", kind: "small" },
+            { dy: 5.8, text: "dL/da₁ = −0,064 × 0,4 = −0,0256", kind: "value" }
+          ]
+        }
+      ],
+      arrows: [
+        {
+          a: { x: 22, y: 4.5 }, b: { x: 29, y: 4.5 },
+          line: "flow-line", head: "arrow-forward"
+        },
+        {
+          a: { x: 46, y: 4.5 }, b: { x: 53, y: 4.5 },
+          line: "flow-line", head: "arrow-forward"
+        },
+        {
+          a: { x: 89, y: 19 }, b: { x: 82, y: 19 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        },
+        {
+          a: { x: 59, y: 19 }, b: { x: 53, y: 19 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        },
+        {
+          a: { x: 32, y: 19 }, b: { x: 26, y: 19 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        },
+        {
+          a: { x: 15, y: 24 }, b: { x: 18, y: 31 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        },
+        {
+          a: { x: 15, y: 24 }, b: { x: 51.5, y: 31 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        },
+        {
+          a: { x: 15, y: 24 }, b: { x: 86.5, y: 31 },
+          line: "flow-line backward-line", head: "arrow-backward"
+        }
+      ],
+      junctions: [
+        { x: 15, y: 24 }
+      ]
+    }];
+
+    const [{ origin, scale, units, cards, arrows, junctions }] = DIAGRAM;
+    const sx = x => origin.x + x * scale;
+    const sy = y => origin.y + y * scale;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const namespace = svg.namespaceURI;
+
+      const make = (name, attributes, parent) => {
+        const element = document.createElementNS(namespace, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          element.setAttribute(key, value);
+        });
+        (parent || svg).appendChild(element);
+        return element;
+      };
+
+      const arrow = item => {
+        make("line", {
+          x1: sx(item.a.x),
+          y1: sy(item.a.y),
+          x2: sx(item.b.x),
+          y2: sy(item.b.y),
+          class: item.line
+        });
+
+        const dx = item.b.x - item.a.x;
+        const dy = item.b.y - item.a.y;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const baseX = item.b.x - ux * units.arrowLength;
+        const baseY = item.b.y - uy * units.arrowLength;
+        const left = {
+          x: baseX - uy * units.arrowHalfWidth,
+          y: baseY + ux * units.arrowHalfWidth
+        };
+        const right = {
+          x: baseX + uy * units.arrowHalfWidth,
+          y: baseY - ux * units.arrowHalfWidth
+        };
+        const points = [item.b, left, right]
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ");
+
+        make("polygon", {
+          points,
+          class: item.head
+        });
+      };
+
+      arrows.forEach(arrow);
+
+      junctions.forEach(point => {
+        make("circle", {
+          cx: sx(point.x),
+          cy: sy(point.y),
+          r: sx(units.junctionRadius) - sx(units.zero),
+          class: "junction"
+        });
+      });
+
+      cards.forEach(card => {
+        const group = make("g", {}, svg);
+
+        make("rect", {
+          x: sx(card.x),
+          y: sy(card.y),
+          width: sx(card.x + card.w) - sx(card.x),
+          height: sy(card.y + card.h) - sy(card.y),
+          rx: sx(units.radius) - sx(units.zero),
+          ry: sy(units.radius) - sy(units.zero),
+          class: `card ${card.kind}`
+        }, group);
+
+        card.lines.forEach(line => {
+          const text = make("text", {
+            x: sx(card.x + card.w * units.half),
+            y: sy(card.y + line.dy),
+            "text-anchor": "middle",
+            "dominant-baseline": "middle",
+            class: line.kind
+          }, group);
+          text.textContent = line.text;
+        });
+      });
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>

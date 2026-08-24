@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полный контур безопасного переговорного агента</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f9fc;
+    --ink: #172033;
+    --muted: #526079;
+    --line: #526987;
+    --panel: #ffffff;
+    --control: #e9f2ff;
+    --private: #f0eaff;
+    --public: #e5f7ef;
+    --warn: #fff0e4;
+    --terminal: #eef2f7;
+    --accent: #1769aa;
+    --good: #17734a;
+    --bad: #a33b28;
+    --shadow: #d7deea;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #10141d;
+      --ink: #edf2fa;
+      --muted: #b6c1d3;
+      --line: #91a4c1;
+      --panel: #19202c;
+      --control: #172f49;
+      --private: #2b2344;
+      --public: #17392f;
+      --warn: #442b22;
+      --terminal: #242c39;
+      --accent: #72b7ef;
+      --good: #72d6a7;
+      --bad: #ff9b87;
+      --shadow: #303a4a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  body { padding: 10px 12px 8px; }
+
+  h2 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 440px;
+    background: var(--page);
+  }
+
+  .node {
+    stroke: var(--line);
+    stroke-width: 1.8;
+    fill: var(--panel);
+  }
+
+  .control { fill: var(--control); }
+  .private { fill: var(--private); }
+  .public { fill: var(--public); }
+  .warning { fill: var(--warn); }
+  .terminal { fill: var(--terminal); }
+
+  .route {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .arrow { fill: var(--line); }
+
+  .title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .detail {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .caption {
+    fill: var(--muted);
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .good-text { fill: var(--good); }
+  .bad-text { fill: var(--bad); }
+  .accent-text { fill: var(--accent); }
+
+  #fallback {
+    margin: 12px;
+    padding: 12px;
+    border: 1.8px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<h2>Полный контур безопасного переговорного агента</h2>
+
+<svg id="diagram" viewBox="0 0 1200 440" width="1200" height="440"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-labelledby="svgTitle svgDesc">
+  <title id="svgTitle">Замкнутый безопасный контур переговорного агента</title>
+  <desc id="svgDesc">Предложение проходит валидацию ZOPA, приватное состояние, генератор цены, рассказчика и публичный канал. Переговоры ограничены пятью раундами и завершаются сделкой, отказом или передачей посреднику. Отказы журналируются, а результаты поступают в мониторинг.</desc>
+  <g id="routes"></g>
+  <g id="nodes"></g>
+  <g id="labels"></g>
+</svg>
+
+<p id="fallback" hidden>
+  Схема должна была показать замкнутый контур: входящее предложение проверяется
+  валидатором ZOPA, приватный блокнот изолирован от публичного канала,
+  детерминированный генератор выбирает цену, рассказчик формулирует сообщение,
+  а лимит в 3–5 раундов завершает процесс сделкой, отказом или передачей
+  посреднику. Отклонения журналируются, deal rate и разброс выигрыша
+  отслеживаются мониторингом.
+</p>
+
+<script>
+const scheme = {
+  unit: [0, 1, 2],
+  half: 2,
+  radius: 1,
+  arrowLength: 1.5,
+  arrowWidth: 0.8,
+  titleOffset: 3.1,
+  detailOffset: 5.8,
+  leading: 2.4,
+  labelPad: 8,
+  nodes: [
+    { id: "input", x: 3, y: 15, w: 18, h: 12, tone: "control",
+      lines: ["Входящее", "предложение", "по схеме"] },
+    { id: "validator", x: 29, y: 15, w: 22, h: 12, tone: "control",
+      lines: ["Валидатор ZOPA", "структура и", "допустимые границы"] },
+    { id: "generator", x: 59, y: 15, w: 22, h: 12, tone: "control",
+      lines: ["Генератор цены", "детерминированное", "решение"] },
+    { id: "narrator", x: 89, y: 15, w: 22, h: 12, tone: "control",
+      lines: ["Рассказчик", "только превращает", "решение в реплику"] },
+    { id: "public", x: 119, y: 15, w: 21, h: 12, tone: "public",
+      lines: ["Публичный канал", "только проверенная", "реплика"] },
+    { id: "scratch", x: 59, y: 1, w: 52, h: 10, tone: "private",
+      lines: ["Приватный scratchpad", "резерв · история · служебные расчёты"] },
+    { id: "reject", x: 29, y: 35, w: 47, h: 11, tone: "warning",
+      lines: ["Журнал отклонений", "предложение + проверяемая причина"] },
+    { id: "monitor", x: 84, y: 35, w: 48, h: 11, tone: "public",
+      lines: ["Непрерывный мониторинг", "deal rate · разброс выигрыша"] },
+    { id: "deal", x: 156, y: 2, w: 10, h: 8, tone: "terminal",
+      lines: ["Сделка"] },
+    { id: "refusal", x: 156, y: 15, w: 10, h: 8, tone: "terminal",
+      lines: ["Отказ"] },
+    { id: "mediator", x: 154, y: 32, w: 12, h: 10, tone: "warning",
+      lines: ["Посредник", "5-й раунд", "или тупик"] }
+  ],
+  diamond: {
+    points: [[142, 21], [148, 14], [154, 21], [148, 28]],
+    lines: ["Лимит", "3–5 раундов"]
+  },
+  routes: [
+    { points: [[21, 21], [29, 21]] },
+    { points: [[51, 21], [59, 21]], caption: ["допустимо", 55, 19, "middle"] },
+    { points: [[81, 21], [89, 21]], caption: ["готовая цена", 85, 19, "middle"] },
+    { points: [[111, 21], [119, 21]], caption: ["формулировка", 115, 24, "middle"] },
+    { points: [[140, 21], [142, 21]] },
+    { points: [[70, 11], [70, 15]] },
+    { points: [[100, 11], [100, 15]] },
+    { points: [[40, 27], [40, 35]], caption: ["ошибка или вне ZOPA", 42, 31, "start"] },
+    { points: [[129, 27], [129, 31], [108, 31], [108, 35]],
+      caption: ["после отправки", 127, 29, "end"] },
+    { points: [[148, 14], [148, 6], [156, 6]] },
+    { points: [[154, 21], [156, 19]] },
+    { points: [[148, 28], [148, 37], [154, 37]] },
+    { points: [[145, 25], [145, 52], [40, 52], [40, 27]],
+      caption: ["следующий раунд, пока лимит не исчерпан", 116, 52, "middle"] },
+    { points: [[76, 41], [84, 41]],
+      caption: ["сигналы отказов", 80, 39, "middle"] }
+  ]
+};
+
+const origin = { x: 22, y: 18 };
+const scale = 7;
+const sx = x => origin.x + x * scale;
+const sy = y => origin.y + y * scale;
+
+try {
+  const [ZERO, ONE, TWO] = scheme.unit;
+  const svgNS = "http://www.w3.org/2000/svg";
+  const routesLayer = document.getElementById("routes");
+  const nodesLayer = document.getElementById("nodes");
+  const labelsLayer = document.getElementById("labels");
+
+  const make = (name, attrs, parent) => {
+    const element = document.createElementNS(svgNS, name);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    parent.appendChild(element);
+    return element;
+  };
+
+  const write = (value, x, y, kind, anchor, dx, dy) => {
+    const element = make("text", {
+      x: sx(x),
+      y: sy(y),
+      class: kind,
+      "text-anchor": anchor,
+      dx: dx,
+      dy: dy
+    }, labelsLayer);
+    element.textContent = value;
+    return element;
+  };
+
+  const arrow = points => {
+    const textPoints = points.map(point => `${sx(point[ZERO])},${sy(point[ONE])}`).join(" ");
+    make("polyline", { points: textPoints, class: "route" }, routesLayer);
+
+    const before = points[points.length - TWO];
+    const tip = points[points.length - ONE];
+    const vx = tip[ZERO] - before[ZERO];
+    const vy = tip[ONE] - before[ONE];
+    const length = Math.hypot(vx, vy);
+    const ux = vx / length;
+    const uy = vy / length;
+    const px = -uy;
+    const py = ux;
+    const baseX = tip[ZERO] - ux * scheme.arrowLength;
+    const baseY = tip[ONE] - uy * scheme.arrowLength;
+    const left = [
+      baseX + px * scheme.arrowWidth,
+      baseY + py * scheme.arrowWidth
+    ];
+    const right = [
+      baseX - px * scheme.arrowWidth,
+      baseY - py * scheme.arrowWidth
+    ];
+    const triangle = [tip, left, right]
+      .map(point => `${sx(point[ZERO])},${sy(point[ONE])}`)
+      .join(" ");
+
+    make("polygon", { points: triangle, class: "arrow" }, routesLayer);
+  };
+
+  scheme.routes.forEach(route => {
+    arrow(route.points);
+    if (route.caption) {
+      write(
+        route.caption[ZERO],
+        route.caption[ONE],
+        route.caption[TWO],
+        "caption",
+        route.caption[scheme.titleOffset],
+        ZERO,
+        -scheme.labelPad
+      );
+    }
+  });
+
+  scheme.nodes.forEach(node => {
+    make("rect", {
+      x: sx(node.x),
+      y: sy(node.y),
+      width: sx(node.x + node.w) - sx(node.x),
+      height: sy(node.y + node.h) - sy(node.y),
+      rx: sx(scheme.radius) - sx(ZERO),
+      ry: sy(scheme.radius) - sy(ZERO),
+      class: `node ${node.tone}`
+    }, nodesLayer);
+
+    const center = node.x + node.w / scheme.half;
+    if (node.lines.length === ONE) {
+      write(node.lines[ZERO], center, node.y + node.h / scheme.half,
+        "title", "middle", ZERO, scheme.labelPad / scheme.half);
+    } else {
+      node.lines.forEach((line, index) => {
+        const kind = index === ZERO ? "title" : "detail";
+        const position = node.y + scheme.titleOffset + index * scheme.leading;
+        write(line, center, position, kind, "middle", ZERO, ZERO);
+      });
+    }
+  });
+
+  const diamondPoints = scheme.diamond.points
+    .map(point => `${sx(point[ZERO])},${sy(point[ONE])}`)
+    .join(" ");
+
+  make("polygon", {
+    points: diamondPoints,
+    class: "node control"
+  }, nodesLayer);
+
+  scheme.diamond.lines.forEach((line, index) => {
+    write(
+      line,
+      148,
+      19.5 + index * scheme.leading,
+      index === ZERO ? "title accent-text" : "detail",
+      "middle",
+      ZERO,
+      ZERO
+    );
+  });
+
+  write("приватное состояние не публикуется", 85, 1,
+    "caption accent-text", "middle", ZERO, -scheme.labelPad);
+  write("проверено → опубликовано", 129, 14,
+    "caption good-text", "middle", ZERO, -scheme.labelPad);
+  write("отклонено → записано", 52.5, 46,
+    "caption bad-text", "middle", ZERO, scheme.labelPad);
+} catch (error) {
+  document.getElementById("diagram").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

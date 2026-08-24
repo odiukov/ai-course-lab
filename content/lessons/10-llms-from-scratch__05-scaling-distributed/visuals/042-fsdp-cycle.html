@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Жизненный цикл параметров одного слоя в FSDP</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f4f7fb;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #58647a;
+    --line: #8793a8;
+    --empty: #edf1f6;
+    --empty-stroke: #aab4c4;
+    --accent: #3558d4;
+    --accent-soft: #e8edff;
+    --gpu1: #2474d2;
+    --gpu2: #16896a;
+    --gpu3: #c27613;
+    --gpu4: #b34888;
+    --inside: #ffffff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111722;
+      --panel: #182131;
+      --text: #eef3ff;
+      --muted: #b5bfd2;
+      --line: #8290a8;
+      --empty: #222d40;
+      --empty-stroke: #526079;
+      --accent: #8da5ff;
+      --accent-soft: #273453;
+      --gpu1: #4d9df0;
+      --gpu2: #34b891;
+      --gpu3: #e5a33f;
+      --gpu4: #df76b4;
+      --inside: #101722;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--empty-stroke);
+  }
+
+  h1 {
+    margin: 0;
+    padding: 12px 20px 7px;
+    font-size: 20px;
+    line-height: 1.25;
+    font-weight: 700;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--panel);
+  }
+
+  .stage {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .stage-note {
+    fill: var(--muted);
+    font-size: 12px;
+  }
+
+  .operation {
+    fill: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .operation-note {
+    fill: var(--muted);
+    font-size: 11px;
+  }
+
+  .gpu-label {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .segment {
+    stroke: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .segment-empty {
+    fill: var(--empty);
+    stroke: var(--empty-stroke);
+    stroke-width: 1px;
+  }
+
+  .gpu1 {
+    fill: var(--gpu1);
+  }
+
+  .gpu2 {
+    fill: var(--gpu2);
+  }
+
+  .gpu3 {
+    fill: var(--gpu3);
+  }
+
+  .gpu4 {
+    fill: var(--gpu4);
+  }
+
+  .segment-text {
+    fill: var(--inside);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .arrow {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2.5px;
+  }
+
+  .arrow-head {
+    fill: var(--accent);
+  }
+
+  .loop {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .loop-head {
+    fill: var(--line);
+  }
+
+  .loop-label {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .legend {
+    fill: var(--text);
+    font-size: 12px;
+  }
+
+  .summary {
+    fill: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  #fallback {
+    margin: 0;
+    padding: 18px 20px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Жизненный цикл параметров одного слоя в FSDP</h1>
+  <svg id="diagram"
+       viewBox="0 0 1200 420"
+       width="1200"
+       height="420"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Цикл параметров слоя FSDP на четырёх GPU</title>
+    <desc id="svg-description">Временная шкала: шарды, полный слой для forward, снова шарды, полный слой для backward и шарды после reduce-scatter.</desc>
+  </svg>
+  <p id="fallback" hidden>Схема должна была показать цикл на 4 GPU: постоянные шарды по 1/4, all-gather полного слоя перед forward и backward, освобождение чужих шардов и reduce-scatter градиентов.</p>
+</main>
+
+<script>
+"use strict";
+
+const DATA = [
+  { x: -32, y: -20, w: 1200, h: 420 },
+  { x: 32, y: 20 },
+  { x: 1, y: 1 },
+  {
+    barW: 126,
+    barH: 24,
+    segmentW: 30,
+    rowCenterOffset: 12
+  },
+  [
+    { key: "gpu1", label: "GPU 1", shard: "P₁", x: 28, y: 110, centerY: 122 },
+    { key: "gpu2", label: "GPU 2", shard: "P₂", x: 28, y: 163, centerY: 175 },
+    { key: "gpu3", label: "GPU 3", shard: "P₃", x: 28, y: 216, centerY: 228 },
+    { key: "gpu4", label: "GPU 4", shard: "P₄", x: 28, y: 269, centerY: 281 }
+  ],
+  [
+    { key: "gpu1", label: "P₁", offset: 0 },
+    { key: "gpu2", label: "P₂", offset: 32 },
+    { key: "gpu3", label: "P₃", offset: 64 },
+    { key: "gpu4", label: "P₄", offset: 96 }
+  ],
+  [
+    {
+      x: 135, labelX: 198, titleY: 12, noteY: 34,
+      title: "Между шагами", note: "только постоянные шарды 1/4",
+      mode: "shard"
+    },
+    {
+      x: 345, labelX: 408, titleY: 12, noteY: 34,
+      title: "Forward", note: "полный слой на каждой GPU",
+      mode: "full"
+    },
+    {
+      x: 555, labelX: 618, titleY: 12, noteY: 34,
+      title: "После forward", note: "чужие шарды освобождены",
+      mode: "shard"
+    },
+    {
+      x: 765, labelX: 828, titleY: 12, noteY: 34,
+      title: "Backward", note: "полный слой на каждой GPU",
+      mode: "full"
+    },
+    {
+      x: 975, labelX: 1038, titleY: 12, noteY: 34,
+      title: "Между шагами", note: "локальные шарды весов и градиентов",
+      mode: "shard"
+    }
+  ],
+  [
+    {
+      x1: 270, y1: 91, x2: 332, y2: 91,
+      labelX: 301, labelY: 55, noteY: 72,
+      label: "all-gather", note: "собрать полные параметры",
+      head: [{ x: 332, y: 91 }, { x: 321, y: 84 }, { x: 321, y: 98 }]
+    },
+    {
+      x1: 480, y1: 91, x2: 542, y2: 91,
+      labelX: 511, labelY: 55, noteY: 72,
+      label: "освободить", note: "удалить чужие шарды",
+      head: [{ x: 542, y: 91 }, { x: 531, y: 84 }, { x: 531, y: 98 }]
+    },
+    {
+      x1: 690, y1: 91, x2: 752, y2: 91,
+      labelX: 721, labelY: 55, noteY: 72,
+      label: "all-gather", note: "собрать полные параметры",
+      head: [{ x: 752, y: 91 }, { x: 741, y: 84 }, { x: 741, y: 98 }]
+    },
+    {
+      x1: 900, y1: 91, x2: 962, y2: 91,
+      labelX: 931, labelY: 55, noteY: 72,
+      label: "reduce-scatter", note: "оставить шарды градиентов",
+      head: [{ x: 962, y: 91 }, { x: 951, y: 84 }, { x: 951, y: 98 }]
+    }
+  ],
+  {
+    points: [
+      { x: 1101, y: 293 },
+      { x: 1101, y: 334 },
+      { x: 135, y: 334 },
+      { x: 135, y: 305 }
+    ],
+    head: [
+      { x: 135, y: 293 },
+      { x: 128, y: 305 },
+      { x: 142, y: 305 }
+    ],
+    labelX: 618,
+    labelY: 326,
+    label: "Adam: локально обновить свой шард и начать следующий цикл"
+  },
+  [
+    { className: "gpu1", x: 300, y: 350, textX: 322, textY: 360, label: "шард GPU 1" },
+    { className: "gpu2", x: 445, y: 350, textX: 467, textY: 360, label: "шард GPU 2" },
+    { className: "gpu3", x: 590, y: 350, textX: 612, textY: 360, label: "шард GPU 3" },
+    { className: "gpu4", x: 735, y: 350, textX: 757, textY: 360, label: "шард GPU 4" }
+  ],
+  {
+    swatchW: 14,
+    swatchH: 14,
+    summaryX: 568,
+    summaryY: 390,
+    summary: "Постоянно на каждой GPU: 1/4 параметров · 1/4 градиентов · 1/4 состояния Adam"
+  }
+];
+
+const [
+  FRAME,
+  ORIGIN,
+  SCALE,
+  METRICS,
+  ROWS,
+  SEGMENTS,
+  STAGES,
+  OPERATIONS,
+  LOOP,
+  LEGEND,
+  LEGEND_METRICS
+] = DATA;
+
+const sx = x => ORIGIN.x + x * SCALE.x;
+const sy = y => ORIGIN.y + y * SCALE.y;
+
+const svg = document.getElementById("diagram");
+const fallback = document.getElementById("fallback");
+
+try {
+  const element = (tag, attributes = {}, content = "") => {
+    const node = document.createElementNS(svg.namespaceURI, tag);
+    Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value));
+    if (content) node.textContent = content;
+    return node;
+  };
+
+  const addText = (x, y, className, content, anchor = "middle") => {
+    const node = element("text", {
+      x: sx(x),
+      y: sy(y),
+      class: className,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle"
+    }, content);
+    svg.appendChild(node);
+    return node;
+  };
+
+  const background = element("rect", {
+    x: sx(FRAME.x),
+    y: sy(FRAME.y),
+    width: sx(FRAME.x + FRAME.w) - sx(FRAME.x),
+    height: sy(FRAME.y + FRAME.h) - sy(FRAME.y),
+    fill: "var(--panel)"
+  });
+  svg.insertBefore(background, svg.querySelector("title"));
+
+  STAGES.forEach(stage => {
+    addText(stage.labelX, stage.titleY, "stage", stage.title);
+    addText(stage.labelX, stage.noteY, "stage-note", stage.note);
+
+    ROWS.forEach(row => {
+      SEGMENTS.forEach(segment => {
+        const visible = stage.mode === "full" || segment.key === row.key;
+        const segmentX = stage.x + segment.offset;
+        const rect = element("rect", {
+          x: sx(segmentX),
+          y: sy(row.y),
+          width: sx(segmentX + METRICS.segmentW) - sx(segmentX),
+          height: sy(row.y + METRICS.barH) - sy(row.y),
+          class: visible ? `segment ${segment.key}` : "segment-empty"
+        });
+        svg.appendChild(rect);
+
+        if (visible) {
+          addText(
+            segmentX + METRICS.segmentW / SCALE.x / METRICS.rowCenterOffset,
+            row.centerY,
+            "segment-text",
+            segment.label
+          );
+        }
+      });
+    });
+  });
+
+  ROWS.forEach(row => {
+    addText(row.x, row.centerY, "gpu-label", row.label, "end");
+  });
+
+  OPERATIONS.forEach(operation => {
+    const shaft = element("line", {
+      x1: sx(operation.x1),
+      y1: sy(operation.y1),
+      x2: sx(operation.x2),
+      y2: sy(operation.y2),
+      class: "arrow"
+    });
+    svg.appendChild(shaft);
+
+    const head = element("polygon", {
+      points: operation.head.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+      class: "arrow-head"
+    });
+    svg.appendChild(head);
+
+    addText(operation.labelX, operation.labelY, "operation", operation.label);
+    addText(operation.labelX, operation.noteY, "operation-note", operation.note);
+  });
+
+  const loopLine = element("polyline", {
+    points: LOOP.points.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: "loop"
+  });
+  svg.appendChild(loopLine);
+
+  const loopHead = element("polygon", {
+    points: LOOP.head.map(point => `${sx(point.x)},${sy(point.y)}`).join(" "),
+    class: "loop-head"
+  });
+  svg.appendChild(loopHead);
+  addText(LOOP.labelX, LOOP.labelY, "loop-label", LOOP.label);
+
+  LEGEND.forEach(item => {
+    const swatch = element("rect", {
+      x: sx(item.x),
+      y: sy(item.y),
+      width: sx(item.x + LEGEND_METRICS.swatchW) - sx(item.x),
+      height: sy(item.y + LEGEND_METRICS.swatchH) - sy(item.y),
+      class: item.className
+    });
+    svg.appendChild(swatch);
+    addText(item.textX, item.textY, "legend", item.label, "start");
+  });
+
+  addText(
+    LEGEND_METRICS.summaryX,
+    LEGEND_METRICS.summaryY,
+    "summary",
+    LEGEND_METRICS.summary
+  );
+} catch (error) {
+  svg.hidden = true;
+  fallback.hidden = false;
+  fallback.textContent = "Схема должна была показать цикл на 4 GPU: постоянные шарды по 1/4, all-gather полного слоя перед forward и backward, освобождение чужих шардов и reduce-scatter градиентов.";
+}
+</script>
+</body>
+</html>

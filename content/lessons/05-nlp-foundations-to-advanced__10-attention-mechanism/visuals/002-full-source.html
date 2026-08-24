@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Доступ декодера к состояниям энкодера</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f7fb;
+      --bg: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --line: #344054;
+      --soft-line: #98a2b3;
+      --encoder-fill: #e8f1ff;
+      --encoder-stroke: #3972c6;
+      --decoder-fill: #fff2d8;
+      --decoder-stroke: #b96b16;
+      --memory-fill: #e8f8ef;
+      --memory-stroke: #21865a;
+      --discard: #b04444;
+      --divider: #c7cfda;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --bg: #18202d;
+        --text: #edf2f7;
+        --muted: #aeb9c8;
+        --line: #d1d8e2;
+        --soft-line: #8793a5;
+        --encoder-fill: #203b5e;
+        --encoder-stroke: #75aaf0;
+        --decoder-fill: #51391f;
+        --decoder-stroke: #efae60;
+        --memory-fill: #173f32;
+        --memory-stroke: #64c99b;
+        --discard: #ef8585;
+        --divider: #566174;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    .frame {
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    h1 {
+      font-size: 20px;
+      text-align: center;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: var(--bg);
+      border: 1px solid var(--divider);
+    }
+
+    svg text {
+      fill: var(--text);
+      user-select: none;
+    }
+
+    .panel-title {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .caption {
+      font-size: 14px;
+      fill: var(--muted);
+    }
+
+    .node-label {
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .small-label {
+      font-size: 13px;
+    }
+
+    .main-line,
+    .soft-line,
+    .discard-line,
+    .memory-line,
+    .divider-line {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .main-line {
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .soft-line {
+      stroke: var(--soft-line);
+      stroke-width: 1.5px;
+    }
+
+    .discard-line {
+      stroke: var(--discard);
+      stroke-width: 2px;
+    }
+
+    .memory-line {
+      stroke: var(--memory-stroke);
+      stroke-width: 2px;
+    }
+
+    .divider-line {
+      stroke: var(--divider);
+      stroke-width: 1px;
+    }
+
+    .input-node {
+      fill: var(--bg);
+      stroke: var(--soft-line);
+      stroke-width: 1.5px;
+    }
+
+    .encoder-node {
+      fill: var(--encoder-fill);
+      stroke: var(--encoder-stroke);
+      stroke-width: 2px;
+    }
+
+    .decoder-node {
+      fill: var(--decoder-fill);
+      stroke: var(--decoder-stroke);
+      stroke-width: 2px;
+    }
+
+    .memory-node {
+      fill: var(--memory-fill);
+      stroke: var(--memory-stroke);
+      stroke-width: 2px;
+    }
+
+    .context-node {
+      fill: var(--decoder-fill);
+      stroke: var(--decoder-stroke);
+      stroke-width: 2px;
+    }
+
+    .discard-text {
+      fill: var(--discard);
+    }
+
+    .memory-text {
+      fill: var(--memory-stroke);
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <h1>Декодер получает доступ ко всем состояниям энкодера</h1>
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 430"
+      width="1200"
+      height="430"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Сравнение памяти seq2seq до и после сохранения всех состояний энкодера</title>
+      <desc id="svg-description">
+        Слева декодеру передаётся только последнее состояние энкодера.
+        Справа каждый шаг декодера получает доступ ко всем пяти состояниям.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+  </main>
+
+  <script>
+    const DATA = Object.freeze({
+      origin: Object.freeze({ x: 0, y: 0 }),
+      scale: Object.freeze({ x: 1, y: 1 }),
+      divisor: 2,
+      panel: Object.freeze({
+        dividerX: 600,
+        headingY: 25,
+        captionY: 51,
+        leftCenter: 300,
+        rightCenter: 900
+      }),
+      levels: Object.freeze({
+        input: 92,
+        hidden: 174,
+        discardedEnd: 238,
+        discardedLabel: 262,
+        context: 302,
+        decoder: 302,
+        decoderCaption: 354,
+        memoryTop: 226,
+        memoryHeight: 62,
+        memoryLabel: 257,
+        rightDecoder: 355,
+        rightCaption: 409
+      }),
+      inputBox: Object.freeze({ width: 58, height: 36 }),
+      stateBox: Object.freeze({ width: 58, height: 40 }),
+      stepBox: Object.freeze({ width: 72, height: 42 }),
+      contextBox: Object.freeze({ width: 138, height: 50 }),
+      memoryBox: Object.freeze({ x: 635, width: 525 }),
+      arrow: Object.freeze({ length: 10, wing: 5 }),
+      cross: Object.freeze({ half: 6 }),
+      leftStates: Object.freeze([
+        Object.freeze({ x: 78, input: "слово ₁", state: "h₁", kept: false }),
+        Object.freeze({ x: 165, input: "слово ₂", state: "h₂", kept: false }),
+        Object.freeze({ x: 252, input: "слово ₃", state: "h₃", kept: false }),
+        Object.freeze({ x: 339, input: "слово ₄", state: "h₄", kept: false }),
+        Object.freeze({ x: 426, input: "слово ₅", state: "h₅", kept: true })
+      ]),
+      rightStates: Object.freeze([
+        Object.freeze({ x: 680, input: "слово ₁", state: "h₁" }),
+        Object.freeze({ x: 770, input: "слово ₂", state: "h₂" }),
+        Object.freeze({ x: 860, input: "слово ₃", state: "h₃" }),
+        Object.freeze({ x: 950, input: "слово ₄", state: "h₄" }),
+        Object.freeze({ x: 1040, input: "слово ₅", state: "h₅" })
+      ]),
+      leftSteps: Object.freeze([
+        Object.freeze({ x: 306, label: "шаг" }),
+        Object.freeze({ x: 398, label: "шаг" }),
+        Object.freeze({ x: 490, label: "шаг" })
+      ]),
+      rightSteps: Object.freeze([
+        Object.freeze({ x: 735, label: "шаг" }),
+        Object.freeze({ x: 895, label: "шаг" }),
+        Object.freeze({ x: 1055, label: "шаг" })
+      ]),
+      memoryAnchors: Object.freeze([
+        Object.freeze({ x: 735 }),
+        Object.freeze({ x: 895 }),
+        Object.freeze({ x: 1055 })
+      ]),
+      labels: Object.freeze({
+        leftTitle: "БЕЗ МЕХАНИЗМА ВНИМАНИЯ",
+        leftCaption: "декодер видит одно последнее состояние",
+        rightTitle: "ВСЕ СОСТОЯНИЯ ДОСТУПНЫ",
+        rightCaption: "пять промежуточных записей сохранены",
+        discarded: "h₁–h₄ отброшены",
+        onlyLast: "передано только h₅ (= h_T)",
+        context: "один context vector",
+        leftDecoder: "декодер работает только с одной сжатой запиской",
+        memory: "вся память: h₁ · h₂ · h₃ · h₄ · h₅ (= h_T)",
+        rightDecoder: "каждый шаг декодера может обратиться ко всей памяти",
+        fallbackFirst: "Слева декодер должен был видеть только h₅.",
+        fallbackSecond: "Справа каждый его шаг должен был обращаться ко всем h₁…h_T."
+      }),
+      points: Object.freeze({
+        onlyLastX: 449,
+        onlyLastY: 220,
+        contextX: 188,
+        contextY: 302,
+        leftCaptionX: 300,
+        memoryCaptionX: 898,
+        fallbackX: 600,
+        fallbackFirstY: 202,
+        fallbackSecondY: 230
+      })
+    });
+
+    const origin = Object.freeze(DATA.origin);
+    const scale = Object.freeze(DATA.scale);
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.getElementById("diagram");
+    const layer = document.getElementById("drawing");
+
+    function make(name, attributes, parent) {
+      const node = document.createElementNS(NS, name);
+      Object.entries(attributes).forEach(([key, value]) => {
+        node.setAttribute(key, String(value));
+      });
+      parent.appendChild(node);
+      return node;
+    }
+
+    function mappedWidth(x, width) {
+      return sx(x + width) - sx(x);
+    }
+
+    function mappedHeight(y, height) {
+      return sy(y + height) - sy(y);
+    }
+
+    function line(x1, y1, x2, y2, className, parent) {
+      return make("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        class: className
+      }, parent);
+    }
+
+    function arrow(x1, y1, x2, y2, className, parent) {
+      line(x1, y1, x2, y2, className, parent);
+
+      const deltaX = x2 - x1;
+      const deltaY = y2 - y1;
+      const magnitude = Math.hypot(deltaX, deltaY);
+      const unitX = deltaX / magnitude;
+      const unitY = deltaY / magnitude;
+      const normalX = -unitY;
+      const normalY = unitX;
+      const baseX = x2 - unitX * DATA.arrow.length;
+      const baseY = y2 - unitY * DATA.arrow.length;
+      const leftX = baseX + normalX * DATA.arrow.wing;
+      const leftY = baseY + normalY * DATA.arrow.wing;
+      const rightX = baseX - normalX * DATA.arrow.wing;
+      const rightY = baseY - normalY * DATA.arrow.wing;
+
+      make("polygon", {
+        points:
+          sx(x2) + "," + sy(y2) + " " +
+          sx(leftX) + "," + sy(leftY) + " " +
+          sx(rightX) + "," + sy(rightY),
+        class: className
+      }, parent);
+    }
+
+    function box(centerX, centerY, width, height, className, parent) {
+      const left = centerX - width / DATA.divisor;
+      const top = centerY - height / DATA.divisor;
+      return make("rect", {
+        x: sx(left),
+        y: sy(top),
+        width: mappedWidth(left, width),
+        height: mappedHeight(top, height),
+        class: className
+      }, parent);
+    }
+
+    function label(x, y, content, className, anchor, parent) {
+      const node = make("text", {
+        x: sx(x),
+        y: sy(y),
+        class: className,
+        "text-anchor": anchor,
+        "dominant-baseline": "middle"
+      }, parent);
+      node.textContent = content;
+      return node;
+    }
+
+    function drawInputAndState(item, parent) {
+      const inputBottom =
+        DATA.levels.input + DATA.inputBox.height / DATA.divisor;
+      const stateTop =
+        DATA.levels.hidden - DATA.stateBox.height / DATA.divisor;
+
+      box(
+        item.x,
+        DATA.levels.input,
+        DATA.inputBox.width,
+        DATA.inputBox.height,
+        "input-node",
+        parent
+      );
+      label(
+        item.x,
+        DATA.levels.input,
+        item.input,
+        "small-label",
+        "middle",
+        parent
+      );
+      arrow(
+        item.x,
+        inputBottom,
+        item.x,
+        stateTop,
+        "soft-line",
+        parent
+      );
+      box(
+        item.x,
+        DATA.levels.hidden,
+        DATA.stateBox.width,
+        DATA.stateBox.height,
+        "encoder-node",
+        parent
+      );
+      label(
+        item.x,
+        DATA.levels.hidden,
+        item.state,
+        "node-label",
+        "middle",
+        parent
+      );
+    }
+
+    function connectEncoderRow(items, parent) {
+      items.forEach((item, position, collection) => {
+        const next = collection[position + DATA.scale.x];
+        if (next) {
+          arrow(
+            item.x + DATA.stateBox.width / DATA.divisor,
+            DATA.levels.hidden,
+            next.x - DATA.stateBox.width / DATA.divisor,
+            DATA.levels.hidden,
+            "main-line",
+            parent
+          );
+        }
+      });
+    }
+
+    function drawDecoderRow(steps, level, parent) {
+      steps.forEach(step => {
+        box(
+          step.x,
+          level,
+          DATA.stepBox.width,
+          DATA.stepBox.height,
+          "decoder-node",
+          parent
+        );
+        label(
+          step.x,
+          level,
+          step.label,
+          "small-label",
+          "middle",
+          parent
+        );
+      });
+
+      steps.forEach((step, position, collection) => {
+        const next = collection[position + DATA.scale.x];
+        if (next) {
+          arrow(
+            step.x + DATA.stepBox.width / DATA.divisor,
+            level,
+            next.x - DATA.stepBox.width / DATA.divisor,
+            level,
+            "main-line",
+            parent
+          );
+        }
+      });
+    }
+
+    try {
+      const left = make("g", { "aria-label": DATA.labels.leftTitle }, layer);
+      const right = make("g", { "aria-label": DATA.labels.rightTitle }, layer);
+
+      line(
+        DATA.panel.dividerX,
+        DATA.panel.headingY,
+        DATA.panel.dividerX,
+        DATA.levels.rightCaption,
+        "divider-line",
+        layer
+      );
+
+      label(
+        DATA.panel.leftCenter,
+        DATA.panel.headingY,
+        DATA.labels.leftTitle,
+        "panel-title",
+        "middle",
+        left
+      );
+      label(
+        DATA.panel.leftCenter,
+        DATA.panel.captionY,
+        DATA.labels.leftCaption,
+        "caption",
+        "middle",
+        left
+      );
+      label(
+        DATA.panel.rightCenter,
+        DATA.panel.headingY,
+        DATA.labels.rightTitle,
+        "panel-title",
+        "middle",
+        right
+      );
+      label(
+        DATA.panel.rightCenter,
+        DATA.panel.captionY,
+        DATA.labels.rightCaption,
+        "caption",
+        "middle",
+        right
+      );
+
+      DATA.leftStates.forEach(item => drawInputAndState(item, left));
+      connectEncoderRow(DATA.leftStates, left);
+
+      DATA.leftStates.forEach(item => {
+        if (!item.kept) {
+          const stateBottom =
+            DATA.levels.hidden + DATA.stateBox.height / DATA.divisor;
+          line(
+            item.x,
+            stateBottom,
+            item.x,
+            DATA.levels.discardedEnd,
+            "discard-line",
+            left
+          );
+          line(
+            item.x - DATA.cross.half,
+            DATA.levels.discardedEnd - DATA.cross.half,
+            item.x + DATA.cross.half,
+            DATA.levels.discardedEnd + DATA.cross.half,
+            "discard-line",
+            left
+          );
+          line(
+            item.x - DATA.cross.half,
+            DATA.levels.discardedEnd + DATA.cross.half,
+            item.x + DATA.cross.half,
+            DATA.levels.discardedEnd - DATA.cross.half,
+            "discard-line",
+            left
+          );
+        }
+      });
+
+      label(
+        DATA.leftStates[DATA.origin.x].x,
+        DATA.levels.discardedLabel,
+        DATA.labels.discarded,
+        "small-label discard-text",
+        "start",
+        left
+      );
+
+      box(
+        DATA.points.contextX,
+        DATA.points.contextY,
+        DATA.contextBox.width,
+        DATA.contextBox.height,
+        "context-node",
+        left
+      );
+      label(
+        DATA.points.contextX,
+        DATA.points.contextY,
+        DATA.labels.context,
+        "small-label",
+        "middle",
+        left
+      );
+
+      const lastLeftState = DATA.leftStates.find(item => item.kept);
+      arrow(
+        lastLeftState.x,
+        DATA.levels.hidden + DATA.stateBox.height / DATA.divisor,
+        DATA.points.contextX + DATA.contextBox.width / DATA.divisor,
+        DATA.points.contextY - DATA.contextBox.height / DATA.divisor,
+        "main-line",
+        left
+      );
+      label(
+        DATA.points.onlyLastX,
+        DATA.points.onlyLastY,
+        DATA.labels.onlyLast,
+        "small-label",
+        "end",
+        left
+      );
+
+      drawDecoderRow(DATA.leftSteps, DATA.levels.decoder, left);
+      arrow(
+        DATA.points.contextX + DATA.contextBox.width / DATA.divisor,
+        DATA.levels.context,
+        DATA.leftSteps[DATA.origin.x].x -
+          DATA.stepBox.width / DATA.divisor,
+        DATA.levels.decoder,
+        "main-line",
+        left
+      );
+      label(
+        DATA.points.leftCaptionX,
+        DATA.levels.decoderCaption,
+        DATA.labels.leftDecoder,
+        "caption",
+        "middle",
+        left
+      );
+
+      DATA.rightStates.forEach(item => drawInputAndState(item, right));
+      connectEncoderRow(DATA.rightStates, right);
+
+      DATA.rightStates.forEach(item => {
+        arrow(
+          item.x,
+          DATA.levels.hidden + DATA.stateBox.height / DATA.divisor,
+          item.x,
+          DATA.levels.memoryTop,
+          "memory-line",
+          right
+        );
+      });
+
+      make("rect", {
+        x: sx(DATA.memoryBox.x),
+        y: sy(DATA.levels.memoryTop),
+        width: mappedWidth(DATA.memoryBox.x, DATA.memoryBox.width),
+        height: mappedHeight(
+          DATA.levels.memoryTop,
+          DATA.levels.memoryHeight
+        ),
+        class: "memory-node"
+      }, right);
+
+      label(
+        DATA.points.memoryCaptionX,
+        DATA.levels.memoryLabel,
+        DATA.labels.memory,
+        "small-label memory-text",
+        "middle",
+        right
+      );
+
+      drawDecoderRow(DATA.rightSteps, DATA.levels.rightDecoder, right);
+
+      DATA.memoryAnchors.forEach((anchor, position) => {
+        const step = DATA.rightSteps[position];
+        arrow(
+          anchor.x,
+          DATA.levels.memoryTop + DATA.levels.memoryHeight,
+          step.x,
+          DATA.levels.rightDecoder - DATA.stepBox.height / DATA.divisor,
+          "memory-line",
+          right
+        );
+      });
+
+      label(
+        DATA.panel.rightCenter,
+        DATA.levels.rightCaption,
+        DATA.labels.rightDecoder,
+        "caption",
+        "middle",
+        right
+      );
+    } catch (error) {
+      layer.replaceChildren();
+
+      const firstFallback = document.createElementNS(NS, "text");
+      firstFallback.setAttribute("x", String(sx(DATA.points.fallbackX)));
+      firstFallback.setAttribute("y", String(sy(DATA.points.fallbackFirstY)));
+      firstFallback.setAttribute("text-anchor", "middle");
+      firstFallback.setAttribute("class", "node-label");
+      firstFallback.textContent = DATA.labels.fallbackFirst;
+      layer.appendChild(firstFallback);
+
+      const secondFallback = document.createElementNS(NS, "text");
+      secondFallback.setAttribute("x", String(sx(DATA.points.fallbackX)));
+      secondFallback.setAttribute("y", String(sy(DATA.points.fallbackSecondY)));
+      secondFallback.setAttribute("text-anchor", "middle");
+      secondFallback.setAttribute("class", "caption");
+      secondFallback.textContent = DATA.labels.fallbackSecond;
+      layer.appendChild(secondFallback);
+
+      svg.setAttribute("aria-label",
+        DATA.labels.fallbackFirst + " " + DATA.labels.fallbackSecond
+      );
+    }
+  </script>
+</body>
+</html>

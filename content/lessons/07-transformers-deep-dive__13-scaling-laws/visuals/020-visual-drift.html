@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Дрейф токенов на параметр по бюджету</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1b1f24; --muted:#5a6472;
+    --axis:#3d4552; --line:#1f6fb2; --dot:#1f6fb2; --flat:#c0392b; --grid:#e3e7ec;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --fg:#e8edf3; --muted:#9aa6b4;
+      --axis:#8b97a6; --line:#5cb3ff; --dot:#5cb3ff; --flat:#ff7b6b; --grid:#252c34;
+    }
+  }
+  html,body{margin:0}
+  .wrap{background:var(--bg);color:var(--fg);padding:10px 12px 12px;
+        font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;box-sizing:border-box}
+  h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  svg{display:block;width:100%;height:auto;max-height:470px;background:var(--bg)}
+  .fail{color:var(--flat);font-size:13px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Дрейф D/N по бюджету: правило «20 токенов на параметр» не держится</h2>
+  <svg id="chart" viewBox="0 0 760 400" preserveAspectRatio="xMidYMid meet" role="img"
+       aria-label="График отношения токенов на параметр в зависимости от логарифма бюджета"></svg>
+  <div id="fallback" class="fail" hidden></div>
+</div>
+<script>
+(function(){
+  var svg = document.getElementById("chart");
+  var NS = "http://www.w3.org/2000/svg";
+  try{
+    // ---- данные схемы -------------------------------------------------
+    var DATA = [
+      {logC:18, ratio:25.7},
+      {logC:20, ratio:40.0},
+      {logC:22, ratio:62.8},
+      {logC:25, ratio:121.9}
+    ];
+    var FLAT = 20;                 // «плоское» правило для контраста
+    var X_MIN = 17, X_MAX = 26;    // диапазон осей в единицах данных
+    var Y_MIN = 0,  Y_MAX = 130;
+
+    // ---- одна пара origin/scale ---------------------------------------
+    var origin = {px: 96, py: 336};                       // точка (X_MIN, Y_MIN) на холсте
+    var scale  = {x: (760 - 96 - 40) / (X_MAX - X_MIN),   // px на единицу log10(C)
+                  y: (336 - 34) / (Y_MAX - Y_MIN)};       // px на единицу D/N
+
+    function sx(x){ return origin.px + (x - X_MIN) * scale.x; }
+    function sy(y){ return origin.py - (y - Y_MIN) * scale.y; }
+
+    // ---- примитивы -----------------------------------------------------
+    function el(tag, attrs){
+      var n = document.createElementNS(NS, tag);
+      for(var k in attrs) n.setAttribute(k, attrs[k]);
+      svg.appendChild(n); return n;
+    }
+    function line(x1,y1,x2,y2,stroke,w,dash){
+      var a = {x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),stroke:stroke,
+               "stroke-width":w,"stroke-linecap":"round"};
+      if(dash) a["stroke-dasharray"] = dash;
+      return el("line", a);
+    }
+    function text(x,y,dx,dy,anchor,str,cls,size){
+      var t = el("text",{x:sx(x)+dx, y:sy(y)+dy, "text-anchor":anchor,
+                         fill:cls, "font-size":size,
+                         "font-family":"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"});
+      t.textContent = str; return t;
+    }
+    var C = getComputedStyle(document.documentElement);
+    var c = function(n){ return C.getPropertyValue(n).trim(); };
+
+    // ---- сетка по Y ----------------------------------------------------
+    [20,40,60,80,100,120].forEach(function(v){
+      line(X_MIN, v, X_MAX, v, c("--grid"), 1);
+      text(X_MIN, v, -10, 4, "end", String(v), c("--muted"), 12);
+    });
+
+    // ---- оси ------------------------------------------------------------
+    line(X_MIN, Y_MIN, X_MAX, Y_MIN, c("--axis"), 1.6);
+    line(X_MIN, Y_MIN, X_MIN, Y_MAX, c("--axis"), 1.6);
+    text(X_MIN, Y_MIN, -10, 4, "end", "0", c("--muted"), 12);
+
+    // засечки и подписи по X
+    [18,20,22,24,26].forEach(function(v){
+      line(v, Y_MIN, v, Y_MIN - 4/scale.y, c("--axis"), 1.4);
+      text(v, Y_MIN, 0, 20, "middle", "1e"+v, c("--muted"), 12);
+    });
+
+    // ---- пунктир «ровно 20» ---------------------------------------------
+    line(X_MIN, FLAT, X_MAX, FLAT, c("--flat"), 2, "7 5");
+    text(X_MAX, FLAT, -4, -9, "end", "правило: 20 токенов/параметр", c("--flat"), 13);
+
+    // ---- ломаная по данным ------------------------------------------------
+    var d = DATA.map(function(p,i){
+      return (i ? "L" : "M") + sx(p.logC) + " " + sy(p.ratio);
+    }).join(" ");
+    el("path",{d:d, fill:"none", stroke:c("--line"), "stroke-width":2.4,
+               "stroke-linejoin":"round","stroke-linecap":"round"});
+
+    // точки + подписи значений (разведены: чётные сверху, нечётные снизу-справа)
+    DATA.forEach(function(p,i){
+      el("circle",{cx:sx(p.logC), cy:sy(p.ratio), r:4.5, fill:c("--dot")});
+      if(i % 2 === 0) text(p.logC, p.ratio, 0, -13, "middle", p.ratio.toFixed(1), c("--fg"), 13);
+      else            text(p.logC, p.ratio, 9, 16, "start",  p.ratio.toFixed(1), c("--fg"), 13);
+    });
+
+    // ---- подписи осей -----------------------------------------------------
+    text((X_MIN+X_MAX)/2, Y_MIN, 0, 42, "middle", "бюджет C, FLOPs (log10)", c("--muted"), 13);
+    var yl = text(X_MIN, (Y_MIN+Y_MAX)/2, -52, 0, "middle", "D/N, токенов на параметр", c("--muted"), 13);
+    yl.setAttribute("transform","rotate(-90 "+(sx(X_MIN)-52)+" "+sy((Y_MIN+Y_MAX)/2)+")");
+
+    // ---- множитель роста ---------------------------------------------------
+    text(21.4, 118, 0, 0, "middle", "рост в 121.9 / 25.7 ≈ 4.7 раза на 7 порядков бюджета", c("--fg"), 13);
+    text(21.4, 118, 0, 18, "middle", "это множитель C^0.097, а не константа", c("--muted"), 12);
+
+  }catch(e){
+    svg.setAttribute("hidden","hidden");
+    var f = document.getElementById("fallback");
+    f.hidden = false;
+    f.textContent =
+      "Схема не построилась. Она должна показывать: отношение D/N растёт с бюджетом — "
+      + "25.7 при 1e18, 40.0 при 1e20, 62.8 при 1e22, 121.9 при 1e25, "
+      + "а пунктирная горизонталь на 20 (правило «20 токенов на параметр») лежит ниже всех точек. "
+      + "Рост 121.9/25.7 ≈ 4.7 раза за 7 порядков бюджета — это множитель C^0.097.";
+  }
+})();
+</script>
+</body>
+</html>

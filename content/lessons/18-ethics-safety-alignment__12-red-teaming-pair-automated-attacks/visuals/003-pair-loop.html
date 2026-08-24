@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контур автоматической атаки PAIR</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fb;
+      --panel: #ffffff;
+      --panel-soft: #eef3f8;
+      --ink: #172033;
+      --muted: #526177;
+      --line: #34445d;
+      --attack: #e9e2ff;
+      --attack-line: #6e55bd;
+      --target: #dff2ff;
+      --target-line: #267ca8;
+      --judge: #fff0cc;
+      --judge-line: #a46a00;
+      --decision: #f5e9ff;
+      --decision-line: #8050a2;
+      --success: #def5e5;
+      --success-line: #2f7d4b;
+      --failure: #f1f3f6;
+      --failure-line: #667085;
+      --history: #e8eef6;
+      --history-line: #526c8d;
+      --accent: #9d3c55;
+      --fallback: #8d253f;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #182130;
+        --panel-soft: #202c3d;
+        --ink: #f2f5fa;
+        --muted: #bcc7d7;
+        --line: #9eacc1;
+        --attack: #30264b;
+        --attack-line: #b59af2;
+        --target: #17374b;
+        --target-line: #73c3eb;
+        --judge: #44351d;
+        --judge-line: #efbd62;
+        --decision: #392543;
+        --decision-line: #d2a1e9;
+        --success: #173a27;
+        --success-line: #7bd397;
+        --failure: #2a303a;
+        --failure-line: #adb6c5;
+        --history: #243246;
+        --history-line: #91acd0;
+        --accent: #f09ab0;
+        --fallback: #ff9bb2;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .figure-title {
+      box-sizing: border-box;
+      padding: 8px 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-bottom: none;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 450px;
+      max-height: 450px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+
+    .flow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+      stroke: none;
+    }
+
+    .node {
+      stroke-width: 3px;
+    }
+
+    .attack {
+      fill: var(--attack);
+      stroke: var(--attack-line);
+    }
+
+    .target {
+      fill: var(--target);
+      stroke: var(--target-line);
+    }
+
+    .judge {
+      fill: var(--judge);
+      stroke: var(--judge-line);
+    }
+
+    .decision {
+      fill: var(--decision);
+      stroke: var(--decision-line);
+    }
+
+    .history {
+      fill: var(--history);
+      stroke: var(--history-line);
+    }
+
+    .success {
+      fill: var(--success);
+      stroke: var(--success-line);
+    }
+
+    .failure {
+      fill: var(--failure);
+      stroke: var(--failure-line);
+    }
+
+    .chip {
+      fill: var(--panel-soft);
+      stroke: var(--line);
+      stroke-width: 2px;
+    }
+
+    .main-label {
+      fill: var(--ink);
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .small-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .edge-label {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+
+    .branch-label {
+      fill: var(--accent);
+      font-size: 16px;
+      font-weight: 800;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 5px;
+    }
+
+    .fallback {
+      fill: var(--fallback);
+      font-size: 18px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <header class="figure-title">Контур автоматической атаки PAIR</header>
+  <svg id="diagram" viewBox="0 0 1200 450"
+       preserveAspectRatio="xMidYMid meet"
+       role="img"
+       aria-labelledby="svg-title svg-description">
+    <title id="svg-title">Последовательный контур атаки PAIR</title>
+    <desc id="svg-description">
+      Атакующая модель создаёт один промпт, целевая модель отвечает,
+      судья оценивает пару. При неудаче пара возвращается в историю,
+      а цикл повторяется, пока не найден джейлбрейк или не исчерпан
+      бюджет в двадцать запросов.
+    </desc>
+    <g id="drawing"></g>
+  </svg>
+  <noscript>
+    Схема должна была показать последовательный цикл A → T → J:
+    промпт, ответ, оценка, возврат пары в историю и остановку не позднее
+    двадцатого запроса.
+  </noscript>
+
+  <script>
+    const data = {
+      zero: 0,
+      one: 1,
+      two: 2,
+      negOne: -1,
+      origin: { x: 25, y: 18 },
+      scale: 1,
+      ns: "http://www.w3.org/2000/svg",
+      lineGap: 23,
+      headLength: 14,
+      headHalf: 7,
+      fallbackX: 575,
+      fallbackY: 220,
+      shapes: [
+        {
+          kind: "box", className: "chip",
+          x: 10, y: 78, w: 115, h: 62,
+          lines: ["Цель G"], textClass: "main-label"
+        },
+        {
+          kind: "box", className: "chip",
+          x: 165, y: 8, w: 160, h: 40,
+          lines: ["Старт: k = 1"], textClass: "small-label"
+        },
+        {
+          kind: "box", className: "node attack",
+          x: 155, y: 75, w: 180, h: 90,
+          lines: ["Атакующая", "LLM A"], textClass: "main-label"
+        },
+        {
+          kind: "box", className: "node target",
+          x: 400, y: 75, w: 180, h: 90,
+          lines: ["Целевая", "LLM T"], textClass: "main-label"
+        },
+        {
+          kind: "box", className: "node judge",
+          x: 645, y: 65, w: 230, h: 110,
+          lines: ["Судейская LLM J", "сравнивает (pₖ, rₖ)", "с целью G"],
+          textClass: "main-label"
+        },
+        {
+          kind: "diamond", className: "node decision",
+          cx: 1000, cy: 120, rx: 105, ry: 65,
+          lines: ["Оценка достигла", "порога?"], textClass: "main-label"
+        },
+        {
+          kind: "box", className: "node history",
+          x: 770, y: 245, w: 230, h: 75,
+          lines: ["Сохранить (pₖ, rₖ)", "в истории A"],
+          textClass: "main-label"
+        },
+        {
+          kind: "diamond", className: "node decision",
+          cx: 560, cy: 282, rx: 120, ry: 55,
+          lines: ["k < K = 20?"], textClass: "main-label"
+        },
+        {
+          kind: "box", className: "node success",
+          x: 1040, y: 245, w: 120, h: 75,
+          lines: ["Стоп:", "джейлбрейк", "найден"],
+          textClass: "small-label"
+        },
+        {
+          kind: "box", className: "node failure",
+          x: 50, y: 247, w: 190, h: 75,
+          lines: ["Стоп: бюджет", "исчерпан", "атака не найдена"],
+          textClass: "small-label"
+        },
+        {
+          kind: "box", className: "chip",
+          x: 825, y: 8, w: 310, h: 40,
+          lines: ["Бюджет: максимум 20 запросов к T"],
+          textClass: "small-label"
+        }
+      ],
+      arrows: [
+        {
+          points: [{ x: 125, y: 109 }, { x: 155, y: 109 }],
+          label: "G + история",
+          labelAt: { x: 138, y: 92 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [{ x: 245, y: 48 }, { x: 245, y: 75 }],
+          label: "",
+          labelAt: { x: 245, y: 60 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [{ x: 335, y: 120 }, { x: 400, y: 120 }],
+          label: "новый промпт pₖ",
+          labelAt: { x: 346, y: 101 },
+          labelAnchor: "start"
+        },
+        {
+          points: [{ x: 580, y: 120 }, { x: 645, y: 120 }],
+          label: "ответ rₖ",
+          labelAt: { x: 592, y: 101 },
+          labelAnchor: "start"
+        },
+        {
+          points: [{ x: 875, y: 120 }, { x: 895, y: 120 }],
+          label: "оценка пары",
+          labelAt: { x: 882, y: 96 },
+          labelAnchor: "end"
+        },
+        {
+          points: [
+            { x: 1105, y: 120 },
+            { x: 1100, y: 120 },
+            { x: 1100, y: 245 }
+          ],
+          label: "",
+          labelAt: { x: 1100, y: 120 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [
+            { x: 1000, y: 185 },
+            { x: 1000, y: 211 },
+            { x: 885, y: 211 },
+            { x: 885, y: 245 }
+          ],
+          label: "",
+          labelAt: { x: 1000, y: 185 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [{ x: 770, y: 282 }, { x: 680, y: 282 }],
+          label: "",
+          labelAt: { x: 742, y: 263 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [{ x: 440, y: 282 }, { x: 240, y: 282 }],
+          label: "",
+          labelAt: { x: 410, y: 263 },
+          labelAnchor: "middle"
+        },
+        {
+          points: [
+            { x: 560, y: 337 },
+            { x: 560, y: 392 },
+            { x: 245, y: 392 },
+            { x: 245, y: 165 }
+          ],
+          label: "k ← k + 1",
+          labelAt: { x: 530, y: 376 },
+          labelAnchor: "end"
+        }
+      ],
+      branchLabels: [
+        { text: "да", x: 1118, y: 102, anchor: "start" },
+        { text: "нет", x: 982, y: 207, anchor: "end" },
+        { text: "нет", x: 416, y: 263, anchor: "end" },
+        { text: "да", x: 578, y: 356, anchor: "start" }
+      ]
+    };
+
+    const origin = Object.freeze(data.origin);
+    const scale = data.scale;
+
+    function sx(x) {
+      return origin.x + x * scale;
+    }
+
+    function sy(y) {
+      return origin.y + y * scale;
+    }
+
+    try {
+      const root = document.getElementById("drawing");
+
+      function element(tag, attributes, className) {
+        const node = document.createElementNS(data.ns, tag);
+        Object.entries(attributes).forEach(([name, value]) => {
+          node.setAttribute(name, String(value));
+        });
+        if (className) node.setAttribute("class", className);
+        return node;
+      }
+
+      function addText(lines, x, y, className, anchor) {
+        const text = element(
+          "text",
+          {
+            x: sx(x),
+            y: sy(y),
+            "text-anchor": anchor,
+            "dominant-baseline": "middle"
+          },
+          className
+        );
+
+        const center = (lines.length - data.one) / data.two;
+        lines.forEach((line, index) => {
+          const span = element(
+            "tspan",
+            {
+              x: sx(x),
+              y: sy(y + (index - center) * data.lineGap)
+            },
+            ""
+          );
+          span.textContent = line;
+          text.appendChild(span);
+        });
+        root.appendChild(text);
+      }
+
+      function addBox(shape) {
+        root.appendChild(
+          element(
+            "rect",
+            {
+              x: sx(shape.x),
+              y: sy(shape.y),
+              width: sx(shape.x + shape.w) - sx(shape.x),
+              height: sy(shape.y + shape.h) - sy(shape.y)
+            },
+            shape.className
+          )
+        );
+        addText(
+          shape.lines,
+          shape.x + shape.w / data.two,
+          shape.y + shape.h / data.two,
+          shape.textClass,
+          "middle"
+        );
+      }
+
+      function addDiamond(shape) {
+        const points = [
+          [sx(shape.cx), sy(shape.cy - shape.ry)],
+          [sx(shape.cx + shape.rx), sy(shape.cy)],
+          [sx(shape.cx), sy(shape.cy + shape.ry)],
+          [sx(shape.cx - shape.rx), sy(shape.cy)]
+        ]
+          .map(point => point.join(","))
+          .join(" ");
+
+        root.appendChild(
+          element("polygon", { points: points }, shape.className)
+        );
+        addText(
+          shape.lines,
+          shape.cx,
+          shape.cy,
+          shape.textClass,
+          "middle"
+        );
+      }
+
+      function addArrow(spec) {
+        const linePoints = spec.points
+          .map(point => `${sx(point.x)},${sy(point.y)}`)
+          .join(" ");
+
+        root.appendChild(
+          element("polyline", { points: linePoints }, "flow")
+        );
+
+        const tip = spec.points[spec.points.length - data.one];
+        const prior = spec.points[spec.points.length - data.two];
+        const dx = tip.x - prior.x;
+        const dy = tip.y - prior.y;
+        const magnitude = Math.sqrt(dx * dx + dy * dy);
+        const ux = dx / magnitude;
+        const uy = dy / magnitude;
+        const baseX = tip.x - ux * data.headLength;
+        const baseY = tip.y - uy * data.headLength;
+        const sideX = -uy * data.headHalf;
+        const sideY = ux * data.headHalf;
+
+        const headPoints = [
+          [sx(tip.x), sy(tip.y)],
+          [sx(baseX + sideX), sy(baseY + sideY)],
+          [sx(baseX - sideX), sy(baseY - sideY)]
+        ]
+          .map(point => point.join(","))
+          .join(" ");
+
+        root.appendChild(
+          element("polygon", { points: headPoints }, "arrow-head")
+        );
+
+        if (spec.label) {
+          addText(
+            [spec.label],
+            spec.labelAt.x,
+            spec.labelAt.y,
+            "edge-label",
+            spec.labelAnchor
+          );
+        }
+      }
+
+      data.shapes.forEach(shape => {
+        if (shape.kind === "diamond") addDiamond(shape);
+        else addBox(shape);
+      });
+
+      data.arrows.forEach(addArrow);
+
+      data.branchLabels.forEach(label => {
+        addText(
+          [label.text],
+          label.x,
+          label.y,
+          "branch-label",
+          label.anchor
+        );
+      });
+    } catch (error) {
+      const root = document.getElementById("drawing");
+      root.replaceChildren();
+      const message = document.createElementNS(data.ns, "text");
+      message.setAttribute("x", String(sx(data.fallbackX)));
+      message.setAttribute("y", String(sy(data.fallbackY)));
+      message.setAttribute("text-anchor", "middle");
+      message.setAttribute("class", "fallback");
+      message.textContent =
+        "Схема: A создаёт pₖ → T отвечает rₖ → J оценивает → пара возвращается в историю; максимум 20 запросов.";
+      root.appendChild(message);
+    }
+  </script>
+</body>
+</html>

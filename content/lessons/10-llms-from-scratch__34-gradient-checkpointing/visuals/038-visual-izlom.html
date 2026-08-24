@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Излом кривой памяти около k = 8</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f24;
+    --muted: #6b737d;
+    --axis: #444c56;
+    --mem: #b4451f;
+    --flops: #1f5fb4;
+    --mark: #7a5c00;
+    --grid: #e2e5e9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161b;
+      --fg: #e6e9ee;
+      --muted: #9aa3ad;
+      --axis: #8b949e;
+      --mem: #ff9a6d;
+      --flops: #7fb2ff;
+      --mark: #e2c15a;
+      --grid: #262d35;
+    }
+  }
+  html, body { margin: 0; background: var(--bg); }
+  .wrap { background: var(--bg); color: var(--fg); padding: 8px 4px 10px; font: 14px/1.35 system-ui, sans-serif; }
+  h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; text-align: center; }
+  svg { display: block; width: 100%; height: auto; max-height: 470px; }
+  .legend { margin: 2px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+  .legend b { font-weight: 600; }
+  .sw-mem { color: var(--mem); }
+  .sw-flops { color: var(--flops); }
+  .fail { padding: 10px; font-size: 13px; color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Излом кривой памяти около k = 8 (L = 64)</h2>
+  <div id="slot"></div>
+  <p class="legend">
+    <b class="sw-mem">— память</b>: 64/k + k, в слоях &nbsp;·&nbsp;
+    <b class="sw-flops">— FLOPs</b>: лишний пересчёт, растёт ровно &nbsp;·&nbsp;
+    <b>k = 8</b>: минимум 16
+  </p>
+</div>
+<script>
+(function () {
+  var slot = document.getElementById('slot');
+  try {
+    // ---- данные схемы -------------------------------------------------
+    var L = 64;
+    var MEM = [
+      {k: 1,  v: 65},
+      {k: 2,  v: 34},
+      {k: 4,  v: 20},
+      {k: 6,  v: 16.7},
+      {k: 8,  v: 16},
+      {k: 10, v: 16.4},
+      {k: 12, v: 17.3},
+      {k: 16, v: 20},
+      {k: 32, v: 34},
+      {k: 64, v: 65}
+    ];
+    // FLOPs: доля пересчитываемых слоёв растёт вместе с k (k живых слоёв из 64)
+    var FLOPS = [
+      {k: 1,  v: 1},
+      {k: 8,  v: 8},
+      {k: 16, v: 16},
+      {k: 32, v: 32},
+      {k: 64, v: 64}
+    ];
+    var KMIN = 8;
+    var XTICKS = [1, 4, 8, 16, 32, 64];
+    var YTICKS = [16, 20, 34, 65];
+
+    // ---- холст, origin, scale (объявлены один раз) --------------------
+    var W = 760, H = 460;
+    var origin = {x: 96, y: 396};          // пиксель точки (0, 0)
+    var scale  = {x: (620) / 64, y: (346) / 70};
+
+    function sx(x) { return origin.x + x * scale.x; }
+    function sy(y) { return origin.y - y * scale.y; }
+
+    // ---- отступы подписей (пиксели, разрешены литералами) -------------
+    var PAD = 8, PAD_BIG = 14, FS = 13, FS_SM = 12, LW = 2;
+
+    var ns = 'http://www.w3.org/2000/svg';
+    function el(name, attrs) {
+      var n = document.createElementNS(ns, name);
+      for (var a in attrs) n.setAttribute(a, attrs[a]);
+      return n;
+    }
+    function txt(x, y, s, anchor, cls, size) {
+      var t = el('text', {x: x, y: y, 'text-anchor': anchor, fill: cls,
+                          'font-size': size || FS, 'font-family': 'system-ui, sans-serif'});
+      t.appendChild(document.createTextNode(s));
+      return t;
+    }
+    function path(pts) {
+      return pts.map(function (p, i) {
+        return (i ? 'L' : 'M') + sx(p.k).toFixed(2) + ' ' + sy(p.v).toFixed(2);
+      }).join(' ');
+    }
+
+    var svg = el('svg', {viewBox: '0 0 ' + W + ' ' + H,
+                         preserveAspectRatio: 'xMidYMid meet',
+                         role: 'img',
+                         'aria-label': 'Память 64/k + k падает до минимума 16 при k = 8 и дальше растёт зеркально; FLOPs растут линейно'});
+    svg.appendChild(el('rect', {x: 0, y: 0, width: W, height: H, fill: 'var(--bg)'}));
+
+    // ---- сетка по горизонтали -----------------------------------------
+    YTICKS.forEach(function (v) {
+      svg.appendChild(el('line', {x1: sx(0), y1: sy(v), x2: sx(64), y2: sy(v),
+                                  stroke: 'var(--grid)', 'stroke-width': 1}));
+      svg.appendChild(txt(sx(0) - PAD, sy(v) + 4, String(v), 'end', 'var(--muted)', FS_SM));
+    });
+
+    // ---- оси ------------------------------------------------------------
+    svg.appendChild(el('line', {x1: sx(0), y1: sy(0), x2: sx(64), y2: sy(0),
+                                stroke: 'var(--axis)', 'stroke-width': LW}));
+    svg.appendChild(el('line', {x1: sx(0), y1: sy(0), x2: sx(0), y2: sy(70),
+                                stroke: 'var(--axis)', 'stroke-width': LW}));
+
+    XTICKS.forEach(function (k) {
+      svg.appendChild(el('line', {x1: sx(k), y1: sy(0), x2: sx(k), y2: sy(-1.4),
+                                  stroke: 'var(--axis)', 'stroke-width': 1}));
+      svg.appendChild(txt(sx(k), sy(-1.4) + PAD_BIG, String(k), 'middle', 'var(--muted)', FS_SM));
+    });
+    svg.appendChild(txt(sx(64), sy(-1.4) + PAD_BIG * 2 + 2, 'k — слоёв в сегменте', 'end', 'var(--fg)', FS));
+    svg.appendChild(txt(sx(0) - PAD, sy(70) - PAD, 'слоёв в памяти', 'end', 'var(--fg)', FS));
+
+    // ---- плоское дно: k = 6 … 12 ---------------------------------------
+    svg.appendChild(el('rect', {x: sx(6), y: sy(20), width: sx(12) - sx(6), height: sy(0) - sy(20),
+                                fill: 'var(--mark)', opacity: 0.12}));
+    svg.appendChild(txt((sx(6) + sx(12)) / 2, sy(20) - PAD, 'плоское дно', 'middle', 'var(--mark)', FS_SM));
+
+    // ---- вертикаль k = 8 -------------------------------------------------
+    svg.appendChild(el('line', {x1: sx(KMIN), y1: sy(0), x2: sx(KMIN), y2: sy(70),
+                                stroke: 'var(--mark)', 'stroke-width': LW, 'stroke-dasharray': '6 5'}));
+    svg.appendChild(txt(sx(KMIN) + PAD, sy(70) + PAD_BIG, 'k = 8', 'start', 'var(--mark)', FS));
+
+    // ---- кривые ---------------------------------------------------------
+    svg.appendChild(el('path', {d: path(FLOPS), fill: 'none', stroke: 'var(--flops)',
+                                'stroke-width': LW, 'stroke-dasharray': '7 4'}));
+    svg.appendChild(el('path', {d: path(MEM), fill: 'none', stroke: 'var(--mem)',
+                                'stroke-width': LW + 1, 'stroke-linejoin': 'round'}));
+
+    MEM.forEach(function (p) {
+      svg.appendChild(el('circle', {cx: sx(p.k), cy: sy(p.v), r: 3.5, fill: 'var(--mem)'}));
+    });
+
+    // ---- подписи точек: разведены в разные стороны ----------------------
+    svg.appendChild(txt(sx(1) + PAD, sy(65) - PAD, '65', 'start', 'var(--mem)', FS_SM));
+    svg.appendChild(txt(sx(2) + PAD, sy(34) - PAD, '34', 'start', 'var(--mem)', FS_SM));
+    svg.appendChild(txt(sx(4), sy(20) - PAD, '20', 'middle', 'var(--mem)', FS_SM));
+    svg.appendChild(txt(sx(KMIN), sy(16) + PAD_BIG + 4, '16', 'middle', 'var(--mem)', FS));
+    svg.appendChild(txt(sx(16), sy(20) - PAD, '20', 'middle', 'var(--mem)', FS_SM));
+    svg.appendChild(txt(sx(32) - PAD, sy(34) - PAD, '34', 'end', 'var(--mem)', FS_SM));
+    svg.appendChild(txt(sx(64) - PAD, sy(65) - PAD, '65', 'end', 'var(--mem)', FS_SM));
+
+    // ---- подписи кривых у хвоста / сбоку, не у концов --------------------
+    svg.appendChild(txt(sx(20), sy(28) + PAD, 'память: 64/k + k', 'start', 'var(--mem)', FS));
+    svg.appendChild(txt(sx(48) - PAD, sy(48) + PAD_BIG, 'FLOPs пересчёта', 'end', 'var(--flops)', FS));
+
+    // ---- обрыв слева ------------------------------------------------------
+    svg.appendChild(txt(sx(1) + PAD, sy(44), 'обрыв: шаг влево', 'start', 'var(--muted)', FS_SM));
+    svg.appendChild(txt(sx(1) + PAD, sy(44) - PAD_BIG + 1, 'почти удваивает', 'start', 'var(--muted)', FS_SM));
+
+    slot.appendChild(svg);
+  } catch (e) {
+    slot.innerHTML = '<div class="fail"><b>Схема не построилась.</b> Она должна показывать две кривые по k от 1 до 64 при L = 64: ' +
+      'память 64/k + k падает с 65 при k = 1 до 20 при k = 4 и до минимума 16 при k = 8, между k = 6 и k = 12 идёт почти плоско (16,7 · 16 · 16,4 · 17,3), ' +
+      'а дальше зеркально растёт — 20 при k = 16, 34 при k = 32, 65 при k = 64. FLOPs пересчёта растут ровно по прямой. ' +
+      'Вертикальная линия отмечает k = 8.</div>';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как сигнал уменьшается через десять sigmoid-слоёв</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f7f8fc;
+    --panel: #ffffff;
+    --ink: #172033;
+    --muted: #5f6b7e;
+    --line: #a8b2c3;
+    --layer: #eef1ff;
+    --layer-stroke: #6f70c9;
+    --signal: #8b3fd1;
+    --signal-soft: #c6a3e8;
+    --accent: #6b2db3;
+    --callout: #46546a;
+    --summary: #f1e9fb;
+    --summary-stroke: #8b55bd;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #111522;
+      --panel: #171c2a;
+      --ink: #f1f3f8;
+      --muted: #b4bdcc;
+      --line: #626e82;
+      --layer: #282747;
+      --layer-stroke: #aaa8ff;
+      --signal: #d29aff;
+      --signal-soft: #7f6298;
+      --accent: #e1b7ff;
+      --callout: #c8d0dc;
+      --summary: #2b2138;
+      --summary-stroke: #bf8ae7;
+    }
+  }
+
+  html, body {
+    background: var(--page);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+  }
+
+  .diagram {
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+
+  h1 {
+    font-size: 20px;
+    text-align: center;
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+  }
+
+  .guide {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 2px;
+  }
+
+  .signal-strong {
+    fill: none;
+    stroke: var(--signal);
+    stroke-width: 10px;
+    stroke-linecap: round;
+  }
+
+  .signal-high {
+    fill: none;
+    stroke: var(--signal);
+    stroke-width: 8px;
+    stroke-linecap: round;
+  }
+
+  .signal-medium {
+    fill: none;
+    stroke: var(--signal);
+    stroke-width: 6px;
+    stroke-linecap: round;
+  }
+
+  .signal-low {
+    fill: none;
+    stroke: var(--signal-soft);
+    stroke-width: 4px;
+    stroke-linecap: round;
+  }
+
+  .signal-faint {
+    fill: none;
+    stroke: var(--signal-soft);
+    stroke-width: 2px;
+    stroke-linecap: round;
+  }
+
+  .arrowhead {
+    fill: var(--signal);
+  }
+
+  .arrowhead-faint {
+    fill: var(--signal-soft);
+  }
+
+  .layer {
+    fill: var(--layer);
+    stroke: var(--layer-stroke);
+    stroke-width: 2px;
+  }
+
+  .layer-title {
+    fill: var(--ink);
+    font-size: 14px;
+    font-weight: bold;
+    text-anchor: middle;
+  }
+
+  .factor {
+    fill: var(--accent);
+    font-size: 12px;
+    font-weight: bold;
+    text-anchor: middle;
+  }
+
+  .direction {
+    fill: var(--muted);
+    font-size: 14px;
+    font-weight: bold;
+  }
+
+  .endpoint {
+    fill: var(--signal);
+    stroke: var(--panel);
+    stroke-width: 2px;
+  }
+
+  .callout-line {
+    fill: none;
+    stroke: var(--callout);
+    stroke-width: 1.5px;
+  }
+
+  .callout-dot {
+    fill: var(--callout);
+  }
+
+  .callout-main {
+    fill: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .callout-detail {
+    fill: var(--muted);
+    font-size: 14px;
+  }
+
+  .summary-box {
+    fill: var(--summary);
+    stroke: var(--summary-stroke);
+    stroke-width: 2px;
+  }
+
+  .summary-label {
+    fill: var(--muted);
+    font-size: 13px;
+    text-anchor: middle;
+  }
+
+  .equation {
+    fill: var(--ink);
+    font-size: 21px;
+    font-weight: bold;
+    text-anchor: middle;
+  }
+
+  .fallback {
+    color: var(--ink);
+    font-size: 16px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main class="diagram">
+  <h1>Как сигнал уменьшается через десять sigmoid-слоёв</h1>
+
+  <svg id="canvas"
+       viewBox="0 0 1280 378"
+       width="1280"
+       height="378"
+       role="img"
+       aria-labelledby="svgTitle svgDesc"
+       preserveAspectRatio="xMidYMid meet">
+    <title id="svgTitle">Затухание градиента в десяти sigmoid-слоях</title>
+    <desc id="svgDesc">Исходный градиент единица проходит назад через десять слоёв. Каждый слой умножает его не более чем на 0,25. После трёх слоёв остаётся 0,0156 исходного сигнала, после десяти — около 0,000001.</desc>
+    <g id="drawing"></g>
+  </svg>
+
+  <div id="fallback" class="fallback" hidden>
+    Десять последовательных sigmoid-слоёв умножают градиент не более чем
+    на 0,25 каждый: после трёх слоёв остаётся 0,0156 исходного сигнала,
+    а после десяти — около 0,000001.
+  </div>
+</main>
+
+<script>
+const data = [{
+  origin: [32, 18],
+  scale: [1, 1],
+  numbers: {
+    zero: 0,
+    one: 1
+  },
+  geometry: {
+    trackY: 166,
+    layerTop: 132,
+    layerBottom: 200,
+    layerHalf: 34,
+    layerTitleY: 157,
+    factorY: 181,
+    outputX: 1202,
+    outputRadius: 11,
+    terminalX: 72,
+    arrowHead: 9,
+    arrowWing: 6,
+    calloutDotRadius: 3,
+    lineGap: 19,
+    directionX: 1198,
+    directionY: 20,
+    summaryLeft: 282,
+    summaryRight: 998,
+    summaryTop: 295,
+    summaryBottom: 350,
+    summaryLabelY: 315,
+    equationY: 340
+  },
+  layers: [
+    { number: "1",  x: 1090, signal: "signal-high",   head: "arrowhead" },
+    { number: "2",  x: 990,  signal: "signal-medium", head: "arrowhead" },
+    { number: "3",  x: 890,  signal: "signal-low",    head: "arrowhead-faint" },
+    { number: "4",  x: 790,  signal: "signal-low",    head: "arrowhead-faint" },
+    { number: "5",  x: 690,  signal: "signal-faint",  head: "arrowhead-faint" },
+    { number: "6",  x: 590,  signal: "signal-faint",  head: "arrowhead-faint" },
+    { number: "7",  x: 490,  signal: "signal-faint",  head: "arrowhead-faint" },
+    { number: "8",  x: 390,  signal: "signal-faint",  head: "arrowhead-faint" },
+    { number: "9",  x: 290,  signal: "signal-faint",  head: "arrowhead-faint" },
+    { number: "10", x: 190,  signal: "signal-faint",  head: "arrowhead-faint" }
+  ],
+  callouts: [
+    {
+      point: [1170, 166],
+      elbow: [1184, 91],
+      label: [1198, 64],
+      anchor: "end",
+      lines: [
+        { text: "исходный градиент", className: "callout-detail" },
+        { text: "1", className: "callout-main" }
+      ]
+    },
+    {
+      point: [1040, 166],
+      elbow: [1040, 100],
+      label: [1060, 76],
+      anchor: "middle",
+      lines: [
+        { text: "после слоя 1", className: "callout-detail" },
+        { text: "≤ 0,25", className: "callout-main" }
+      ]
+    },
+    {
+      point: [940, 166],
+      elbow: [940, 230],
+      label: [966, 247],
+      anchor: "middle",
+      lines: [
+        { text: "после слоя 2", className: "callout-detail" },
+        { text: "0,0625", className: "callout-main" }
+      ]
+    },
+    {
+      point: [840, 166],
+      elbow: [840, 100],
+      label: [820, 76],
+      anchor: "middle",
+      lines: [
+        { text: "после 3 слоёв", className: "callout-detail" },
+        { text: "0,0156 исходного градиента", className: "callout-main" }
+      ]
+    },
+    {
+      point: [640, 166],
+      elbow: [640, 230],
+      label: [660, 247],
+      anchor: "middle",
+      lines: [
+        { text: "после 5 слоёв", className: "callout-detail" },
+        { text: "≈ 0,001", className: "callout-main" }
+      ]
+    },
+    {
+      point: [112, 166],
+      elbow: [88, 100],
+      label: [38, 76],
+      anchor: "start",
+      lines: [
+        { text: "после 10 слоёв", className: "callout-detail" },
+        { text: "≈ 0,000001 исходного", className: "callout-main" }
+      ]
+    }
+  ],
+  labels: {
+    direction: "обратный сигнал: от выхода к ранним слоям",
+    layerPrefix: "слой ",
+    factor: "× ≤ 0,25",
+    summary: "десять последовательных умножений",
+    equation: "1 · 0,25¹⁰ ≈ 0,00000095"
+  }
+}];
+
+const origin = Object.freeze({ x: data[0].origin[0], y: data[0].origin[1] });
+const scale = Object.freeze({ x: data[0].scale[0], y: data[0].scale[1] });
+
+const sx = x => origin.x + x * scale.x;
+const sy = y => origin.y + y * scale.y;
+
+try {
+  const D = data[0];
+  const G = D.geometry;
+  const root = document.getElementById("drawing");
+  const namespace = "http://www.w3.org/2000/svg";
+
+  const make = (name, attributes, text) => {
+    const node = document.createElementNS(namespace, name);
+    Object.entries(attributes).forEach(([key, value]) => {
+      node.setAttribute(key, value);
+    });
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const add = node => {
+    root.appendChild(node);
+    return node;
+  };
+
+  const rect = (left, top, right, bottom, className) => add(make("rect", {
+    x: sx(left),
+    y: sy(top),
+    width: sx(right) - sx(left),
+    height: sy(bottom) - sy(top),
+    class: className
+  }));
+
+  const line = (x1, y1, x2, y2, className) => add(make("line", {
+    x1: sx(x1),
+    y1: sy(y1),
+    x2: sx(x2),
+    y2: sy(y2),
+    class: className
+  }));
+
+  const circle = (x, y, radius, className) => add(make("circle", {
+    cx: sx(x),
+    cy: sy(y),
+    r: sx(x + radius) - sx(x),
+    class: className
+  }));
+
+  const text = (x, y, content, className, anchor) => add(make("text", {
+    x: sx(x),
+    y: sy(y),
+    class: className,
+    "text-anchor": anchor
+  }, content));
+
+  const leftArrow = (fromX, toX, y, className, headClass) => {
+    line(fromX, y, toX, y, className);
+    const points = [
+      [toX, y],
+      [toX + G.arrowHead, y - G.arrowWing],
+      [toX + G.arrowHead, y + G.arrowWing]
+    ].map(point => `${sx(point[0])},${sy(point[1])}`).join(" ");
+    add(make("polygon", { points, class: headClass }));
+  };
+
+  line(G.outputX, G.trackY, G.terminalX, G.trackY, "guide");
+
+  text(
+    G.directionX,
+    G.directionY,
+    D.labels.direction,
+    "direction",
+    "end"
+  );
+
+  const firstRight = D.layers[0].x + G.layerHalf;
+  leftArrow(
+    G.outputX,
+    firstRight,
+    G.trackY,
+    "signal-strong",
+    "arrowhead"
+  );
+
+  D.layers.forEach((layer, index) => {
+    const left = layer.x - G.layerHalf;
+    const right = layer.x + G.layerHalf;
+
+    rect(left, G.layerTop, right, G.layerBottom, "layer");
+
+    text(
+      layer.x,
+      G.layerTitleY,
+      D.labels.layerPrefix + layer.number,
+      "layer-title",
+      "middle"
+    );
+
+    text(
+      layer.x,
+      G.factorY,
+      D.labels.factor,
+      "factor",
+      "middle"
+    );
+
+    const next = D.layers[index + D.numbers.one];
+    const destination = next
+      ? next.x + G.layerHalf
+      : G.terminalX;
+
+    leftArrow(
+      left,
+      destination,
+      G.trackY,
+      layer.signal,
+      layer.head
+    );
+  });
+
+  circle(
+    G.outputX,
+    G.trackY,
+    G.outputRadius,
+    "endpoint"
+  );
+
+  D.callouts.forEach(callout => {
+    const point = callout.point;
+    const elbow = callout.elbow;
+    const label = callout.label;
+
+    line(
+      point[0],
+      point[1],
+      elbow[0],
+      elbow[1],
+      "callout-line"
+    );
+
+    line(
+      elbow[0],
+      elbow[1],
+      label[0],
+      label[1],
+      "callout-line"
+    );
+
+    circle(
+      point[0],
+      point[1],
+      G.calloutDotRadius,
+      "callout-dot"
+    );
+
+    callout.lines.forEach((item, row) => {
+      text(
+        label[0],
+        label[1] + row * G.lineGap,
+        item.text,
+        item.className,
+        callout.anchor
+      );
+    });
+  });
+
+  rect(
+    G.summaryLeft,
+    G.summaryTop,
+    G.summaryRight,
+    G.summaryBottom,
+    "summary-box"
+  );
+
+  text(
+    (G.summaryLeft + G.summaryRight) / D.numbers.one - G.summaryLeft,
+    G.summaryLabelY,
+    D.labels.summary,
+    "summary-label",
+    "middle"
+  );
+
+  text(
+    (G.summaryLeft + G.summaryRight) / D.numbers.one - G.summaryLeft,
+    G.equationY,
+    D.labels.equation,
+    "equation",
+    "middle"
+  );
+} catch (error) {
+  document.getElementById("canvas").hidden = true;
+  document.getElementById("fallback").hidden = false;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сравнение пяти расписаний learning rate</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f6fa;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #657086;
+      --axis: #526078;
+      --grid: #d8deea;
+      --band-a: #f7f9fc;
+      --band-b: #eef3f9;
+      --constant: #7653c6;
+      --decay: #dc642b;
+      --cosine: #237cc2;
+      --warmup: #168c70;
+      --cycle: #cf3f6b;
+      --error: #a3263a;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111620;
+        --panel: #181f2b;
+        --text: #edf2fa;
+        --muted: #aeb8ca;
+        --axis: #bac5d8;
+        --grid: #364153;
+        --band-a: #1b2330;
+        --band-b: #202a38;
+        --constant: #b397ff;
+        --decay: #ff9a68;
+        --cosine: #6ab9f2;
+        --warmup: #57d6ae;
+        --cycle: #ff7ca4;
+        --error: #ff91a2;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1040px;
+      margin-inline: auto;
+      padding: 14px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 23px;
+      font-weight: 720;
+      letter-spacing: -0.015em;
+    }
+
+    .diagram {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 450px;
+      overflow: visible;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+    }
+
+    .stage-band {
+      fill: var(--band-a);
+    }
+
+    .stage-band.alt {
+      fill: var(--band-b);
+    }
+
+    .grid-line {
+      fill: none;
+      stroke: var(--grid);
+      stroke-dasharray: 5 7;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-line,
+    .tick-line {
+      fill: none;
+      stroke: var(--axis);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .curve {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .axis-label {
+      fill: var(--text);
+      font-weight: 650;
+    }
+
+    .tick-label,
+    .stage-label {
+      fill: var(--muted);
+    }
+
+    .legend-label {
+      fill: var(--text);
+      font-weight: 610;
+    }
+
+    .fallback {
+      fill: var(--error);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Пять расписаний на общей временной шкале</h1>
+
+    <svg
+      id="schedule-diagram"
+      class="diagram"
+      viewBox="0 0 1040 450"
+      width="1040"
+      height="450"
+      role="img"
+      aria-labelledby="diagram-title diagram-description"
+    >
+      <title id="diagram-title">Сравнение пяти кривых learning rate</title>
+      <desc id="diagram-description">
+        На шагах от 0 до 500 показаны постоянная, ступенчатая,
+        косинусная, косинусная с разогревом и треугольная кривые.
+      </desc>
+    </svg>
+  </main>
+
+  <script>
+    "use strict";
+
+    /*
+      Все числовые параметры изображения собраны в одном массиве данных.
+      Геометрия строится только через неизменяемые origin, scale и пару
+      sx/sy, поэтому оси, кривые, засечки и подписи используют одно
+      отображение координат.
+    */
+    const DATA = [
+      {
+        canvasWidth: 1040,
+        canvasHeight: 450,
+        originX: 120,
+        originY: 292,
+        scaleX: 1.68,
+        scaleY: 218,
+        total: 500,
+        zero: 0,
+        one: 1,
+        two: 2,
+        half: 0.5,
+        plotTop: 1.03,
+        plotLabelY: 1.12,
+        tickTop: 0.018,
+        tickBottom: -0.034,
+        tickLabelY: -0.105,
+        xLabelY: -0.205,
+        legendRowA: -0.36,
+        legendRowB: -0.49,
+        legendLength: 24,
+        legendGap: 7,
+        legendX: [0, 176, 352, 86, 302],
+        milestones: [
+          { x: 0, label: "начало · 0", anchor: "start", bandEnd: 166 },
+          { x: 250, label: "середина", anchor: "middle", bandEnd: 334 },
+          { x: 500, label: "конец · 500", anchor: "end", bandEnd: 500 }
+        ],
+        bandStarts: [0, 166, 334],
+        bandEnds: [166, 334, 500],
+        bandClass: ["stage-band", "stage-band alt", "stage-band"],
+        samples: 96,
+        axisWidth: 2,
+        gridWidth: 1,
+        curveWidth: 4,
+        labelPad: 5,
+        axisFont: 15,
+        tickFont: 14,
+        legendFont: 14,
+        errorFont: 17,
+        errorX: 250,
+        errorY: 0.5,
+        yWordX: -8,
+        largeY: 0.91,
+        smallY: 0.09
+      },
+      {
+        id: "constant",
+        label: "Постоянный",
+        mode: "constant",
+        color: "var(--constant)",
+        level: 0.82,
+        dash: ""
+      },
+      {
+        id: "decay",
+        label: "Ступенчатое снижение",
+        mode: "points",
+        color: "var(--decay)",
+        dash: "15 6",
+        points: [
+          [0, 0.72],
+          [128, 0.72],
+          [128, 0.52],
+          [258, 0.52],
+          [258, 0.32],
+          [388, 0.32],
+          [388, 0.15],
+          [500, 0.15]
+        ]
+      },
+      {
+        id: "cosine",
+        label: "Косинусное снижение",
+        mode: "cosine",
+        color: "var(--cosine)",
+        dash: "",
+        start: 0.96,
+        final: 0.07
+      },
+      {
+        id: "warmup",
+        label: "Разогрев + косинус",
+        mode: "warmup",
+        color: "var(--warmup)",
+        dash: "4 6",
+        start: 0.12,
+        peak: 0.9,
+        peakAt: 0.15,
+        final: 0.045
+      },
+      {
+        id: "cycle",
+        label: "Один треугольный цикл",
+        mode: "cycle",
+        color: "var(--cycle)",
+        dash: "20 5 4 5",
+        start: 0.18,
+        peak: 0.94,
+        peakAt: 0.35,
+        final: 0.012
+      }
+    ];
+
+    const [layout, ...schedules] = DATA;
+    const origin = Object.freeze({ x: layout.originX, y: layout.originY });
+    const scale = Object.freeze({ x: layout.scaleX, y: layout.scaleY });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y - y * scale.y;
+
+    const svg = document.getElementById("schedule-diagram");
+    const namespace = "http://www.w3.org/2000/svg";
+
+    function makeElement(name, attributes, content) {
+      const node = document.createElementNS(namespace, name);
+
+      Object.entries(attributes || {}).forEach(([key, value]) => {
+        if (value !== "" && value !== undefined) {
+          node.setAttribute(key, String(value));
+        }
+      });
+
+      if (content !== undefined) {
+        node.textContent = content;
+      }
+
+      return node;
+    }
+
+    function appendLine(parent, x1, y1, x2, y2, attributes) {
+      const line = makeElement("line", {
+        x1: sx(x1),
+        y1: sy(y1),
+        x2: sx(x2),
+        y2: sy(y2),
+        ...attributes
+      });
+
+      parent.appendChild(line);
+      return line;
+    }
+
+    function appendRect(parent, x1, yTop, x2, yBottom, attributes) {
+      const rect = makeElement("rect", {
+        x: sx(x1),
+        y: sy(yTop),
+        width: sx(x2) - sx(x1),
+        height: sy(yBottom) - sy(yTop),
+        ...attributes
+      });
+
+      parent.appendChild(rect);
+      return rect;
+    }
+
+    function appendText(parent, x, y, content, attributes) {
+      const text = makeElement("text", {
+        x: sx(x),
+        y: sy(y),
+        ...attributes
+      }, content);
+
+      parent.appendChild(text);
+      return text;
+    }
+
+    function pathFromPoints(points) {
+      return points
+        .map((point, index) => {
+          const command = index === layout.zero ? "M" : "L";
+          return `${command} ${sx(point[layout.zero])} ${sy(point[layout.one])}`;
+        })
+        .join(" ");
+    }
+
+    function sampledPoints(schedule) {
+      return Array.from(
+        { length: layout.samples + layout.one },
+        (_, index) => {
+          const progress = index / layout.samples;
+          const x = layout.total * progress;
+          let y;
+
+          if (schedule.mode === "cosine") {
+            const blend =
+              (layout.one + Math.cos(Math.PI * progress)) / layout.two;
+            y = schedule.final + (schedule.start - schedule.final) * blend;
+          }
+
+          if (schedule.mode === "warmup") {
+            if (progress <= schedule.peakAt) {
+              const rise = progress / schedule.peakAt;
+              y = schedule.start + (schedule.peak - schedule.start) * rise;
+            } else {
+              const fall =
+                (progress - schedule.peakAt) /
+                (layout.one - schedule.peakAt);
+              const blend =
+                (layout.one + Math.cos(Math.PI * fall)) / layout.two;
+              y = schedule.final + (schedule.peak - schedule.final) * blend;
+            }
+          }
+
+          if (schedule.mode === "cycle") {
+            if (progress <= schedule.peakAt) {
+              const rise = progress / schedule.peakAt;
+              y = schedule.start + (schedule.peak - schedule.start) * rise;
+            } else {
+              const fall =
+                (progress - schedule.peakAt) /
+                (layout.one - schedule.peakAt);
+              y = schedule.peak + (schedule.final - schedule.peak) * fall;
+            }
+          }
+
+          return [x, y];
+        }
+      );
+    }
+
+    function pointsFor(schedule) {
+      if (schedule.mode === "constant") {
+        return [
+          [layout.zero, schedule.level],
+          [layout.total, schedule.level]
+        ];
+      }
+
+      if (schedule.mode === "points") {
+        return schedule.points;
+      }
+
+      return sampledPoints(schedule);
+    }
+
+    function drawBackground(parent) {
+      layout.bandStarts.forEach((start, index) => {
+        appendRect(
+          parent,
+          start,
+          layout.plotTop,
+          layout.bandEnds[index],
+          layout.zero,
+          { class: layout.bandClass[index] }
+        );
+      });
+
+      layout.milestones.forEach(milestone => {
+        appendLine(
+          parent,
+          milestone.x,
+          layout.zero,
+          milestone.x,
+          layout.plotTop,
+          {
+            class: "grid-line",
+            "stroke-width": layout.gridWidth
+          }
+        );
+      });
+    }
+
+    function drawAxes(parent) {
+      appendLine(
+        parent,
+        layout.zero,
+        layout.zero,
+        layout.total,
+        layout.zero,
+        {
+          class: "axis-line",
+          "stroke-width": layout.axisWidth
+        }
+      );
+
+      appendLine(
+        parent,
+        layout.zero,
+        layout.zero,
+        layout.zero,
+        layout.plotTop,
+        {
+          class: "axis-line",
+          "stroke-width": layout.axisWidth
+        }
+      );
+
+      layout.milestones.forEach(milestone => {
+        appendLine(
+          parent,
+          milestone.x,
+          layout.tickTop,
+          milestone.x,
+          layout.tickBottom,
+          {
+            class: "tick-line",
+            "stroke-width": layout.axisWidth
+          }
+        );
+
+        appendText(
+          parent,
+          milestone.x,
+          layout.tickLabelY,
+          milestone.label,
+          {
+            class: "tick-label",
+            "font-size": layout.tickFont,
+            "text-anchor": milestone.anchor
+          }
+        );
+      });
+
+      appendText(
+        parent,
+        layout.zero,
+        layout.plotLabelY,
+        "learning rate · размер обновления",
+        {
+          class: "axis-label",
+          "font-size": layout.axisFont,
+          "text-anchor": "start"
+        }
+      );
+
+      appendText(
+        parent,
+        layout.half * layout.total,
+        layout.xLabelY,
+        "шаг обучения",
+        {
+          class: "axis-label",
+          "font-size": layout.axisFont,
+          "text-anchor": "middle"
+        }
+      );
+
+      appendText(
+        parent,
+        layout.yWordX,
+        layout.largeY,
+        "крупнее",
+        {
+          class: "stage-label",
+          "font-size": layout.tickFont,
+          "text-anchor": "end",
+          dx: -layout.labelPad
+        }
+      );
+
+      appendText(
+        parent,
+        layout.yWordX,
+        layout.smallY,
+        "мельче",
+        {
+          class: "stage-label",
+          "font-size": layout.tickFont,
+          "text-anchor": "end",
+          dx: -layout.labelPad
+        }
+      );
+    }
+
+    function drawCurves(parent) {
+      schedules.forEach(schedule => {
+        const curve = makeElement("path", {
+          class: "curve",
+          d: pathFromPoints(pointsFor(schedule)),
+          stroke: schedule.color,
+          "stroke-width": layout.curveWidth,
+          "stroke-dasharray": schedule.dash
+        });
+
+        parent.appendChild(curve);
+      });
+    }
+
+    function drawLegend(parent) {
+      schedules.forEach((schedule, index) => {
+        const row =
+          index < layout.legendX.length - layout.two
+            ? layout.legendRowA
+            : layout.legendRowB;
+        const start = layout.legendX[index];
+        const end = start + layout.legendLength;
+
+        appendLine(parent, start, row, end, row, {
+          class: "curve",
+          stroke: schedule.color,
+          "stroke-width": layout.curveWidth,
+          "stroke-dasharray": schedule.dash
+        });
+
+        appendText(
+          parent,
+          end + layout.legendGap,
+          row,
+          schedule.label,
+          {
+            class: "legend-label",
+            "font-size": layout.legendFont,
+            "text-anchor": "start",
+            "dominant-baseline": "middle",
+            dx: layout.labelPad
+          }
+        );
+      });
+    }
+
+    function buildDiagram() {
+      const drawing = makeElement("g", {
+        "aria-hidden": "true"
+      });
+
+      drawBackground(drawing);
+      drawAxes(drawing);
+      drawCurves(drawing);
+      drawLegend(drawing);
+      svg.appendChild(drawing);
+    }
+
+    try {
+      buildDiagram();
+    } catch (error) {
+      svg.querySelectorAll("g").forEach(node => node.remove());
+
+      appendText(
+        svg,
+        layout.errorX,
+        layout.errorY,
+        "Схема должна показать пять расписаний learning rate на шагах 0–500.",
+        {
+          class: "fallback",
+          "font-size": layout.errorFont,
+          "text-anchor": "middle"
+        }
+      );
+    }
+  </script>
+</body>
+</html>

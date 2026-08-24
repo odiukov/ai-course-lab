@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Конвейер Thinker → Talker → декодер</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5c6670;
+    --grid:#d8dee4; --think:#2f6fb0; --talk:#b06a1f; --dec:#2f8a5b;
+    --lag:#b03a3a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161a; --fg:#e8edf2; --muted:#9aa7b2;
+      --grid:#2c343c; --think:#6fb0e8; --talk:#e5a458; --dec:#63c795;
+      --lag:#e8756f;
+    }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{background:var(--bg);padding:8px 4px 4px;}
+  h2{font-size:15px;margin:0 0 2px;text-align:center;font-weight:600;}
+  p.sub{font-size:12px;margin:0 0 4px;text-align:center;color:var(--muted);}
+  svg{display:block;width:100%;height:auto;max-height:520px;margin:0 auto;}
+  .fail{font-size:13px;line-height:1.5;padding:8px 12px;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Конвейер Thinker → Talker → декодер</h2>
+  <p class="sub">Отставание на три токена — это ~150-200 мс речи</p>
+  <div id="slot"></div>
+</div>
+<script>
+(function(){
+  var slot = document.getElementById('slot');
+  try{
+    // ---- данные схемы (единственные литералы-данные) ----
+    var LANES = [
+      {key:'thinker', name:'Thinker', unit:'текстовые токены', color:'var(--think)',
+       row:0, cells:['t₀','t₁','t₂','t₃'], start:0},
+      {key:'talker', name:'Talker', unit:'речевые токены', color:'var(--talk)',
+       row:1, cells:['t₀','t₁','t₂'], start:0},
+      {key:'decoder', name:'Декодер', unit:'аудиосэмплы', color:'var(--dec)',
+       row:2, cells:['t₀','t₁'], start:0}
+    ];
+    var STEPS = 4;   // тактов на ленте времени: t₀..t₃
+
+    // ---- один origin, один scale ----
+    var origin = {x:132, y:64};
+    var scale  = {x:74, y:78};
+    // единственная пара перевода координат
+    function sx(x){ return origin.x + x*scale.x; }
+    function sy(y){ return origin.y + y*scale.y; }
+
+    // ---- пиксельные литералы: холст, отступы подписей, толщины, шрифт ----
+    var W = 700, H = 330;
+    var PAD = 6, LW = 1.6, FS = 12, FS_SM = 11;
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e;}
+    function txt(x,y,s,anchor,cls,fill,size){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor,'font-size':size||FS,
+        fill:fill||'var(--fg)','dominant-baseline':'middle'});
+      t.textContent=s; if(cls) t.setAttribute('font-weight','600'); return t;}
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H,
+      preserveAspectRatio:'xMidYMid meet',role:'img'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    var defs = el('defs',{});
+    ['think','talk','lag'].forEach(function(c){
+      var m = el('marker',{id:'ar-'+c,markerWidth:8,markerHeight:8,
+        refX:7,refY:3,orient:'auto',markerUnits:'strokeWidth'});
+      m.appendChild(el('path',{d:'M0,0 L7,3 L0,6 z',fill:'var(--'+c+')'}));
+      defs.appendChild(m);
+    });
+    svg.appendChild(defs);
+
+    // ---- ось времени: засечки такта ----
+    for(var i=0;i<=STEPS;i++){
+      svg.appendChild(el('line',{x1:sx(i),y1:sy(-0.42),x2:sx(i),y2:sy(2.9),
+        stroke:'var(--grid)','stroke-width':LW,'stroke-dasharray':'3 4'}));
+    }
+    svg.appendChild(el('line',{x1:sx(0),y1:sy(2.9),x2:sx(STEPS),y2:sy(2.9),
+      stroke:'var(--grid)','stroke-width':LW}));
+    for(var i=0;i<STEPS;i++){
+      svg.appendChild(txt(sx(i+0.5),sy(2.9)+PAD*2.6,'такт '+i,'middle',null,
+        'var(--muted)',FS_SM));
+    }
+    svg.appendChild(txt(sx(STEPS)+PAD,sy(2.9),'время →','start',null,
+      'var(--muted)',FS_SM));
+
+    // ---- дорожки ----
+    var hh = 0.30; // полувысота ячейки в единицах сетки
+    LANES.forEach(function(L){
+      var y = L.row;
+      // подпись дорожки — слева, anchor=end, вне поля ячеек
+      svg.appendChild(txt(sx(0)-PAD*2, sy(y)-PAD, L.name,'end','b',L.color,FS));
+      svg.appendChild(txt(sx(0)-PAD*2, sy(y)+PAD*1.8, L.unit,'end',null,
+        'var(--muted)',FS_SM));
+
+      L.cells.forEach(function(c,k){
+        var a = L.start+k;
+        svg.appendChild(el('rect',{x:sx(a)+PAD/2,y:sy(y-hh),
+          width:sx(a+1)-sx(a)-PAD, height:sy(y+hh)-sy(y-hh),
+          rx:PAD, fill:'none', stroke:L.color,'stroke-width':LW*1.6}));
+        svg.appendChild(txt(sx(a+0.5), sy(y), c,'middle','b',L.color,FS+1));
+      });
+    });
+
+    // ---- стрелки между дорожками (по одной единице, не по партии) ----
+    function drop(a, r1, r2, color, mark){
+      svg.appendChild(el('path',{
+        d:'M'+sx(a+0.5)+','+sy(r1+hh)+' L'+sx(a+0.5)+','+sy(r2-hh),
+        stroke:color,'stroke-width':LW*1.4,fill:'none',
+        'marker-end':'url(#ar-'+mark+')'}));
+    }
+    LANES[1].cells.forEach(function(_,k){ drop(k,0,1,'var(--think)','think'); });
+    LANES[2].cells.forEach(function(_,k){ drop(k,1,2,'var(--talk)','talk'); });
+
+    // подписи стрелок — сбоку от середины крайней левой стрелки, в разные стороны
+    svg.appendChild(txt(sx(0.5)-PAD*1.4, (sy(0+hh)+sy(1-hh))/2,
+      'текстовый токен','end',null,'var(--think)',FS_SM));
+    svg.appendChild(txt(sx(0.5)-PAD*1.4, (sy(1+hh)+sy(2-hh))/2,
+      'речевые токены','end',null,'var(--talk)',FS_SM));
+
+    // ---- отставание: Thinker на t₃, декодер отдал t₀..t₁ ----
+    var lagY = sy(2+hh)+PAD*2.2;
+    svg.appendChild(el('path',{
+      d:'M'+sx(2)+','+lagY+' L'+sx(STEPS)+','+lagY,
+      stroke:'var(--lag)','stroke-width':LW*1.4,fill:'none',
+      'marker-end':'url(#ar-lag)'}));
+    svg.appendChild(el('line',{x1:sx(2),y1:lagY-PAD,x2:sx(2),y2:lagY+PAD,
+      stroke:'var(--lag)','stroke-width':LW*1.4}));
+    svg.appendChild(txt(sx(2)-PAD*1.6, lagY,'отставание','end',null,
+      'var(--lag)',FS_SM));
+    svg.appendChild(txt(sx(3), lagY+PAD*2.8,
+      'три токена ≈ 150-200 мс речи','middle',null,'var(--lag)',FS_SM));
+
+    // ---- вертикаль «здесь Thinker уже на t₃, а звучит t₁» ----
+    svg.appendChild(txt(sx(3.5), sy(-0.42)-PAD*1.6,
+      'Thinker думает t₃','middle',null,'var(--think)',FS_SM));
+    svg.appendChild(txt(sx(1.5), sy(2)-sy(0)+sy(0)+0, '', 'middle'));
+    svg.appendChild(txt(sx(1.5), sy(2+hh)+PAD*0.2,
+      '','middle',null,'var(--dec)',FS_SM));
+
+    slot.appendChild(svg);
+  }catch(e){
+    slot.innerHTML='<div class="fail"><b>Схема не построилась.</b> Она должна была '+
+      'показать три дорожки на одной ленте времени: Thinker выдаёт t₀..t₃, '+
+      'Talker обрабатывает t₀..t₂, декодер отдаёт аудио для t₀..t₁. '+
+      'Стрелки идут вниз по одной единице на такт: текстовый токен в Talker, '+
+      'речевые токены в декодер. Итог — отставание звука от мысли на три '+
+      'токена, примерно 150-200 мс речи.</div>';
+  }
+})();
+</script>
+</body>
+</html>

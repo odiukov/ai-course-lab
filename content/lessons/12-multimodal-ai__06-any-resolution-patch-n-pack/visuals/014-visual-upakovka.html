@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Три картинки в одной последовательности</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#666;
+    --c1:#2f6fb5; --c2:#c1751e; --c3:#2e8b6b;
+    --grid:#c9ccd1; --off:#eceef1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15181c; --fg:#e8eaed; --muted:#9aa2ac;
+      --c1:#6aa8e8; --c2:#e2a44e; --c3:#5cc3a0;
+      --grid:#3a4048; --off:#22262c;
+    }
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;padding:8px 10px 10px;}
+  h2{font-size:15px;margin:0 0 6px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;background:var(--bg);}
+  .fail{font-size:13px;color:var(--muted);white-space:pre-wrap;}
+  text{font-family:inherit;fill:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Три картинки в одной строке на 1600 токенов</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---------- данные схемы ----------
+    var IMGS = [
+      {id:'A', name:'чек 336×336',        tok:576, color:'var(--c1)', gw:24, gh:24},
+      {id:'B', name:'иконка 224×224',     tok:256, color:'var(--c2)', gw:16, gh:16},
+      {id:'C', name:'график 448×336',     tok:768, color:'var(--c3)', gw:32, gh:24}
+    ];
+    var TOTAL = 1600;          // 576 + 256 + 768
+    var CELLS = 2560000;       // 1600 × 1600
+    var MARKS = 987136;        // 576² + 256² + 768²
+
+    // ---------- единственная система координат ----------
+    // мир: x в токенах (0..1600), y в условных строках (0..14)
+    var VB_W = 980, VB_H = 470;
+    var ORIGIN = {x: 120, y: 26};
+    var SCALE  = {x: 0.4, y: 30};
+    function sx(x){ return ORIGIN.x + x * SCALE.x; }
+    function sy(y){ return ORIGIN.y + y * SCALE.y; }
+
+    // ---------- литералы оформления ----------
+    var PAD = 8, LW = 1.2, FS = 12, FS_S = 11;
+
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n);
+      for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,size,fill,weight){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle',
+        'font-size':(size||FS),'dominant-baseline':'middle'});
+      if(fill) t.setAttribute('fill',fill);
+      if(weight) t.setAttribute('font-weight',weight);
+      t.textContent=s; return t;
+    }
+
+    var svg = el('svg',{viewBox:'0 0 '+VB_W+' '+VB_H,
+      preserveAspectRatio:'xMidYMid meet', role:'img'});
+    var defs = el('defs');
+    var m = el('marker',{id:'ah',viewBox:'0 0 10 10',refX:'9',refY:'5',
+      markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+    m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',fill:'var(--muted)'}));
+    defs.appendChild(m); svg.appendChild(defs);
+    svg.appendChild(el('rect',{x:0,y:0,width:VB_W,height:VB_H,fill:'var(--bg)'}));
+
+    // ---------- ряд 1: три картинки как сетки патчей ----------
+    var ROW_IMG_TOP = 0.15, ROW_IMG_H = 2.0;   // в единицах y
+    var starts = [], acc = 0;
+    IMGS.forEach(function(im){ starts.push(acc); acc += im.tok; });
+
+    svg.appendChild(txt(sx(0)-PAD, sy(ROW_IMG_TOP+ROW_IMG_H/2),
+      'картинки', 'end', FS, 'var(--muted)'));
+
+    IMGS.forEach(function(im,i){
+      // ширину картинки-миниатюры берём из её доли токенов
+      var x0 = starts[i], x1 = starts[i] + im.tok;
+      var cx = (x0+x1)/2;
+      var w = sx(x1) - sx(x0);
+      var h = sy(ROW_IMG_TOP+ROW_IMG_H) - sy(ROW_IMG_TOP);
+      // прямоугольник картинки, вписанный по высоте с сохранением сетки
+      var cellH = h / im.gh;
+      var boxW = cellH * im.gw;
+      var bx = sx(cx) - boxW/2, by = sy(ROW_IMG_TOP);
+      svg.appendChild(el('rect',{x:bx,y:by,width:boxW,height:h,
+        fill:'none',stroke:im.color,'stroke-width':LW*1.6}));
+      // сетка патчей (прореженная, чтобы линии читались)
+      var stepX = im.gw/8, stepY = im.gh/6;
+      for(var g=1; g<8; g++){
+        var gx = bx + boxW*(g*stepX/im.gw);
+        svg.appendChild(el('line',{x1:gx,y1:by,x2:gx,y2:by+h,
+          stroke:im.color,'stroke-width':0.5,opacity:0.55}));
+      }
+      for(var r=1; r<6; r++){
+        var gy = by + h*(r*stepY/im.gh);
+        svg.appendChild(el('line',{x1:bx,y1:gy,x2:bx+boxW,y2:gy,
+          stroke:im.color,'stroke-width':0.5,opacity:0.55}));
+      }
+      svg.appendChild(txt(sx(cx), sy(ROW_IMG_TOP)-PAD*1.4, im.name,
+        'middle', FS_S, im.color, '600'));
+      // стрелка «вытянуть в последовательность»
+      svg.appendChild(el('line',{x1:sx(cx),y1:sy(ROW_IMG_TOP+ROW_IMG_H)+PAD*0.4,
+        x2:sx(cx),y2:sy(ROW_IMG_TOP+ROW_IMG_H+0.85),
+        stroke:'var(--muted)','stroke-width':LW,'marker-end':'url(#ah)'}));
+      svg.appendChild(txt(sx(cx)+PAD, sy(ROW_IMG_TOP+ROW_IMG_H+0.45),
+        im.tok+' ток.', 'start', FS_S, 'var(--muted)'));
+    });
+
+    // ---------- ряд 2: одна склеенная строка ----------
+    var SEQ_TOP = 3.3, SEQ_H = 0.75;
+    svg.appendChild(txt(sx(0)-PAD, sy(SEQ_TOP+SEQ_H/2),
+      'одна строка', 'end', FS, 'var(--muted)'));
+    IMGS.forEach(function(im,i){
+      var x0 = starts[i], x1 = starts[i]+im.tok;
+      svg.appendChild(el('rect',{x:sx(x0),y:sy(SEQ_TOP),
+        width:sx(x1)-sx(x0), height:sy(SEQ_TOP+SEQ_H)-sy(SEQ_TOP),
+        fill:im.color, opacity:0.30, stroke:im.color,'stroke-width':LW*1.4}));
+      svg.appendChild(txt(sx((x0+x1)/2), sy(SEQ_TOP+SEQ_H/2),
+        im.id+': '+im.tok, 'middle', FS, 'var(--fg)', '600'));
+    });
+    // шкала под строкой
+    svg.appendChild(el('line',{x1:sx(0),y1:sy(SEQ_TOP+SEQ_H+0.35),
+      x2:sx(TOTAL),y2:sy(SEQ_TOP+SEQ_H+0.35),
+      stroke:'var(--muted)','stroke-width':LW}));
+    [0].concat(starts.slice(1)).concat([TOTAL]).forEach(function(t,i,arr){
+      svg.appendChild(el('line',{x1:sx(t),y1:sy(SEQ_TOP+SEQ_H+0.35),
+        x2:sx(t),y2:sy(SEQ_TOP+SEQ_H+0.55),
+        stroke:'var(--muted)','stroke-width':LW}));
+      var a = (i===0)?'start':(i===arr.length-1?'end':'middle');
+      svg.appendChild(txt(sx(t), sy(SEQ_TOP+SEQ_H+0.85), String(t),
+        a, FS_S, 'var(--muted)'));
+    });
+    svg.appendChild(txt(sx(TOTAL/2), sy(SEQ_TOP)-PAD*1.6,
+      '576 + 256 + 768 = 1600, padding нет', 'middle', FS, 'var(--fg)','600'));
+
+    // ---------- ряд 3: блочно-диагональная маска 1600×1600 ----------
+    var MASK_TOP = 6.0;
+    var MASK_SIDE_W = TOTAL;                  // ширина маски в мировых x = 1600
+    var maskPxW = sx(TOTAL) - sx(0);
+    var maskPxH = maskPxW * 0.55;             // сжата по вертикали, но пропорции блоков сохранены долями
+    // высоту маски выражаем через y-мир, чтобы всё шло через sy
+    var MASK_H_WORLD = maskPxH / SCALE.y;
+    var mx0 = sx(0), my0 = sy(MASK_TOP);
+    svg.appendChild(el('rect',{x:mx0,y:my0,width:maskPxW,height:maskPxH,
+      fill:'var(--off)',stroke:'var(--grid)','stroke-width':LW}));
+    IMGS.forEach(function(im,i){
+      var x0=starts[i], x1=starts[i]+im.tok;
+      var bx = sx(x0), bw = sx(x1)-sx(x0);
+      var by = sy(MASK_TOP + MASK_H_WORLD*(x0/TOTAL));
+      var bh = maskPxH*(im.tok/TOTAL);
+      svg.appendChild(el('rect',{x:bx,y:by,width:bw,height:bh,
+        fill:im.color,opacity:0.55,stroke:im.color,'stroke-width':LW}));
+      svg.appendChild(txt(bx+bw/2, by+bh/2, im.id, 'middle', FS, 'var(--fg)','700'));
+    });
+    // подписи маски
+    svg.appendChild(txt(sx(0)-PAD, sy(MASK_TOP+MASK_H_WORLD/2),
+      'кто смотрит', 'end', FS, 'var(--muted)'));
+    svg.appendChild(txt(sx(TOTAL/2), sy(MASK_TOP)-PAD*1.2,
+      'на кого смотрит  ·  маска 1600×1600', 'middle', FS, 'var(--muted)'));
+    // выноска к запрещённой зоне (у хвоста стрелки)
+    var forbX = starts[2] + IMGS[2].tok*0.5, forbY = MASK_TOP + MASK_H_WORLD*0.12;
+    svg.appendChild(el('line',{x1:sx(TOTAL)+PAD*2, y1:sy(forbY),
+      x2:sx(forbX), y2:sy(forbY),
+      stroke:'var(--muted)','stroke-width':LW,'marker-end':'url(#ah)'}));
+    svg.appendChild(txt(sx(TOTAL)+PAD*2.6, sy(forbY),
+      'запрет', 'start', FS_S, 'var(--muted)'));
+
+    // ---------- легенда ----------
+    var LEG = MASK_TOP + MASK_H_WORLD + 0.75;
+    svg.appendChild(txt(sx(0), sy(LEG),
+      'галочки: 576² + 256² + 768² = '+MARKS.toLocaleString('ru-RU')+
+      ' из '+CELLS.toLocaleString('ru-RU')+' клеток — 39%',
+      'start', FS, 'var(--fg)'));
+    svg.appendChild(txt(sx(0), sy(LEG+0.55),
+      'A — чек 576, B — иконка 256, C — график 768; серое поле — 61% запретов',
+      'start', FS_S, 'var(--muted)'));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<p class="fail">Схема должна была показать: три картинки — '+
+      'чек 336×336 (576 токенов), иконка 224×224 (256), график 448×336 (768) — '+
+      'вытянуты в патч-последовательности и склеены в одну строку 576+256+768=1600 '+
+      'без padding, а под ней маску 1600×1600 из трёх квадратов по диагонали: '+
+      '576²+256²+768² = 987 136 разрешённых клеток из 2 560 000 (39%), '+
+      'остальные 61% — запрет смотреть в соседнюю картинку.</p>';
+  }
+})();
+</script>
+</body>
+</html>

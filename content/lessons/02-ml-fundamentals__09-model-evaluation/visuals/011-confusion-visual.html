@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Матрица ошибок как четыре счётчика</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5e687c;
+      --line: #aeb8c9;
+      --line-strong: #718096;
+      --correct-fill: #e7f6ee;
+      --correct-ink: #176c45;
+      --correct-mark: #249466;
+      --error-fill: #fff0eb;
+      --error-ink: #a53b28;
+      --error-mark: #dc624b;
+      --badge-fill: #e9eef9;
+      --badge-ink: #30466f;
+      --shadow: #20304a1f;
+      --white: #ffffff;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111722;
+        --panel: #192231;
+        --ink: #f3f6fb;
+        --muted: #b7c1d1;
+        --line: #536176;
+        --line-strong: #8794a8;
+        --correct-fill: #153e32;
+        --correct-ink: #a9ebca;
+        --correct-mark: #58c994;
+        --error-fill: #492820;
+        --error-ink: #ffc0b1;
+        --error-mark: #f18a72;
+        --badge-fill: #283650;
+        --badge-ink: #cfddfa;
+        --shadow: #0000004d;
+        --white: #ffffff;
+      }
+    }
+
+    html,
+    body {
+      background: var(--page);
+      color: var(--ink);
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 960px;
+      margin: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 28px var(--shadow);
+    }
+
+    h1 {
+      margin: 18px 28px 4px;
+      font-size: 24px;
+      line-height: 30px;
+    }
+
+    .intro {
+      margin: 0 28px 8px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 22px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 420px;
+      background: var(--panel);
+    }
+
+    .axis-title {
+      fill: var(--ink);
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .axis-label {
+      fill: var(--muted);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .badge {
+      fill: var(--badge-fill);
+      stroke: var(--line);
+      stroke-width: 1px;
+    }
+
+    .badge-text {
+      fill: var(--badge-ink);
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .cell-correct {
+      fill: var(--correct-fill);
+    }
+
+    .cell-error {
+      fill: var(--error-fill);
+    }
+
+    .matrix-border {
+      fill: none;
+      stroke: var(--line-strong);
+      stroke-width: 2px;
+    }
+
+    .divider {
+      stroke: var(--line-strong);
+      stroke-width: 2px;
+    }
+
+    .guide {
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+    }
+
+    .tag-correct {
+      fill: var(--correct-mark);
+    }
+
+    .tag-error {
+      fill: var(--error-mark);
+    }
+
+    .tag-text {
+      fill: var(--white);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .value-correct {
+      fill: var(--correct-ink);
+      font-size: 44px;
+      font-weight: bold;
+    }
+
+    .value-error {
+      fill: var(--error-ink);
+      font-size: 44px;
+      font-weight: bold;
+    }
+
+    .description-correct {
+      fill: var(--correct-ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .description-error {
+      fill: var(--error-ink);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .legend-text {
+      fill: var(--ink);
+      font-size: 14px;
+    }
+
+    .footer-text {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .legend-correct {
+      fill: var(--correct-mark);
+    }
+
+    .legend-error {
+      fill: var(--error-mark);
+    }
+
+    #fallback {
+      margin: 20px 28px 28px;
+      padding: 14px 18px;
+      color: var(--ink);
+      background: var(--badge-fill);
+      border: 1px solid var(--line);
+      font-size: 16px;
+      line-height: 24px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Матрица ошибок как четыре счётчика</h1>
+    <p class="intro">100 писем: строки показывают настоящий класс, столбцы — предсказание модели.</p>
+
+    <svg
+      id="diagram"
+      viewBox="0 0 960 420"
+      width="960"
+      height="420"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description">
+      <title id="svg-title">Матрица ошибок для ста писем</title>
+      <desc id="svg-description">
+        Таблица два на два. Для настоящего спама модель получила шесть
+        истинно положительных и четыре ложно отрицательных результата.
+        Для обычных писем — два ложноположительных и восемьдесят восемь
+        истинно отрицательных результатов.
+      </desc>
+    </svg>
+
+    <p id="fallback" hidden>
+      Схема должна была показать матрицу два на два для 100 писем:
+      TP — 6, FN — 4, FP — 2, TN — 88. Строки обозначают настоящий
+      класс, столбцы — предсказанный.
+    </p>
+  </main>
+
+  <script>
+    const data = Object.freeze([
+      Object.freeze({
+        zero: 0,
+        canvasWidth: 960,
+        canvasHeight: 420,
+        badgeX: 28,
+        badgeY: 18,
+        badgeW: 128,
+        badgeH: 38,
+        badgeR: 19,
+        badgeTextX: 92,
+        badgeTextY: 43,
+        predictionX: 625,
+        predictionY: 31,
+        guideLeft: 385,
+        guideRight: 865,
+        guideY: 51,
+        tickTop: 51,
+        tickBottom: 61,
+        positiveColumnX: 505,
+        negativeColumnX: 745,
+        columnLabelY: 83,
+        truthX: 335,
+        truthY: 83,
+        rowGuideLeft: 347,
+        rowGuideRight: 373,
+        positiveRowY: 159,
+        negativeRowY: 273,
+        matrixX: 385,
+        matrixY: 102,
+        matrixW: 480,
+        matrixH: 228,
+        cellW: 240,
+        cellH: 114,
+        matrixR: 18,
+        splitX: 625,
+        splitY: 216,
+        tagOffsetX: 20,
+        tagOffsetY: 16,
+        tagW: 48,
+        tagH: 27,
+        tagR: 13,
+        tagTextOffsetX: 44,
+        tagTextOffsetY: 35,
+        valueOffsetX: 120,
+        valueOffsetY: 76,
+        descriptionOffsetX: 120,
+        descriptionOffsetY: 101,
+        legendCorrectX: 226,
+        legendErrorX: 560,
+        legendY: 369,
+        legendDotR: 7,
+        legendTextOffset: 18,
+        footerX: 480,
+        footerY: 405
+      }),
+      Object.freeze({
+        code: "TP",
+        value: 6,
+        description: "спам распознан",
+        x: 385,
+        y: 102,
+        correct: true
+      }),
+      Object.freeze({
+        code: "FN",
+        value: 4,
+        description: "спам пропущен",
+        x: 625,
+        y: 102,
+        correct: false
+      }),
+      Object.freeze({
+        code: "FP",
+        value: 2,
+        description: "ложная тревога",
+        x: 385,
+        y: 216,
+        correct: false
+      }),
+      Object.freeze({
+        code: "TN",
+        value: 88,
+        description: "обычное письмо",
+        x: 625,
+        y: 216,
+        correct: true
+      })
+    ]);
+
+    const origin = Object.freeze({ x: 0, y: 0 });
+    const scale = Object.freeze({ x: 1, y: 1 });
+
+    const sx = x => origin.x + x * scale.x;
+    const sy = y => origin.y + y * scale.y;
+
+    try {
+      const [layout, ...cells] = data;
+      const svg = document.getElementById("diagram");
+      const fallback = document.getElementById("fallback");
+      const namespace = "http://www.w3.org/2000/svg";
+
+      function element(name, attributes, content) {
+        const item = document.createElementNS(namespace, name);
+
+        for (const [key, value] of Object.entries(attributes)) {
+          item.setAttribute(key, String(value));
+        }
+
+        if (content !== undefined) {
+          item.textContent = String(content);
+        }
+
+        return item;
+      }
+
+      function add(parent, name, attributes, content) {
+        const item = element(name, attributes, content);
+        parent.appendChild(item);
+        return item;
+      }
+
+      function rectangle(parent, x, y, width, height, radius, className) {
+        return add(parent, "rect", {
+          x: sx(x),
+          y: sy(y),
+          width: sx(x + width) - sx(x),
+          height: sy(y + height) - sy(y),
+          rx: sx(radius) - sx(layout.zero),
+          ry: sy(radius) - sy(layout.zero),
+          class: className
+        });
+      }
+
+      function line(parent, x1, y1, x2, y2, className) {
+        return add(parent, "line", {
+          x1: sx(x1),
+          y1: sy(y1),
+          x2: sx(x2),
+          y2: sy(y2),
+          class: className
+        });
+      }
+
+      function label(parent, x, y, content, className, anchor) {
+        return add(parent, "text", {
+          x: sx(x),
+          y: sy(y),
+          class: className,
+          "text-anchor": anchor,
+          "dominant-baseline": "alphabetic"
+        }, content);
+      }
+
+      function circle(parent, x, y, radius, className) {
+        return add(parent, "circle", {
+          cx: sx(x),
+          cy: sy(y),
+          r: sx(radius) - sx(layout.zero),
+          class: className
+        });
+      }
+
+      const header = add(svg, "g", {
+        "aria-label": "Оси матрицы"
+      });
+
+      rectangle(
+        header,
+        layout.badgeX,
+        layout.badgeY,
+        layout.badgeW,
+        layout.badgeH,
+        layout.badgeR,
+        "badge"
+      );
+
+      label(
+        header,
+        layout.badgeTextX,
+        layout.badgeTextY,
+        "100 писем",
+        "badge-text",
+        "middle"
+      );
+
+      label(
+        header,
+        layout.predictionX,
+        layout.predictionY,
+        "Предсказанный класс",
+        "axis-title",
+        "middle"
+      );
+
+      line(
+        header,
+        layout.guideLeft,
+        layout.guideY,
+        layout.guideRight,
+        layout.guideY,
+        "guide"
+      );
+
+      line(
+        header,
+        layout.positiveColumnX,
+        layout.tickTop,
+        layout.positiveColumnX,
+        layout.tickBottom,
+        "guide"
+      );
+
+      line(
+        header,
+        layout.negativeColumnX,
+        layout.tickTop,
+        layout.negativeColumnX,
+        layout.tickBottom,
+        "guide"
+      );
+
+      label(
+        header,
+        layout.positiveColumnX,
+        layout.columnLabelY,
+        "Положительный (спам)",
+        "axis-label",
+        "middle"
+      );
+
+      label(
+        header,
+        layout.negativeColumnX,
+        layout.columnLabelY,
+        "Отрицательный (не спам)",
+        "axis-label",
+        "middle"
+      );
+
+      label(
+        header,
+        layout.truthX,
+        layout.truthY,
+        "Настоящий класс",
+        "axis-title",
+        "end"
+      );
+
+      label(
+        header,
+        layout.truthX,
+        layout.positiveRowY,
+        "Положительный (спам)",
+        "axis-label",
+        "end"
+      );
+
+      label(
+        header,
+        layout.truthX,
+        layout.negativeRowY,
+        "Отрицательный (не спам)",
+        "axis-label",
+        "end"
+      );
+
+      line(
+        header,
+        layout.rowGuideLeft,
+        layout.positiveRowY,
+        layout.rowGuideRight,
+        layout.positiveRowY,
+        "guide"
+      );
+
+      line(
+        header,
+        layout.rowGuideLeft,
+        layout.negativeRowY,
+        layout.rowGuideRight,
+        layout.negativeRowY,
+        "guide"
+      );
+
+      const definitions = add(svg, "defs", {});
+      const clip = add(definitions, "clipPath", { id: "matrix-clip" });
+
+      rectangle(
+        clip,
+        layout.matrixX,
+        layout.matrixY,
+        layout.matrixW,
+        layout.matrixH,
+        layout.matrixR,
+        ""
+      );
+
+      const fills = add(svg, "g", {
+        "clip-path": "url(#matrix-clip)",
+        "aria-hidden": "true"
+      });
+
+      for (const cell of cells) {
+        rectangle(
+          fills,
+          cell.x,
+          cell.y,
+          layout.cellW,
+          layout.cellH,
+          layout.zero,
+          cell.correct ? "cell-correct" : "cell-error"
+        );
+      }
+
+      const grid = add(svg, "g", {
+        "aria-hidden": "true"
+      });
+
+      line(
+        grid,
+        layout.splitX,
+        layout.matrixY,
+        layout.splitX,
+        layout.matrixY + layout.matrixH,
+        "divider"
+      );
+
+      line(
+        grid,
+        layout.matrixX,
+        layout.splitY,
+        layout.matrixX + layout.matrixW,
+        layout.splitY,
+        "divider"
+      );
+
+      rectangle(
+        grid,
+        layout.matrixX,
+        layout.matrixY,
+        layout.matrixW,
+        layout.matrixH,
+        layout.matrixR,
+        "matrix-border"
+      );
+
+      const counters = add(svg, "g", {
+        "aria-label": "Четыре счётчика результатов"
+      });
+
+      for (const cell of cells) {
+        const outcome = add(counters, "g", {
+          "aria-label": cell.code + ": " + cell.value + ", " + cell.description
+        });
+
+        rectangle(
+          outcome,
+          cell.x + layout.tagOffsetX,
+          cell.y + layout.tagOffsetY,
+          layout.tagW,
+          layout.tagH,
+          layout.tagR,
+          cell.correct ? "tag-correct" : "tag-error"
+        );
+
+        label(
+          outcome,
+          cell.x + layout.tagTextOffsetX,
+          cell.y + layout.tagTextOffsetY,
+          cell.code,
+          "tag-text",
+          "middle"
+        );
+
+        label(
+          outcome,
+          cell.x + layout.valueOffsetX,
+          cell.y + layout.valueOffsetY,
+          cell.value,
+          cell.correct ? "value-correct" : "value-error",
+          "middle"
+        );
+
+        label(
+          outcome,
+          cell.x + layout.descriptionOffsetX,
+          cell.y + layout.descriptionOffsetY,
+          cell.description,
+          cell.correct ? "description-correct" : "description-error",
+          "middle"
+        );
+      }
+
+      const legend = add(svg, "g", {
+        "aria-label": "Легенда"
+      });
+
+      circle(
+        legend,
+        layout.legendCorrectX,
+        layout.legendY,
+        layout.legendDotR,
+        "legend-correct"
+      );
+
+      label(
+        legend,
+        layout.legendCorrectX + layout.legendTextOffset,
+        layout.legendY,
+        "TP и TN — верные ответы",
+        "legend-text",
+        "start"
+      );
+
+      circle(
+        legend,
+        layout.legendErrorX,
+        layout.legendY,
+        layout.legendDotR,
+        "legend-error"
+      );
+
+      label(
+        legend,
+        layout.legendErrorX + layout.legendTextOffset,
+        layout.legendY,
+        "FP и FN — ошибки",
+        "legend-text",
+        "start"
+      );
+
+      label(
+        legend,
+        layout.footerX,
+        layout.footerY,
+        "Строка = факт  •  столбец = прогноз  •  всего 100 писем",
+        "footer-text",
+        "middle"
+      );
+
+      fallback.hidden = true;
+    } catch (error) {
+      const fallback = document.getElementById("fallback");
+      fallback.hidden = false;
+      fallback.textContent =
+        "Схема должна была показать матрицу 2×2 для 100 писем: " +
+        "TP = 6, FN = 4, FP = 2 и TN = 88. " +
+        "Строки — настоящий класс, столбцы — предсказанный.";
+    }
+  </script>
+</body>
+</html>

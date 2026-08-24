@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PCA против kernel PCA на концентрических окружностях</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#6b7280; --axis:#9aa3ad;
+    --ring-out:#1f6fb5; --ring-in:#c2410c; --band:#eef2f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171c; --fg:#e8ecf1; --muted:#9aa3ad; --axis:#5b646f;
+      --ring-out:#5aa9e6; --ring-in:#f59e5b; --band:#1d222a;
+    }
+  }
+  html,body{margin:0;background:var(--bg);}
+  .wrap{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;}
+  h2{margin:0;padding:10px 12px 4px;font-size:15px;font-weight:600;}
+  svg{display:block;width:100%;height:auto;max-height:520px;}
+  text{font:12px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--fg);}
+  text.mut{fill:var(--muted);font-size:11px;}
+  text.ttl{font-size:12.5px;font-weight:600;}
+  .fail{padding:10px 12px;color:var(--fg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Концентрические окружности: PCA против kernel PCA</h2>
+  <div id="host"></div>
+</div>
+<script>
+(function(){
+  var host = document.getElementById('host');
+  try{
+    // ---- данные схемы (единственные литеральные координаты) ----
+    var R_OUT = 4, R_IN = 1.8, N = 26;
+    var rings = [];
+    for (var k=0;k<N;k++){
+      var a = 2*Math.PI*k/N;
+      rings.push({x:R_OUT*Math.cos(a), y:R_OUT*Math.sin(a), r:R_OUT, cls:'out'});
+      var b = 2*Math.PI*(k+0.5)/N;
+      rings.push({x:R_IN*Math.cos(b), y:R_IN*Math.sin(b), r:R_IN, cls:'in'});
+    }
+
+    // ---- один origin, один scale ----
+    var W = 980, H = 400;
+    var ORIGIN = {x: 170, y: 200};
+    var SCALE = 16;
+
+    function sx(x){ return ORIGIN.x + x*SCALE; }
+    function sy(y){ return ORIGIN.y - y*SCALE; }
+
+    // панели заданы сдвигом в единицах данных, не в пикселях
+    var PANEL = [0, 17.5, 34];   // сдвиг по x для панелей 1..3
+    var PAD = 6;                 // пиксельный отступ подписи
+
+    var NS='http://www.w3.org/2000/svg';
+    function el(n,a){ var e=document.createElementNS(NS,n); for(var k in a) e.setAttribute(k,a[k]); return e; }
+    function txt(x,y,s,anchor,cls){
+      var t=el('text',{x:x,y:y,'text-anchor':anchor||'middle'});
+      if(cls) t.setAttribute('class',cls);
+      t.appendChild(document.createTextNode(s)); return t;
+    }
+    function line(x1,y1,x2,y2,stroke,w,dash){
+      var a={x1:sx(x1),y1:sy(y1),x2:sx(x2),y2:sy(y2),stroke:stroke,'stroke-width':w};
+      if(dash) a['stroke-dasharray']=dash; return el('line',a);
+    }
+    function dot(x,y,fill,r){ return el('circle',{cx:sx(x),cy:sy(y),r:r,fill:fill}); }
+
+    var svg = el('svg',{viewBox:'0 0 '+W+' '+H, preserveAspectRatio:'xMidYMid meet',
+                        role:'img','aria-label':'Три панели: кольца, проекция PCA, kernel PCA'});
+    svg.appendChild(el('rect',{x:0,y:0,width:W,height:H,fill:'var(--bg)'}));
+
+    var defs = el('defs'); svg.appendChild(defs);
+    ['ah-out','ah-in','ah-ax'].forEach(function(id,i){
+      var m = el('marker',{id:id,viewBox:'0 0 10 10',refX:'9',refY:'5',
+        markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+      m.appendChild(el('path',{d:'M0,0 L10,5 L0,10 z',
+        fill:['var(--ring-out)','var(--ring-in)','var(--axis)'][i]}));
+      defs.appendChild(m);
+    });
+
+    var COL = {out:'var(--ring-out)', in:'var(--ring-in)'};
+    var AX = 'var(--axis)';
+
+    // ================= панель 1: исходные кольца =================
+    var d0 = PANEL[0];
+    svg.appendChild(line(d0-5.5,0, d0+5.5,0, AX,1,'3 3'));
+    svg.appendChild(line(d0,-5.5, d0,5.5, AX,1,'3 3'));
+    rings.forEach(function(p){ svg.appendChild(dot(d0+p.x,p.y,COL[p.cls],2.6)); });
+    svg.appendChild(txt(sx(d0), sy(6.2)-PAD, 'Исходные данные', 'middle','ttl'));
+    svg.appendChild(txt(sx(d0+R_OUT)+PAD, sy(0)-PAD, 'внешнее', 'start'));
+    svg.appendChild(txt(sx(d0+R_IN)-PAD, sy(0)+PAD+10, 'внутреннее', 'end'));
+    svg.appendChild(txt(sx(d0), sy(-6.4)+PAD, 'два кольца, одно вокруг другого','middle','mut'));
+
+    // ================= панель 2: обычный PCA =================
+    var d1 = PANEL[1];
+    var ang = Math.PI/9;                       // направление «максимального» разброса
+    var ux = Math.cos(ang), uy = Math.sin(ang);
+    rings.forEach(function(p){
+      svg.appendChild(el('circle',{cx:sx(d1+p.x),cy:sy(p.y),r:2.2,
+        fill:COL[p.cls],opacity:'0.28'}));
+    });
+    // ось u1
+    svg.appendChild(line(d1-5.2*ux, -5.2*uy, d1+5.2*ux, 5.2*uy, AX, 1.6));
+    // проекции на прямую
+    rings.forEach(function(p){
+      var t = p.x*ux + p.y*uy;
+      svg.appendChild(line(d1+p.x,p.y, d1+t*ux, t*uy, AX, 0.5,'2 3'));
+    });
+    rings.forEach(function(p){
+      var t = p.x*ux + p.y*uy;
+      svg.appendChild(dot(d1+t*ux, t*uy, COL[p.cls], 2.8));
+    });
+    svg.appendChild(txt(sx(d1), sy(6.2)-PAD, 'Обычный PCA: одна координата','middle','ttl'));
+    svg.appendChild(txt(sx(d1-5.2*ux)-PAD, sy(-5.2*uy)+PAD+8, 'u₁','end'));
+    svg.appendChild(txt(sx(d1), sy(-6.4)+PAD, 'кольца смешались: проекции совпадают','middle','mut'));
+
+    // ================= панель 3: kernel PCA (RBF) =================
+    var d2 = PANEL[2];
+    // оси новых координат
+    svg.appendChild(line(d2-5.2,-4.6, d2+5.2,-4.6, AX,1.2,null));
+    var axh = line(d2-5.2,-4.6, d2+5.4,-4.6, AX,1.2,null);
+    axh.setAttribute('marker-end','url(#ah-ax)'); svg.appendChild(axh);
+    var axv = line(d2-5.2,-4.6, d2-5.2,5.0, AX,1.2,null);
+    axv.setAttribute('marker-end','url(#ah-ax)'); svg.appendChild(axv);
+
+    // кольца превращаются в две компактные области по удалённости от центра
+    function blobY(cls){ return cls==='out' ? 2.6 : -2.0; }
+    rings.forEach(function(p,i){
+      var a = 2*Math.PI*i/rings.length;
+      var jx = 2.4*Math.cos(a*3.7), jy = 0.85*Math.sin(a*2.3);
+      svg.appendChild(dot(d2 + jx*0.9, blobY(p.cls) + jy, COL[p.cls], 2.6));
+    });
+    // разделяющая прямая
+    svg.appendChild(line(d2-4.4, 0.6, d2+4.4, -0.2, 'var(--fg)', 1.4, '6 4'));
+
+    svg.appendChild(txt(sx(d2), sy(6.2)-PAD, 'Kernel PCA, ядро RBF','middle','ttl'));
+    svg.appendChild(txt(sx(d2+4.4)+PAD, sy(-0.2)+PAD+4, 'прямая','start'));
+    svg.appendChild(txt(sx(d2-5.2)+PAD, sy(5.0)+PAD+8, 'КР₂','start','mut'));
+    svg.appendChild(txt(sx(d2+5.4), sy(-4.6)+PAD+12, 'КР₁','middle','mut'));
+    svg.appendChild(txt(sx(d2), sy(-6.4)+PAD, 'кольца в разных областях, разделимы прямой','middle','mut'));
+
+    // ================= легенда =================
+    var ly = -8.6;
+    svg.appendChild(dot(d0-4.0, ly, COL.out, 3.2));
+    svg.appendChild(txt(sx(d0-4.0)+PAD+2, sy(ly)+4, 'внешнее кольцо','start'));
+    svg.appendChild(dot(d1-1.0, ly, COL.in, 3.2));
+    svg.appendChild(txt(sx(d1-1.0)+PAD+2, sy(ly)+4, 'внутреннее кольцо','start'));
+    svg.appendChild(line(d1+9.0, ly, d1+11.5, ly, 'var(--fg)', 1.4, '6 4'));
+    svg.appendChild(txt(sx(d1+11.5)+PAD, sy(ly)+4, 'разделяющая прямая','start'));
+
+    host.appendChild(svg);
+  }catch(e){
+    host.innerHTML = '<div class="fail">Схема должна была показать три панели: '+
+      '(1) два концентрических кольца точек в 2D; '+
+      '(2) обычный PCA проецирует их на одну прямую u₁ — точки внешнего и '+
+      'внутреннего кольца смешиваются, проекции совпадают; '+
+      '(3) kernel PCA с RBF-ядром разводит внутреннее и внешнее кольцо '+
+      'в разные области, между которыми проходит прямая.</div>';
+  }
+})();
+</script>
+</body>
+</html>

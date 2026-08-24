@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вычисление DPO для одной пары</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f7f8fc;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #536078;
+      --line: #71809d;
+      --line-back: #ffffff;
+      --winner-fill: #e8f7ee;
+      --winner-stroke: #218a55;
+      --loser-fill: #fff0f0;
+      --loser-stroke: #c94b55;
+      --current-fill: #edf3ff;
+      --current-stroke: #4267b2;
+      --reference-fill: #f2f3f6;
+      --reference-stroke: #697386;
+      --ratio-fill: #fff8dc;
+      --ratio-stroke: #ae7a00;
+      --result-fill: #f2ecff;
+      --result-stroke: #7047b8;
+      --accent-fill: #e8f6fa;
+      --accent-stroke: #177f98;
+      --shadow: #d7dce7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #10141d;
+        --panel: #171d29;
+        --ink: #f1f4fa;
+        --muted: #b6c0d4;
+        --line: #9aa9c4;
+        --line-back: #171d29;
+        --winner-fill: #163729;
+        --winner-stroke: #59cf8e;
+        --loser-fill: #45242a;
+        --loser-stroke: #ff8189;
+        --current-fill: #1c3155;
+        --current-stroke: #80a9ff;
+        --reference-fill: #292f3a;
+        --reference-stroke: #aeb8ca;
+        --ratio-fill: #40371b;
+        --ratio-stroke: #e8bd51;
+        --result-fill: #32244c;
+        --result-stroke: #ba94ff;
+        --accent-fill: #173941;
+        --accent-stroke: #65cadd;
+        --shadow: #090c12;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: unset;
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    body {
+      padding: 12px;
+    }
+
+    figure {
+      margin: unset;
+      background: var(--panel);
+      border: 1px solid var(--shadow);
+      overflow: hidden;
+    }
+
+    h2 {
+      margin: unset;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--shadow);
+      font-size: 20px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 440px;
+      background: var(--panel);
+    }
+
+    .connector-back {
+      fill: none;
+      stroke: var(--line-back);
+      stroke-width: 5px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .connector {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .arrow-head {
+      fill: var(--line);
+    }
+
+    .node {
+      stroke-width: 2px;
+    }
+
+    .prompt {
+      fill: var(--panel);
+      stroke: var(--line);
+    }
+
+    .winner {
+      fill: var(--winner-fill);
+      stroke: var(--winner-stroke);
+    }
+
+    .loser {
+      fill: var(--loser-fill);
+      stroke: var(--loser-stroke);
+    }
+
+    .current {
+      fill: var(--current-fill);
+      stroke: var(--current-stroke);
+    }
+
+    .reference {
+      fill: var(--reference-fill);
+      stroke: var(--reference-stroke);
+    }
+
+    .ratio {
+      fill: var(--ratio-fill);
+      stroke: var(--ratio-stroke);
+    }
+
+    .result {
+      fill: var(--result-fill);
+      stroke: var(--result-stroke);
+    }
+
+    .accent {
+      fill: var(--accent-fill);
+      stroke: var(--accent-stroke);
+    }
+
+    text {
+      fill: var(--ink);
+      font-size: 15px;
+    }
+
+    .node-title {
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 13px;
+    }
+
+    .legend {
+      fill: var(--muted);
+      font-size: 13px;
+    }
+
+    #fallback {
+      padding: 12px;
+      color: var(--ink);
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <figure aria-labelledby="diagram-heading">
+    <h2 id="diagram-heading">Прослеживаем вычисление DPO для одной пары</h2>
+    <svg
+      id="diagram"
+      viewBox="0 0 1200 460"
+      width="1200"
+      height="460"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-labelledby="svg-title svg-description"
+    >
+      <title id="svg-title">Цепочка вычисления потери DPO</title>
+      <desc id="svg-description">
+        Промпт разветвляется на победивший и проигравший ответы. Для каждого
+        сравниваются логарифмические вероятности текущей и референсной моделей,
+        после чего вычисляются лог-отношения, их разность, произведение на beta,
+        sigmoid и итоговая потеря.
+      </desc>
+      <g id="drawing"></g>
+    </svg>
+    <div id="fallback" hidden>
+      Схема должна была показать: промпт разветвляется на победителя и
+      проигравшего; для обоих сравниваются log π и log π_ref, затем
+      лог-отношения +0,5 и −1,0 дают разность 1,5; умножение на β = 0,2 даёт
+      0,3; sigmoid даёт примерно 0,57, а −log — потерю примерно 0,56.
+    </div>
+  </figure>
+
+  <script>
+    const DATA = Object.freeze({
+      zero: 0,
+      half: 0.5,
+      headLength: 0.13,
+      headWidth: 0.075,
+      lineGap: 0.22,
+      titleShift: -0.18,
+      legendY: 5.18,
+      nodes: [
+        {
+          id: "prompt",
+          kind: "prompt",
+          x: 0.1,
+          y: 2.18,
+          w: 1.3,
+          h: 0.9,
+          lines: ["Промпт x", "одна пара"]
+        },
+        {
+          id: "winner",
+          kind: "winner",
+          x: 1.8,
+          y: 0.76,
+          w: 1.45,
+          h: 0.76,
+          lines: ["Победитель y_w", "preferred"]
+        },
+        {
+          id: "winnerCurrent",
+          kind: "current",
+          x: 3.6,
+          y: 0.12,
+          w: 1.45,
+          h: 0.82,
+          lines: ["Текущая π", "log π = −2,0"]
+        },
+        {
+          id: "winnerReference",
+          kind: "reference",
+          x: 3.6,
+          y: 1.34,
+          w: 1.45,
+          h: 0.82,
+          lines: ["Референс π_ref", "log π_ref = −2,5"]
+        },
+        {
+          id: "winnerRatio",
+          kind: "ratio",
+          x: 5.45,
+          y: 0.76,
+          w: 1.25,
+          h: 0.88,
+          lines: ["Лог-отношение", "−2,0 − (−2,5)", "= +0,5"]
+        },
+        {
+          id: "loser",
+          kind: "loser",
+          x: 1.8,
+          y: 3.66,
+          w: 1.45,
+          h: 0.76,
+          lines: ["Проигравший y_l", "rejected"]
+        },
+        {
+          id: "loserCurrent",
+          kind: "current",
+          x: 3.6,
+          y: 3.02,
+          w: 1.45,
+          h: 0.82,
+          lines: ["Текущая π", "log π = −3,0"]
+        },
+        {
+          id: "loserReference",
+          kind: "reference",
+          x: 3.6,
+          y: 4.24,
+          w: 1.45,
+          h: 0.82,
+          lines: ["Референс π_ref", "log π_ref = −2,0"]
+        },
+        {
+          id: "loserRatio",
+          kind: "ratio",
+          x: 5.45,
+          y: 3.66,
+          w: 1.25,
+          h: 0.88,
+          lines: ["Лог-отношение", "−3,0 − (−2,0)", "= −1,0"]
+        },
+        {
+          id: "difference",
+          kind: "result",
+          x: 7.05,
+          y: 2.18,
+          w: 1.45,
+          h: 0.98,
+          lines: ["Разность", "+0,5 − (−1,0)", "= 1,5"]
+        },
+        {
+          id: "beta",
+          kind: "accent",
+          x: 8.75,
+          y: 2.18,
+          w: 0.95,
+          h: 0.98,
+          lines: ["Умножаем", "× β = 0,2", "= 0,3"]
+        },
+        {
+          id: "sigmoid",
+          kind: "accent",
+          x: 9.9,
+          y: 2.18,
+          w: 0.85,
+          h: 0.98,
+          lines: ["sigmoid", "σ(0,3)", "≈ 0,57"]
+        },
+        {
+          id: "loss",
+          kind: "result",
+          x: 10.95,
+          y: 2.18,
+          w: 0.9,
+          h: 0.98,
+          lines: ["Потеря DPO", "−log(0,57)", "≈ 0,56"]
+        }
+      ],
+      arrows: [
+        { x1: 1.4, y1: 2.48, x2: 1.8, y2: 1.14 },
+        { x1: 1.4, y1: 2.78, x2: 1.8, y2: 4.04 },
+
+        { x1: 3.25, y1: 1.03, x2: 3.6, y2: 0.53 },
+        { x1: 3.25, y1: 1.25, x2: 3.6, y2: 1.75 },
+        { x1: 5.05, y1: 0.53, x2: 5.45, y2: 1.02 },
+        { x1: 5.05, y1: 1.75, x2: 5.45, y2: 1.38 },
+
+        { x1: 3.25, y1: 3.93, x2: 3.6, y2: 3.43 },
+        { x1: 3.25, y1: 4.15, x2: 3.6, y2: 4.65 },
+        { x1: 5.05, y1: 3.43, x2: 5.45, y2: 3.92 },
+        { x1: 5.05, y1: 4.65, x2: 5.45, y2: 4.28 },
+
+        { x1: 6.7, y1: 1.2, x2: 7.05, y2: 2.43 },
+        { x1: 6.7, y1: 4.1, x2: 7.05, y2: 2.91 },
+        { x1: 8.5, y1: 2.67, x2: 8.75, y2: 2.67 },
+        { x1: 9.7, y1: 2.67, x2: 9.9, y2: 2.67 },
+        { x1: 10.75, y1: 2.67, x2: 10.95, y2: 2.67 }
+      ],
+      captions: [
+        {
+          x: 0.14,
+          y: 0.18,
+          anchor: "start",
+          text: "Один x, два полных ответа, две модели"
+        },
+        {
+          x: 0.14,
+          y: 5.18,
+          anchor: "start",
+          text: "π — обучаемая модель · π_ref — замороженная точка отсчёта · больший правильный разрыв → меньшая потеря"
+        }
+      ]
+    });
+
+    const ORIGIN = Object.freeze({ x: 24, y: 16 });
+    const SCALE = Object.freeze({ x: 98, y: 82 });
+
+    const sx = x => ORIGIN.x + x * SCALE.x;
+    const sy = y => ORIGIN.y + y * SCALE.y;
+
+    try {
+      const svg = document.getElementById("diagram");
+      const drawing = document.getElementById("drawing");
+      const ns = svg.namespaceURI;
+
+      const element = (name, attributes, className) => {
+        const item = document.createElementNS(ns, name);
+        Object.entries(attributes).forEach(([key, value]) => {
+          item.setAttribute(key, String(value));
+        });
+        if (className) item.setAttribute("class", className);
+        return item;
+      };
+
+      const addArrow = arrow => {
+        const dx = arrow.x2 - arrow.x1;
+        const dy = arrow.y2 - arrow.y1;
+        const length = Math.hypot(dx, dy);
+        const ux = dx / length;
+        const uy = dy / length;
+        const nx = -uy;
+        const ny = ux;
+        const baseX = arrow.x2 - ux * DATA.headLength;
+        const baseY = arrow.y2 - uy * DATA.headLength;
+        const wingX = nx * DATA.headWidth;
+        const wingY = ny * DATA.headWidth;
+
+        const lineAttributes = {
+          x1: sx(arrow.x1),
+          y1: sy(arrow.y1),
+          x2: sx(baseX),
+          y2: sy(baseY)
+        };
+
+        drawing.appendChild(
+          element("line", lineAttributes, "connector-back")
+        );
+        drawing.appendChild(
+          element("line", lineAttributes, "connector")
+        );
+
+        const vertices = [
+          { x: arrow.x2, y: arrow.y2 },
+          { x: baseX + wingX, y: baseY + wingY },
+          { x: baseX - wingX, y: baseY - wingY }
+        ];
+
+        drawing.appendChild(
+          element(
+            "polygon",
+            {
+              points: vertices
+                .map(point => `${sx(point.x)},${sy(point.y)}`)
+                .join(" ")
+            },
+            "arrow-head"
+          )
+        );
+      };
+
+      const addNode = node => {
+        drawing.appendChild(
+          element(
+            "rect",
+            {
+              x: sx(node.x),
+              y: sy(node.y),
+              width: sx(node.x + node.w) - sx(node.x),
+              height: sy(node.y + node.h) - sy(node.y)
+            },
+            `node ${node.kind}`
+          )
+        );
+
+        const text = element(
+          "text",
+          {
+            x: sx(node.x + node.w * DATA.half),
+            y: sy(
+              node.y +
+                node.h * DATA.half -
+                DATA.lineGap * (node.lines.length - DATA.half - DATA.half) *
+                  DATA.half
+            ),
+            "text-anchor": "middle",
+            "dominant-baseline": "middle"
+          },
+          "small"
+        );
+
+        node.lines.forEach((line, position) => {
+          const span = element(
+            "tspan",
+            {
+              x: sx(node.x + node.w * DATA.half),
+              y: sy(
+                node.y +
+                  node.h * DATA.half -
+                  DATA.lineGap *
+                    (node.lines.length - DATA.half - DATA.half) *
+                    DATA.half +
+                  DATA.lineGap * position
+              )
+            },
+            position === DATA.zero ? "node-title" : ""
+          );
+          span.textContent = line;
+          text.appendChild(span);
+        });
+
+        drawing.appendChild(text);
+      };
+
+      const addCaption = caption => {
+        const text = element(
+          "text",
+          {
+            x: sx(caption.x),
+            y: sy(caption.y),
+            "text-anchor": caption.anchor,
+            "dominant-baseline": "middle"
+          },
+          caption.y === DATA.legendY ? "legend" : "legend node-title"
+        );
+        text.textContent = caption.text;
+        drawing.appendChild(text);
+      };
+
+      DATA.arrows.forEach(addArrow);
+      DATA.nodes.forEach(addNode);
+      DATA.captions.forEach(addCaption);
+    } catch (error) {
+      document.getElementById("diagram").hidden = true;
+      document.getElementById("fallback").hidden = false;
+    }
+  </script>
+</body>
+</html>
