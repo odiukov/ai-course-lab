@@ -164,6 +164,20 @@ describe("страница шага", () => {
 
     expect(stored(window)).toEqual(["003-c"]);
   });
+
+  it("перерисовывает прогресс, приехавший из облака после отрисовки", () => {
+    // Слияние с облаком асинхронно и заканчивается уже после того, как
+    // страница нарисована: без события счётчик до перезагрузки врёт.
+    const window = open(renderStepPage(model, 1, { basePath: "/base" }));
+    window.localStorage.setItem(key, JSON.stringify(["001-a", "003-c"]));
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    expect(window.document.querySelector("[data-counter]")?.textContent).toBe(
+      "2 / 3 · прочитано 2",
+    );
+    expect(window.document.querySelector('[data-step="003-c"]')?.className).toContain("is-read");
+  });
 });
 
 describe("практика", () => {
@@ -436,6 +450,64 @@ describe("практика", () => {
     expect(saved).not.toContain("def mag_nitude");
     expect(window.localStorage.getItem(`course-exercise:${panel.slug}:recovery`)).toBe(broken);
   });
+
+  /** Событие о файле, приехавшем из аккаунта после отрисовки страницы. */
+  function sendFile(window: Window, detail: Record<string, unknown>): void {
+    window.dispatchEvent(
+      new window.CustomEvent("course-sync-file", {
+        detail: { slug: panel.slug, fileName: "exercise.py", backup: false, ...detail },
+      }),
+    );
+  }
+
+  it("показывает код, приехавший из аккаунта, в нетронутом редакторе", async () => {
+    const window = await openPractice();
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+
+    expect((pick(window, "[data-code]") as HTMLTextAreaElement).value).toBe(
+      "def magnitude(v):\n    return 5",
+    );
+    expect(pick(window, "[data-sync-notice]").hidden).toBe(false);
+  });
+
+  it("не подменяет код под пальцами: тронутый редактор получает плашку", async () => {
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+
+    area.value = "def magnitude(v):\n    return 1";
+    area.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+
+    sendFile(window, { content: template.replace("raise NotImplementedError", "return 5") });
+
+    expect(area.value).toBe("def magnitude(v):\n    return 1");
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("Обнови страницу");
+  });
+
+  it("сообщает об отложенной копии, а не подменяет текст", async () => {
+    // У события про копию содержимого нет вовсе: облачный текст приехал
+    // отдельным событием, а это — только объяснение, куда делся локальный.
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { backup: true });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").textContent).toContain("local-копия");
+  });
+
+  it("не реагирует на файл чужого упражнения", async () => {
+    const window = await openPractice();
+    const area = pick(window, "[data-code]") as HTMLTextAreaElement;
+    const before = area.value;
+
+    sendFile(window, { slug: "p01-l02-other", content: "def magnitude(v):\n    return 5" });
+    sendFile(window, { fileName: "main.py", content: "def magnitude(v):\n    return 5" });
+
+    expect(area.value).toBe(before);
+    expect(pick(window, "[data-sync-notice]").hidden).toBe(true);
+  });
 });
 
 describe("оглавление урока", () => {
@@ -457,6 +529,21 @@ describe("оглавление урока", () => {
 
     expect(resume.getAttribute("href")).toBe("/base/lesson/lesson-a/001-a/");
     expect(resume.textContent).toBe("Начать урок");
+  });
+
+  it("перерисовывает оглавление по приехавшему из облака прогрессу", () => {
+    const window = open(renderLessonIndexPage(model, { basePath: "/base" }));
+    window.localStorage.setItem(key, JSON.stringify(["001-a"]));
+
+    window.dispatchEvent(new window.CustomEvent("course-sync-progress"));
+
+    expect(window.document.querySelector("[data-read-count]")?.textContent).toBe(
+      "прочитано 1 из 3",
+    );
+    expect(window.document.querySelector('[data-step="001-a"]')?.className).toContain("is-read");
+    expect(pick(window, "[data-resume]").getAttribute("href")).toBe(
+      "/base/lesson/lesson-a/002-b/",
+    );
   });
 });
 

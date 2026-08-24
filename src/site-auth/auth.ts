@@ -10,9 +10,11 @@
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import {
   EXERCISE_KEY_PREFIX,
+  LOCAL_BACKUP_SUFFIX,
   PROGRESS_KEY_PREFIX,
   STEP_STATE_KEY_PREFIX,
   SYNCED_KEY_PREFIX,
+  UPDATED_AT_SUFFIX,
 } from "../lib/site/storage-keys";
 import type { FileRow, StepRow } from "../lib/sync/merge";
 import { planMigration, readLocalProgress, type StorageSnapshot } from "../lib/sync/migrate";
@@ -89,6 +91,11 @@ async function pullCloud(): Promise<{ steps: StepRow[]; files: FileRow[] }> {
     client.from("step_progress").select("lesson_slug, step_id, state, updated_at"),
     client.from("exercise_files").select("slug, file_name, content, updated_at"),
   ]);
+  // Отказ чтения нельзя принимать за пустое облако. Иначе слияние решит, что в
+  // аккаунте пусто, а вызывающий выставит флаг «этот браузер уже влит» — и
+  // прогресс, набранный здесь, не уедет в аккаунт уже никогда.
+  if (steps.error) throw new Error(steps.error.message);
+  if (files.error) throw new Error(files.error.message);
   return {
     steps: (steps.data ?? []).map((row) => ({
       lessonSlug: row.lesson_slug as string,
@@ -106,16 +113,19 @@ async function pullCloud(): Promise<{ steps: StepRow[]; files: FileRow[] }> {
 }
 
 /**
- * Первое слияние после входа.
+ * Слияние облака с локальным хранилищем.
  *
- * Выполняется один раз на пару «браузер + пользователь»: флаг в localStorage.
+ * Выполняется на каждом открытии страницы, а не только при первом входе:
+ * иначе прогресс, набранный на втором устройстве, не доехал бы до первого.
+ * Слияние идемпотентно, поэтому повтор ничего не стоит и ничего не портит.
+ *
  * Локальные ключи не удаляются никогда — выход из аккаунта не должен
  * оставлять человека с пустым курсом.
+ *
+ * Флаг «этот браузер уже влит» выставляет вызывающий: он относится к первому
+ * слиянию, а не к самому слиянию.
  */
-export async function migrateOnce(
-  user: string,
-): Promise<{ steps: number; files: number; backups: number }> {
-  const flag = SYNCED_KEY_PREFIX + user;
+async function syncNow(user: string): Promise<{ steps: number; files: number; backups: number }> {
   const cloud = await pullCloud();
   const local = readLocalProgress(snapshot(), new Date().toISOString());
   const plan = planMigration(local, cloud);
@@ -144,10 +154,27 @@ export async function migrateOnce(
   }
 
   write(plan.writes);
-  try {
-    localStorage.setItem(flag, new Date().toISOString());
-  } catch {
-    // Без флага миграция просто повторится: она идемпотентна.
+  // Страница уже отрисована по тому, что лежало в localStorage до слияния.
+  // Событиями ей сообщается, что данные под ней поменялись: сама она об этом
+  // узнать не может.
+  window.dispatchEvent(new CustomEvent("course-sync-progress"));
+  for (const [key, value] of Object.entries(plan.writes)) {
+    if (!key.startsWith(EXERCISE_KEY_PREFIX)) continue;
+    if (key.endsWith(UPDATED_AT_SUFFIX)) continue;
+    const backup = key.endsWith(LOCAL_BACKUP_SUFFIX);
+    const clean = backup ? key.slice(0, -LOCAL_BACKUP_SUFFIX.length) : key;
+    const rest = clean.slice(EXERCISE_KEY_PREFIX.length);
+    const separator = rest.indexOf(":");
+    window.dispatchEvent(
+      new CustomEvent("course-sync-file", {
+        detail: {
+          slug: separator === -1 ? rest : rest.slice(0, separator),
+          fileName: separator === -1 ? "exercise.py" : rest.slice(separator + 1),
+          backup,
+          content: backup ? undefined : value,
+        },
+      }),
+    );
   }
   return { steps: plan.steps.length, files: plan.files.length, backups: plan.backups };
 }
@@ -271,13 +298,18 @@ void ready.then(async () => {
   const user = session.user.id;
   const fresh = !alreadyMigrated(user);
   let detail: Record<string, unknown> = { user, migrated: false };
-  if (fresh) {
-    try {
-      const result = await migrateOnce(user);
+  try {
+    const result = await syncNow(user);
+    if (fresh) {
+      try {
+        localStorage.setItem(SYNCED_KEY_PREFIX + user, new Date().toISOString());
+      } catch {
+        // Без флага слияние просто повторится: оно идемпотентно.
+      }
       detail = { user, migrated: true, ...result };
-    } catch (error) {
-      detail = { user, migrated: false, error: String(error) };
     }
+  } catch (error) {
+    detail = { user, migrated: false, error: String(error) };
   }
   window.dispatchEvent(new CustomEvent("course-sync-ready", { detail }));
 });

@@ -115,6 +115,11 @@ function paint(ids) {
 
 paint(readProgress(data.slug));
 
+// Прогресс мог приехать из облака уже после отрисовки: слияние асинхронно.
+window.addEventListener("course-sync-progress", function () {
+  paint(readProgress(data.slug));
+});
+
 // Прочитан — значит «ушёл с него». Любым способом: кнопкой «Дальше»,
 // ссылкой из оглавления, ссылкой из текста, закрытой вкладкой.
 //
@@ -196,30 +201,37 @@ ${STORE}
 var data = lessonData("[data-lesson]");
 if (!data) return;
 
-var ids = readProgress(data.slug);
-var read = {};
-for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
+function paint() {
+  var ids = readProgress(data.slug);
+  var read = {};
+  for (var i = 0; i < ids.length; i += 1) read[ids[i]] = true;
 
-var links = document.querySelectorAll("[data-step]");
-var next = null;
-for (var j = 0; j < links.length; j += 1) {
-  var id = links[j].getAttribute("data-step");
-  if (read[id]) links[j].classList.add("is-read");
-  else if (!next) next = links[j];
-}
+  var links = document.querySelectorAll("[data-step]");
+  var next = null;
+  for (var j = 0; j < links.length; j += 1) {
+    var id = links[j].getAttribute("data-step");
+    if (read[id]) links[j].classList.add("is-read");
+    else if (!next) next = links[j];
+  }
 
-var counter = document.querySelector("[data-read-count]");
-if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
+  var counter = document.querySelector("[data-read-count]");
+  if (counter) counter.textContent = "прочитано " + ids.length + " из " + data.plannedCount;
 
-var resume = document.querySelector("[data-resume]");
-if (resume) {
-  var target = next || links[0];
-  if (target) {
-    resume.setAttribute("href", target.getAttribute("href"));
-    resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
-    resume.hidden = false;
+  var resume = document.querySelector("[data-resume]");
+  if (resume) {
+    var target = next || links[0];
+    if (target) {
+      resume.setAttribute("href", target.getAttribute("href"));
+      resume.textContent = ids.length > 0 && next ? "Продолжить" : "Начать урок";
+      resume.hidden = false;
+    }
   }
 }
+
+paint();
+
+// Прогресс мог приехать из облака уже после отрисовки: слияние асинхронно.
+window.addEventListener("course-sync-progress", paint);
 })();
 `;
 
@@ -778,6 +790,38 @@ var lesson = lessonData("[data-lesson]");
       .then(function () {
         runButton.disabled = false;
       });
+  });
+
+  // Код приехал с другого устройства. Молча подменять текст под пальцами
+  // нельзя, поэтому подменяется только нетронутый редактор; тронутый получает
+  // плашку и остаётся как есть.
+  var dirty = false;
+  area.addEventListener("input", function () { dirty = true; });
+
+  var notice = document.querySelector("[data-sync-notice]");
+  // Имя параметра не text: так зовут загрузчик файлов выше по скрипту.
+  function say(message) {
+    if (!notice) return;
+    notice.textContent = message;
+    notice.hidden = false;
+  }
+
+  window.addEventListener("course-sync-file", function (event) {
+    var detail = event.detail || {};
+    if (detail.slug !== data.slug || detail.fileName !== activeFile) return;
+    if (detail.backup) {
+      say("На этом устройстве был другой код. Победил код из аккаунта, а local-копия сохранена в хранилище браузера.");
+      return;
+    }
+    if (dirty) {
+      say("Код из аккаунта новее того, что открыт здесь. Обнови страницу, чтобы забрать его.");
+      return;
+    }
+    full = detail.content;
+    var parts = split(full, data.fn);
+    activeParts = parts;
+    setCode(parts ? parts.code : full);
+    say("Код подтянут из аккаунта.");
   });
 })();
 `;
