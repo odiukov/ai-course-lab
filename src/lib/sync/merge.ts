@@ -23,6 +23,14 @@ export interface FileRow {
   content: string;
   /** Отметки времени нет у файлов, сохранённых до появления синхронизации. */
   updatedAt?: string;
+  /**
+   * Файл лежит в localStorage под ключом без имени: `course-exercise:<slug>`.
+   *
+   * Признак хранится явно, а не выводится из имени файла: одиночному
+   * упражнению страница подставляет имя `exercise.py`, и вывод по имени
+   * склеил бы его с настоящим файлом `exercise.py` многофайлового урока.
+   */
+  single?: boolean;
 }
 
 export type FileDecision = {
@@ -60,7 +68,10 @@ function keyOf(row: StepRow): string {
  * Слияние всех шагов сразу.
  *
  * `upload` — только то, что в облаке отсутствует или отличается от
- * победителя: отправлять обратно строку, которая и так там лежит, незачем.
+ * победителя состоянием. Разница в одной отметке времени поводом для отправки
+ * не считается намеренно: у прочитанных шагов локального времени правки нет
+ * вовсе, оно подставляется, и сверка по нему заставляла бы браузер
+ * переотправлять всю историю чтения на каждом переходе между страницами.
  */
 export function mergeSteps(
   local: StepRow[],
@@ -77,9 +88,7 @@ export function mergeSteps(
     if (!winner) continue;
     merged.push(winner);
     const known = cloudByKey.get(key);
-    if (!known || known.state !== winner.state || known.updatedAt !== winner.updatedAt) {
-      upload.push(winner);
-    }
+    if (!known || known.state !== winner.state) upload.push(winner);
   }
   return { merged, upload };
 }
@@ -92,14 +101,21 @@ export function mergeSteps(
  * из двух разошедшихся текстов новее, нечем. Тогда побеждает облако, а
  * локальный текст откладывается в копию — молча терять написанный код нельзя,
  * а угадывать без отметки времени тем более.
+ *
+ * Копия откладывается всякий раз, когда облако побеждает разошедшийся
+ * локальный текст, а не только при отсутствии отметки времени. Отметка есть у
+ * всех, кто хоть раз печатал в редакторе, — она пишется на каждое нажатие
+ * клавиши, в том числе до всякого входа в аккаунт. Без копии первый же вход
+ * такого человека затирал бы написанное им в localStorage безвозвратно, а
+ * стоит копия одного ключа.
  */
 export function mergeFile(local: FileRow | null, cloud: FileRow | null): FileDecision | null {
   if (!local && !cloud) return null;
   if (!cloud) return { action: "upload", row: local as FileRow };
   if (!local) return { action: "keep-cloud", row: cloud };
   if (local.content === cloud.content) return { action: "none", row: cloud };
-  if (!local.updatedAt) return { action: "keep-cloud", row: cloud, backup: local.content };
-  return local.updatedAt > (cloud.updatedAt ?? "")
-    ? { action: "upload", row: local }
-    : { action: "keep-cloud", row: cloud };
+  if (local.updatedAt && local.updatedAt > (cloud.updatedAt ?? "")) {
+    return { action: "upload", row: local };
+  }
+  return { action: "keep-cloud", row: cloud, backup: local.content };
 }

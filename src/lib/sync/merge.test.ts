@@ -57,6 +57,14 @@ describe("mergeSteps", () => {
     );
     expect(upload.map((row) => row.stepId).sort()).toEqual(["001", "002"]);
   });
+
+  it("не отправляет строку, у которой разошлась одна отметка времени", () => {
+    // Отметку прочитанному шагу подставляет разбор локального хранилища:
+    // времени у него нет. Сверка по ней означала бы, что каждый переход между
+    // страницами переотправляет в облако всю историю чтения целиком.
+    const { upload } = mergeSteps([step("001", "read", late)], [step("001", "read", early)]);
+    expect(upload).toEqual([]);
+  });
 });
 
 describe("mergeFile", () => {
@@ -87,7 +95,20 @@ describe("mergeFile", () => {
 
     const older = { ...local, updatedAt: early };
     const fresherCloud = { ...cloud, updatedAt: late };
-    expect(mergeFile(older, fresherCloud)).toEqual({ action: "keep-cloud", row: fresherCloud });
+    expect(mergeFile(older, fresherCloud)?.action).toBe("keep-cloud");
+  });
+
+  it("откладывает копию и тогда, когда локальная отметка времени есть", () => {
+    // Отметка времени пишется на каждое нажатие клавиши, в том числе до
+    // всякого входа. Человек, печатавший здесь до первого входа, без копии
+    // терял бы написанное молча — оно затиралось бы прямо в localStorage.
+    const older = { ...local, updatedAt: early };
+    const fresherCloud = { ...cloud, updatedAt: late };
+    expect(mergeFile(older, fresherCloud)).toEqual({
+      action: "keep-cloud",
+      row: fresherCloud,
+      backup: "local",
+    });
   });
 
   it("на двух пустых сторонах не решает ничего", () => {

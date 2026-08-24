@@ -10,7 +10,14 @@
 /** На каждый урок свой массив id прочитанных шагов. */
 export const PROGRESS_KEY_PREFIX = "course-progress:";
 
-/** На каждый урок объект `{ "<step-id>": "read" | "failed" | "passed" }`. */
+/**
+ * На каждый урок объект
+ * `{ "<step-id>": { "state": "read" | "failed" | "passed", "updatedAt": "<ISO>" } }`.
+ *
+ * Время изменения лежит рядом с состоянием, потому что слиянию с облаком
+ * нужно знать, чей `failed` свежее; подставлять время открытия страницы
+ * нельзя — оно всегда новее всего облачного.
+ */
 export const STEP_STATE_KEY_PREFIX = "course-step-state:";
 
 /** Полный текст файла упражнения: `course-exercise:<slug>[:<file>]`. */

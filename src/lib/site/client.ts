@@ -57,16 +57,32 @@ function readStates(slug) {
 }
 
 /**
+ * Состояние из записи хранилища.
+ *
+ * Запись — объект с состоянием и временем. Голая строка состояния осталась от
+ * первых дней ключа: опубликована она не была, но в браузере разработчика
+ * лежать может.
+ */
+function stateOf(entry) {
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : entry.state || "";
+}
+
+/**
  * Состояние практики шага.
  *
  * passed не сбрасывается ничем: красный прогон после зелёного означает, что
  * человек полез что-то менять в уже сданном шаге, а не что шаг разучился.
+ *
+ * Рядом с состоянием пишется время изменения. Без него слияние с облаком не
+ * знает, чей failed свежее, и вынуждено подставлять время открытия страницы —
+ * то есть отдавать любую ничью тому устройству, на котором её разбирают.
  */
 function markState(slug, stepId, state) {
   var rank = { read: 1, failed: 1, passed: 2 };
   var states = readStates(slug);
-  if ((rank[states[stepId]] || 0) > (rank[state] || 0)) return states;
-  states[stepId] = state;
+  if ((rank[stateOf(states[stepId])] || 0) > (rank[state] || 0)) return states;
+  states[stepId] = { state: state, updatedAt: new Date().toISOString() };
   try {
     localStorage.setItem(STATE_PREFIX + slug, JSON.stringify(states));
   } catch (error) {
@@ -981,8 +997,7 @@ export const AUTH_PAGE_SCRIPT = `
     return url.pathname + url.search + url.hash;
   }
 
-  window.addEventListener("course-sync-ready", function (event) {
-    var detail = event.detail || {};
+  function show(detail) {
     if (!detail.user) {
       if (status) status.textContent = "Войти не удалось: " + (detail.error || "неизвестная причина");
       return;
@@ -1002,6 +1017,18 @@ export const AUTH_PAGE_SCRIPT = `
     window.setTimeout(function () {
       window.location.replace(safeNext());
     }, detail.error || detail.backups > 0 ? 4000 : 1200);
-  });
+  }
+
+  // Бандл входа грузится блокирующим тегом и может закончить работу раньше,
+  // чем этот скрипт вообще выполнится. Событие в таком случае уже пролетело,
+  // и страница осталась бы на «Проверяю вход…» навсегда. Итог лежит ещё и в
+  // window.CourseSyncReady, поэтому сначала смотрим туда.
+  if (window.CourseSyncReady) {
+    show(window.CourseSyncReady);
+  } else {
+    window.addEventListener("course-sync-ready", function (event) {
+      show(event.detail || {});
+    });
+  }
 })();
 `;

@@ -654,7 +654,11 @@ describe("состояние шага", () => {
     expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBeUndefined();
 
     (questions[1].querySelectorAll("[data-option]")[1] as unknown as HTMLElement).click();
-    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("passed");
+    const entry = JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"];
+    expect(entry.state).toBe("passed");
+    // Время изменения пишется рядом с состоянием: без него слияние с облаком
+    // подставляло бы время открытия страницы и выигрывало бы каждую ничью.
+    expect(Number.isNaN(Date.parse(entry.updatedAt))).toBe(false);
   });
 
   it("отмечает шаг проваленным на неверном ответе", () => {
@@ -677,7 +681,7 @@ describe("состояние шага", () => {
 
     const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
     wrong.click();
-    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"]).toBe("failed");
+    expect(JSON.parse(window.localStorage.getItem(stateKey) ?? "{}")["002-b"].state).toBe("failed");
   });
 
   it("не сбрасывает сданный шаг последующим неверным ответом", () => {
@@ -697,6 +701,8 @@ describe("состояние шага", () => {
 
     const html = renderStepPage(withQuiz, 1, { basePath: "/base", nextLesson: null });
     const window = open(html);
+    // Голая строка вместо записи — форма ключа первых дней: она могла остаться
+    // в браузере разработчика, и понижать сданный шаг из-за неё нельзя.
     window.localStorage.setItem(stateKey, JSON.stringify({ "002-b": "passed" }));
 
     const wrong = window.document.querySelectorAll("[data-option]")[1] as unknown as HTMLElement;
@@ -744,8 +750,18 @@ describe("состояние шага", () => {
  * первую очередь то, что уйти по ней можно только внутрь самого сайта.
  */
 describe("AUTH_PAGE_SCRIPT", () => {
-  /** Открывает `/auth/?next=...` и отдаёт то, что скрипт сделал по событию. */
-  function openAuth(next: string | null, detail: Record<string, unknown>, basePath = "/base") {
+  /**
+   * Открывает `/auth/?next=...` и отдаёт то, что скрипт сделал по итогу входа.
+   *
+   * `ahead` — бандл входа успел закончить работу до того, как скрипт страницы
+   * подписался: итог лежит в window.CourseSyncReady, а событие уже пролетело.
+   */
+  function openAuth(
+    next: string | null,
+    detail: Record<string, unknown>,
+    basePath = "/base",
+    ahead = false,
+  ) {
     const search = next === null ? "" : `?next=${encodeURIComponent(next)}`;
     const window = new Window({ url: `https://example.test${basePath}/auth/${search}` });
     const html = renderAuthPage({ basePath });
@@ -768,11 +784,13 @@ describe("AUTH_PAGE_SCRIPT", () => {
       configurable: true,
     });
 
+    if (ahead) (window as unknown as { CourseSyncReady?: unknown }).CourseSyncReady = detail;
+
     for (const script of [...window.document.body.querySelectorAll("script")]) {
       if (script.getAttribute("type") === "application/json") continue;
       window.eval(script.textContent ?? "");
     }
-    window.dispatchEvent(new window.CustomEvent("course-sync-ready", { detail }));
+    if (!ahead) window.dispatchEvent(new window.CustomEvent("course-sync-ready", { detail }));
 
     return {
       replaced,
@@ -781,6 +799,15 @@ describe("AUTH_PAGE_SCRIPT", () => {
   }
 
   const signedIn = { user: "u-1", migrated: false };
+
+  it("забирает итог, когда бандл входа закончил раньше подписки на событие", () => {
+    // Бандл грузится блокирующим тегом и в принципе может закончить работу до
+    // того, как этот скрипт вообще выполнится. Раньше страница в таком случае
+    // навсегда осталась бы на «Проверяю вход…».
+    const page = openAuth("/base/lesson/lesson-a/002-b/", signedIn, "/base", true);
+    expect(page.status).toBe("Вход выполнен.");
+    expect(page.replaced).toEqual(["/base/lesson/lesson-a/002-b/"]);
+  });
 
   it("returns to the page the reader came from", () => {
     expect(openAuth("/base/lesson/lesson-a/002-b/", signedIn).replaced).toEqual([

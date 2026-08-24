@@ -35,6 +35,49 @@ export interface MigrationPlan {
 
 const STATES: StepState[] = ["read", "failed", "passed"];
 
+/**
+ * Имя файла одиночного упражнения.
+ *
+ * Ровно то же имя подставляет страница практики, когда файл в уроке один, —
+ * иначе один и тот же файл уезжал бы в облако под двумя разными именами.
+ */
+export const SINGLE_FILE_NAME = "exercise.py";
+
+/**
+ * Отметка времени у шага, про который её негде взять.
+ *
+ * Массив `course-progress:<урок>` времени не хранит и никогда не хранил, и
+ * подставить сюда время загрузки страницы нельзя: оно всегда свежее всего, что
+ * уже лежит в облаке, поэтому при равных рангах локальное «прочитан» вечно
+ * побеждало бы облачный `failed` со второго устройства. Заведомо проигрышная
+ * отметка отдаёт такие ничьи облаку — то есть единственной стороне, у которой
+ * настоящее время правки есть.
+ */
+export const LEGACY_UPDATED_AT = "1970-01-01T00:00:00.000Z";
+
+/** Разобранный ключ упражнения. */
+export interface ExerciseKey {
+  slug: string;
+  fileName: string;
+  /** Ключ без имени файла: `course-exercise:<slug>`. */
+  single: boolean;
+}
+
+/**
+ * Разбор ключа упражнения — одним местом.
+ *
+ * Правило «есть двоеточие — многофайловое, нет — одиночное» нужно и здесь, и
+ * в бандле входа, когда он рассылает странице события о приехавших файлах.
+ * Написанное дважды, оно разъедется.
+ */
+export function splitExerciseKey(key: string): ExerciseKey | null {
+  if (!key.startsWith(EXERCISE_KEY_PREFIX)) return null;
+  const rest = key.slice(EXERCISE_KEY_PREFIX.length);
+  const separator = rest.indexOf(":");
+  if (separator === -1) return { slug: rest, fileName: SINGLE_FILE_NAME, single: true };
+  return { slug: rest.slice(0, separator), fileName: rest.slice(separator + 1), single: false };
+}
+
 function parse<T>(raw: string | undefined, fallback: T): T {
   if (raw === undefined) return fallback;
   try {
@@ -54,7 +97,29 @@ function isServiceKey(key: string): boolean {
   );
 }
 
-export function readLocalProgress(snapshot: StorageSnapshot, now: string): LocalProgress {
+/**
+ * Разбор одной записи `course-step-state:<урок>`.
+ *
+ * Нынешняя форма записи — `{ "state": …, "updatedAt": … }`. Голая строка
+ * состояния — форма первых дней ключа: опубликована она никогда не была, но в
+ * браузере разработчика остаться могла, поэтому читается тоже. Времени правки
+ * у неё нет, и такая запись получает заведомо проигрышную отметку.
+ */
+function readState(value: unknown): { state: StepState; updatedAt: string } | null {
+  if (typeof value === "string") {
+    if (!STATES.includes(value as StepState)) return null;
+    return { state: value as StepState, updatedAt: LEGACY_UPDATED_AT };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as { state?: unknown; updatedAt?: unknown };
+  if (typeof record.state !== "string" || !STATES.includes(record.state as StepState)) return null;
+  return {
+    state: record.state as StepState,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : LEGACY_UPDATED_AT,
+  };
+}
+
+export function readLocalProgress(snapshot: StorageSnapshot): LocalProgress {
   const byStep = new Map<string, StepRow>();
 
   for (const [key, raw] of Object.entries(snapshot)) {
@@ -68,7 +133,7 @@ export function readLocalProgress(snapshot: StorageSnapshot, now: string): Local
         lessonSlug,
         stepId: id,
         state: "read",
-        updatedAt: now,
+        updatedAt: LEGACY_UPDATED_AT,
       });
     }
   }
@@ -78,28 +143,40 @@ export function readLocalProgress(snapshot: StorageSnapshot, now: string): Local
     const lessonSlug = key.slice(STEP_STATE_KEY_PREFIX.length);
     const states = parse<Record<string, unknown>>(raw, {});
     if (Array.isArray(states) || typeof states !== "object") continue;
-    for (const [stepId, state] of Object.entries(states)) {
-      if (typeof state !== "string" || !STATES.includes(state as StepState)) continue;
-      byStep.set(`${lessonSlug}:${stepId}`, {
-        lessonSlug,
-        stepId,
-        state: state as StepState,
-        updatedAt: now,
-      });
+    for (const [stepId, value] of Object.entries(states)) {
+      const parsed = readState(value);
+      if (!parsed) continue;
+      byStep.set(`${lessonSlug}:${stepId}`, { lessonSlug, stepId, ...parsed });
     }
+  }
+
+  // Многофайловое упражнение первой опубликованной версии держало main.py под
+  // ключом без имени файла, и страница практики читает такой ключ только тогда,
+  // когда именованного нет. В облако он уехал бы под подставным именем
+  // одиночного файла, а на другом устройстве лёг бы обратно в ключ без имени и
+  // подменил бы собой заготовку урока. Пока у того же упражнения есть
+  // именованные ключи, ключ без имени — пережиток, и трогать его незачем.
+  const named = new Set<string>();
+  for (const key of Object.keys(snapshot)) {
+    if (isServiceKey(key)) continue;
+    const parsed = splitExerciseKey(key);
+    if (parsed && !parsed.single) named.add(parsed.slug);
   }
 
   const files: FileRow[] = [];
   for (const [key, content] of Object.entries(snapshot)) {
-    if (!key.startsWith(EXERCISE_KEY_PREFIX) || isServiceKey(key)) continue;
-    const rest = key.slice(EXERCISE_KEY_PREFIX.length);
-    const separator = rest.indexOf(":");
-    // Одиночное упражнение хранится без имени файла; имя exercise.py — то же
-    // самое, что подставляет страница практики, когда файл в уроке один.
-    const slug = separator === -1 ? rest : rest.slice(0, separator);
-    const fileName = separator === -1 ? "exercise.py" : rest.slice(separator + 1);
+    if (isServiceKey(key)) continue;
+    const parsed = splitExerciseKey(key);
+    if (!parsed) continue;
+    if (parsed.single && named.has(parsed.slug)) continue;
     const updatedAt = snapshot[key + UPDATED_AT_SUFFIX];
-    files.push(updatedAt ? { slug, fileName, content, updatedAt } : { slug, fileName, content });
+    const row: FileRow = {
+      slug: parsed.slug,
+      fileName: parsed.fileName,
+      content,
+      single: parsed.single,
+    };
+    files.push(updatedAt ? { ...row, updatedAt } : row);
   }
 
   return {
@@ -110,10 +187,10 @@ export function readLocalProgress(snapshot: StorageSnapshot, now: string): Local
   };
 }
 
-function fileKey(row: FileRow, multi: boolean): string {
-  return multi
-    ? `${EXERCISE_KEY_PREFIX}${row.slug}:${row.fileName}`
-    : `${EXERCISE_KEY_PREFIX}${row.slug}`;
+function fileKey(row: FileRow, single: boolean): string {
+  return single
+    ? `${EXERCISE_KEY_PREFIX}${row.slug}`
+    : `${EXERCISE_KEY_PREFIX}${row.slug}:${row.fileName}`;
 }
 
 export function planMigration(local: LocalProgress, cloud: LocalProgress): MigrationPlan {
@@ -121,14 +198,14 @@ export function planMigration(local: LocalProgress, cloud: LocalProgress): Migra
 
   const writes: Record<string, string> = {};
   const readByLesson = new Map<string, string[]>();
-  const stateByLesson = new Map<string, Record<string, StepState>>();
+  const stateByLesson = new Map<string, Record<string, { state: StepState; updatedAt: string }>>();
   for (const row of merged) {
     const ids = readByLesson.get(row.lessonSlug) ?? [];
     ids.push(row.stepId);
     readByLesson.set(row.lessonSlug, ids);
     if (row.state !== "read") {
       const states = stateByLesson.get(row.lessonSlug) ?? {};
-      states[row.stepId] = row.state;
+      states[row.stepId] = { state: row.state, updatedAt: row.updatedAt };
       stateByLesson.set(row.lessonSlug, states);
     }
   }
@@ -159,13 +236,19 @@ export function planMigration(local: LocalProgress, cloud: LocalProgress): Migra
 
     // Облачный текст побеждает: он должен оказаться и в localStorage, иначе
     // страница продолжит показывать локальный.
-    const multi = decision.row.fileName !== "exercise.py";
-    writes[fileKey(decision.row, multi)] = decision.row.content;
+    //
+    // Форма ключа берётся у локальной строки: признак у неё явный. У облачной
+    // строки его нет вовсе — в облаке лежат только slug и имя файла, — и для
+    // упражнения, которого на этом устройстве ещё не было, остаётся
+    // единственная примета: подставное имя одиночного файла.
+    const single = localRow ? localRow.single === true : decision.row.fileName === SINGLE_FILE_NAME;
+    const target = fileKey(decision.row, single);
+    writes[target] = decision.row.content;
     if (decision.row.updatedAt) {
-      writes[fileKey(decision.row, multi) + UPDATED_AT_SUFFIX] = decision.row.updatedAt;
+      writes[target + UPDATED_AT_SUFFIX] = decision.row.updatedAt;
     }
     if (decision.backup !== undefined) {
-      writes[fileKey(decision.row, multi) + LOCAL_BACKUP_SUFFIX] = decision.backup;
+      writes[target + LOCAL_BACKUP_SUFFIX] = decision.backup;
       backups += 1;
     }
   }
