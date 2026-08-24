@@ -74,3 +74,22 @@ create policy "own rows" on exercise_files
 drop policy if exists "own rows" on run_results;
 create policy "own rows" on run_results
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Права на таблицы.
+--
+-- Политики RLS отвечают на вопрос «какие строки видно», но сначала роль должна
+-- иметь право обратиться к таблице вообще. Этот проект Supabase не выдаёт такие
+-- права новым таблицам сам, и без строк ниже даже вошедший читатель получает
+-- «permission denied for table step_progress» — до политик дело не доходит.
+--
+-- Права выдаются только роли authenticated. Роль anon не получает ничего: к
+-- этим таблицам обращается лишь вошедший читатель, и отказ на уровне привилегий
+-- надёжнее отказа на уровне политики — он не зависит от того, не ошиблись ли мы
+-- в условии.
+grant select, insert, update, delete on step_progress  to authenticated;
+grant select, insert, update, delete on exercise_files to authenticated;
+grant select, insert, update, delete on run_results    to authenticated;
+
+revoke all on step_progress  from anon;
+revoke all on exercise_files from anon;
+revoke all on run_results    from anon;
