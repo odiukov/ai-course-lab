@@ -22,6 +22,11 @@ function text(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
+function pagefindQuery(query: string): string {
+  const hasCompoundIdentifier = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+){2,}/u.test(query);
+  return hasCompoundIdentifier ? `"${query}"` : query;
+}
+
 function resultUrl(basePath: string, url: string): string {
   if (/^https?:\/\//i.test(url) || url.startsWith("//") || url.startsWith("#")) {
     return url;
@@ -56,7 +61,7 @@ export class PagefindProvider implements SearchProvider {
 
   async search(query: string): Promise<SearchHit[]> {
     const pagefind = await this.pagefind;
-    const { results } = await pagefind.search(query);
+    const { results } = await pagefind.search(pagefindQuery(query));
     const data = await Promise.all(results.slice(0, RESULT_LIMIT).map((result) => result.data()));
 
     return data.map((result) => ({
