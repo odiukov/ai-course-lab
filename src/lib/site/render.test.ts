@@ -30,6 +30,17 @@ const allWritten = {
 };
 
 describe("renderStepPage", () => {
+  it("marks only the step content for Pagefind and exposes result metadata", () => {
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
+
+    expect(html).toContain('<article class="step" data-pagefind-body>');
+    expect(html).toContain('<h1 class="step-title" data-pagefind-meta="title">Проверка</h1>');
+    expect(html).toContain('data-pagefind-meta="lesson">← Урок</a>');
+    expect(html).toContain('<header class="step-header" data-pagefind-ignore>');
+    expect(html).toContain('<div class="toc-drawer" data-pagefind-ignore>');
+    expect(html).toContain('<nav class="step-nav" data-pagefind-ignore>');
+  });
+
   it("links Back and Next to the neighbouring step pages", () => {
     const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
 
@@ -115,6 +126,7 @@ describe("renderStepPage", () => {
 
     expect(html).toContain('type="application/json" data-quiz-answers');
     expect(html).toContain('"correct":1');
+    expect(html).toContain('<div class="quiz" data-pagefind-ignore>');
   });
 
   it("mounts a lazy sandboxed frame for a visual", () => {
@@ -165,6 +177,7 @@ describe("renderStepPage", () => {
     expect(html).toContain('"fn":"magnitude"');
     expect(html).toContain('"functions":["magnitude","dot"]');
     expect(html).toContain("/base/assets/pyodide/");
+    expect(html).toContain('<section class="practice-panel" data-pagefind-ignore>');
     // Эталона у этого упражнения нет — и кнопки быть не должно.
     expect(html).not.toContain("<button type=\"button\" class=\"nav-button\" data-show-solution>");
   });
@@ -201,6 +214,13 @@ describe("renderStepPage", () => {
 });
 
 describe("renderLessonIndexPage", () => {
+  it("excludes the lesson table of contents from Pagefind", () => {
+    const html = renderLessonIndexPage(model(allWritten), { basePath: "/base" });
+
+    expect(html).toContain('<body data-base="/base" data-pagefind-ignore="all">');
+    expect(html).not.toContain("data-pagefind-body");
+  });
+
   it("lists every planned step and marks the unwritten ones", () => {
     const html = renderLessonIndexPage(model({ "001-a": step(plan[0]) }), { basePath: "/base" });
 
@@ -229,6 +249,13 @@ describe("renderLessonIndexPage", () => {
 });
 
 describe("renderIndexPage", () => {
+  it("excludes the catalog from step search results", () => {
+    const html = renderIndexPage([], { basePath: "/base" });
+
+    expect(html).toContain('<body data-base="/base" data-pagefind-ignore="all">');
+    expect(html).not.toContain("data-pagefind-body");
+  });
+
   it("lists phases and lessons, with a slot the script fills with read counts", () => {
     const html = renderIndexPage(
       [
@@ -268,8 +295,12 @@ describe("обвязка страницы", () => {
     expect(renderStepPage(model(allWritten), 1, { basePath: "/base" })).toContain(
       '<body data-base="/base">',
     );
-    expect(renderIndexPage([], { basePath: "/base" })).toContain('<body data-base="/base">');
-    expect(renderIndexPage([], { basePath: "" })).toContain('<body data-base="">');
+    expect(renderIndexPage([], { basePath: "/base" })).toContain(
+      '<body data-base="/base" data-pagefind-ignore="all">',
+    );
+    expect(renderIndexPage([], { basePath: "" })).toContain(
+      '<body data-base="" data-pagefind-ignore="all">',
+    );
   });
 
   it("подключает бандл входа только тогда, когда он собран", () => {

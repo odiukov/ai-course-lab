@@ -61,6 +61,7 @@ function htmlDocument(options: {
   title: string;
   basePath: string;
   body: string;
+  excludeFromSearch?: boolean;
   scripts?: string[];
   /** Внешние файлы скриптов сайта: грузятся до инлайновых. */
   modules?: string[];
@@ -69,6 +70,7 @@ function htmlDocument(options: {
     ...(options.modules ?? []).map((src) => `<script src="${src}"></script>`),
     ...(options.scripts ?? []).map((code) => `<script>${code}</script>`),
   ].join("\n");
+  const pagefind = options.excludeFromSearch ? ' data-pagefind-ignore="all"' : "";
 
   return `<!doctype html>
 <html lang="ru">
@@ -80,7 +82,7 @@ function htmlDocument(options: {
 <link rel="stylesheet" href="${options.basePath}/assets/katex/katex.min.css">
 <link rel="stylesheet" href="${options.basePath}/assets/site.css">
 </head>
-<body data-base="${options.basePath}">
+<body data-base="${options.basePath}"${pagefind}>
 ${options.body}
 ${scripts}
 </body>
@@ -118,11 +120,13 @@ function renderQuiz(block: LessonBlock): string {
     })
     .join("\n");
 
-  return `<div class="quiz" data-quiz>
+  return `<div class="quiz" data-pagefind-ignore>
+<div data-quiz>
 <script type="application/json" data-quiz-answers>${encodeQuizPayload(block.questions)}</script>
 <ol class="quiz-questions">
 ${questions}
 </ol>
+</div>
 </div>`;
 }
 
@@ -144,7 +148,7 @@ function renderToc(model: LessonModel, currentId: string | null, options: Render
     })
     .join("\n");
 
-  return `<div class="toc-drawer">
+  return `<div class="toc-drawer" data-pagefind-ignore>
 <input type="checkbox" id="toc-toggle" class="toc-toggle">
 <label class="toc-summary" for="toc-toggle">Шаги урока</label>
 <nav class="toc" aria-label="Шаги урока"><ol>
@@ -190,7 +194,7 @@ function renderPractice(block: LessonBlock, options: RenderOptions): string {
     ? `<button type="button" class="nav-button" data-show-solution>Показать решение</button>`
     : "";
 
-  return `<section class="practice-panel">
+  return `<section class="practice-panel" data-pagefind-ignore>
 <h2 class="practice-title">Практика: <code>${escapeHtml(fn)}</code></h2>
 <p class="practice-hint">Редактируется только функция этого шага — остальной файл упражнения подставится при запуске. Для метода ниже также показан контекст класса: его поля и готовые методы. Код выполняется прямо в твоём браузере: первый запуск качает Python, примерно двенадцать мегабайт, дальше из кэша.</p>
 <details class="practice-context" data-context-panel open hidden>
@@ -216,7 +220,7 @@ ${solution}
 }
 
 function renderProgressBar(): string {
-  return `<div class="progress"><div class="progress-fill" data-progress-fill></div></div>`;
+  return `<div class="progress" data-pagefind-ignore><div class="progress-fill" data-progress-fill></div></div>`;
 }
 
 export function renderStepPage(
@@ -272,7 +276,7 @@ export function renderStepPage(
   // Кнопку показывает скрипт, и только когда сюда пришли по ссылке из текста
   // другого шага. Возврат — history.back(), чтобы вернуться ровно к тому
   // абзацу, из которого ушли.
-  const returnButton = `<button type="button" class="return-button" data-return hidden></button>`;
+  const returnButton = `<button type="button" class="return-button" data-return data-pagefind-ignore hidden></button>`;
 
   const lessonData = encodeJson({
     slug: model.slug,
@@ -281,23 +285,23 @@ export function renderStepPage(
     plannedCount: model.plannedCount,
   });
 
-  const page = `<header class="step-header">
-<a class="back" href="${lessonUrl(options.basePath, model.slug)}">← ${escapeHtml(model.title)}</a>
+  const page = `<header class="step-header" data-pagefind-ignore>
+<a class="back" href="${lessonUrl(options.basePath, model.slug)}" data-pagefind-meta="lesson">← ${escapeHtml(model.title)}</a>
 <span class="counter" data-counter>${block.number} / ${model.plannedCount}</span>
 </header>
 ${renderProgressBar()}
 <div class="lesson-layout">
 ${renderToc(model, block.step.id, options)}
 <main class="lesson">
-<article class="step">
-<h1 class="step-title">${escapeHtml(block.step.title)}</h1>
+<article class="step" data-pagefind-body>
+<h1 class="step-title" data-pagefind-meta="title">${escapeHtml(block.step.title)}</h1>
 ${returnButton}
 ${body}
 ${visual}
 ${renderQuiz(block)}
 ${practice}
 </article>
-<nav class="step-nav">
+<nav class="step-nav" data-pagefind-ignore>
 ${back}
 <span class="step-nav-forward">
 ${forward}
@@ -364,6 +368,7 @@ ${items}
     title: `${model.title} — ${SITE_TITLE}`,
     basePath: options.basePath,
     body: page,
+    excludeFromSearch: true,
     scripts: [LESSON_INDEX_SCRIPT],
     modules: authModules(options),
   });
@@ -403,6 +408,7 @@ ${lessons}
     title: SITE_TITLE,
     basePath: options.basePath,
     body: `<header class="index-header"><h1>${SITE_TITLE}</h1></header>\n${sections}`,
+    excludeFromSearch: true,
     scripts: [CATALOG_SCRIPT],
     modules: authModules(options),
   });
@@ -423,6 +429,7 @@ export function renderAuthPage(options: { basePath: string }): string {
 <p class="run-status" data-auth-status>Проверяю вход…</p>
 <a class="nav-button" data-auth-back href="${options.basePath}/">К курсу</a>
 </main>`,
+    excludeFromSearch: true,
     modules: [`${options.basePath}/assets/auth.js`],
     scripts: [AUTH_PAGE_SCRIPT],
   });
