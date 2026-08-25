@@ -1,5 +1,5 @@
 import { Window } from "happy-dom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installSearch } from "./modal";
 import type { SearchHit, SearchProvider } from "./search-provider";
 
@@ -62,9 +62,9 @@ function pressInput(key: string): boolean {
   return event.defaultPrevented;
 }
 
-function pressOn(element: HTMLElement, key: string): void {
+function pressOn(element: HTMLElement, key: string, options: { shiftKey?: boolean } = {}): void {
   element.dispatchEvent(
-    new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }) as unknown as Event,
+    new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key, ...options }) as unknown as Event,
   );
 }
 
@@ -149,9 +149,14 @@ describe("поисковая модалка", () => {
     );
     expect(pick(".search-heading > .search-close").hasAttribute("data-search-close")).toBe(true);
     expect(pick("[data-search-input]").classList.contains("search-input")).toBe(true);
+    expect(pick("[data-search-input]").getAttribute("role")).toBe("combobox");
+    expect(pick("[data-search-input]").getAttribute("aria-controls")).toBe(
+      pick("[data-search-results]").id,
+    );
     expect(pick("[data-search-status]").classList.contains("search-status")).toBe(true);
     expect(pick("[data-search-status]").getAttribute("aria-live")).toBe("polite");
     expect(pick("[data-search-results]").classList.contains("search-results")).toBe(true);
+    expect(pick("[data-search-results]").getAttribute("role")).toBe("listbox");
   });
 
   it("дебаунсит ввод и рендерит заголовок, урок и безопасный фрагмент", async () => {
@@ -201,11 +206,17 @@ describe("поисковая модалка", () => {
       destination = results[1].getAttribute("href") ?? "";
     });
 
+    expect(pick<HTMLInputElement>("[data-search-input]").getAttribute("aria-activedescendant")).toBe(
+      results[0].id,
+    );
     expect(pressInput("ArrowDown")).toBe(true);
     expect(pressInput("Enter")).toBe(true);
 
     expect(results[1].classList.contains("is-active")).toBe(true);
     expect(results[1].getAttribute("aria-current")).toBe("true");
+    expect(pick<HTMLInputElement>("[data-search-input]").getAttribute("aria-activedescendant")).toBe(
+      results[1].id,
+    );
     expect(destination).toBe("/course/gradient-descent/");
 
     destination = "";
@@ -214,6 +225,36 @@ describe("поисковая модалка", () => {
     pressOn(closeButton, "Enter");
 
     expect(destination).toBe("");
+
+    type("");
+    expect(pick<HTMLInputElement>("[data-search-input]").getAttribute("aria-activedescendant")).toBeNull();
+    expect(pick("[data-search-results]").children).toHaveLength(0);
+  });
+
+  it("ловит Tab внутри модалки и не передаёт фокус фоновому триггеру", async () => {
+    const provider = new FakeSearchProvider(async () => hits);
+    install(provider);
+    const trigger = pick<HTMLButtonElement>("[data-search-trigger]");
+    trigger.click();
+    type("вектор");
+    await eventually(() => expect(window.document.querySelectorAll("[data-search-result]")).toHaveLength(2));
+
+    const closeButton = pick<HTMLButtonElement>("[data-search-close]");
+    const input = pick<HTMLInputElement>("[data-search-input]");
+    const results = [...window.document.querySelectorAll("[data-search-result]")] as unknown as HTMLAnchorElement[];
+
+    closeButton.focus();
+    pressOn(closeButton, "Tab");
+    expect(window.document.activeElement).toBe(input);
+
+    results[1].focus();
+    pressOn(results[1], "Tab");
+    expect(window.document.activeElement).toBe(closeButton);
+    expect(window.document.activeElement).not.toBe(trigger);
+
+    closeButton.focus();
+    pressOn(closeButton, "Tab", { shiftKey: true });
+    expect(window.document.activeElement).toBe(results[1]);
   });
 
   it("оставляет обычный клик по результату нативным", async () => {
@@ -237,11 +278,11 @@ describe("поисковая модалка", () => {
     expect(wasPrevented).toBe(false);
   });
 
-  it("закрывается по Escape и возвращает фокус триггеру", () => {
+  it("закрывается по Escape и возвращает фокус на кликнутый триггер", () => {
     const provider = new FakeSearchProvider(async () => hits);
     install(provider);
     const trigger = pick<HTMLButtonElement>("[data-search-trigger]");
-    trigger.focus();
+
     trigger.click();
 
     press("Escape");
@@ -249,6 +290,92 @@ describe("поисковая модалка", () => {
     expect(pick("[data-search-modal]").hidden).toBe(true);
     expect(window.document.body.classList.contains("has-search-modal")).toBe(false);
     expect(window.document.activeElement).toBe(trigger);
+  });
+
+  it("закрытие во время debounce очищает состояние перед повторным открытием", async () => {
+    const provider = new FakeSearchProvider(async () => hits);
+    vi.useFakeTimers();
+    try {
+      install(provider, 20);
+      pick<HTMLButtonElement>("[data-search-trigger]").click();
+      type("ожидающий");
+      pick<HTMLButtonElement>("[data-search-close]").click();
+      pick<HTMLButtonElement>("[data-search-trigger]").click();
+
+      expect(pick<HTMLInputElement>("[data-search-input]").value).toBe("");
+      expect(pick("[data-search-status]").textContent).toBe("Введите запрос");
+      expect(pick("[data-search-results]").children).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(21);
+
+      expect(provider.queries).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("закрытие инвалидирует ожидающий ответ перед повторным открытием", async () => {
+    let resolvePending: (value: SearchHit[]) => void = () => undefined;
+    const provider = new FakeSearchProvider(
+      () =>
+        new Promise<SearchHit[]>((resolve) => {
+          resolvePending = resolve;
+        }),
+    );
+    install(provider);
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+    type("ожидающий");
+    await eventually(() => expect(provider.queries).toEqual(["ожидающий"]));
+
+    pick<HTMLButtonElement>("[data-search-close]").click();
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+    resolvePending(hits);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pick<HTMLInputElement>("[data-search-input]").value).toBe("");
+    expect(pick("[data-search-status]").textContent).toBe("Введите запрос");
+    expect(pick("[data-search-results]").children).toHaveLength(0);
+  });
+
+  it("закрывается кликом по фону", () => {
+    install(new FakeSearchProvider(async () => hits));
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+
+    pick("[data-search-modal]").click();
+
+    expect(pick("[data-search-modal]").hidden).toBe(true);
+  });
+
+  it("вставляет заголовок и урок результата как текст", async () => {
+    const hostileHit: SearchHit = {
+      ...hits[0],
+      title: '<img src=x onerror="alert(1)">Заголовок',
+      lesson: '<img src=x onerror="alert(1)">Урок',
+    };
+    install(new FakeSearchProvider(async () => [hostileHit]));
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+    type("текст");
+
+    await eventually(() => expect(window.document.querySelector("[data-search-result]")).not.toBeNull());
+
+    expect(pick(".search-result-title").textContent).toBe(hostileHit.title);
+    expect(pick(".search-result-lesson").textContent).toBe(hostileHit.lesson);
+    expect(window.document.querySelector(".search-result-title img")).toBeNull();
+    expect(window.document.querySelector(".search-result-lesson img")).toBeNull();
+  });
+
+  it("переиспользует одну модалку и провайдер для всех триггеров", () => {
+    window.document.body.insertAdjacentHTML("beforeend", '<button data-search-trigger>Ещё найти</button>');
+    const provider = new FakeSearchProvider(async () => hits);
+    const { factoryCalls } = install(provider);
+    const triggers = [...window.document.querySelectorAll("[data-search-trigger]")] as unknown as HTMLButtonElement[];
+
+    triggers[0].click();
+    pick<HTMLButtonElement>("[data-search-close]").click();
+    triggers[1].click();
+
+    expect(factoryCalls()).toBe(1);
+    expect(window.document.querySelectorAll("[data-search-modal]")).toHaveLength(1);
   });
 
   it("показывает точное сообщение при недоступном поиске", async () => {

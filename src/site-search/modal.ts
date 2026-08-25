@@ -1,8 +1,10 @@
 import type { SearchHit, SearchProvider } from "./search-provider";
 
+let modalId = 0;
+
 interface SearchModal {
-  open(): void;
-  handleEscape(event: KeyboardEvent): void;
+  open(restoreFocus: HTMLElement | null): void;
+  handleDocumentKey(event: KeyboardEvent): void;
   destroy(): void;
 }
 
@@ -12,15 +14,16 @@ export function installSearch(
   document: Document = window.document,
   debounceMs = 250,
 ): () => void {
+  // Composition root устанавливает поиск только один раз на документ.
   const triggers = [...document.querySelectorAll<HTMLButtonElement>("[data-search-trigger]")];
   let modal: SearchModal | undefined;
 
-  const open = () => {
+  const open = (restoreFocus: HTMLElement | null) => {
     modal ??= createSearchModal(providerFactory(), document, debounceMs);
-    modal.open();
+    modal.open(restoreFocus);
   };
 
-  const onTriggerClick = () => open();
+  const onTriggerClick = (event: MouseEvent) => open(event.currentTarget as HTMLElement);
   const onDocumentKeyDown = (event: KeyboardEvent) => {
     if (
       event.key.toLowerCase() === "k" &&
@@ -28,11 +31,11 @@ export function installSearch(
       !event.altKey
     ) {
       event.preventDefault();
-      open();
+      open(document.activeElement as HTMLElement | null);
       return;
     }
 
-    modal?.handleEscape(event);
+    modal?.handleDocumentKey(event);
   };
 
   for (const trigger of triggers) trigger.addEventListener("click", onTriggerClick);
@@ -51,20 +54,23 @@ function createSearchModal(
   document: Document,
   debounceMs: number,
 ): SearchModal {
+  const instanceId = ++modalId;
+  const headingId = `search-modal-title-${instanceId}`;
+  const resultsId = `search-modal-results-${instanceId}`;
   const overlay = document.createElement("div");
   overlay.className = "search-modal";
   overlay.dataset.searchModal = "";
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-labelledby", "search-modal-title");
+  overlay.setAttribute("aria-labelledby", headingId);
 
   const dialog = document.createElement("div");
   dialog.className = "search-dialog";
   const headingWrapper = document.createElement("div");
   headingWrapper.className = "search-heading";
   const heading = document.createElement("h2");
-  heading.id = "search-modal-title";
+  heading.id = headingId;
   heading.textContent = "Поиск по курсу";
   const closeButton = document.createElement("button");
   closeButton.type = "button";
@@ -76,7 +82,10 @@ function createSearchModal(
   input.type = "search";
   input.className = "search-input";
   input.dataset.searchInput = "";
+  input.setAttribute("role", "combobox");
   input.setAttribute("aria-label", "Поиск по курсу");
+  input.setAttribute("aria-controls", resultsId);
+  input.setAttribute("aria-expanded", "false");
   const status = document.createElement("p");
   status.className = "search-status";
   status.dataset.searchStatus = "";
@@ -85,6 +94,8 @@ function createSearchModal(
   const results = document.createElement("ol");
   results.className = "search-results";
   results.dataset.searchResults = "";
+  results.id = resultsId;
+  results.setAttribute("role", "listbox");
 
   headingWrapper.append(heading, closeButton);
   dialog.append(headingWrapper, input, status, results);
@@ -100,6 +111,7 @@ function createSearchModal(
   const clearResults = () => {
     results.replaceChildren();
     activeIndex = -1;
+    input.removeAttribute("aria-activedescendant");
   };
 
   const cancelPendingSearch = () => {
@@ -120,17 +132,21 @@ function createSearchModal(
       anchor.classList.toggle("is-active", active);
       if (active) anchor.setAttribute("aria-current", "true");
       else anchor.removeAttribute("aria-current");
+      anchor.setAttribute("aria-selected", String(active));
     });
+    input.setAttribute("aria-activedescendant", anchors[activeIndex].id);
   };
 
   const renderHits = (hits: SearchHit[]) => {
     clearResults();
-    for (const hit of hits) {
+    for (const [index, hit] of hits.entries()) {
       const item = document.createElement("li");
       const anchor = document.createElement("a");
       anchor.className = "search-result";
       anchor.dataset.searchResult = "";
+      anchor.id = `${resultsId}-option-${index}`;
       anchor.setAttribute("href", hit.url);
+      anchor.setAttribute("role", "option");
 
       const title = document.createElement("span");
       title.className = "search-result-title";
@@ -187,17 +203,22 @@ function createSearchModal(
     if (!isOpen) return;
     isOpen = false;
     cancelPendingSearch();
+    input.value = "";
+    clearResults();
+    status.textContent = "Введите запрос";
+    input.setAttribute("aria-expanded", "false");
     overlay.hidden = true;
     document.body.classList.remove("has-search-modal");
-    previousFocus?.focus();
+    if (previousFocus?.isConnected) previousFocus.focus();
   };
 
-  const open = () => {
+  const open = (restoreFocus: HTMLElement | null) => {
     if (isOpen) return;
-    previousFocus = document.activeElement as HTMLElement | null;
+    previousFocus = restoreFocus;
     isOpen = true;
     overlay.hidden = false;
     document.body.classList.add("has-search-modal");
+    input.setAttribute("aria-expanded", "true");
     input.focus();
   };
 
@@ -205,6 +226,23 @@ function createSearchModal(
     if (event.target === overlay) close();
   };
   const onCloseClick = () => close();
+  const focusableElements = () =>
+    [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href]')];
+  const trapTab = (event: KeyboardEvent) => {
+    if (event.key !== "Tab" || !isOpen) return;
+    const elements = focusableElements();
+    if (elements.length === 0) return;
+    const currentIndex = elements.indexOf(document.activeElement as HTMLElement);
+    const next = event.shiftKey
+      ? currentIndex <= 0
+        ? elements.at(-1)
+        : elements[currentIndex - 1]
+      : currentIndex === -1 || currentIndex === elements.length - 1
+        ? elements[0]
+        : elements[currentIndex + 1];
+    event.preventDefault();
+    next?.focus();
+  };
   const onInputKeyDown = (event: KeyboardEvent) => {
     if (!isOpen) return;
     if (event.key === "ArrowDown") {
@@ -231,12 +269,14 @@ function createSearchModal(
 
   return {
     open,
-    handleEscape(event) {
+    handleDocumentKey(event) {
       if (!isOpen) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close();
+        return;
       }
+      trapTab(event);
     },
     destroy() {
       close();
