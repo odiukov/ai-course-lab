@@ -23,7 +23,7 @@ function text(value: unknown, fallback: string): string {
 }
 
 function resultUrl(basePath: string, url: string): string {
-  if (/^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(url) || /^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith("#")) {
+  if (/^https?:\/\//i.test(url) || url.startsWith("//") || url.startsWith("#")) {
     return url;
   }
 
@@ -44,11 +44,14 @@ function importPagefind(url: string): Promise<PagefindApi> {
 export class PagefindProvider implements SearchProvider {
   private readonly pagefind: Promise<PagefindApi>;
 
+  /** basePath приходит нормализованным из build-site/body: "" или путь с ведущим слешем без завершающего. */
   constructor(private readonly basePath: string) {
     this.pagefind = importPagefind(`${basePath}/pagefind/pagefind.js`).then(async (pagefind) => {
       await pagefind.init();
       return pagefind;
     });
+    // Наблюдаем раннюю ошибку загрузки, не меняя исходное отклонение для search().
+    void this.pagefind.catch(() => undefined);
   }
 
   async search(query: string): Promise<SearchHit[]> {
