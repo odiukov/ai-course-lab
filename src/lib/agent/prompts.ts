@@ -8,6 +8,7 @@ export type PromptName =
   | "plan-project"
   | "write-project-contracts"
   | "write-step"
+  | "write-cards"
   | "explain"
   | "review-code"
   | "draw-visual"
