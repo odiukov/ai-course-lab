@@ -2,8 +2,7 @@ import type { SearchHit, SearchProvider } from "./search-provider";
 
 interface SearchModal {
   open(): void;
-  close(): void;
-  handleKey(event: KeyboardEvent): void;
+  handleEscape(event: KeyboardEvent): void;
   destroy(): void;
 }
 
@@ -33,7 +32,7 @@ export function installSearch(
       return;
     }
 
-    modal?.handleKey(event);
+    modal?.handleEscape(event);
   };
 
   for (const trigger of triggers) trigger.addEventListener("click", onTriggerClick);
@@ -53,6 +52,7 @@ function createSearchModal(
   debounceMs: number,
 ): SearchModal {
   const overlay = document.createElement("div");
+  overlay.className = "search-modal";
   overlay.dataset.searchModal = "";
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
@@ -61,26 +61,33 @@ function createSearchModal(
 
   const dialog = document.createElement("div");
   dialog.className = "search-dialog";
+  const headingWrapper = document.createElement("div");
+  headingWrapper.className = "search-heading";
   const heading = document.createElement("h2");
   heading.id = "search-modal-title";
   heading.textContent = "Поиск по курсу";
   const closeButton = document.createElement("button");
   closeButton.type = "button";
+  closeButton.className = "search-close";
   closeButton.dataset.searchClose = "";
   closeButton.setAttribute("aria-label", "Закрыть поиск");
   closeButton.textContent = "Закрыть";
   const input = document.createElement("input");
   input.type = "search";
+  input.className = "search-input";
   input.dataset.searchInput = "";
   input.setAttribute("aria-label", "Поиск по курсу");
   const status = document.createElement("p");
+  status.className = "search-status";
   status.dataset.searchStatus = "";
   status.setAttribute("aria-live", "polite");
   status.textContent = "Введите запрос";
   const results = document.createElement("ol");
+  results.className = "search-results";
   results.dataset.searchResults = "";
 
-  dialog.append(heading, closeButton, input, status, results);
+  headingWrapper.append(heading, closeButton);
+  dialog.append(headingWrapper, input, status, results);
   overlay.append(dialog);
   document.body.append(overlay);
 
@@ -121,14 +128,18 @@ function createSearchModal(
     for (const hit of hits) {
       const item = document.createElement("li");
       const anchor = document.createElement("a");
+      anchor.className = "search-result";
       anchor.dataset.searchResult = "";
       anchor.setAttribute("href", hit.url);
 
-      const title = document.createElement("strong");
+      const title = document.createElement("span");
+      title.className = "search-result-title";
       title.textContent = hit.title;
       const lesson = document.createElement("span");
+      lesson.className = "search-result-lesson";
       lesson.textContent = hit.lesson;
-      const excerpt = document.createElement("p");
+      const excerpt = document.createElement("span");
+      excerpt.className = "search-result-excerpt";
       // Контракт SearchProvider гарантирует, что excerpt уже безопасно экранирован.
       excerpt.innerHTML = hit.excerpt;
 
@@ -194,34 +205,37 @@ function createSearchModal(
     if (event.target === overlay) close();
   };
   const onCloseClick = () => close();
+  const onInputKeyDown = (event: KeyboardEvent) => {
+    if (!isOpen) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveResult(activeIndex + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveResult(activeIndex - 1);
+      return;
+    }
+    if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      const active = results.querySelectorAll<HTMLAnchorElement>("[data-search-result]")[activeIndex];
+      active?.click();
+    }
+  };
 
   overlay.addEventListener("click", onBackdropClick);
   closeButton.addEventListener("click", onCloseClick);
   input.addEventListener("input", onInput);
+  input.addEventListener("keydown", onInputKeyDown);
 
   return {
     open,
-    close,
-    handleKey(event) {
+    handleEscape(event) {
       if (!isOpen) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close();
-        return;
-      }
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveResult(activeIndex + 1);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveResult(activeIndex - 1);
-        return;
-      }
-      if (event.key === "Enter" && activeIndex >= 0) {
-        const active = results.querySelectorAll<HTMLAnchorElement>("[data-search-result]")[activeIndex];
-        active?.click();
       }
     },
     destroy() {
@@ -229,6 +243,7 @@ function createSearchModal(
       overlay.removeEventListener("click", onBackdropClick);
       closeButton.removeEventListener("click", onCloseClick);
       input.removeEventListener("input", onInput);
+      input.removeEventListener("keydown", onInputKeyDown);
       overlay.remove();
     },
   };

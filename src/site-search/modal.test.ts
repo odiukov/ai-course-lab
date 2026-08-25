@@ -49,8 +49,23 @@ function pick<T extends HTMLElement = HTMLElement>(selector: string): T {
   return element as unknown as T;
 }
 
-function press(key: string, options: { ctrlKey?: boolean; metaKey?: boolean } = {}): void {
+function press(
+  key: string,
+  options: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } = {},
+): void {
   window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, ...options }));
+}
+
+function pressInput(key: string): boolean {
+  const event = new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key });
+  pick<HTMLInputElement>("[data-search-input]").dispatchEvent(event as unknown as Event);
+  return event.defaultPrevented;
+}
+
+function pressOn(element: HTMLElement, key: string): void {
+  element.dispatchEvent(
+    new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }) as unknown as Event,
+  );
 }
 
 function type(value: string): void {
@@ -110,14 +125,33 @@ describe("поисковая модалка", () => {
     expect(pick("[data-search-modal]").hidden).toBe(false);
   });
 
+  it("не открывается по Alt+Cmd+K", () => {
+    const provider = new FakeSearchProvider(async () => hits);
+    const { factoryCalls } = install(provider);
+
+    press("k", { altKey: true, metaKey: true });
+
+    expect(factoryCalls()).toBe(0);
+    expect(window.document.querySelector("[data-search-modal]")).toBeNull();
+  });
+
   it("открывается кликом по триггеру", () => {
     install(new FakeSearchProvider(async () => hits));
 
     pick<HTMLButtonElement>("[data-search-trigger]").click();
 
-    expect(pick("[data-search-modal]").getAttribute("role")).toBe("dialog");
-    expect(pick("[data-search-modal]").getAttribute("aria-modal")).toBe("true");
+    const modal = pick("[data-search-modal]");
+    expect(modal.classList.contains("search-modal")).toBe(true);
+    expect(modal.getAttribute("role")).toBe("dialog");
+    expect(modal.getAttribute("aria-modal")).toBe("true");
+    expect(pick(".search-dialog").querySelector(".search-heading > h2")?.textContent).toBe(
+      "Поиск по курсу",
+    );
+    expect(pick(".search-heading > .search-close").hasAttribute("data-search-close")).toBe(true);
+    expect(pick("[data-search-input]").classList.contains("search-input")).toBe(true);
+    expect(pick("[data-search-status]").classList.contains("search-status")).toBe(true);
     expect(pick("[data-search-status]").getAttribute("aria-live")).toBe("polite");
+    expect(pick("[data-search-results]").classList.contains("search-results")).toBe(true);
   });
 
   it("дебаунсит ввод и рендерит заголовок, урок и безопасный фрагмент", async () => {
@@ -135,7 +169,22 @@ describe("поисковая модалка", () => {
       expect(pick("[data-search-results]").textContent).toContain("Векторы и матрицы");
       expect(pick("[data-search-results]").textContent).toContain("Линейная алгебра");
       expect(pick("[data-search-results]").innerHTML).toContain("<mark>векторов</mark>");
+      expect(pick("[data-search-result]").classList.contains("search-result")).toBe(true);
+      expect(pick(".search-result-title").textContent).toBe("Векторы и матрицы");
+      expect(pick(".search-result-lesson").textContent).toBe("Линейная алгебра");
+      expect(pick(".search-result-excerpt").innerHTML).toContain("<mark>векторов</mark>");
     });
+  });
+
+  it("отменяет предыдущий debounce и ищет только последний быстрый запрос", async () => {
+    const provider = new FakeSearchProvider(async () => hits);
+    install(provider, 10);
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+
+    type("первый");
+    type("второй");
+
+    await eventually(() => expect(provider.queries).toEqual(["второй"]));
   });
 
   it("выбирает второй результат стрелкой вниз и открывает его по Enter", async () => {
@@ -152,12 +201,19 @@ describe("поисковая модалка", () => {
       destination = results[1].getAttribute("href") ?? "";
     });
 
-    press("ArrowDown");
-    press("Enter");
+    expect(pressInput("ArrowDown")).toBe(true);
+    expect(pressInput("Enter")).toBe(true);
 
     expect(results[1].classList.contains("is-active")).toBe(true);
     expect(results[1].getAttribute("aria-current")).toBe("true");
     expect(destination).toBe("/course/gradient-descent/");
+
+    destination = "";
+    const closeButton = pick<HTMLButtonElement>("[data-search-close]");
+    closeButton.focus();
+    pressOn(closeButton, "Enter");
+
+    expect(destination).toBe("");
   });
 
   it("оставляет обычный клик по результату нативным", async () => {
@@ -169,13 +225,16 @@ describe("поисковая модалка", () => {
 
     const result = pick<HTMLAnchorElement>("[data-search-result]");
     let destination = "";
+    let wasPrevented = true;
     result.addEventListener("click", (event: MouseEvent) => {
+      wasPrevented = event.defaultPrevented;
       event.preventDefault();
       destination = result.getAttribute("href") ?? "";
     });
     result.click();
 
     expect(destination).toBe("/course/vectors/");
+    expect(wasPrevented).toBe(false);
   });
 
   it("закрывается по Escape и возвращает фокус триггеру", () => {
@@ -234,12 +293,38 @@ describe("поисковая модалка", () => {
     expect(pick("[data-search-results]").textContent).not.toContain("Векторы и матрицы");
   });
 
-  it("cleanup снимает обработчики и удаляет модалку", () => {
-    const provider = new FakeSearchProvider(async () => hits);
-    const cleanup = installSearch(() => provider, window.document as unknown as Document, 1);
+  it("cleanup отменяет таймер, инвалидирует ответ и снимает обработчики", async () => {
+    let resolvePending: (value: SearchHit[]) => void = () => undefined;
+    const provider = new FakeSearchProvider(
+      () =>
+        new Promise<SearchHit[]>((resolve) => {
+          resolvePending = resolve;
+        }),
+    );
+    const cleanup = installSearch(() => provider, window.document as unknown as Document, 10);
     pick<HTMLButtonElement>("[data-search-trigger]").click();
+    type("ожидающий");
+    await eventually(() => expect(provider.queries).toEqual(["ожидающий"]));
 
     cleanup();
+    resolvePending(hits);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(window.document.querySelector("[data-search-modal]")).toBeNull();
+    expect(window.document.body.classList.contains("has-search-modal")).toBe(false);
+
+    const debounceProvider = new FakeSearchProvider(async () => hits);
+    const cancelDebounce = installSearch(
+      () => debounceProvider,
+      window.document as unknown as Document,
+      10,
+    );
+    pick<HTMLButtonElement>("[data-search-trigger]").click();
+    type("не должен искаться");
+    cancelDebounce();
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(debounceProvider.queries).toEqual([]);
     pick<HTMLButtonElement>("[data-search-trigger]").click();
     press("k", { metaKey: true });
 
