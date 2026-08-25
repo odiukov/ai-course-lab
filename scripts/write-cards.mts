@@ -17,6 +17,7 @@ import type { Card } from "../src/lib/cards/card.js";
 import { loadConfig } from "../src/lib/config.js";
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { readStepsById, writeStep } from "../src/lib/content/step-file.js";
+import type { GenerateDeps } from "../src/lib/generate/plan-lesson.js";
 import { writeCardsForStep } from "../src/lib/generate/write-cards.js";
 import { readCatalog } from "../src/lib/source/catalog.js";
 
@@ -84,7 +85,7 @@ interface Report {
 async function writeLessonCards(
   contentDir: string,
   slug: string,
-  agent: "claude" | "codex" | null,
+  deps: GenerateDeps,
 ): Promise<Report> {
   const plan = readLessonPlan(contentDir, slug);
   if (!plan) throw new Error(`Нет плана урока ${slug}`);
@@ -96,9 +97,14 @@ async function writeLessonCards(
 
   for (const id of ids) {
     const step = steps[id];
-    if (!step) continue;
+    if (!step) {
+      // План урока и файлы шага могут разъехаться (шаг удалили руками, план не
+      // обновили) — без предупреждения дыра осталась бы незаметной в отчёте,
+      // который человек читает перед диффом.
+      console.warn(`[${slug}] шага ${id} нет на диске — пропускаю`);
+      continue;
+    }
 
-    const deps = defaultDeps(loadConfig(), agent ? { agent } : {});
     const result = await writeCardsForStep({
       contentDir,
       slug,
@@ -146,11 +152,19 @@ function printReport(report: Report): void {
 async function main(): Promise<void> {
   const config = loadConfig();
   const { slugs, agent } = parseArgs(process.argv.slice(2));
+  // Один раз на весь прогон: агент выбран заранее и не меняется от урока к
+  // уроку, а loadConfig() внутри цикла на каждый шаг означало бы читать
+  // конфиг с диска 54 раза на урок и 18000+ раз на курс.
+  const deps = defaultDeps(config, agent ? { agent } : {});
   let timeoutsInRow = 0;
+  // Один провалившийся урок посреди фазы не должен стоить оставшихся
+  // четырнадцати — фаза стоит часы агентского времени. write-lesson.mts несёт
+  // тот же список по той же причине.
+  const failed: string[] = [];
 
   for (const slug of slugs) {
     try {
-      printReport(await writeLessonCards(config.contentDir, slug, agent));
+      printReport(await writeLessonCards(config.contentDir, slug, deps));
       timeoutsInRow = 0;
     } catch (error) {
       if (isLimitError(error)) {
@@ -165,8 +179,15 @@ async function main(): Promise<void> {
         }
         continue;
       }
-      throw error;
+      console.error(`${slug}: не разобрался — ${(error as Error).message}`);
+      failed.push(slug);
+      timeoutsInRow = 0;
     }
+  }
+
+  if (failed.length > 0) {
+    console.error(`\nНе разобрались: ${failed.join(", ")}`);
+    process.exitCode = 1;
   }
 }
 
