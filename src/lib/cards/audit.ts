@@ -1,4 +1,5 @@
 import { answerText, type CardDraft } from "./card";
+import type { CheckQuestion } from "../content/step-file";
 
 export interface Finding {
   ref: string;
@@ -218,4 +219,49 @@ export function formatFindings(findings: Finding[]): string {
   return findings
     .map((finding) => `- [${finding.severity}] ${finding.rule} (${finding.ref}): ${finding.message}`)
     .join("\n");
+}
+
+/**
+ * Правила для вопросов внутри шага — подмножество правил карточек.
+ *
+ * Разница по существу: вопрос `check` задают сразу после чтения абзаца, и
+ * опираться на контекст шага ему законно. Незаконно другое — быть вопросом,
+ * ПРАВИЛЬНЫЙ ОТВЕТ на который напечатан строкой выше. Поэтому число из урока
+ * в условии допустимо, а в правильном варианте — нет.
+ */
+export function auditCheck(questions: CheckQuestion[], stepBody: string): Finding[] {
+  const inBody = new Set(numbersIn(stepBody));
+  return questions.flatMap((question) => {
+    const findings: Finding[] = [];
+    const ref = question.question.slice(0, 60);
+
+    const answer = question.options[question.correct] ?? "";
+    const shared = numbersIn(answer).filter(
+      (value) => !UBIQUITOUS.has(value) && inBody.has(value),
+    );
+    if (shared.length) {
+      findings.push({
+        ref,
+        rule: "number-answer",
+        severity: "error",
+        message: `Правильный ответ — число ${shared.join(", ")} из текста шага: спроси про идею, а не про число`,
+      });
+    }
+
+    const problems: string[] = [];
+    if (new Set(question.options).size !== question.options.length) {
+      problems.push("варианты повторяются");
+    }
+    if (!answer) problems.push("correct не указывает на вариант");
+    if (problems.length) {
+      findings.push({
+        ref,
+        rule: "answer-integrity",
+        severity: "error",
+        message: problems.join("; "),
+      });
+    }
+
+    return findings;
+  });
 }

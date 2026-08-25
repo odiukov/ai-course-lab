@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { auditLesson, auditStep } from "./audit";
+import { auditCheck, auditLesson, auditStep } from "./audit";
 import type { CardDraft } from "./card";
+import type { CheckQuestion } from "../content/step-file";
 
 const STEP_BODY = [
   "Стартовый loss при словаре из 65 символов равен примерно 4.17.",
@@ -156,5 +157,65 @@ describe("правила урока", () => {
 
   it("не предупреждает про однообразие у урока с одной карточкой", () => {
     expect(auditLesson([numericCard()]).map((f) => f.rule)).not.toContain("kind-variety");
+  });
+});
+
+describe("auditCheck — правила для вопросов внутри шага", () => {
+  const body = "Стартовый loss при словаре из 65 символов равен примерно 4.17.";
+
+  it("разрешает указательные обороты: вопрос задают в контексте шага", () => {
+    const questions: CheckQuestion[] = [
+      {
+        question: "Почему в примере выше стартовый loss именно такой?",
+        options: [
+          "Модель раскладывает вероятность поровну между токенами",
+          "Модель уже что-то выучила",
+          "В коде ошибка",
+        ],
+        correct: 0,
+        explanation: "Равномерное распределение даёт ln(|V|).",
+      },
+    ];
+    expect(auditCheck(questions, body).map((f) => f.rule)).not.toContain("deictic");
+  });
+
+  it("заворачивает вопрос, ответ на который — число из текста шага", () => {
+    const questions: CheckQuestion[] = [
+      {
+        question: "Чему равен стартовый loss?",
+        options: ["4.17", "0.0", "65"],
+        correct: 0,
+        explanation: "ln(65) ≈ 4.17.",
+      },
+    ];
+    expect(auditCheck(questions, body).map((f) => f.rule)).toContain("number-answer");
+  });
+
+  it("пропускает вопрос про идею, даже если число урока стоит в условии", () => {
+    const questions: CheckQuestion[] = [
+      {
+        question: "Стартовый loss оказался около 4.17 при словаре из 65 символов. Почему?",
+        options: [
+          "Модель считает все символы равновероятными",
+          "Маска не работает",
+          "Скорость обучения слишком велика",
+        ],
+        correct: 0,
+        explanation: "Равномерное распределение по |V| даёт ln(|V|).",
+      },
+    ];
+    expect(auditCheck(questions, body)).toEqual([]);
+  });
+
+  it("заворачивает повторяющиеся варианты", () => {
+    const questions: CheckQuestion[] = [
+      {
+        question: "Что делает каузальная маска?",
+        options: ["Запрещает смотреть вправо", "Ускоряет softmax", "Запрещает смотреть вправо"],
+        correct: 0,
+        explanation: "Обнуляет вес позиций правее текущей.",
+      },
+    ];
+    expect(auditCheck(questions, body).map((f) => f.rule)).toContain("answer-integrity");
   });
 });
