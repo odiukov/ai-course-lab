@@ -6,9 +6,11 @@ export interface LessonPaths {
   stepsDir: string;
   clarificationsDir: string;
   visualsDir: string;
+  cardsDir: string;
   stepFile(id: string): string;
   clarificationFile(id: string): string;
   visualFile(id: string): string;
+  cardsFile(id: string): string;
 }
 
 /**
@@ -43,14 +45,17 @@ export function lessonPaths(contentDir: string, slug: string): LessonPaths {
   const stepsDir = path.join(dir, "steps");
   const clarificationsDir = path.join(dir, "clarifications");
   const visualsDir = path.join(dir, "visuals");
+  const cardsDir = path.join(dir, "cards");
   return {
     dir,
     planFile: path.join(dir, "lesson.json"),
     stepsDir,
     clarificationsDir,
     visualsDir,
+    cardsDir,
     stepFile: (id) => path.join(stepsDir, `${id}.md`),
     clarificationFile: (id) => path.join(clarificationsDir, `${id}.md`),
     visualFile: (id) => path.join(visualsDir, `${id}.html`),
+    cardsFile: (id) => path.join(cardsDir, `${id}.yml`),
   };
 }
