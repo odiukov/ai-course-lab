@@ -92,6 +92,19 @@ async function buildEditor(): Promise<void> {
   });
 }
 
+/** Бандл не включает генерируемый индекс Pagefind: он импортируется в рантайме при открытии поиска. */
+async function buildSearch(): Promise<void> {
+  await build({
+    entryPoints: [path.join(root, "src", "site-search", "index.ts")],
+    outfile: path.join(outDir, "assets", "search.js"),
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2020",
+    logLevel: "warning",
+  });
+}
+
 /**
  * Вход и синхронизация одним файлом.
  *
@@ -285,7 +298,7 @@ async function main(): Promise<void> {
   write(".nojekyll", "");
   copyKatexAssets();
   copyPyodide();
-  await buildEditor();
+  await Promise.all([buildEditor(), buildSearch()]);
 
   console.log(
     `Собрано: уроков ${catalog.length}, шагов ${renderedSteps}, ` +

@@ -305,6 +305,20 @@ describe("renderIndexPage", () => {
  * переход не выпускается. Обе молча сломаются, если атрибут пропадёт.
  */
 describe("обвязка страницы", () => {
+  it("добавляет поиск и его бандл на все статические страницы", () => {
+    const pages = [
+      renderStepPage(model(allWritten), 1, { basePath: "/base" }),
+      renderLessonIndexPage(model(allWritten), { basePath: "/base" }),
+      renderIndexPage([], { basePath: "/base" }),
+      renderAuthPage({ basePath: "/base" }),
+    ];
+
+    for (const html of pages) {
+      expect(html).toContain("data-search-trigger");
+      expect(html).toContain('<script src="/base/assets/search.js"></script>');
+    }
+  });
+
   it("кладёт базовый путь в атрибут body", () => {
     expect(renderStepPage(model(allWritten), 1, { basePath: "/base" })).toContain(
       '<body data-base="/base">',

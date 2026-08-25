@@ -57,6 +57,13 @@ function encodeJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/&/g, "\\u0026");
 }
 
+function renderSearchButton(): string {
+  return `<button type="button" class="nav-button search-button" data-search-trigger data-pagefind-ignore aria-haspopup="dialog">
+<span>Поиск</span>
+<kbd class="search-shortcut" data-search-shortcut aria-hidden="true">⌘K</kbd>
+</button>`;
+}
+
 function htmlDocument(options: {
   title: string;
   basePath: string;
@@ -68,6 +75,7 @@ function htmlDocument(options: {
 }): string {
   const scripts = [
     ...(options.modules ?? []).map((src) => `<script src="${src}"></script>`),
+    `<script src="${options.basePath}/assets/search.js"></script>`,
     ...(options.scripts ?? []).map((code) => `<script>${code}</script>`),
   ].join("\n");
   const pagefind = options.excludeFromSearch ? ' data-pagefind-ignore="all"' : "";
@@ -285,7 +293,10 @@ export function renderStepPage(
 
   const page = `<header class="step-header" data-pagefind-ignore>
 <a class="back" href="${lessonUrl(options.basePath, model.slug)}" data-pagefind-meta="lesson">← ${escapeHtml(model.title)}</a>
+<span class="step-header-actions">
 <span class="counter" data-counter>${block.number} / ${model.plannedCount}</span>
+${renderSearchButton()}
+</span>
 </header>
 ${renderProgressBar()}
 <div class="lesson-layout">
@@ -347,7 +358,10 @@ export function renderLessonIndexPage(model: LessonModel, options: RenderOptions
   const lessonData = encodeJson({ slug: model.slug, plannedCount: model.plannedCount });
 
   const page = `<header class="lesson-header">
+<div class="header-toolbar">
 <a class="back" href="${options.basePath}/">← к списку уроков</a>
+${renderSearchButton()}
+</div>
 <h1>${escapeHtml(model.title)}</h1>
 <p class="lesson-meta"><span data-read-count>${model.plannedCount} шагов</span></p>
 <p class="lesson-actions">
@@ -405,7 +419,7 @@ ${lessons}
   return htmlDocument({
     title: SITE_TITLE,
     basePath: options.basePath,
-    body: `<header class="index-header"><h1>${SITE_TITLE}</h1></header>\n${sections}`,
+    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1>${renderSearchButton()}</div></header>\n${sections}`,
     excludeFromSearch: true,
     scripts: [CATALOG_SCRIPT],
     modules: authModules(options),
@@ -422,7 +436,7 @@ export function renderAuthPage(options: { basePath: string }): string {
   return htmlDocument({
     title: `Вход — ${SITE_TITLE}`,
     basePath: options.basePath,
-    body: `<header class="index-header"><h1>Вход</h1></header>
+    body: `<header class="index-header"><div class="header-toolbar"><h1>Вход</h1>${renderSearchButton()}</div></header>
 <main class="lesson">
 <p class="run-status" data-auth-status>Проверяю вход…</p>
 <a class="nav-button" data-auth-back href="${options.basePath}/">К курсу</a>
