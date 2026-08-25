@@ -29,6 +29,34 @@ describe("правило: указательные обороты", () => {
   it("пропускает самодостаточный вопрос", () => {
     expect(auditStep([numericCard()], STEP_BODY)).toEqual([]);
   });
+
+  it("заворачивает explanation с указательным оборотом", () => {
+    const cards = [numericCard({ explanation: "Как показано в примере выше, это происходит." })];
+    const findings = auditStep(cards, STEP_BODY);
+    expect(findings.map((f) => f.rule)).toContain("deictic");
+  });
+
+  it("заворачивает open карточку, в reference которой есть указательный оборот", () => {
+    const cards: CardDraft[] = [
+      {
+        kind: "open",
+        concept: "понимание loss",
+        question: "Что такое loss?",
+        explanation: "Loss — это ошибка модели.",
+        reference: "Как показано в примере выше.",
+      },
+    ];
+    const findings = auditStep(cards, STEP_BODY);
+    expect(findings.map((f) => f.rule)).toContain("deictic");
+  });
+
+  it("сообщение дейктического правила читаемо, без регулярных выражений", () => {
+    const cards = [numericCard({ question: "Чему равен loss в примере выше?" })];
+    const findings = auditStep(cards, STEP_BODY);
+    const deicticFinding = findings.find((f) => f.rule === "deictic");
+    expect(deicticFinding?.message).toContain("в примере");
+    expect(deicticFinding?.message).not.toContain("(?<");
+  });
 });
 
 describe("правило: пересечение чисел", () => {
@@ -57,12 +85,39 @@ describe("правило: пересечение чисел", () => {
     const cards = [numericCard({ explanation: "В уроке словарь был 65, ln(65) ≈ 4.17." })];
     expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("number-overlap");
   });
+
+  it("не смотрит в reference open карточки: ответ ссылается на материал урока", () => {
+    const cards: CardDraft[] = [
+      {
+        kind: "open",
+        concept: "понимание loss",
+        question: "Что такое loss?",
+        explanation: "Loss — это ошибка модели.",
+        reference: "В уроке loss был 4.17 при словаре из 65 символов.",
+      },
+    ];
+    expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("number-overlap");
+  });
 });
 
 describe("правило: ссылки на номера шагов", () => {
   it("заворачивает «см. шаг 12»", () => {
     const cards = [numericCard({ question: "См. шаг 12: чему равен loss?" })];
     expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("step-reference");
+  });
+
+  it("заворачивает open карточку со ссылкой на номер шага в reference", () => {
+    const cards: CardDraft[] = [
+      {
+        kind: "open",
+        concept: "понимание loss",
+        question: "Что такое loss?",
+        explanation: "Loss — это ошибка модели.",
+        reference: "См. шаг 12 для полного объяснения.",
+      },
+    ];
+    const findings = auditStep(cards, STEP_BODY);
+    expect(findings.map((f) => f.rule)).toContain("step-reference");
   });
 });
 

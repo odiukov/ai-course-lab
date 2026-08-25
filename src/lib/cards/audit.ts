@@ -24,16 +24,23 @@ function refOf(card: CardDraft): string {
  *
  * Для Cyrillic текста \b не работает, поэтому используем lookahead/lookbehind с классом
  * символов. Начало word boundary: (?<![а-яА-ЯёЁ]). Конец: (?![а-яА-ЯёЁ]).
+ * Каждый паттерн с label: label интерполируется в сообщение об ошибке вместо
+ * raw .source регулярного выражения, чтобы сообщение было понятно человеку.
  */
-const DEICTIC = [
-  /(?<![а-яА-ЯёЁ])в примере(?![а-яА-ЯёЁ])/i,
-  /(?<![а-яА-ЯёЁ])выше(?![а-яА-ЯёЁ])(?!\s+нул)/i,
-  /(?<![а-яА-ЯёЁ])ниже(?![а-яА-ЯёЁ])(?!\s+нул)/i,
-  /(?<![а-яА-ЯёЁ])мы получили(?![а-яА-ЯёЁ])/i,
-  /(?<![а-яА-ЯёЁ])на этом шаге(?![а-яА-ЯёЁ])/i,
-  /(?<![а-яА-ЯёЁ])как показано(?![а-яА-ЯёЁ])/i,
-  /(?<![а-яА-ЯёЁ])в предыдущем(?![а-яА-ЯёЁ])/i,
-  /(?<![а-яА-ЯёЁ])в тексте(?![а-яА-ЯёЁ])/i,
+interface DeicticPattern {
+  label: string;
+  pattern: RegExp;
+}
+
+const DEICTIC: DeicticPattern[] = [
+  { label: "в примере", pattern: /(?<![а-яА-ЯёЁ])в примере(?![а-яА-ЯёЁ])/i },
+  { label: "выше", pattern: /(?<![а-яА-ЯёЁ])выше(?![а-яА-ЯёЁ])(?!\s+нул)/i },
+  { label: "ниже", pattern: /(?<![а-яА-ЯёЁ])ниже(?![а-яА-ЯёЁ])(?!\s+нул)/i },
+  { label: "мы получили", pattern: /(?<![а-яА-ЯёЁ])мы получили(?![а-яА-ЯёЁ])/i },
+  { label: "на этом шаге", pattern: /(?<![а-яА-ЯёЁ])на этом шаге(?![а-яА-ЯёЁ])/i },
+  { label: "как показано", pattern: /(?<![а-яА-ЯёЁ])как показано(?![а-яА-ЯёЁ])/i },
+  { label: "в предыдущем", pattern: /(?<![а-яА-ЯёЁ])в предыдущем(?![а-яА-ЯёЁ])/i },
+  { label: "в тексте", pattern: /(?<![а-яА-ЯёЁ])в тексте(?![а-яА-ЯёЁ])/i },
 ];
 
 const STEP_REFERENCE = /(?<![а-яА-ЯёЁ])шаг[ае]?\s*№?\s*\d+/i;
@@ -51,21 +58,40 @@ function askedText(card: CardDraft): string {
   return parts.join("\n");
 }
 
+/**
+ * Всё, что человек видит при решении карточки: вопрос, варианты/шаблон/элементы,
+ * плюс explanation и reference для open карточек.
+ *
+ * Reference и explanation — части ответа, прочитанные ПОСЛЕ попытки, одна категория.
+ * Обе должны быть свободны ссылаться на числа урока (пересечение чисел их не касается),
+ * но обе не должны указывать на текст вне карточки (дейктика и ссылки на шаги их касаются).
+ * Это закрывает дыры: open карточки не проверялись дейктикой/step-reference,
+ * explanation тоже не проверялась дейктикой.
+ */
+function shownText(card: CardDraft): string {
+  let text = askedText(card);
+  text += "\n" + card.explanation;
+  if (card.kind === "open") {
+    text += "\n" + card.reference;
+  }
+  return text;
+}
+
 function numbersIn(text: string): string[] {
   return (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((value) => value.replace(",", "."));
 }
 
 const deictic: StepRule = (cards) =>
   cards.flatMap((card) => {
-    const text = askedText(card);
-    const hit = DEICTIC.find((pattern) => pattern.test(text));
+    const text = shownText(card);
+    const hit = DEICTIC.find(({ pattern }) => pattern.test(text));
     return hit
       ? [
           {
             ref: refOf(card),
             rule: "deictic",
             severity: "error" as const,
-            message: `Указательный оборот ${hit.source}: карточка показывается вне урока, указывать не на что`,
+            message: `Указательный оборот «${hit.label}»: карточка показывается вне урока, указывать не на что`,
           },
         ]
       : [];
@@ -101,7 +127,7 @@ const numberOverlap: StepRule = (cards, stepBody) => {
 
 const stepReference: StepRule = (cards) =>
   cards.flatMap((card) =>
-    STEP_REFERENCE.test(askedText(card))
+    STEP_REFERENCE.test(shownText(card))
       ? [
           {
             ref: refOf(card),
