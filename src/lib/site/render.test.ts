@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Step, StepMeta } from "../content/step-file";
 import { buildLessonModel } from "./lesson-page";
-import { renderIndexPage, renderLessonIndexPage, renderStepPage } from "./render";
+import {
+  renderAuthPage,
+  renderIndexPage,
+  renderLessonIndexPage,
+  renderStepPage,
+} from "./render";
 
 const plan: StepMeta[] = [
   { id: "001-a", type: "theory", title: "Первый" },
@@ -39,6 +44,15 @@ describe("renderStepPage", () => {
     expect(html).toContain('<header class="step-header" data-pagefind-ignore>');
     expect(html).toContain('<div class="toc-drawer" data-pagefind-ignore>');
     expect(html).toContain('<nav class="step-nav" data-pagefind-ignore>');
+  });
+
+  it("excludes step controls from Pagefind", () => {
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base" });
+
+    expect(html).toContain('<div class="progress" data-pagefind-ignore>');
+    expect(html).toContain(
+      '<button type="button" class="return-button" data-return data-pagefind-ignore hidden>',
+    );
   });
 
   it("links Back and Next to the neighbouring step pages", () => {
@@ -126,7 +140,7 @@ describe("renderStepPage", () => {
 
     expect(html).toContain('type="application/json" data-quiz-answers');
     expect(html).toContain('"correct":1');
-    expect(html).toContain('<div class="quiz" data-pagefind-ignore>');
+    expect(html).toContain('<div class="quiz" data-quiz data-pagefind-ignore>');
   });
 
   it("mounts a lazy sandboxed frame for a visual", () => {
@@ -311,6 +325,12 @@ describe("обвязка страницы", () => {
 
     expect(renderStepPage(model(allWritten), 1, { basePath: "/base" })).not.toContain(
       "assets/auth.js",
+    );
+  });
+
+  it("исключает страницу входа из результатов Pagefind", () => {
+    expect(renderAuthPage({ basePath: "/base" })).toContain(
+      '<body data-base="/base" data-pagefind-ignore="all">',
     );
   });
 });

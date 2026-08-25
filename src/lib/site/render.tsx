@@ -120,13 +120,11 @@ function renderQuiz(block: LessonBlock): string {
     })
     .join("\n");
 
-  return `<div class="quiz" data-pagefind-ignore>
-<div data-quiz>
+  return `<div class="quiz" data-quiz data-pagefind-ignore>
 <script type="application/json" data-quiz-answers>${encodeQuizPayload(block.questions)}</script>
 <ol class="quiz-questions">
 ${questions}
 </ol>
-</div>
 </div>`;
 }
 
