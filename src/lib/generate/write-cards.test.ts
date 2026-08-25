@@ -1,0 +1,116 @@
+import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { readCards } from "../cards/card";
+import type { Step } from "../content/step-file";
+import { parseCardsReply, writeCardsForStep } from "./write-cards";
+
+const SLUG = "01-math__01-alpha";
+
+const STEP: Step = {
+  id: "046-quiz",
+  type: "theory",
+  title: "Стартовый loss",
+  body: "Стартовый loss при словаре из 65 символов равен примерно 4.17.",
+};
+
+const GOOD = JSON.stringify({
+  cards: [
+    {
+      kind: "numeric",
+      concept: "стартовый loss равен логарифму размера словаря",
+      question: "В словаре 1024 токена, модель необучена. Чему примерно равен loss?",
+      answer: 6.93,
+      tolerance: 0.05,
+      explanation: "ln(1024) ≈ 6.93.",
+    },
+  ],
+  check: [],
+});
+
+const RECYCLED = JSON.stringify({
+  cards: [
+    {
+      kind: "numeric",
+      concept: "стартовый loss равен логарифму размера словаря",
+      question: "В словаре 65 символов. Чему равен loss?",
+      answer: 4.17,
+      tolerance: 0.01,
+      explanation: "ln(65) ≈ 4.17.",
+    },
+  ],
+  check: [],
+});
+
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "write-cards-"));
+}
+
+function agent(replies: string[]) {
+  const prompts: string[] = [];
+  return {
+    prompts,
+    deps: {
+      run: async (prompt: string) => {
+        prompts.push(prompt);
+        return replies[prompts.length - 1] ?? replies[replies.length - 1];
+      },
+    },
+  };
+}
+
+describe("parseCardsReply", () => {
+  it("достаёт JSON из ответа, обрамлённого текстом", () => {
+    const parsed = parseCardsReply(`Вот карточки:\n\`\`\`json\n${GOOD}\n\`\`\`\nГотово.`);
+    expect(parsed.cards).toHaveLength(1);
+    expect(parsed.check).toEqual([]);
+  });
+
+  it("на мусоре вместо JSON возвращает пустые списки, а не бросает", () => {
+    expect(parseCardsReply("Извини, не понял задачу.")).toEqual({ cards: [], check: [] });
+  });
+});
+
+describe("writeCardsForStep", () => {
+  it("пишет карточки на диск и не жалуется", async () => {
+    const dir = tmpDir();
+    const { deps } = agent([GOOD]);
+    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+
+    expect(result.findings).toEqual([]);
+    expect(result.cards).toHaveLength(1);
+    expect(readCards(dir, SLUG, "046-quiz")).toHaveLength(1);
+  });
+
+  it("переспрашивает один раз, отдав замечания, и принимает исправленное", async () => {
+    const dir = tmpDir();
+    const { deps, prompts } = agent([RECYCLED, GOOD]);
+    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("number-overlap");
+    expect(result.findings).toEqual([]);
+    expect(readCards(dir, SLUG, "046-quiz")).toHaveLength(1);
+  });
+
+  it("на повторном провале ничего не пишет и возвращает замечания", async () => {
+    const dir = tmpDir();
+    const { deps } = agent([RECYCLED, RECYCLED]);
+    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+
+    expect(result.findings.map((f) => f.rule)).toContain("number-overlap");
+    expect(result.cards).toEqual([]);
+    expect(readCards(dir, SLUG, "046-quiz")).toBeNull();
+  });
+
+  it("пустой список карточек — законный ответ для шага без запоминаемой идеи", async () => {
+    const dir = tmpDir();
+    const { deps } = agent([JSON.stringify({ cards: [], check: [] })]);
+    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+
+    expect(result.cards).toEqual([]);
+    expect(result.findings).toEqual([]);
+    expect(readCards(dir, SLUG, "046-quiz")).toBeNull();
+  });
+});
