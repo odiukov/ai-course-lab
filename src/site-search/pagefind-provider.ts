@@ -28,7 +28,7 @@ function resultUrl(basePath: string, url: string): string {
   }
 
   const path = url.startsWith("/") ? url : `/${url}`;
-  if (!basePath || path === basePath || path.startsWith(basePath)) {
+  if (!basePath || path === basePath || path.startsWith(`${basePath}/`)) {
     return path;
   }
 
