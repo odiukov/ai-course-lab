@@ -8,6 +8,7 @@
 // Local-first: localStorage уже записан к моменту, когда сюда приходит вызов.
 // Сеть здесь — зеркало, и её отказ ничего не ломает.
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import { appendAuthButton } from "./header-actions";
 import {
   EXERCISE_KEY_PREFIX,
   PROGRESS_KEY_PREFIX,
@@ -184,7 +185,7 @@ function paintButton(): void {
     button.type = "button";
     button.className = "nav-button auth-button";
     button.setAttribute("data-auth", "");
-    header.appendChild(button);
+    appendAuthButton(document, button);
   }
 
   if (session) {

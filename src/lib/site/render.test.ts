@@ -315,8 +315,20 @@ describe("обвязка страницы", () => {
 
     for (const html of pages) {
       expect(html).toContain("data-search-trigger");
+      expect(html).toContain("data-header-actions");
       expect(html).toContain('<script src="/base/assets/search.js"></script>');
     }
+  });
+
+  it("грузит поиск перед auth, но после него не оставляет инлайновые скрипты", () => {
+    const html = renderStepPage(model(allWritten), 1, { basePath: "/base", withAuth: true });
+    const search = html.indexOf('<script src="/base/assets/search.js"></script>');
+    const auth = html.indexOf('<script src="/base/assets/auth.js"></script>');
+    const inline = html.indexOf("<script>");
+
+    expect(search).toBeGreaterThan(-1);
+    expect(auth).toBeGreaterThan(search);
+    expect(inline).toBeGreaterThan(auth);
   });
 
   it("кладёт базовый путь в атрибут body", () => {

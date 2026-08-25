@@ -235,7 +235,7 @@ function createSearchModal(
     const currentIndex = elements.indexOf(document.activeElement as HTMLElement);
     const next = event.shiftKey
       ? currentIndex <= 0
-        ? elements.at(-1)
+        ? elements[elements.length - 1]
         : elements[currentIndex - 1]
       : currentIndex === -1 || currentIndex === elements.length - 1
         ? elements[0]

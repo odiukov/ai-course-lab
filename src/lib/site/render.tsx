@@ -74,8 +74,8 @@ function htmlDocument(options: {
   modules?: string[];
 }): string {
   const scripts = [
-    ...(options.modules ?? []).map((src) => `<script src="${src}"></script>`),
     `<script src="${options.basePath}/assets/search.js"></script>`,
+    ...(options.modules ?? []).map((src) => `<script src="${src}"></script>`),
     ...(options.scripts ?? []).map((code) => `<script>${code}</script>`),
   ].join("\n");
   const pagefind = options.excludeFromSearch ? ' data-pagefind-ignore="all"' : "";
@@ -101,8 +101,8 @@ ${scripts}
 /**
  * Бандл входа в списке модулей страницы — или пусто.
  *
- * Он стоит первым: `window.CourseSync` должен существовать к моменту, когда
- * инлайновый скрипт страницы впервые до него дотянется.
+ * Он должен загрузиться до инлайновых скриптов: `window.CourseSync` нужен к
+ * моменту, когда скрипт страницы впервые до него дотянется.
  */
 function authModules(options: RenderOptions): string[] {
   return options.withAuth ? [`${options.basePath}/assets/auth.js`] : [];
@@ -293,7 +293,7 @@ export function renderStepPage(
 
   const page = `<header class="step-header" data-pagefind-ignore>
 <a class="back" href="${lessonUrl(options.basePath, model.slug)}" data-pagefind-meta="lesson">← ${escapeHtml(model.title)}</a>
-<span class="step-header-actions">
+<span class="step-header-actions" data-header-actions>
 <span class="counter" data-counter>${block.number} / ${model.plannedCount}</span>
 ${renderSearchButton()}
 </span>
@@ -360,7 +360,7 @@ export function renderLessonIndexPage(model: LessonModel, options: RenderOptions
   const page = `<header class="lesson-header">
 <div class="header-toolbar">
 <a class="back" href="${options.basePath}/">← к списку уроков</a>
-${renderSearchButton()}
+<span class="header-actions" data-header-actions>${renderSearchButton()}</span>
 </div>
 <h1>${escapeHtml(model.title)}</h1>
 <p class="lesson-meta"><span data-read-count>${model.plannedCount} шагов</span></p>
@@ -419,7 +419,7 @@ ${lessons}
   return htmlDocument({
     title: SITE_TITLE,
     basePath: options.basePath,
-    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1>${renderSearchButton()}</div></header>\n${sections}`,
+    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1><span class="header-actions" data-header-actions>${renderSearchButton()}</span></div></header>\n${sections}`,
     excludeFromSearch: true,
     scripts: [CATALOG_SCRIPT],
     modules: authModules(options),
@@ -436,7 +436,7 @@ export function renderAuthPage(options: { basePath: string }): string {
   return htmlDocument({
     title: `Вход — ${SITE_TITLE}`,
     basePath: options.basePath,
-    body: `<header class="index-header"><div class="header-toolbar"><h1>Вход</h1>${renderSearchButton()}</div></header>
+    body: `<header class="index-header"><div class="header-toolbar"><h1>Вход</h1><span class="header-actions" data-header-actions>${renderSearchButton()}</span></div></header>
 <main class="lesson">
 <p class="run-status" data-auth-status>Проверяю вход…</p>
 <a class="nav-button" data-auth-back href="${options.basePath}/">К курсу</a>
