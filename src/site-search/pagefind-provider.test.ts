@@ -2,21 +2,26 @@ import { describe, expect, it } from "vitest";
 import { PagefindProvider } from "./pagefind-provider";
 
 describe("PagefindProvider", () => {
-  it("не показывает неточные совпадения для составного идентификатора", async () => {
-    const fuzzyResult = {
-      url: "/lesson/fuzzy/",
-      excerpt: "Локальное влияние параметров на <mark>zzz</mark>",
-      meta: { lesson: "← Урок", title: "Нечёткое совпадение" },
-    };
+  it.each([
+    ["softmax", "softmax"],
+    ["foo-bar", "foo-bar"],
+    ["end-to-end обучение", "end-to-end обучение"],
+    ["zzzz-course-no-result-20260825", '"zzzz-course-no-result-20260825"'],
+    ["  zzzz-course-no-result-20260825  ", '"zzzz-course-no-result-20260825"'],
+  ])("передаёт запрос %s в Pagefind как %s", async (query, expectedQuery) => {
+    const pagefindQueries: string[] = [];
     const pagefind = {
       init: () => undefined,
-      search: async (query: string) => ({
-        results: query.startsWith('"') ? [] : [{ data: async () => fuzzyResult }],
-      }),
+      search: async (pagefindQuery: string) => {
+        pagefindQueries.push(pagefindQuery);
+        return { results: [] };
+      },
     };
     const provider = Object.create(PagefindProvider.prototype) as PagefindProvider;
     Object.assign(provider, { basePath: "/ai-course-lab", pagefind: Promise.resolve(pagefind) });
 
-    await expect(provider.search("zzzz-course-no-result-20260825")).resolves.toEqual([]);
+    await provider.search(query);
+
+    expect(pagefindQueries).toEqual([expectedQuery]);
   });
 });

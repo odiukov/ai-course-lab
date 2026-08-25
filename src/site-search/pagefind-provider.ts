@@ -23,8 +23,9 @@ function text(value: unknown, fallback: string): string {
 }
 
 function pagefindQuery(query: string): string {
-  const hasCompoundIdentifier = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+){2,}/u.test(query);
-  return hasCompoundIdentifier ? `"${query}"` : query;
+  const trimmedQuery = query.trim();
+  const isCompoundIdentifier = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+){2,}$/u.test(trimmedQuery);
+  return isCompoundIdentifier ? `"${trimmedQuery}"` : query;
 }
 
 function resultUrl(basePath: string, url: string): string {
