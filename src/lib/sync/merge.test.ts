@@ -120,7 +120,6 @@ function row(over: Partial<CardRow> = {}): CardRow {
   return {
     lessonSlug: "01-alpha",
     cardId: "s-1",
-    fingerprint: "abcd1234",
     state: {
       intervalDays: 6,
       ease: 2.5,

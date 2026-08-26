@@ -122,10 +122,18 @@ export function mergeFile(local: FileRow | null, cloud: FileRow | null): FileDec
   return { action: "keep-cloud", row: cloud, backup: local.content };
 }
 
+/**
+ * Строка графика одной карточки.
+ *
+ * Отпечаток живёт только внутри `state`, рядом с интервалом и датой правки:
+ * одна мысль — одно поле. Второй, наружный, мог бы разойтись с внутренним
+ * молча, и тому, кто позже подключит облачную ветку, пришлось бы помнить, что
+ * копировать его надо в оба места. Цена забывчивости — график, переживший
+ * переписанный вопрос, то есть ровно то, от чего отпечаток и защищает.
+ */
 export interface CardRow {
   lessonSlug: string;
   cardId: string;
-  fingerprint: string;
   state: StoredState;
 }
 
@@ -144,7 +152,8 @@ export function mergeCard(
   cloud: CardRow | null,
   fileFingerprint: string,
 ): CardRow | null {
-  const fresh = (row: CardRow | null) => (row && row.fingerprint === fileFingerprint ? row : null);
+  const fresh = (row: CardRow | null) =>
+    row && row.state.fingerprint === fileFingerprint ? row : null;
   const l = fresh(local);
   const c = fresh(cloud);
 
