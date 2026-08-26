@@ -171,6 +171,27 @@ describe("правило: указательные обороты", () => {
       expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
     });
   });
+
+  describe("«<существительное> выше/ниже» + объект сравнения — не дейктика", () => {
+    // Регресс на сужение REFERABLE_NOUN (ab733c95): прошлая версия правила
+    // несла вырез `(?!\s+нул)` ровно для этого случая, и сужение корней его
+    // не унаследовало. Фаза 01 — про знак функции и графики, и «где график
+    // выше нуля» там канонический вопрос.
+    it("пропускает «на каком интервале график выше нуля»", () => {
+      const cards = [numericCard({ question: "На каком интервале график выше нуля?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «где график ниже нуля»", () => {
+      const cards = [numericCard({ question: "Где график ниже нуля?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «график выше оси абсцисс»", () => {
+      const cards = [numericCard({ question: "Что означает, что график выше оси абсцисс?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+  });
 });
 
 describe("правило: пересечение чисел", () => {
@@ -289,7 +310,7 @@ describe("auditCheck — правила для вопросов внутри ш�
         explanation: "Равномерное распределение даёт ln(|V|).",
       },
     ];
-    expect(auditCheck(questions, body).map((f) => f.rule)).not.toContain("deictic");
+    expect(auditCheck(questions, body)).toEqual([]);
   });
 
   it("заворачивает вопрос, ответ на который — число из текста шага", () => {
