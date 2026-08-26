@@ -7,6 +7,7 @@ import {
   LOCAL_BACKUP_SUFFIX,
   PROGRESS_KEY_PREFIX,
   RECOVERY_SUFFIX,
+  REVIEW_KEY_PREFIX,
   STEP_STATE_KEY_PREFIX,
   SYNCED_KEY_PREFIX,
   UPDATED_AT_SUFFIX,
@@ -24,5 +25,9 @@ describe("ключи localStorage", () => {
     expect(SYNCED_KEY_PREFIX).toBe("course-synced:");
     expect(UPDATED_AT_SUFFIX).toBe(":updatedAt");
     expect(LOCAL_BACKUP_SUFFIX).toBe(":local-backup");
+  });
+
+  it("ключ графика повторений закреплён", () => {
+    expect(REVIEW_KEY_PREFIX).toBe("course-review:");
   });
 });

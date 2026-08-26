@@ -26,6 +26,16 @@ export const EXERCISE_KEY_PREFIX = "course-exercise:";
 /** Флаг «локальный прогресс уже влит в этот аккаунт»: `course-synced:<user-id>`. */
 export const SYNCED_KEY_PREFIX = "course-synced:";
 
+/**
+ * График повторений урока: `course-review:<lesson-slug>`, значение — объект
+ * `{ "<card-id>": { intervalDays, ease, reps, lapses, dueOn, fingerprint, updatedAt } }`.
+ *
+ * Отпечаток лежит рядом с состоянием, потому что переписанная по существу
+ * карточка не должна унаследовать чужой график: человек получил бы интервал в
+ * три месяца на вопрос, которого никогда не видел.
+ */
+export const REVIEW_KEY_PREFIX = "course-review:";
+
 /** Время последней правки файла упражнения в ISO. */
 export const UPDATED_AT_SUFFIX = ":updatedAt";
 
