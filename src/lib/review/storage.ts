@@ -45,18 +45,27 @@ export function readLessonStates(
   }
 }
 
+/**
+ * Запись состояния одной карточки. `false` — записать не удалось.
+ *
+ * Функция по-прежнему не бросает: ронять страницу из-за отказа хранилища
+ * нельзя, читать урок человек может и без графика. Но и молчать о нём нельзя —
+ * иначе читатель отвечает сорок карточек, видит «Подход закончен», а завтра
+ * получает те же сорок. Кто вызвал, тот и решает, как предупредить; здесь
+ * возвращается только факт.
+ */
 export function writeCardState(
   storage: ReviewStorage,
   slug: string,
   cardId: string,
   state: StoredState,
-): void {
+): boolean {
   try {
     const states = readLessonStates(storage, slug);
     states[cardId] = state;
     storage.setItem(REVIEW_KEY_PREFIX + slug, JSON.stringify(states));
+    return true;
   } catch {
-    // Отказ записи означает подход, который не сохранится. Ронять страницу
-    // из-за этого нельзя: читать урок человек может и без графика.
+    return false;
   }
 }

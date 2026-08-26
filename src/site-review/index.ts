@@ -57,6 +57,45 @@ function collectStates(slugs: string[]): Record<string, StoredState> {
   return states;
 }
 
+/** Сообщение вместо подхода: страница обязана сказать хоть что-то. */
+function showFailure(element: HTMLElement, message: string): void {
+  element.replaceChildren();
+  const failure = element.ownerDocument.createElement("p");
+  failure.className = "run-status";
+  failure.textContent = message;
+  element.appendChild(failure);
+}
+
+let saveWarning: HTMLElement | null = null;
+
+/**
+ * Предупреждение о подходе, который не сохранится.
+ *
+ * Спека требует именно этого: при отказе хранилища режим работает в пределах
+ * вкладки и предупреждает. Худший случай — тихий: чтение работает, запись нет,
+ * и человек отвечает сорок карточек, чтобы завтра получить те же сорок.
+ *
+ * Заметка кладётся рядом с хостом подхода, а не внутрь него: `runSession`
+ * очищает хост перед каждой карточкой, и вложенная заметка исчезла бы на
+ * следующем же вопросе. Один раз на страницу — предупреждение на каждый ответ
+ * превратилось бы в стену.
+ */
+function warnNotSaved(element: HTMLElement): void {
+  if (saveWarning) return;
+
+  const notice = element.ownerDocument.createElement("p");
+  notice.className = "review-notice";
+  notice.dataset.reviewNotice = "";
+  notice.textContent =
+    "Ответы не сохраняются: браузер не даёт записать прогресс — например, в приватном окне. " +
+    "Подход работает до закрытия вкладки, но график останется прежним.";
+
+  const parent = element.parentNode;
+  if (parent) parent.insertBefore(notice, element);
+  else element.prepend(notice);
+  saveWarning = notice;
+}
+
 /**
  * Подход на выбранный день.
  *
@@ -72,7 +111,9 @@ function startSession(element: HTMLElement, cards: Record<string, SiteCard[]>, s
     today: addDays(today(), shift),
     onGraded:
       shift === 0
-        ? (lessonSlug, card, state) => writeCardState(localStorage, lessonSlug, card.id, state)
+        ? (lessonSlug, card, state) => {
+            if (!writeCardState(localStorage, lessonSlug, card.id, state)) warnNotSaved(element);
+          }
         : () => {},
   });
 }
@@ -98,11 +139,7 @@ async function main(element: HTMLElement): Promise<void> {
   if (loaded.status === "failed") {
     // Ровно тот случай, ради которого итог загрузки размечен: пустая страница
     // без этого сообщения означала бы «всё повторено».
-    element.replaceChildren();
-    const failure = element.ownerDocument.createElement("p");
-    failure.className = "run-status";
-    failure.textContent = loaded.message;
-    element.appendChild(failure);
+    showFailure(element, loaded.message);
     return;
   }
 
@@ -115,4 +152,17 @@ async function main(element: HTMLElement): Promise<void> {
   startSession(element, loaded.cards, 0);
 }
 
-if (host) void main(host);
+/**
+ * Непредвиденный отказ тоже говорит фразу.
+ *
+ * Без `.catch` любое исключение оставляло бы читателя на «Загружаю карточки…»
+ * навсегда: обещание, которое страница не выполнит, и ни строки о том, почему.
+ */
+if (host) {
+  void main(host).catch(() => {
+    showFailure(
+      host,
+      "Страница повторений не запустилась. Обнови её, а если не поможет — попробуй позже.",
+    );
+  });
+}

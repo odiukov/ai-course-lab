@@ -151,7 +151,7 @@ describe("loadReviewCards", () => {
     expect(result.status).toBe("failed");
   });
 
-  it("отказ хранилища не роняет загрузку", async () => {
+  it("отказ хранилища — отказ со своим текстом, а не пустая очередь", async () => {
     const { asked, fetchJson } = fetcher({ "/base/cards/index.json": MANIFEST });
 
     const result = await loadReviewCards({
@@ -165,8 +165,89 @@ describe("loadReviewCards", () => {
       },
     });
 
-    // Прогресса не видно — значит, повторять нечего; это не отказ загрузки.
-    expect(result.status).toBe("loaded");
+    // Прогресс не прочитан — страница не знает ни одного урока, а не знает,
+    // что уроки пройдены. Иначе приватное окно показывало бы «На сегодня всё».
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") return;
+    expect(result.message).toContain("хранилищу");
+    expect(result.message).not.toContain("соединение");
     expect(asked).toEqual(["/base/cards/index.json"]);
+  });
+
+  it("битый JSON прогресса — не отказ хранилища, а урок мимо очереди", async () => {
+    const { asked, fetchJson } = fetcher({
+      "/base/cards/index.json": MANIFEST,
+      "/base/cards/02-beta.json": [card("c-2")],
+    });
+
+    const result = await loadReviewCards({
+      basePath: "/base",
+      fetchJson,
+      storage: storageWith({
+        [PROGRESS_KEY_PREFIX + "01-alpha"]: "{не json",
+        [PROGRESS_KEY_PREFIX + "02-beta"]: JSON.stringify(["s-1"]),
+      }),
+    });
+
+    expect(result.status).toBe("loaded");
+    expect(asked).toEqual(["/base/cards/index.json", "/base/cards/02-beta.json"]);
+  });
+
+  it("выбрасывает карточку с неизвестным видом, а не роняет подход", async () => {
+    const { fetchJson } = fetcher({
+      "/base/cards/index.json": MANIFEST,
+      "/base/cards/01-alpha.json": [
+        { ...card("c-1"), kind: "diagram" },
+        card("c-2"),
+      ],
+    });
+
+    const result = await loadReviewCards({
+      basePath: "/base",
+      fetchJson,
+      storage: readProgress("01-alpha"),
+    });
+
+    // Отрисовщика на такой вид нет, и до session.ts карточка доезжать не
+    // должна: там она упала бы на undefined.mount уже после очистки хоста.
+    expect(result.status).toBe("loaded");
+    if (result.status !== "loaded") return;
+    expect(result.cards["01-alpha"].map((item) => item.id)).toEqual(["c-2"]);
+  });
+
+  it("выбрасывает карточку без id и отпечатка", async () => {
+    const { fetchJson } = fetcher({
+      "/base/cards/index.json": MANIFEST,
+      // По id и отпечатку живёт ключ графика: без них состояние писалось бы
+      // под ключом «undefined».
+      "/base/cards/01-alpha.json": [{ ...card("c-1"), id: undefined }, card("c-2")],
+    });
+
+    const result = await loadReviewCards({
+      basePath: "/base",
+      fetchJson,
+      storage: readProgress("01-alpha"),
+    });
+
+    expect(result.status).toBe("loaded");
+    if (result.status !== "loaded") return;
+    expect(result.cards["01-alpha"].map((item) => item.id)).toEqual(["c-2"]);
+  });
+
+  it("урок, у которого все карточки нечитаемы, просто не участвует", async () => {
+    const { fetchJson } = fetcher({
+      "/base/cards/index.json": MANIFEST,
+      "/base/cards/01-alpha.json": [{ kind: "diagram" }],
+    });
+
+    const result = await loadReviewCards({
+      basePath: "/base",
+      fetchJson,
+      storage: readProgress("01-alpha"),
+    });
+
+    expect(result.status).toBe("loaded");
+    if (result.status !== "loaded") return;
+    expect(Object.keys(result.cards)).toEqual([]);
   });
 });

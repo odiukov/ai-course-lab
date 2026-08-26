@@ -77,4 +77,20 @@ describe("writeCardState", () => {
     };
     expect(() => writeCardState(throwing, "01-alpha", "s-1", stored())).not.toThrow();
   });
+
+  it("сообщает об отказе записи, а не только не падает", () => {
+    const throwing = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota");
+      },
+    };
+    // Тихий отказ означал бы сорок отвеченных карточек и те же сорок завтра:
+    // страница обязана узнать о нём, чтобы предупредить.
+    expect(writeCardState(throwing, "01-alpha", "s-1", stored())).toBe(false);
+  });
+
+  it("на успешной записи отвечает true", () => {
+    expect(writeCardState(fakeStorage(), "01-alpha", "s-1", stored())).toBe(true);
+  });
 });
