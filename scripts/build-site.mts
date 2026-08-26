@@ -29,6 +29,7 @@ import {
   renderAuthPage,
   renderIndexPage,
   renderLessonIndexPage,
+  renderReviewPage,
   renderStepPage,
 } from "../src/lib/site/render.js";
 import { collectVisualRefs } from "../src/lib/site/visual-refs.js";
@@ -100,6 +101,19 @@ async function buildSearch(): Promise<void> {
   await build({
     entryPoints: [path.join(root, "src", "site-search", "index.ts")],
     outfile: path.join(outDir, "assets", "search.js"),
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2020",
+    logLevel: "warning",
+  });
+}
+
+/** Режим повторений одним файлом: очередь, отрисовщики карточек и подход. */
+async function buildReview(): Promise<void> {
+  await build({
+    entryPoints: [path.join(root, "src", "site-review", "index.ts")],
+    outfile: path.join(outDir, "assets", "review.js"),
     bundle: true,
     minify: true,
     format: "iife",
@@ -296,6 +310,7 @@ async function main(): Promise<void> {
   });
 
   write("index.html", renderIndexPage(phases, { basePath, withAuth }));
+  write(path.join("review", "index.html"), renderReviewPage({ basePath, withAuth }));
   if (withAuth) write(path.join("auth", "index.html"), renderAuthPage({ basePath }));
   write("assets/site.css", buildSiteCss());
   write("assets/harness.py", fs.readFileSync(path.join(root, "src", "site-python", "harness.py"), "utf8"));
@@ -308,7 +323,7 @@ async function main(): Promise<void> {
   write(".nojekyll", "");
   copyKatexAssets();
   copyPyodide();
-  await Promise.all([buildEditor(), buildSearch()]);
+  await Promise.all([buildEditor(), buildSearch(), buildReview()]);
 
   console.log(
     `Собрано: уроков ${catalog.length}, шагов ${renderedSteps}, ` +

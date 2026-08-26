@@ -427,6 +427,48 @@ ${lessons}
 }
 
 /**
+ * Страница повторений.
+ *
+ * Внутри пусто: очередь на сегодня зависит от графика в браузере, и на сборке
+ * её знать неоткуда. Разметка даёт бандлу только место под карточку и место
+ * под поле сдвига дня.
+ *
+ * Поле сдвига лежит в разметке скрытым, а показывает его скрипт по `?debug=1`:
+ * страница статическая и одна на всех, про параметры адреса она узнать не
+ * может. Ничего не записывая, поле не испортит график — худшее, что оно
+ * делает, это показывает не тот список.
+ */
+export function renderReviewPage(options: RenderOptions): string {
+  const page = `<header class="lesson-header">
+<div class="header-toolbar">
+<a class="back" href="${options.basePath}/">← к списку уроков</a>
+<span class="header-actions" data-header-actions>${renderSearchButton()}</span>
+</div>
+<h1>Повторение</h1>
+<p class="lesson-meta">Карточки, до которых дошёл срок. График живёт в этом браузере.</p>
+</header>
+<main class="lesson">
+<div class="review-debug" data-review-debug hidden>
+<label for="review-shift">Показать день +N</label>
+<input id="review-shift" type="number" data-review-shift value="0" min="0" max="365" step="1">
+<button type="button" class="nav-button" data-review-shift-apply>Пересчитать</button>
+<p class="run-status" data-review-shift-note></p>
+</div>
+<div class="review" data-review>
+<p class="run-status">Загружаю карточки…</p>
+</div>
+</main>`;
+
+  return htmlDocument({
+    title: `Повторение — ${SITE_TITLE}`,
+    basePath: options.basePath,
+    body: page,
+    excludeFromSearch: true,
+    modules: [...authModules(options), `${options.basePath}/assets/review.js`],
+  });
+}
+
+/**
  * Страница возврата после входа через GitHub.
  *
  * Единственное место, где виден ход первого слияния. Разбор токена из адреса
