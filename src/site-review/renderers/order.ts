@@ -44,23 +44,82 @@ export const order: CardRenderer = {
       display = shuffled(card.items);
     }
 
+    /**
+     * Выбранное видно списком по ходу дела.
+     *
+     * Без него единственным следом клика была бы погасшая кнопка, и человек
+     * держал бы собственный порядок из шести шагов в голове — карточка
+     * проверяла бы память о своих же нажатиях, а не знание материала.
+     */
+    const picks = doc.createElement("ol");
+    picks.className = "review-picks";
+    picks.dataset.picks = "";
+    host.appendChild(picks);
+
     const picked: string[] = [];
+    const buttons: HTMLButtonElement[] = [];
+    /**
+     * Карточка оценена — дальше ни клик, ни сброс ничего не меняют.
+     *
+     * Погасшие кнопки — защита для браузера, а этот признак — для кода: второй
+     * вызов onAnswer означал бы второй расчёт срока и вторую панель разбора
+     * поверх первой, и держаться такая гарантия на одном атрибуте DOM не должна.
+     */
+    let graded = false;
+
+    /**
+     * Сброс доступен до последнего выбора.
+     *
+     * Последний клик оценивает карточку и уезжает в планировщик, так что
+     * отменять после него уже нечего; до него ошибка на втором шаге из шести
+     * иначе означала бы гарантированное «неверно» и лишний провал в графике.
+     */
+    const reset = doc.createElement("button");
+    reset.type = "button";
+    reset.className = "review-reset";
+    reset.dataset.reset = "";
+    reset.textContent = "Начать заново";
+    reset.disabled = true;
+    reset.addEventListener("click", () => {
+      if (graded) return;
+      picked.length = 0;
+      picks.replaceChildren();
+      for (const button of buttons) button.disabled = false;
+      reset.disabled = true;
+    });
+
     display.forEach((label, index) => {
       const button = doc.createElement("button");
       button.type = "button";
+      button.className = "review-item";
       button.dataset.item = String(index);
       button.textContent = label;
       button.addEventListener("click", () => {
+        if (graded || button.disabled) return;
         // Кнопка гаснет сразу после своего клика: повторный клик по ней иначе
         // добавил бы элемент в ответ дважды.
         button.disabled = true;
         picked.push(label);
+
+        const pick = doc.createElement("li");
+        pick.className = "review-pick";
+        pick.dataset.pick = String(picked.length);
+        pick.textContent = label;
+        picks.appendChild(pick);
+
         if (picked.length === card.items.length) {
+          graded = true;
+          reset.disabled = true;
           const correct = sameOrder(picked, card.items);
           onAnswer({ grade: gradeAuto(correct), correct });
+        } else {
+          reset.disabled = false;
         }
       });
+      buttons.push(button);
       host.appendChild(button);
     });
+
+    host.appendChild(reset);
   },
 };

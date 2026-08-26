@@ -1,6 +1,20 @@
 import { gradeSelf, type SelfGrade } from "../../lib/review/grade";
 import type { CardRenderer } from "./types";
 
+/**
+ * Подписи кнопок самооценки.
+ *
+ * Значение остаётся английским: по нему живут `data-self`, `gradeSelf` и тесты.
+ * Видит человек только подпись — на русскоязычном сайте, рядом с «Ответить» и
+ * «Показать эталон», кнопка с надписью `hard` заставляла бы угадывать ровно в
+ * том месте, где от читателя ждут честного выбора из трёх.
+ */
+const SELF_LABELS: Record<SelfGrade, string> = {
+  again: "не вспомнил",
+  hard: "с трудом",
+  easy: "легко",
+};
+
 const SELF_GRADES: SelfGrade[] = ["again", "hard", "easy"];
 
 /**
@@ -21,6 +35,7 @@ export const open: CardRenderer = {
 
     const reveal = doc.createElement("button");
     reveal.type = "button";
+    reveal.className = "review-submit";
     reveal.dataset.reveal = "";
     reveal.textContent = "Показать эталон";
     reveal.addEventListener("click", () => {
@@ -32,12 +47,19 @@ export const open: CardRenderer = {
       reference.textContent = card.reference;
       host.appendChild(reference);
 
+      // Три кнопки лежат в одной строке-обёртке: расстояние между ними задаётся
+      // одним gap, а не отступами у каждой.
+      const row = doc.createElement("div");
+      row.className = "review-self-row";
+      host.appendChild(row);
+
       const buttons: HTMLButtonElement[] = [];
       for (const value of SELF_GRADES) {
         const button = doc.createElement("button");
         button.type = "button";
+        button.className = "review-self";
         button.dataset.self = value;
-        button.textContent = value;
+        button.textContent = SELF_LABELS[value];
         button.addEventListener("click", () => {
           // Кнопки гаснут после ответа: второй клик иначе пересчитал бы
           // оценку и уехал бы вторым вызовом onAnswer.
@@ -45,7 +67,7 @@ export const open: CardRenderer = {
           onAnswer({ grade: gradeSelf(value), correct: null });
         });
         buttons.push(button);
-        host.appendChild(button);
+        row.appendChild(button);
       }
     });
     host.appendChild(reveal);

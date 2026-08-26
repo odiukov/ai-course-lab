@@ -24,21 +24,29 @@ export const cloze: CardRenderer = {
 
     // Шаблон приходит одной строкой с "___" внутри — разрезаем по нему и
     // вставляем поле ввода в разрез, а не рядом с текстом.
-    const [before, after] = card.template.split("___");
+    //
+    // Хвост склеивается обратно, а не берётся вторым элементом разреза: схема
+    // требует от шаблона только наличие "___", так что пропусков может быть и
+    // два. Поле ввода остаётся одно — второй пропуск показывается как есть, —
+    // но взять из разреза ровно две части значило бы молча потерять всё после
+    // второго пропуска, и читателя оценивали бы по строке кода без конца.
+    const [before, ...rest] = card.template.split("___");
     const line = doc.createElement("p");
     line.appendChild(doc.createTextNode(before));
 
     const input = doc.createElement("input");
     input.type = "text";
+    input.className = "review-input";
     line.appendChild(input);
 
-    line.appendChild(doc.createTextNode(after));
+    line.appendChild(doc.createTextNode(rest.join("___")));
     host.appendChild(line);
 
     const accepted = [card.answer, ...card.accept].map(normalize);
 
     const submit = doc.createElement("button");
     submit.type = "button";
+    submit.className = "review-submit";
     submit.dataset.submit = "";
     submit.textContent = "Ответить";
     submit.addEventListener("click", () => {

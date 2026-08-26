@@ -19,10 +19,12 @@ export const numeric: CardRenderer = {
 
     const input = doc.createElement("input");
     input.type = "text";
+    input.className = "review-input";
     host.appendChild(input);
 
     const submit = doc.createElement("button");
     submit.type = "button";
+    submit.className = "review-submit";
     submit.dataset.submit = "";
     submit.textContent = "Ответить";
     submit.addEventListener("click", () => {

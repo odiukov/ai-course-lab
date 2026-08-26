@@ -21,6 +21,7 @@ export const choice: CardRenderer = {
     card.options.forEach((label, index) => {
       const button = doc.createElement("button");
       button.type = "button";
+      button.className = "review-option";
       button.dataset.option = String(index);
       button.textContent = label;
       button.addEventListener("click", () => {
