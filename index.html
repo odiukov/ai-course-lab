@@ -9,7 +9,10 @@
 <link rel="stylesheet" href="/ai-course-lab/assets/site.css">
 </head>
 <body data-base="/ai-course-lab" data-pagefind-ignore="all">
-<header class="index-header"><div class="header-toolbar"><h1>AI Lab</h1><span class="header-actions" data-header-actions><button type="button" class="nav-button search-button" data-search-trigger data-pagefind-ignore aria-haspopup="dialog">
+<header class="index-header"><div class="header-toolbar"><h1>AI Lab</h1><span class="header-actions" data-header-actions><a class="nav-button" href="/ai-course-lab/review/">
+<span>Повторение</span>
+<span data-review-due hidden></span>
+</a><button type="button" class="nav-button search-button" data-search-trigger data-pagefind-ignore aria-haspopup="dialog">
 <span>Поиск</span>
 <kbd class="search-shortcut" data-search-shortcut aria-hidden="true">⌘K</kbd>
 </button></span></div></header>
@@ -3983,6 +3986,8 @@ function markState(slug, stepId, state) {
 }
 
 
+var REVIEW_PREFIX = "course-review:";
+
 function paint() {
   var rows = document.querySelectorAll("[data-lesson-slug]");
   for (var i = 0; i < rows.length; i += 1) {
@@ -3997,7 +4002,76 @@ function paint() {
   }
 }
 
+/**
+ * Сегодня по местным часам — тем же правилом, что и на странице повторений.
+ *
+ * Голый toISOString с полуночи до трёх утра по Киеву вернул бы вчерашнюю
+ * дату: бейдж каталога и сама страница повторений разошлись бы во мнении о
+ * том, что уже готово, и читатель увидел бы «3 к повторению», а на странице —
+ * «на сегодня всё».
+ */
+function today() {
+  var now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+/**
+ * График повторений одного урока — или null, если ключа нет или он битый.
+ *
+ * Обёрнута отдельно от остального сканирования: испорченное значение под
+ * одним уроком не должно гасить бейдж целиком — у остальных уроков карточки
+ * к повторению есть, и молчаливый общий ноль отправил бы читателя мимо них.
+ */
+function readReviewStates(key) {
+  try {
+    var raw = localStorage.getItem(key);
+    var parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Бейдж «к повторению» рядом со ссылкой в шапке.
+ *
+ * Карточек в браузере не знает никто, кроме самого браузера: график лежит по
+ * ключу на урок, и единственный способ его найти — перебрать localStorage
+ * целиком, а не список уроков каталога, как делает paint().
+ */
+function paintReviewDue() {
+  var target = document.querySelector("[data-review-due]");
+  if (!target) return;
+
+  try {
+    var day = today();
+    var count = 0;
+    for (var i = 0; i < localStorage.length; i += 1) {
+      var key = localStorage.key(i);
+      if (!key || key.indexOf(REVIEW_PREFIX) !== 0) continue;
+
+      var states = readReviewStates(key);
+      if (!states) continue;
+
+      for (var cardId in states) {
+        if (!Object.prototype.hasOwnProperty.call(states, cardId)) continue;
+        var state = states[cardId];
+        if (state && state.dueOn && state.dueOn <= day) count += 1;
+      }
+    }
+
+    if (count > 0) {
+      target.textContent = String(count);
+      target.hidden = false;
+    }
+  } catch (error) {
+    // localStorage.length/key недоступны целиком — бейдж просто остаётся скрытым.
+  }
+}
+
 paint();
+paintReviewDue();
 
 // Каталог — первая страница, на которую возвращаются: прогресс с другого
 // устройства должен проступить на ней сам, без перезагрузки.
