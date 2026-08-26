@@ -461,7 +461,7 @@ export function renderReviewPage(options: RenderOptions): string {
 <h1>Повторение</h1>
 <p class="lesson-meta">Карточки, до которых дошёл срок. График живёт в этом браузере.</p>
 </header>
-<main class="lesson">
+<main class="lesson review-page">
 <div class="review-debug" data-review-debug hidden>
 <label for="review-shift">Показать день +N</label>
 <input id="review-shift" type="number" data-review-shift value="0" min="0" max="365" step="1">

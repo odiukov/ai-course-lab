@@ -32,6 +32,7 @@ export const cloze: CardRenderer = {
     // второго пропуска, и читателя оценивали бы по строке кода без конца.
     const [before, ...rest] = card.template.split("___");
     const line = doc.createElement("p");
+    line.className = "review-template";
     line.appendChild(doc.createTextNode(before));
 
     const input = doc.createElement("input");
