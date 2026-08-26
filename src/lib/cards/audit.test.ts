@@ -58,6 +58,140 @@ describe("правило: указательные обороты", () => {
     expect(deicticFinding?.message).toContain("в примере");
     expect(deicticFinding?.message).not.toContain("(?<");
   });
+
+  describe("сравнительное «выше»/«ниже» — не дейктика", () => {
+    it("пропускает «вероятность B выше вероятности A»", () => {
+      const cards = [
+        numericCard({ question: "Почему вероятность B выше вероятности A?" }),
+      ];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «значение ниже среднего»", () => {
+      const cards = [numericCard({ question: "Что значит, что значение ниже среднего?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «апостериорная вероятность выше априорной»", () => {
+      const cards = [
+        numericCard({ explanation: "Апостериорная вероятность выше априорной." }),
+      ];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «примерно выше»: «пример» — не одно и то же слово, что «примерно»", () => {
+      // Регресс на открытый «[а-я]*» после корня: он цеплял «примерно» как
+      // существительное «пример» с любым хвостом, и «примерно выше» —
+      // обычное сравнение из текста про вероятность — заворачивалось.
+      const cards = [numericCard({ question: "Значение примерно выше нормы. Почему?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+  });
+
+  describe("дейктическое «выше»/«ниже» — по-прежнему ловится", () => {
+    it("заворачивает «см. выше»", () => {
+      const cards = [numericCard({ question: "См. выше: чему равен loss?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «как показано выше» — через существующий оборот «как показано»", () => {
+      // Эта фраза уже ловится записью «как показано», а не новым паттерном
+      // «выше»/«ниже» — оборот «как выше» без «показано» проверен отдельным кейсом ниже.
+      const cards = [numericCard({ question: "Как показано выше, чему равен loss?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает голое «как выше» без «показано»", () => {
+      const cards = [numericCard({ explanation: "Ответ такой же, как выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «в примере выше»", () => {
+      const cards = [numericCard({ question: "Чему равен loss в примере выше?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «формула выше даёт тот же ответ»", () => {
+      const cards = [numericCard({ explanation: "Формула выше даёт тот же ответ." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «приведённая выше оценка»", () => {
+      const cards = [numericCard({ question: "На чём основана приведённая выше оценка?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it.each([
+      ["Смотри на таблице выше.", "предложный падеж"],
+      ["Данные из таблицы выше.", "родительный падеж"],
+    ])(
+      "заворачивает падежную форму носителя, которую раньше держал открытый хвост: %s (%s)",
+      (explanation) => {
+        // Явные окончания должны покрывать то же самое, что раньше покрывал
+        // «[а-я]*» — просто не покрывать заодно и «примерно».
+        const cards = [numericCard({ explanation })];
+        expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+      },
+    );
+
+    it("заворачивает «примера выше»", () => {
+      const cards = [numericCard({ question: "Что общего у примера выше с этим шагом?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «кода ниже»", () => {
+      const cards = [numericCard({ explanation: "Смысл понятен из кода ниже." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+  });
+
+  describe("рисунки, графики и разделы — тоже дейктика", () => {
+    it("заворачивает «на графике выше»", () => {
+      const cards = [numericCard({ explanation: "Видно на графике выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «в разделе выше»", () => {
+      const cards = [numericCard({ question: "Это уже обсуждалось в разделе выше?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на рисунке выше»", () => {
+      const cards = [numericCard({ explanation: "ROC-кривая показана на рисунке выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на диаграмме выше»", () => {
+      const cards = [numericCard({ explanation: "Распределение видно на диаграмме выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на схеме ниже»", () => {
+      const cards = [numericCard({ explanation: "Порядок шагов показан на схеме ниже." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+  });
+
+  describe("«<существительное> выше/ниже» + объект сравнения — не дейктика", () => {
+    // Регресс на сужение REFERABLE_NOUN (ab733c95): прошлая версия правила
+    // несла вырез `(?!\s+нул)` ровно для этого случая, и сужение корней его
+    // не унаследовало. Фаза 01 — про знак функции и графики, и «где график
+    // выше нуля» там канонический вопрос.
+    it("пропускает «на каком интервале график выше нуля»", () => {
+      const cards = [numericCard({ question: "На каком интервале график выше нуля?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «где график ниже нуля»", () => {
+      const cards = [numericCard({ question: "Где график ниже нуля?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «график выше оси абсцисс»", () => {
+      const cards = [numericCard({ question: "Что означает, что график выше оси абсцисс?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+  });
 });
 
 describe("правило: пересечение чисел", () => {
@@ -176,7 +310,7 @@ describe("auditCheck — правила для вопросов внутри ш�
         explanation: "Равномерное распределение даёт ln(|V|).",
       },
     ];
-    expect(auditCheck(questions, body).map((f) => f.rule)).not.toContain("deictic");
+    expect(auditCheck(questions, body)).toEqual([]);
   });
 
   it("заворачивает вопрос, ответ на который — число из текста шага", () => {

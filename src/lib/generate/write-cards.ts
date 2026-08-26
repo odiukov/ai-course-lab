@@ -43,6 +43,31 @@ export function parseCardsReply(reply: string): { cards: CardDraft[]; check: Che
   return parsed.success ? parsed.data : { cards: [], check: [] };
 }
 
+/**
+ * Пропажа существующих вопросов шага.
+ *
+ * Пустой `check` в ответе — законный результат, когда у шага и не было
+ * вопросов (промпт прямо запрещает агенту их выдумывать). Но если вопросы
+ * БЫЛИ, а вернулся пустой список, это не «нечего чинить» — это агент
+ * промолчал вместо починки. Без этой проверки auditCheck([]) не находит
+ * нарушений (пустому списку нечем нарушить правила), попытка засчитывается
+ * успешной, а на диске остаётся прежний бракованный вопрос — и ни отчёт, ни
+ * повтор об этом не узнают.
+ */
+function checkDropped(step: Step, check: CheckQuestion[]): Finding[] {
+  if (!step.check?.length || check.length) return [];
+  return [
+    {
+      ref: step.id,
+      rule: "check-dropped",
+      severity: "error",
+      message:
+        `У шага были вопросы check (${step.check.length}), а ответ вернул пустой список — ` +
+        "верни их же, но с починенными вопросами, а не выброшенными.",
+    },
+  ];
+}
+
 function buildPrompt(lessonTitle: string, step: Step, findings: Finding[]): string {
   return renderPrompt("write-cards", {
     lesson_title: lessonTitle,
@@ -82,7 +107,11 @@ export async function writeCardsForStep(opts: {
     const reply = await deps.run(buildPrompt(lessonTitle, step, findings), onEvent);
     const { cards, check } = parseCardsReply(reply);
 
-    findings = [...auditStep(cards, step.body), ...auditCheck(check, step.body)];
+    findings = [
+      ...auditStep(cards, step.body),
+      ...auditCheck(check, step.body),
+      ...checkDropped(step, check),
+    ];
     // warning — это «стоит разнообразить», а не брак: карточка не учит
     // неправильному. Останавливать на этом запись и жечь единственный повтор
     // незачем, поэтому за error здесь следят отдельно от findings в отчёте.

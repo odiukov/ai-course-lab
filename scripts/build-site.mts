@@ -19,6 +19,7 @@ import {
   type ExerciseBundle,
 } from "../src/lib/site/exercise.js";
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
+import { lessonSlugs } from "../src/lib/content/lessons.js";
 import { readStepsById } from "../src/lib/content/step-file.js";
 import { groupLessons, type CatalogLesson } from "../src/lib/site/catalog.js";
 import { buildLessonModel } from "../src/lib/site/lesson-page.js";
@@ -156,16 +157,6 @@ function buildSiteCss(): string {
   return site.replace(/@import\s+"\.\/theme\.css";\s*/, `${theme}\n`);
 }
 
-function lessonSlugs(): string[] {
-  const lessonsDir = path.join(contentDir, "lessons");
-  if (!fs.existsSync(lessonsDir)) return [];
-  return fs
-    .readdirSync(lessonsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-}
-
 async function main(): Promise<void> {
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
@@ -180,7 +171,7 @@ async function main(): Promise<void> {
   let copiedVisuals = 0;
   let skippedLessons = 0;
 
-  for (const slug of lessonSlugs()) {
+  for (const slug of lessonSlugs(contentDir)) {
     let plan;
     try {
       plan = readLessonPlan(contentDir, slug);
