@@ -656,6 +656,22 @@ describe("каталог", () => {
     expect(badge.hidden).toBe(false);
     expect(badge.textContent).toBe("2");
   });
+
+  it("не гасит бейдж из-за битого значения под одним уроком", () => {
+    // Один урок хранит неразбираемый мусор — например, обрезанную запись
+    // после отказа квоты; у другого урока карточка честно готова к
+    // повторению. Битый ключ не должен утопить хороший.
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), [], {
+      [`${REVIEW_KEY_PREFIX}lesson-a`]: "{not valid json",
+      [`${REVIEW_KEY_PREFIX}lesson-b`]: JSON.stringify({
+        "card-1": { dueOn: "2000-01-01" },
+      }),
+    });
+
+    const badge = pick(window, "[data-review-due]");
+    expect(badge.hidden).toBe(false);
+    expect(badge.textContent).toBe("1");
+  });
 });
 
 describe("состояние шага", () => {

@@ -895,6 +895,24 @@ function today() {
 }
 
 /**
+ * График повторений одного урока — или null, если ключа нет или он битый.
+ *
+ * Обёрнута отдельно от остального сканирования: испорченное значение под
+ * одним уроком не должно гасить бейдж целиком — у остальных уроков карточки
+ * к повторению есть, и молчаливый общий ноль отправил бы читателя мимо них.
+ */
+function readReviewStates(key) {
+  try {
+    var raw = localStorage.getItem(key);
+    var parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
  * Бейдж «к повторению» рядом со ссылкой в шапке.
  *
  * Карточек в браузере не знает никто, кроме самого браузера: график лежит по
@@ -912,9 +930,8 @@ function paintReviewDue() {
       var key = localStorage.key(i);
       if (!key || key.indexOf(REVIEW_PREFIX) !== 0) continue;
 
-      var raw = localStorage.getItem(key);
-      var states = raw ? JSON.parse(raw) : {};
-      if (!states || typeof states !== "object") continue;
+      var states = readReviewStates(key);
+      if (!states) continue;
 
       for (var cardId in states) {
         if (!Object.prototype.hasOwnProperty.call(states, cardId)) continue;
@@ -928,7 +945,7 @@ function paintReviewDue() {
       target.hidden = false;
     }
   } catch (error) {
-    // Хранилище недоступно или испорчено — бейдж просто остаётся скрытым.
+    // localStorage.length/key недоступны целиком — бейдж просто остаётся скрытым.
   }
 }
 
