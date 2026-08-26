@@ -58,6 +58,61 @@ describe("правило: указательные обороты", () => {
     expect(deicticFinding?.message).toContain("в примере");
     expect(deicticFinding?.message).not.toContain("(?<");
   });
+
+  describe("сравнительное «выше»/«ниже» — не дейктика", () => {
+    it("пропускает «вероятность B выше вероятности A»", () => {
+      const cards = [
+        numericCard({ question: "Почему вероятность B выше вероятности A?" }),
+      ];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «значение ниже среднего»", () => {
+      const cards = [numericCard({ question: "Что значит, что значение ниже среднего?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+
+    it("пропускает «апостериорная вероятность выше априорной»", () => {
+      const cards = [
+        numericCard({ explanation: "Апостериорная вероятность выше априорной." }),
+      ];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
+  });
+
+  describe("дейктическое «выше»/«ниже» — по-прежнему ловится", () => {
+    it("заворачивает «см. выше»", () => {
+      const cards = [numericCard({ question: "См. выше: чему равен loss?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «как показано выше» — через существующий оборот «как показано»", () => {
+      // Эта фраза уже ловится записью «как показано», а не новым паттерном
+      // «выше»/«ниже» — оборот «как выше» без «показано» проверен отдельным кейсом ниже.
+      const cards = [numericCard({ question: "Как показано выше, чему равен loss?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает голое «как выше» без «показано»", () => {
+      const cards = [numericCard({ explanation: "Ответ такой же, как выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «в примере выше»", () => {
+      const cards = [numericCard({ question: "Чему равен loss в примере выше?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «формула выше даёт тот же ответ»", () => {
+      const cards = [numericCard({ explanation: "Формула выше даёт тот же ответ." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «приведённая выше оценка»", () => {
+      const cards = [numericCard({ question: "На чём основана приведённая выше оценка?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+  });
 });
 
 describe("правило: пересечение чисел", () => {
