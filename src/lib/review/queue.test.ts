@@ -116,12 +116,13 @@ describe("buildQueue — подмешивание новых", () => {
     const states = Object.fromEntries(known.map((item) => [stateKey(item), due(TODAY)]));
     const queue = buildQueue([...known, ...fresh], states, TODAY);
 
-    // Verify all cards are present exactly once
+    // Каждая карточка в очереди ровно один раз: подмешивание не имеет права
+    // ни потерять карточку, ни выдать её дважды.
     const queueKeys = queue.map((item) => stateKey(item)).sort();
     const inputKeys = [...known, ...fresh].map((item) => stateKey(item)).sort();
     expect(queueKeys).toEqual(inputKeys);
 
-    // Find longest run of consecutive new cards
+    // Самый длинный кусок подряд идущих новых.
     let maxRun = 0;
     let currentRun = 0;
     for (const item of queue) {
