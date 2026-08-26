@@ -64,6 +64,20 @@ function renderSearchButton(): string {
 </button>`;
 }
 
+/**
+ * Ссылка на режим повторений.
+ *
+ * Число готовых карточек на сборке неизвестно — график живёт в браузере
+ * читателя, — поэтому счётчик остаётся пустым и скрытым: его проставляет
+ * `CATALOG_SCRIPT`.
+ */
+function renderReviewLink(basePath: string): string {
+  return `<a class="nav-button" href="${basePath}/review/">
+<span>Повторение</span>
+<span data-review-due hidden></span>
+</a>`;
+}
+
 function htmlDocument(options: {
   title: string;
   basePath: string;
@@ -419,7 +433,7 @@ ${lessons}
   return htmlDocument({
     title: SITE_TITLE,
     basePath: options.basePath,
-    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1><span class="header-actions" data-header-actions>${renderSearchButton()}</span></div></header>\n${sections}`,
+    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1><span class="header-actions" data-header-actions>${renderReviewLink(options.basePath)}${renderSearchButton()}</span></div></header>\n${sections}`,
     excludeFromSearch: true,
     scripts: [CATALOG_SCRIPT],
     modules: authModules(options),

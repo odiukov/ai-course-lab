@@ -6,6 +6,7 @@ import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
 import type { Step, StepMeta } from "../content/step-file";
 import { PROGRESS_KEY_PREFIX } from "./client";
+import { REVIEW_KEY_PREFIX } from "./storage-keys";
 import { buildLessonModel } from "./lesson-page";
 import {
   renderAuthPage,
@@ -44,11 +45,18 @@ const key = `${PROGRESS_KEY_PREFIX}lesson-a`;
  * Код исполняется через window.eval, а не вставкой тега: happy-dom не
  * запускает скрипты, добавленные в документ после разбора.
  */
-function open(html: string, progress: string[] = []): Window {
+function open(
+  html: string,
+  progress: string[] = [],
+  storage: Record<string, string> = {},
+): Window {
   const window = new Window({ url: "https://example.test/base/lesson/lesson-a/002-b/" });
   const document = window.document;
 
   if (progress.length > 0) window.localStorage.setItem(key, JSON.stringify(progress));
+  for (const [storageKey, value] of Object.entries(storage)) {
+    window.localStorage.setItem(storageKey, value);
+  }
 
   document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)?.[1] ?? "";
   for (const script of [...document.body.querySelectorAll("script")]) {
@@ -622,6 +630,31 @@ describe("каталог", () => {
     expect(read[0].textContent).toBe("прочитано 3");
     expect(read[1].textContent).toBe("прочитано 1");
     expect(read[1].hidden).toBe(false);
+  });
+
+  it("прячет бейдж повторений, когда готовых карточек нет", () => {
+    const window = open(renderIndexPage(phases, { basePath: "/base" }));
+
+    const badge = pick(window, "[data-review-due]");
+    expect(badge.hidden).toBe(true);
+  });
+
+  it("считает в бейдже карточки всех уроков, чей срок уже наступил", () => {
+    // Даты нарочно далеко в прошлом и в будущем: тест проверяет отбор по
+    // dueOn, а не то, что считает сегодняшним днём сам скрипт.
+    const window = open(renderIndexPage(phases, { basePath: "/base" }), [], {
+      [`${REVIEW_KEY_PREFIX}lesson-a`]: JSON.stringify({
+        "card-1": { dueOn: "2000-01-01" },
+        "card-2": { dueOn: "2999-01-01" },
+      }),
+      [`${REVIEW_KEY_PREFIX}lesson-b`]: JSON.stringify({
+        "card-3": { dueOn: "2000-06-01" },
+      }),
+    });
+
+    const badge = pick(window, "[data-review-due]");
+    expect(badge.hidden).toBe(false);
+    expect(badge.textContent).toBe("2");
   });
 });
 

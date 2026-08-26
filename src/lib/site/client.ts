@@ -1,5 +1,10 @@
 import { HEIGHT_MESSAGE } from "../api/visual-height";
-import { PROGRESS_KEY_PREFIX, STEP_STATE_KEY_PREFIX, UPDATED_AT_SUFFIX } from "./storage-keys";
+import {
+  PROGRESS_KEY_PREFIX,
+  REVIEW_KEY_PREFIX,
+  STEP_STATE_KEY_PREFIX,
+  UPDATED_AT_SUFFIX,
+} from "./storage-keys";
 
 // Реэкспорт ради тестов страниц, которые собирают ключ сами.
 export { PROGRESS_KEY_PREFIX };
@@ -860,6 +865,8 @@ export const CATALOG_SCRIPT = `
 (function () {
 ${STORE}
 
+var REVIEW_PREFIX = ${JSON.stringify(REVIEW_KEY_PREFIX)};
+
 function paint() {
   var rows = document.querySelectorAll("[data-lesson-slug]");
   for (var i = 0; i < rows.length; i += 1) {
@@ -874,7 +881,59 @@ function paint() {
   }
 }
 
+/**
+ * Сегодня по местным часам — тем же правилом, что и на странице повторений.
+ *
+ * Голый toISOString с полуночи до трёх утра по Киеву вернул бы вчерашнюю
+ * дату: бейдж каталога и сама страница повторений разошлись бы во мнении о
+ * том, что уже готово, и читатель увидел бы «3 к повторению», а на странице —
+ * «на сегодня всё».
+ */
+function today() {
+  var now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+/**
+ * Бейдж «к повторению» рядом со ссылкой в шапке.
+ *
+ * Карточек в браузере не знает никто, кроме самого браузера: график лежит по
+ * ключу на урок, и единственный способ его найти — перебрать localStorage
+ * целиком, а не список уроков каталога, как делает paint().
+ */
+function paintReviewDue() {
+  var target = document.querySelector("[data-review-due]");
+  if (!target) return;
+
+  try {
+    var day = today();
+    var count = 0;
+    for (var i = 0; i < localStorage.length; i += 1) {
+      var key = localStorage.key(i);
+      if (!key || key.indexOf(REVIEW_PREFIX) !== 0) continue;
+
+      var raw = localStorage.getItem(key);
+      var states = raw ? JSON.parse(raw) : {};
+      if (!states || typeof states !== "object") continue;
+
+      for (var cardId in states) {
+        if (!Object.prototype.hasOwnProperty.call(states, cardId)) continue;
+        var state = states[cardId];
+        if (state && state.dueOn && state.dueOn <= day) count += 1;
+      }
+    }
+
+    if (count > 0) {
+      target.textContent = String(count);
+      target.hidden = false;
+    }
+  } catch (error) {
+    // Хранилище недоступно или испорчено — бейдж просто остаётся скрытым.
+  }
+}
+
 paint();
+paintReviewDue();
 
 // Каталог — первая страница, на которую возвращаются: прогресс с другого
 // устройства должен проступить на ней сам, без перезагрузки.

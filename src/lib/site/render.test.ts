@@ -295,6 +295,12 @@ describe("renderIndexPage", () => {
     expect(html).toContain("data-read");
     expect(html).toContain("8 из 56 шагов");
   });
+
+  it("на главной есть ссылка на повторения со счётчиком", () => {
+    const html = renderIndexPage([], { basePath: "/base" });
+    expect(html).toContain('href="/base/review/"');
+    expect(html).toContain("data-review-due");
+  });
 });
 
 /**
