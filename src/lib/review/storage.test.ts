@@ -50,6 +50,11 @@ describe("readLessonStates", () => {
     };
     expect(readLessonStates(throwing, "01-alpha")).toEqual({});
   });
+
+  it("на массиве вместо объекта возвращает пустой объект", () => {
+    const storage = fakeStorage({ "course-review:01-alpha": "[]" });
+    expect(readLessonStates(storage, "01-alpha")).toEqual({});
+  });
 });
 
 describe("writeCardState", () => {

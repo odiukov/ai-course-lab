@@ -25,6 +25,10 @@ export interface ReviewStorage {
  * В приватном окне Safari запись бросает, и без обёртки на этом падал бы весь
  * скрипт страницы, включая навигацию. Пустой объект означает «графика нет»,
  * и страница просто предложит новые карточки.
+ *
+ * Массив отклоняется: JSON.stringify в writeCardState молча теряет строковые
+ * ключи на массиве, так что возврат массива привёл бы к потере данных при
+ * следующей записи.
  */
 export function readLessonStates(
   storage: ReviewStorage,
@@ -34,7 +38,8 @@ export function readLessonStates(
     const raw = storage.getItem(REVIEW_KEY_PREFIX + slug);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, StoredState>) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, StoredState>;
   } catch {
     return {};
   }
