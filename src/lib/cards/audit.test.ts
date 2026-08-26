@@ -78,6 +78,14 @@ describe("правило: указательные обороты", () => {
       ];
       expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
     });
+
+    it("пропускает «примерно выше»: «пример» — не одно и то же слово, что «примерно»", () => {
+      // Регресс на открытый «[а-я]*» после корня: он цеплял «примерно» как
+      // существительное «пример» с любым хвостом, и «примерно выше» —
+      // обычное сравнение из текста про вероятность — заворачивалось.
+      const cards = [numericCard({ question: "Значение примерно выше нормы. Почему?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).not.toContain("deictic");
+    });
   });
 
   describe("дейктическое «выше»/«ниже» — по-прежнему ловится", () => {
@@ -110,6 +118,56 @@ describe("правило: указательные обороты", () => {
 
     it("заворачивает «приведённая выше оценка»", () => {
       const cards = [numericCard({ question: "На чём основана приведённая выше оценка?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it.each([
+      ["Смотри на таблице выше.", "предложный падеж"],
+      ["Данные из таблицы выше.", "родительный падеж"],
+    ])(
+      "заворачивает падежную форму носителя, которую раньше держал открытый хвост: %s (%s)",
+      (explanation) => {
+        // Явные окончания должны покрывать то же самое, что раньше покрывал
+        // «[а-я]*» — просто не покрывать заодно и «примерно».
+        const cards = [numericCard({ explanation })];
+        expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+      },
+    );
+
+    it("заворачивает «примера выше»", () => {
+      const cards = [numericCard({ question: "Что общего у примера выше с этим шагом?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «кода ниже»", () => {
+      const cards = [numericCard({ explanation: "Смысл понятен из кода ниже." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+  });
+
+  describe("рисунки, графики и разделы — тоже дейктика", () => {
+    it("заворачивает «на графике выше»", () => {
+      const cards = [numericCard({ explanation: "Видно на графике выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «в разделе выше»", () => {
+      const cards = [numericCard({ question: "Это уже обсуждалось в разделе выше?" })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на рисунке выше»", () => {
+      const cards = [numericCard({ explanation: "ROC-кривая показана на рисунке выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на диаграмме выше»", () => {
+      const cards = [numericCard({ explanation: "Распределение видно на диаграмме выше." })];
+      expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
+    });
+
+    it("заворачивает «на схеме ниже»", () => {
+      const cards = [numericCard({ explanation: "Порядок шагов показан на схеме ниже." })];
       expect(auditStep(cards, STEP_BODY).map((f) => f.rule)).toContain("deictic");
     });
   });
