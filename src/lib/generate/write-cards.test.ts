@@ -15,6 +15,21 @@ const STEP: Step = {
   body: "Стартовый loss при словаре из 65 символов равен примерно 4.17.",
 };
 
+// Тот же шаг, но с уже существующими (бракованными) вопросами check во
+// frontmatter — нужен для проверки, что пустой ответ на месте починки этих
+// вопросов не проходит молча.
+const STEP_WITH_CHECK: Step = {
+  ...STEP,
+  check: [
+    {
+      question: "Чему равен loss?",
+      options: ["4.17", "6.93"],
+      correct: 0,
+      explanation: "",
+    },
+  ],
+};
+
 const GOOD = JSON.stringify({
   cards: [
     {
@@ -42,6 +57,22 @@ const RECYCLED = JSON.stringify({
   ],
   check: [],
 });
+
+// Починенный вопрос: правильный ответ не содержит чисел из тела шага, поэтому
+// проходит auditCheck по существу — используется, чтобы отличить провал по
+// number-answer от провала по check-dropped.
+const FIXED_CHECK_QUESTION = {
+  question: "Почему стартовый loss равен логарифму размера словаря?",
+  options: [
+    "Потому что необученная модель распределяет вероятность поровну между токенами словаря",
+    "Потому что функция потерь квадратичная",
+  ],
+  correct: 0,
+  explanation: "Равномерное распределение по |V| вариантам даёт loss ln(|V|).",
+};
+
+const EMPTY_CHECK_REPLY = JSON.stringify({ cards: [], check: [] });
+const FIXED_CHECK_REPLY = JSON.stringify({ cards: [], check: [FIXED_CHECK_QUESTION] });
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "write-cards-"));
@@ -112,5 +143,47 @@ describe("writeCardsForStep", () => {
     expect(result.cards).toEqual([]);
     expect(result.findings).toEqual([]);
     expect(readCards(dir, SLUG, "046-quiz")).toBeNull();
+  });
+});
+
+describe("writeCardsForStep — пропажа существующих check-вопросов", () => {
+  it("у шага были вопросы, агент дважды вернул пустой список — замечание есть, ничего не пишется", async () => {
+    const dir = tmpDir();
+    const { deps } = agent([EMPTY_CHECK_REPLY, EMPTY_CHECK_REPLY]);
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP_WITH_CHECK,
+      deps,
+    });
+
+    expect(result.findings.map((f) => f.rule)).toContain("check-dropped");
+    expect(result.check).toEqual([]);
+    expect(readCards(dir, SLUG, STEP_WITH_CHECK.id)).toBeNull();
+  });
+
+  it("вопросы пропали в первом ответе и вернулись починенными во втором", async () => {
+    const dir = tmpDir();
+    const { deps, prompts } = agent([EMPTY_CHECK_REPLY, FIXED_CHECK_REPLY]);
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP_WITH_CHECK,
+      deps,
+    });
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("check-dropped");
+    expect(result.check).toEqual([FIXED_CHECK_QUESTION]);
+    expect(result.findings).toEqual([]);
+  });
+
+  it("у шага не было вопросов — пустой check в ответе не порождает замечания", async () => {
+    const dir = tmpDir();
+    const { deps } = agent([JSON.stringify({ cards: [], check: [] })]);
+    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+
+    expect(result.check).toEqual([]);
+    expect(result.findings).toEqual([]);
   });
 });
