@@ -1,3 +1,5 @@
+import type { StoredState } from "../review/storage";
+
 /**
  * Правила слияния локального прогресса с облачным.
  *
@@ -118,4 +120,61 @@ export function mergeFile(local: FileRow | null, cloud: FileRow | null): FileDec
     return { action: "upload", row: local };
   }
   return { action: "keep-cloud", row: cloud, backup: local.content };
+}
+
+export interface CardRow {
+  lessonSlug: string;
+  cardId: string;
+  fingerprint: string;
+  state: StoredState;
+}
+
+/**
+ * Слияние графика одной карточки.
+ *
+ * Правило несимметрично намеренно, потому что несимметричны цены ошибки:
+ * ошибочно длинный интервал стоит потерянного знания, ошибочно короткий — одного
+ * лишнего повторения. Поэтому при равенстве времён побеждает меньший интервал.
+ *
+ * Отпечаток из файла карточки старше обеих сторон: если вопрос переписали,
+ * продолжать на нём накопленный график нельзя, и состояние отбрасывается целиком.
+ */
+export function mergeCard(
+  local: CardRow | null,
+  cloud: CardRow | null,
+  fileFingerprint: string,
+): CardRow | null {
+  const fresh = (row: CardRow | null) => (row && row.fingerprint === fileFingerprint ? row : null);
+  const l = fresh(local);
+  const c = fresh(cloud);
+
+  if (!l) return c;
+  if (!c) return l;
+  if (l.state.updatedAt !== c.state.updatedAt) {
+    return l.state.updatedAt > c.state.updatedAt ? l : c;
+  }
+  return l.state.intervalDays <= c.state.intervalDays ? l : c;
+}
+
+export function mergeCards(
+  local: CardRow[],
+  cloud: CardRow[],
+  fingerprints: Record<string, string>,
+): CardRow[] {
+  const key = (row: CardRow) => `${row.lessonSlug}/${row.cardId}`;
+  const byKey = new Map<string, { local?: CardRow; cloud?: CardRow }>();
+
+  for (const row of local) byKey.set(key(row), { ...byKey.get(key(row)), local: row });
+  for (const row of cloud) byKey.set(key(row), { ...byKey.get(key(row)), cloud: row });
+
+  const merged: CardRow[] = [];
+  for (const [id, pair] of byKey) {
+    // Карточки, которой больше нет в файлах, нет и в отпечатках: её график
+    // не переносится никуда — вопрос удалён из урока.
+    const fingerprint = fingerprints[id];
+    if (!fingerprint) continue;
+    const row = mergeCard(pair.local ?? null, pair.cloud ?? null, fingerprint);
+    if (row) merged.push(row);
+  }
+  return merged;
 }

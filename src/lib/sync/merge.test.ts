@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeFile, mergeStep, mergeSteps, rankOf } from "./merge";
+import { mergeCard, mergeCards, mergeFile, mergeStep, mergeSteps, rankOf, type CardRow } from "./merge";
 
 const early = "2026-08-01T10:00:00.000Z";
 const late = "2026-08-02T10:00:00.000Z";
@@ -113,5 +113,72 @@ describe("mergeFile", () => {
 
   it("на двух пустых сторонах не решает ничего", () => {
     expect(mergeFile(null, null)).toBeNull();
+  });
+});
+
+function row(over: Partial<CardRow> = {}): CardRow {
+  return {
+    lessonSlug: "01-alpha",
+    cardId: "s-1",
+    fingerprint: "abcd1234",
+    state: {
+      intervalDays: 6,
+      ease: 2.5,
+      reps: 2,
+      lapses: 0,
+      dueOn: "2026-09-02",
+      fingerprint: "abcd1234",
+      updatedAt: "2026-08-26T10:00:00.000Z",
+    },
+    ...over,
+  };
+}
+
+function at(time: string, over: Partial<CardRow["state"]> = {}): CardRow {
+  return row({ state: { ...row().state, updatedAt: time, ...over } });
+}
+
+describe("mergeCard", () => {
+  it("одна сторона пуста — берётся другая", () => {
+    expect(mergeCard(row(), null, "abcd1234")).toEqual(row());
+    expect(mergeCard(null, row(), "abcd1234")).toEqual(row());
+  });
+
+  it("побеждает свежая запись", () => {
+    const local = at("2026-08-26T12:00:00.000Z", { intervalDays: 30 });
+    const cloud = at("2026-08-26T10:00:00.000Z", { intervalDays: 3 });
+    expect(mergeCard(local, cloud, "abcd1234")?.state.intervalDays).toBe(30);
+  });
+
+  it("при равенстве времён побеждает меньший интервал", () => {
+    const local = at("2026-08-26T10:00:00.000Z", { intervalDays: 30 });
+    const cloud = at("2026-08-26T10:00:00.000Z", { intervalDays: 3 });
+    expect(mergeCard(local, cloud, "abcd1234")?.state.intervalDays).toBe(3);
+  });
+
+  it("отбрасывает состояние с чужим отпечатком", () => {
+    expect(mergeCard(row(), null, "ffff0000")).toBeNull();
+  });
+
+  it("отбрасывает обе стороны, если карточку переписали", () => {
+    expect(mergeCard(row(), row(), "ffff0000")).toBeNull();
+  });
+});
+
+describe("mergeCards", () => {
+  it("сводит списки по паре урок плюс карточка", () => {
+    const local = [row(), row({ cardId: "s-2" })];
+    const cloud = [row({ cardId: "s-3" })];
+    const merged = mergeCards(local, cloud, {
+      "01-alpha/s-1": "abcd1234",
+      "01-alpha/s-2": "abcd1234",
+      "01-alpha/s-3": "abcd1234",
+    });
+    expect(merged.map((item) => item.cardId).sort()).toEqual(["s-1", "s-2", "s-3"]);
+  });
+
+  it("выбрасывает карточку, которой больше нет в файлах", () => {
+    const merged = mergeCards([row({ cardId: "s-9" })], [], {});
+    expect(merged).toEqual([]);
   });
 });

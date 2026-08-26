@@ -59,9 +59,31 @@ create table if not exists run_results (
   primary key (user_id, lesson_slug, step_id)
 );
 
+-- График повторений. Только текущее состояние карточки, не история ответов:
+-- истории в интерфейсе нет, а бесплатная база не то место, где копят журнал.
+-- Цена решения названа прямо: без истории переход на FSRS позже потребует
+-- начинать сбор данных с нуля.
+--
+-- Отпечаток лежит рядом с состоянием: переписанная по существу карточка не
+-- должна унаследовать чужой график.
+create table if not exists review_cards (
+  user_id       uuid not null default auth.uid() references auth.users on delete cascade,
+  lesson_slug   text not null check (length(lesson_slug) < 200),
+  card_id       text not null check (length(card_id) < 200),
+  fingerprint   text not null check (length(fingerprint) < 100),
+  due_on        date not null,
+  interval_days integer not null,
+  ease          real not null,
+  reps          integer not null,
+  lapses        integer not null,
+  updated_at    timestamptz not null default now(),
+  primary key (user_id, lesson_slug, card_id)
+);
+
 alter table step_progress  enable row level security;
 alter table exercise_files enable row level security;
 alter table run_results    enable row level security;
+alter table review_cards   enable row level security;
 
 drop policy if exists "own rows" on step_progress;
 create policy "own rows" on step_progress
@@ -73,6 +95,10 @@ create policy "own rows" on exercise_files
 
 drop policy if exists "own rows" on run_results;
 create policy "own rows" on run_results
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "own rows" on review_cards;
+create policy "own rows" on review_cards
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Права на таблицы.
@@ -89,7 +115,9 @@ create policy "own rows" on run_results
 grant select, insert, update, delete on step_progress  to authenticated;
 grant select, insert, update, delete on exercise_files to authenticated;
 grant select, insert, update, delete on run_results    to authenticated;
+grant select, insert, update, delete on review_cards   to authenticated;
 
 revoke all on step_progress  from anon;
 revoke all on exercise_files from anon;
 revoke all on run_results    from anon;
+revoke all on review_cards   from anon;
