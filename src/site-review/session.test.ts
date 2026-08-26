@@ -65,6 +65,10 @@ describe("runSession", () => {
     element.querySelectorAll<HTMLButtonElement>("button[data-option]")[0].click();
     element.querySelector<HTMLButtonElement>("button[data-next]")!.click();
     expect(element.textContent).toContain("Вопрос c-2");
+    // Хост очищается, а не дописывается: без этой строки тест прошёл бы и с
+    // первой карточкой, оставшейся стоять над второй вместе со своим разбором.
+    expect(element.textContent).not.toContain("Вопрос c-1");
+    expect(element.querySelectorAll("[data-option]")).toHaveLength(3);
   });
 
   it("сохраняет назначенный срок верного ответа", () => {
