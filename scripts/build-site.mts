@@ -12,6 +12,7 @@ import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
 import { withHeightReporter } from "../src/lib/api/visual-height.js";
+import { readCards, type Card } from "../src/lib/cards/card.js";
 import {
   exerciseFiles,
   exerciseUrls,
@@ -21,6 +22,7 @@ import {
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { lessonSlugs } from "../src/lib/content/lessons.js";
 import { readStepsById } from "../src/lib/content/step-file.js";
+import { buildManifest, toSiteCards } from "../src/lib/site/cards-payload.js";
 import { groupLessons, type CatalogLesson } from "../src/lib/site/catalog.js";
 import { buildLessonModel } from "../src/lib/site/lesson-page.js";
 import {
@@ -166,6 +168,9 @@ async function main(): Promise<void> {
   // урок» существует только после того, как известен порядок всех уроков.
   const models = new Map<string, ReturnType<typeof buildLessonModel>>();
   const exercises = new Map<string, ExerciseBundle>();
+  // Манифест копится вместе с каталогом: тот же единственный проход по
+  // урокам, и запись после цикла, когда посчитаны все карточки.
+  const manifestEntries: { slug: string; title: string; cards: number }[] = [];
   let renderedSteps = 0;
   let missingSteps = 0;
   let copiedVisuals = 0;
@@ -233,7 +238,21 @@ async function main(): Promise<void> {
       writtenCount: model.writtenCount,
       plannedCount: model.plannedCount,
     });
+
+    // Карточки читаются по тем же id шагов, что и текст урока: план один на
+    // обоих, второго источника порядка шагов в сборке нет.
+    const lessonCards: Card[] = [];
+    for (const meta of plan.steps) {
+      const cards = readCards(contentDir, slug, meta.id);
+      if (cards) lessonCards.push(...cards);
+    }
+    if (lessonCards.length) {
+      write(path.join("cards", `${slug}.json`), JSON.stringify(toSiteCards(lessonCards)));
+    }
+    manifestEntries.push({ slug, title: plan.title, cards: lessonCards.length });
   }
+
+  write(path.join("cards", "index.json"), JSON.stringify(buildManifest(manifestEntries)));
 
   const phases = groupLessons(catalog);
   // Порядок курса — как в каталоге: фаза за фазой, урок за уроком. Он же
