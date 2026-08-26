@@ -60,23 +60,40 @@ export function buildQueue(
   return interleave(dueCards, newCards, limits.sessionCap);
 }
 
-/** Раскладывает новые карточки равными промежутками между знакомыми. */
+/**
+ * Раскладывает два списка друг в друга равномерно.
+ *
+ * Слияние симметрично намеренно. Прежний вариант шагал по индексам знакомых
+ * карточек и потому умел разложить новые только тогда, когда знакомых не
+ * меньше; при одной знакомой и десяти новых остаток сваливался в хвост одним
+ * куском. Здесь каждый шаг берёт карточку из того списка, чья следующая доля
+ * ближе к началу, и оба списка расходятся по подходу ровно, кого бы ни было
+ * больше.
+ */
 function interleave(due: QueueCard[], fresh: QueueCard[], cap: number): QueueCard[] {
   if (!fresh.length) return due.slice(0, cap);
   if (!due.length) return fresh.slice(0, cap);
 
   const result: QueueCard[] = [];
-  const step = due.length / fresh.length;
-  let nextFresh = 0;
+  let takenDue = 0;
+  let takenFresh = 0;
 
-  due.forEach((card, index) => {
-    while (nextFresh < fresh.length && index >= step * nextFresh) {
-      result.push(fresh[nextFresh]);
-      nextFresh += 1;
+  while (takenDue < due.length || takenFresh < fresh.length) {
+    // Доля считается по середине отрезка карточки: (2k + 1) / 2n. Сравнение
+    // умножением, а не делением, чтобы порядок не зависел от округления.
+    const dueAhead =
+      takenDue < due.length &&
+      (takenFresh >= fresh.length ||
+        (2 * takenDue + 1) * fresh.length <= (2 * takenFresh + 1) * due.length);
+
+    if (dueAhead) {
+      result.push(due[takenDue]);
+      takenDue += 1;
+    } else {
+      result.push(fresh[takenFresh]);
+      takenFresh += 1;
     }
-    result.push(card);
-  });
-  result.push(...fresh.slice(nextFresh));
+  }
 
   return result.slice(0, cap);
 }

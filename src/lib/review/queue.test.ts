@@ -58,6 +58,28 @@ describe("buildQueue — лимиты", () => {
     const queue = buildQueue(cards, {}, TODAY, { newPerDay: 3, sessionCap: 5 });
     expect(queue).toHaveLength(3);
   });
+
+  it("добивает подход новыми до потолка, когда просроченных чуть меньше потолка", () => {
+    const due35 = Array.from({ length: 35 }, (_, i) => card(i));
+    const fresh20 = Array.from({ length: 20 }, (_, i) => card(100 + i));
+    const states = Object.fromEntries(due35.map((item) => [stateKey(item), due("2026-08-01")]));
+    const queue = buildQueue([...due35, ...fresh20], states, TODAY);
+
+    expect(queue).toHaveLength(40);
+    const newCount = queue.filter((item) => !states[stateKey(item)]).length;
+    expect(newCount).toBe(5);
+  });
+
+  it("не берёт новых, когда просроченные сами упираются в потолок", () => {
+    const due45 = Array.from({ length: 45 }, (_, i) => card(i));
+    const fresh20 = Array.from({ length: 20 }, (_, i) => card(100 + i));
+    const states = Object.fromEntries(due45.map((item) => [stateKey(item), due("2026-08-01")]));
+    const queue = buildQueue([...due45, ...fresh20], states, TODAY);
+
+    expect(queue).toHaveLength(40);
+    const newCount = queue.filter((item) => !states[stateKey(item)]).length;
+    expect(newCount).toBe(0);
+  });
 });
 
 describe("buildQueue — подмешивание новых", () => {
@@ -73,6 +95,44 @@ describe("buildQueue — подмешивание новых", () => {
       .map((item) => item.index);
     // Все новые в хвосте означали бы позицию каждой не меньше 10.
     expect(Math.min(...positions)).toBeLessThan(10);
+  });
+
+  it("разводит новые по обе стороны знакомой карточки, когда новых больше", () => {
+    const known = [card(0)];
+    const fresh = Array.from({ length: 10 }, (_, i) => card(100 + i));
+    const states: Record<string, CardState> = { "01-alpha/s-0": due(TODAY) };
+    const queue = buildQueue([...known, ...fresh], states, TODAY);
+
+    const dueIndex = queue.findIndex((item) => stateKey(item) === "01-alpha/s-0");
+    const newBefore = queue.slice(0, dueIndex).filter((item) => !states[stateKey(item)]).length;
+    const newAfter = queue.slice(dueIndex + 1).filter((item) => !states[stateKey(item)]).length;
+
+    expect(Math.abs(newBefore - newAfter)).toBeLessThanOrEqual(1);
+  });
+
+  it("не оставляет длинного куска подряд идущих новых", () => {
+    const known = Array.from({ length: 3 }, (_, i) => card(i));
+    const fresh = Array.from({ length: 10 }, (_, i) => card(100 + i));
+    const states = Object.fromEntries(known.map((item) => [stateKey(item), due(TODAY)]));
+    const queue = buildQueue([...known, ...fresh], states, TODAY);
+
+    // Verify all cards are present exactly once
+    const queueKeys = queue.map((item) => stateKey(item)).sort();
+    const inputKeys = [...known, ...fresh].map((item) => stateKey(item)).sort();
+    expect(queueKeys).toEqual(inputKeys);
+
+    // Find longest run of consecutive new cards
+    let maxRun = 0;
+    let currentRun = 0;
+    for (const item of queue) {
+      if (!states[stateKey(item)]) {
+        currentRun += 1;
+        maxRun = Math.max(maxRun, currentRun);
+      } else {
+        currentRun = 0;
+      }
+    }
+    expect(maxRun).toBeLessThanOrEqual(4);
   });
 });
 
