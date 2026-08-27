@@ -262,6 +262,76 @@ const duplicateConcept: LessonRule = (cards) => {
 };
 
 /**
+ * Служебные слова: они есть в формулировке про что угодно и о предмете идеи
+ * не говорят ничего. Слова короче трёх букв отбрасываются заодно — предлог,
+ * союз или частица, не попавшие в список, всё равно окажутся среди них.
+ */
+const FUNCTION_WORDS = new Set([
+  "как", "или", "это", "его", "её", "их", "что", "чем", "для", "при", "над",
+  "под", "без", "все", "всё", "уже", "ещё", "так", "тот", "той", "том", "тем",
+  "него", "неё", "них", "который", "которая", "которое", "которые",
+]);
+
+function meaningfulWords(concept: string): Set<string> {
+  const words = concept.toLowerCase().match(/[a-zа-яё0-9]+/g) ?? [];
+  return new Set(words.filter((word) => word.length >= 3 && !FUNCTION_WORDS.has(word)));
+}
+
+/**
+ * Порог близости: общего больше, чем различного.
+ *
+ * Не подобран под случай, а выведен из того, что вообще значит «одна и та же
+ * идея, сказанная другими словами». Две формулировки об одном предмете
+ * называют его одними и теми же содержательными словами; если совпавших слов
+ * больше, чем разошедшихся (|A∩B| > |A△B|), формулировки скорее об одном.
+ * Половина — единственная точка, где это утверждение переворачивается, и
+ * ровно ей равен коэффициент Жаккара в этом месте.
+ */
+function sameIdea(first: string, second: string): boolean {
+  const a = meaningfulWords(first);
+  const b = meaningfulWords(second);
+  if (a.size === 0 || b.size === 0) return false;
+  const shared = [...a].filter((word) => b.has(word)).length;
+  return shared * 2 > a.size + b.size - shared;
+}
+
+/**
+ * Одна идея, пересказанная другими словами.
+ *
+ * duplicate-concept сравнивает строки целиком и ловит только буквальный
+ * повтор. В живом уроке про линейную алгебру четыре шага независимо выдали
+ * карточку про евклидову норму — «считается как корень из суммы квадратов
+ * координат», «равна корню из суммы квадратов координат», «считается по
+ * теореме Пифагора из его координат», — ни одна пара не совпала буквально, и
+ * учащийся получил один вопрос трижды за десять.
+ *
+ * Предупреждение, а не ошибка, по двум причинам. Правило считается после
+ * всего прохода, когда переделывать шаг уже поздно — заворачивать нечего. И
+ * мера здесь приблизительная: за ошибку, которая стоит агенту повтора, должно
+ * отвечать точное совпадение, а приблизительной — место в отчёте человеку.
+ */
+const nearDuplicateConcept: LessonRule = (cards) => {
+  const findings: Finding[] = [];
+  for (let i = 0; i < cards.length; i += 1) {
+    for (let j = i + 1; j < cards.length; j += 1) {
+      const first = cards[i].concept.trim();
+      const second = cards[j].concept.trim();
+      // Буквальный повтор — забота duplicate-concept: два замечания об одной
+      // паре только шумят в отчёте.
+      if (first.toLowerCase() === second.toLowerCase()) continue;
+      if (!sameIdea(first, second)) continue;
+      findings.push({
+        ref: refOf(cards[j]),
+        rule: "near-duplicate-concept",
+        severity: "warning",
+        message: `Идея «${second}» почти та же, что «${first}» — учащийся получит один вопрос дважды`,
+      });
+    }
+  }
+  return findings;
+};
+
+/**
  * Однообразие — предупреждение, а не ошибка.
  *
  * У урока из трёх шагов три карточки одного вида — норма, а не брак. Порог в
@@ -282,7 +352,7 @@ const kindVariety: LessonRule = (cards) => {
 };
 
 export const STEP_RULES: StepRule[] = [deictic, numberOverlap, stepReference, answerIntegrity];
-export const LESSON_RULES: LessonRule[] = [duplicateConcept, kindVariety];
+export const LESSON_RULES: LessonRule[] = [duplicateConcept, nearDuplicateConcept, kindVariety];
 
 export function auditStep(cards: CardDraft[], stepBody: string): Finding[] {
   return STEP_RULES.flatMap((rule) => rule(cards, stepBody));

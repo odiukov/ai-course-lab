@@ -145,6 +145,7 @@ describe("writeCardsForStep", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.findings).toEqual([]);
@@ -162,6 +163,7 @@ describe("writeCardsForStep", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts).toHaveLength(2);
@@ -180,6 +182,7 @@ describe("writeCardsForStep", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.findings.map((f) => f.rule)).toContain("number-overlap");
@@ -197,6 +200,7 @@ describe("writeCardsForStep", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.cards).toEqual([]);
@@ -216,6 +220,7 @@ describe("writeCardsForStep — устаревшие карточки на ди�
       deps: good.deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
     expect(readCards(dir, SLUG, STEP.id)).toHaveLength(1);
 
@@ -227,6 +232,7 @@ describe("writeCardsForStep — устаревшие карточки на ди�
       deps: empty.deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.findings).toEqual([]);
@@ -243,6 +249,7 @@ describe("writeCardsForStep — устаревшие карточки на ди�
       deps: good.deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     const bad = agent([RECYCLED, RECYCLED]);
@@ -253,6 +260,7 @@ describe("writeCardsForStep — устаревшие карточки на ди�
       deps: bad.deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.findings.map((f) => f.rule)).toContain("number-overlap");
@@ -270,6 +278,7 @@ describe("writeCardsForStep — материал вопроса", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts[0]).toContain(
@@ -296,6 +305,7 @@ describe("writeCardsForStep — материал вопроса", () => {
         ],
       }),
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts[0]).toContain("What does the rank of a matrix tell you?");
@@ -325,9 +335,42 @@ describe("writeCardsForStep — материал вопроса", () => {
         },
       }),
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts[0]).toContain("return [list(row) for row in zip(*M)]");
+  });
+
+  it("идеи, уже занятые карточками урока, уходят в промпт", async () => {
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+      coveredConcepts: ["длина вектора считается как корень из суммы квадратов координат"],
+    });
+
+    expect(prompts[0]).toContain(
+      "длина вектора считается как корень из суммы квадратов координат",
+    );
+  });
+
+  it("у первого шага урока занятых идей ещё нет", async () => {
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
+    });
+
+    expect(prompts[0]).toContain("это первые карточки урока");
   });
 
   it("шаг без шва кода не роняет сборку промпта", async () => {
@@ -339,6 +382,7 @@ describe("writeCardsForStep — материал вопроса", () => {
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts[0]).toContain("не относится к конкретному шву кода");
@@ -356,6 +400,7 @@ describe("writeCardsForStep — пропажа существующих check-в
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.findings.map((f) => f.rule)).toContain("check-dropped");
@@ -373,6 +418,7 @@ describe("writeCardsForStep — пропажа существующих check-в
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(prompts).toHaveLength(2);
@@ -391,6 +437,7 @@ describe("writeCardsForStep — пропажа существующих check-в
       deps,
       source: SOURCE,
       sourceExcerpt: EXCERPT,
+      coveredConcepts: [],
     });
 
     expect(result.check).toEqual([]);

@@ -294,6 +294,45 @@ describe("правила урока", () => {
   });
 });
 
+// Живой случай урока про линейную алгебру: четыре шага независимо друг от
+// друга выдали карточку про евклидову норму, и учащийся получил один и тот же
+// вопрос трижды за десять. Точного совпадения строк среди них не было ни
+// одного, поэтому duplicate-concept молчал.
+describe("правило: близкие по формулировке идеи", () => {
+  it("предупреждает о паре, делящей больше содержательных слов, чем расходящейся", () => {
+    const cards = [
+      numericCard({ concept: "длина вектора считается как корень из суммы квадратов координат" }),
+      numericCard({
+        concept: "длина вектора равна корню из суммы квадратов координат",
+        question: "Чему равна длина вектора [6, 8]?",
+      }),
+    ];
+    const finding = auditLesson(cards).find((f) => f.rule === "near-duplicate-concept");
+
+    expect(finding?.severity).toBe("warning");
+  });
+
+  it("молчит, когда общих слов меньше половины", () => {
+    const cards = [
+      numericCard({ concept: "длина вектора считается как корень из суммы квадратов координат" }),
+      numericCard({
+        concept: "скалярное произведение измеряет совпадение направлений",
+        question: "Что показывает знак скалярного произведения?",
+      }),
+    ];
+
+    expect(auditLesson(cards).map((f) => f.rule)).not.toContain("near-duplicate-concept");
+  });
+
+  it("не дублирует замечание там, где уже сработало точное совпадение", () => {
+    const cards = [numericCard(), numericCard({ question: "А теперь при 2048 токенах?" })];
+    const rules = auditLesson(cards).map((f) => f.rule);
+
+    expect(rules).toContain("duplicate-concept");
+    expect(rules).not.toContain("near-duplicate-concept");
+  });
+});
+
 describe("auditCheck — правила для вопросов внутри шага", () => {
   const body = "Стартовый loss при словаре из 65 символов равен примерно 4.17.";
 

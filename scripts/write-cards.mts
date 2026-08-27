@@ -125,6 +125,10 @@ async function writeLessonCards(
       step,
       source,
       sourceExcerpt: excerpts.get(id) ?? source.text,
+      // Идеи копятся по ходу прохода: шаг видит карточки предыдущих шагов и
+      // не берёт их идею снова. Шаги идут по порядку плана, поэтому список
+      // растёт монотонно и повторно ничего пересчитывать не нужно.
+      coveredConcepts: lessonCards.map((card) => card.concept),
       deps,
       lessonTitle: plan.title,
     });

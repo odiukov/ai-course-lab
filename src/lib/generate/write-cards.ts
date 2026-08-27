@@ -85,17 +85,34 @@ function formatSourceQuiz(quiz: QuizQuestion[]): string {
     .join("\n");
 }
 
+/**
+ * Идеи, уже разобранные карточками этого урока.
+ *
+ * Без этого списка правило промпта «две карточки урока не могут проверять
+ * одну идею» соблюдать нечем: шаг пишется отдельным вызовом и карточек
+ * соседних шагов не видит. В живом уроке про линейную алгебру это стоило
+ * четырёх карточек про евклидову норму на шагах 1, 3, 4 и 8 — учащийся
+ * получил один вопрос трижды за десять. Ровно та же болезнь и ровно то же
+ * лекарство, что у текста шагов в buildCoveredContext.
+ */
+function formatCoveredConcepts(concepts: string[]): string {
+  if (!concepts.length) return "(это первые карточки урока)";
+  return concepts.map((concept) => `- ${concept}`).join("\n");
+}
+
 function buildPrompt(
   lessonTitle: string,
   step: Step,
   source: LessonSource,
   sourceExcerpt: string,
+  coveredConcepts: string[],
   findings: Finding[],
 ): string {
   return renderPrompt("write-cards", {
     lesson_title: lessonTitle,
     step_title: step.title,
     step_type: step.type,
+    covered_concepts: formatCoveredConcepts(coveredConcepts),
     source_excerpt: sourceExcerpt,
     source_quiz: formatSourceQuiz(source.quiz),
     exercise_code: exerciseCodeForStep(source, step),
@@ -128,18 +145,20 @@ export async function writeCardsForStep(opts: {
   source: LessonSource;
   /** Срез исходника по `source_anchor` шага — что именно этот шаг покрывает. */
   sourceExcerpt: string;
+  /** `concept` карточек, уже написанных для предыдущих шагов этого урока. */
+  coveredConcepts: string[];
   deps: GenerateDeps;
   lessonTitle?: string;
   onEvent?: (event: AgentEvent) => void;
 }): Promise<StepCardsResult> {
-  const { contentDir, slug, step, source, sourceExcerpt, deps } = opts;
+  const { contentDir, slug, step, source, sourceExcerpt, coveredConcepts, deps } = opts;
   const lessonTitle = opts.lessonTitle ?? slug;
   const onEvent = opts.onEvent ?? (() => {});
 
   let findings: Finding[] = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const reply = await deps.run(
-      buildPrompt(lessonTitle, step, source, sourceExcerpt, findings),
+      buildPrompt(lessonTitle, step, source, sourceExcerpt, coveredConcepts, findings),
       onEvent,
     );
     const { cards, check } = parseCardsReply(reply);
