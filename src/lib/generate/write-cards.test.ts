@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { readCards } from "../cards/card";
 import type { Step } from "../content/step-file";
+import type { LessonSource } from "../source/lesson-source";
 import { parseCardsReply, writeCardsForStep } from "./write-cards";
 
 const SLUG = "01-math__01-alpha";
@@ -14,6 +15,36 @@ const STEP: Step = {
   title: "Стартовый loss",
   body: "Стартовый loss при словаре из 65 символов равен примерно 4.17.",
 };
+
+/** Кусок исходника, попадающий в промпт как срез по якорю шага. */
+const EXCERPT = [
+  "## The Concept",
+  "",
+  "Кросс-энтропия необученной модели равна натуральному логарифму размера словаря.",
+].join("\n");
+
+function fakeSource(over: Partial<LessonSource> = {}): LessonSource {
+  return {
+    ref: {
+      slug: SLUG,
+      phaseDir: "01-math",
+      lessonDir: "01-alpha",
+      phaseNumber: 1,
+      lessonNumber: 1,
+      title: "Alpha",
+    },
+    lang: "ru",
+    textPath: "in-memory.md",
+    text: `# Урок\n\n${EXCERPT}\n`,
+    sourceHash: "test",
+    quiz: [],
+    visuals: [],
+    exercise: null,
+    ...over,
+  };
+}
+
+const SOURCE = fakeSource();
 
 // Тот же шаг, но с уже существующими (бракованными) вопросами check во
 // frontmatter — нужен для проверки, что пустой ответ на месте починки этих
@@ -107,7 +138,14 @@ describe("writeCardsForStep", () => {
   it("пишет карточки на диск и не жалуется", async () => {
     const dir = tmpDir();
     const { deps } = agent([GOOD]);
-    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
 
     expect(result.findings).toEqual([]);
     expect(result.cards).toHaveLength(1);
@@ -117,7 +155,14 @@ describe("writeCardsForStep", () => {
   it("переспрашивает один раз, отдав замечания, и принимает исправленное", async () => {
     const dir = tmpDir();
     const { deps, prompts } = agent([RECYCLED, GOOD]);
-    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
 
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toContain("number-overlap");
@@ -128,7 +173,14 @@ describe("writeCardsForStep", () => {
   it("на повторном провале ничего не пишет и возвращает замечания", async () => {
     const dir = tmpDir();
     const { deps } = agent([RECYCLED, RECYCLED]);
-    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
 
     expect(result.findings.map((f) => f.rule)).toContain("number-overlap");
     expect(result.cards).toEqual([]);
@@ -138,11 +190,158 @@ describe("writeCardsForStep", () => {
   it("пустой список карточек — законный ответ для шага без запоминаемой идеи", async () => {
     const dir = tmpDir();
     const { deps } = agent([JSON.stringify({ cards: [], check: [] })]);
-    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
 
     expect(result.cards).toEqual([]);
     expect(result.findings).toEqual([]);
     expect(readCards(dir, SLUG, "046-quiz")).toBeNull();
+  });
+});
+
+describe("writeCardsForStep — устаревшие карточки на диске", () => {
+  it("шаг перестал давать карточки — прежний файл удаляется", async () => {
+    const dir = tmpDir();
+    const good = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps: good.deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+    expect(readCards(dir, SLUG, STEP.id)).toHaveLength(1);
+
+    const empty = agent([JSON.stringify({ cards: [], check: [] })]);
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps: empty.deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(result.findings).toEqual([]);
+    expect(readCards(dir, SLUG, STEP.id)).toBeNull();
+  });
+
+  it("шаг забракован аудитом — прежний файл остаётся нетронутым", async () => {
+    const dir = tmpDir();
+    const good = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps: good.deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+
+    const bad = agent([RECYCLED, RECYCLED]);
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps: bad.deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(result.findings.map((f) => f.rule)).toContain("number-overlap");
+    expect(readCards(dir, SLUG, STEP.id)).toHaveLength(1);
+  });
+});
+
+describe("writeCardsForStep — материал вопроса", () => {
+  it("срез исходника уходит в промпт", async () => {
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(prompts[0]).toContain(
+      "Кросс-энтропия необученной модели равна натуральному логарифму размера словаря",
+    );
+  });
+
+  it("вопросы quiz.json уходят в промпт вместе с правильным ответом", async () => {
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: fakeSource({
+        quiz: [
+          {
+            stage: "post",
+            question: "What does the rank of a matrix tell you?",
+            options: ["The largest value", "The number of independent columns"],
+            correct: 1,
+            explanation: "Rank counts independent columns.",
+          },
+        ],
+      }),
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(prompts[0]).toContain("What does the rank of a matrix tell you?");
+    expect(prompts[0]).toContain("The number of independent columns");
+  });
+
+  it("код шва упражнения уходит в промпт для code-шага", async () => {
+    const exerciseDir = tmpDir();
+    fs.mkdirSync(path.join(exerciseDir, "solution"));
+    fs.writeFileSync(
+      path.join(exerciseDir, "solution", "exercise.py"),
+      "def transpose(M):\n    return [list(row) for row in zip(*M)]\n",
+    );
+
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: { ...STEP, type: "code", exercise_fn: "transpose" },
+      deps,
+      source: fakeSource({
+        exercise: {
+          slug: "p01-l01-alpha",
+          dir: exerciseDir,
+          multi: false,
+          functions: [{ file: "exercise.py", fn: "transpose" }],
+        },
+      }),
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(prompts[0]).toContain("return [list(row) for row in zip(*M)]");
+  });
+
+  it("шаг без шва кода не роняет сборку промпта", async () => {
+    const { deps, prompts } = agent([GOOD]);
+    await writeCardsForStep({
+      contentDir: tmpDir(),
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
+
+    expect(prompts[0]).toContain("не относится к конкретному шву кода");
   });
 });
 
@@ -155,6 +354,8 @@ describe("writeCardsForStep — пропажа существующих check-в
       slug: SLUG,
       step: STEP_WITH_CHECK,
       deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
     });
 
     expect(result.findings.map((f) => f.rule)).toContain("check-dropped");
@@ -170,6 +371,8 @@ describe("writeCardsForStep — пропажа существующих check-в
       slug: SLUG,
       step: STEP_WITH_CHECK,
       deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
     });
 
     expect(prompts).toHaveLength(2);
@@ -181,7 +384,14 @@ describe("writeCardsForStep — пропажа существующих check-в
   it("у шага не было вопросов — пустой check в ответе не порождает замечания", async () => {
     const dir = tmpDir();
     const { deps } = agent([JSON.stringify({ cards: [], check: [] })]);
-    const result = await writeCardsForStep({ contentDir: dir, slug: SLUG, step: STEP, deps });
+    const result = await writeCardsForStep({
+      contentDir: dir,
+      slug: SLUG,
+      step: STEP,
+      deps,
+      source: SOURCE,
+      sourceExcerpt: EXCERPT,
+    });
 
     expect(result.check).toEqual([]);
     expect(result.findings).toEqual([]);

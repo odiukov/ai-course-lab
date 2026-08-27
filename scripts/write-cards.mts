@@ -14,12 +14,14 @@ import { isLimitError, isTimeoutError } from "../src/lib/agent/error-message.js"
 import { defaultDeps } from "../src/lib/agent/factory.js";
 import { auditLesson } from "../src/lib/cards/audit.js";
 import type { Card } from "../src/lib/cards/card.js";
-import { loadConfig } from "../src/lib/config.js";
+import { loadConfig, type Config } from "../src/lib/config.js";
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { readStepsById, writeStep } from "../src/lib/content/step-file.js";
 import type { GenerateDeps } from "../src/lib/generate/plan-lesson.js";
 import { writeCardsForStep } from "../src/lib/generate/write-cards.js";
-import { readCatalog } from "../src/lib/source/catalog.js";
+import { resolveStepExcerpts } from "../src/lib/generate/write-step.js";
+import { findLesson, readCatalog } from "../src/lib/source/catalog.js";
+import { readLessonSource } from "../src/lib/source/lesson-source.js";
 
 /**
  * Сколько таймаутов подряд считать упавшей сетью, а не бедой одного урока.
@@ -83,12 +85,24 @@ interface Report {
 }
 
 async function writeLessonCards(
-  contentDir: string,
+  config: Config,
   slug: string,
   deps: GenerateDeps,
 ): Promise<Report> {
+  const contentDir = config.contentDir;
   const plan = readLessonPlan(contentDir, slug);
   if (!plan) throw new Error(`Нет плана урока ${slug}`);
+
+  // Материал вопросов — исходник курса, а не наш пересказ в теле шага, поэтому
+  // без него проход не имеет смысла и падает сразу, а не пишет 54 карточки по
+  // собственным метафорам.
+  const ref = findLesson(config.sourceDir, slug);
+  if (!ref) throw new Error(`Урока ${slug} нет в source/ — сначала импортируй его`);
+  const source = readLessonSource(config.sourceDir, ref);
+  // Срезы считаются один раз на урок и по всему плану сразу: курсор внутри
+  // resolveStepExcerpts разводит шаги с одинаковым source_anchor по их
+  // собственным вхождениям, а поштучный вызов схлопнул бы их на первое.
+  const excerpts = resolveStepExcerpts(source, plan.steps);
 
   const ids = plan.steps.map((step) => step.id);
   const steps = readStepsById(contentDir, slug, ids);
@@ -109,6 +123,8 @@ async function writeLessonCards(
       contentDir,
       slug,
       step,
+      source,
+      sourceExcerpt: excerpts.get(id) ?? source.text,
       deps,
       lessonTitle: plan.title,
     });
@@ -164,7 +180,7 @@ async function main(): Promise<void> {
 
   for (const slug of slugs) {
     try {
-      printReport(await writeLessonCards(config.contentDir, slug, deps));
+      printReport(await writeLessonCards(config, slug, deps));
       timeoutsInRow = 0;
     } catch (error) {
       if (isLimitError(error)) {

@@ -136,6 +136,19 @@ export function readCards(contentDir: string, slug: string, stepId: string): Car
   return z.array(cardSchema).parse(parsed) as Card[];
 }
 
+/**
+ * Убирает карточки шага с диска.
+ *
+ * Нужна перегенерации: шаг, который раньше давал карточки, а теперь честно
+ * возвращает пустой список (мотивационный раздел, переход, оглавление), иначе
+ * сохранил бы прежний файл навсегда — писать-то нечего, а старое никто не
+ * трогал. Именно так на сайте пережила бы починку карточка, выросшая из нашей
+ * метафоры вместо предмета урока.
+ */
+export function removeCards(contentDir: string, slug: string, stepId: string): void {
+  fs.rmSync(lessonPaths(contentDir, slug).cardsFile(stepId), { force: true });
+}
+
 export function writeCards(
   contentDir: string,
   slug: string,

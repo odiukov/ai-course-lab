@@ -22,7 +22,14 @@ import type { GenerateDeps } from "./plan-lesson";
 
 const MAX_EXCERPT = 6000;
 
-function exerciseCodeForStep(source: LessonSource, meta: StepMeta): string {
+/**
+ * Эталонная реализация шва, к которому привязан шаг.
+ *
+ * Экспортируется, потому что карточки повторения опираются на тот же материал,
+ * что и текст шага: у code-шага предмет вопроса — реальная сигнатура и реальный
+ * алгоритм из solution, а не наш пересказ того, что функция делает.
+ */
+export function exerciseCodeForStep(source: LessonSource, meta: StepMeta): string {
   if (!meta.exercise_fn || !source.exercise) return "(этот экран не относится к конкретному шву кода)";
   const file = meta.exercise_file ?? source.exercise.functions.find((item) => item.fn === meta.exercise_fn)?.file;
   if (!file) return "(файл шва не найден)";

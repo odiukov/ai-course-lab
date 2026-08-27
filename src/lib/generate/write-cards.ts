@@ -4,13 +4,16 @@ import { renderPrompt } from "../agent/prompts";
 import { auditCheck, auditStep, formatFindings, type Finding } from "../cards/audit";
 import {
   cardDraftSchema,
+  removeCards,
   withFingerprints,
   writeCards,
   type Card,
   type CardDraft,
 } from "../cards/card";
 import { checkSchema, type CheckQuestion, type Step } from "../content/step-file";
+import type { LessonSource, QuizQuestion } from "../source/lesson-source";
 import { extractJsonBlock, type GenerateDeps } from "./plan-lesson";
+import { exerciseCodeForStep } from "./write-step";
 
 const replySchema = z.object({
   cards: z.array(cardDraftSchema).default([]),
@@ -68,11 +71,34 @@ function checkDropped(step: Step, check: CheckQuestion[]): Finding[] {
   ];
 }
 
-function buildPrompt(lessonTitle: string, step: Step, findings: Finding[]): string {
+/**
+ * Вопросы исходника курса — как образец предметности, а не как материал.
+ *
+ * Правильный вариант печатается рядом с вопросом намеренно: без него агент
+ * видит только формулировки и не видит, на каком уровне курс ждёт ответ.
+ * Дублировать эти вопросы запрещено промптом — их и так задают на quiz-шаге.
+ */
+function formatSourceQuiz(quiz: QuizQuestion[]): string {
+  if (!quiz.length) return "(в исходнике вопросов нет)";
+  return quiz
+    .map((item) => `- ${item.question}\n  верный ответ: ${item.options[item.correct] ?? "?"}`)
+    .join("\n");
+}
+
+function buildPrompt(
+  lessonTitle: string,
+  step: Step,
+  source: LessonSource,
+  sourceExcerpt: string,
+  findings: Finding[],
+): string {
   return renderPrompt("write-cards", {
     lesson_title: lessonTitle,
     step_title: step.title,
     step_type: step.type,
+    source_excerpt: sourceExcerpt,
+    source_quiz: formatSourceQuiz(source.quiz),
+    exercise_code: exerciseCodeForStep(source, step),
     step_body: step.body,
     existing_check: step.check?.length ? JSON.stringify(step.check, null, 2) : "(их нет)",
     findings: findings.length ? formatFindings(findings) : "(это первая попытка)",
@@ -85,6 +111,11 @@ function buildPrompt(lessonTitle: string, step: Step, findings: Finding[]): stri
  * Один вызов агента выдаёт и то, и другое: чтение шага — самая дорогая часть
  * вызова, и платить за неё дважды незачем.
  *
+ * `source` и `sourceExcerpt` обязательны, а не необязательны с запасным
+ * вариантом: материал вопроса — исходник курса, и вызов без него молча
+ * возвращает нас к тому, ради чего затеяно изменение — к карточкам по нашему
+ * же пересказу. Пусть лучше не соберётся типами.
+ *
  * Повтор ровно один. Замечания первой попытки уходят агенту вместе с исходным
  * заданием; если и вторая попытка не прошла аудит, на диск не пишется ничего,
  * а шаг попадает в отчёт человеку. Писать забракованное «пока так» нельзя:
@@ -94,17 +125,23 @@ export async function writeCardsForStep(opts: {
   contentDir: string;
   slug: string;
   step: Step;
+  source: LessonSource;
+  /** Срез исходника по `source_anchor` шага — что именно этот шаг покрывает. */
+  sourceExcerpt: string;
   deps: GenerateDeps;
   lessonTitle?: string;
   onEvent?: (event: AgentEvent) => void;
 }): Promise<StepCardsResult> {
-  const { contentDir, slug, step, deps } = opts;
+  const { contentDir, slug, step, source, sourceExcerpt, deps } = opts;
   const lessonTitle = opts.lessonTitle ?? slug;
   const onEvent = opts.onEvent ?? (() => {});
 
   let findings: Finding[] = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const reply = await deps.run(buildPrompt(lessonTitle, step, findings), onEvent);
+    const reply = await deps.run(
+      buildPrompt(lessonTitle, step, source, sourceExcerpt, findings),
+      onEvent,
+    );
     const { cards, check } = parseCardsReply(reply);
 
     findings = [
@@ -119,7 +156,13 @@ export async function writeCardsForStep(opts: {
     if (blocking.length) continue;
 
     const written = withFingerprints(cards, step.id);
+    // Пустой список здесь — обдуманное «у этого шага карточек нет», а не
+    // провал: до этой строки доходят только попытки, прошедшие аудит. Значит
+    // прежний файл шага устарел и его надо убрать. Забракованная попытка сюда
+    // не доходит и старые карточки не теряет — одна неудачная генерация не
+    // должна стоить читателю набранного графика повторений.
     if (written.length) writeCards(contentDir, slug, step.id, written);
+    else removeCards(contentDir, slug, step.id);
     return { stepId: step.id, cards: written, check, findings };
   }
 
