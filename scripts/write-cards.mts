@@ -18,7 +18,7 @@ import { loadConfig, type Config } from "../src/lib/config.js";
 import { readLessonPlan } from "../src/lib/content/lesson-plan.js";
 import { readStepsById, writeStep } from "../src/lib/content/step-file.js";
 import type { GenerateDeps } from "../src/lib/generate/plan-lesson.js";
-import { writeCardsForStep } from "../src/lib/generate/write-cards.js";
+import { CARDS_BATCH_SIZE, writeCardsForSteps } from "../src/lib/generate/write-cards.js";
 import { resolveStepExcerpts } from "../src/lib/generate/write-step.js";
 import { findLesson, readCatalog } from "../src/lib/source/catalog.js";
 import { readLessonSource } from "../src/lib/source/lesson-source.js";
@@ -109,23 +109,25 @@ async function writeLessonCards(
   const report: Report = { slug, steps: 0, cards: 0, fixedCheck: 0, rejected: [] };
   const lessonCards: Card[] = [];
 
-  for (const id of ids) {
+  const present = ids.flatMap((id) => {
     const step = steps[id];
-    if (!step) {
-      // План урока и файлы шага могут разъехаться (шаг удалили руками, план не
-      // обновили) — без предупреждения дыра осталась бы незаметной в отчёте,
-      // который человек читает перед диффом.
-      console.warn(`[${slug}] шага ${id} нет на диске — пропускаю`);
-      continue;
-    }
+    // План урока и файлы шага могут разъехаться (шаг удалили руками, план не
+    // обновили) — без предупреждения дыра осталась бы незаметной в отчёте,
+    // который человек читает перед диффом.
+    if (!step) console.warn(`[${slug}] шага ${id} нет на диске — пропускаю`);
+    return step ? [step] : [];
+  });
 
-    const result = await writeCardsForStep({
+  for (let start = 0; start < present.length; start += CARDS_BATCH_SIZE) {
+    const batch = present.slice(start, start + CARDS_BATCH_SIZE);
+
+    const results = await writeCardsForSteps({
       contentDir,
       slug,
-      step,
+      steps: batch,
       source,
-      sourceExcerpt: excerpts.get(id) ?? source.text,
-      // Идеи копятся по ходу прохода: шаг видит карточки предыдущих шагов и
+      sourceExcerpts: excerpts,
+      // Идеи копятся по ходу прохода: пачка видит карточки предыдущих пачек и
       // не берёт их идею снова. Шаги идут по порядку плана, поэтому список
       // растёт монотонно и повторно ничего пересчитывать не нужно.
       coveredConcepts: lessonCards.map((card) => card.concept),
@@ -133,20 +135,23 @@ async function writeLessonCards(
       lessonTitle: plan.title,
     });
 
-    report.steps += 1;
-    if (result.cards.length) {
-      report.cards += result.cards.length;
-      lessonCards.push(...result.cards);
-    }
-    if (result.check.length && step.check?.length) {
-      writeStep(contentDir, slug, { ...step, check: result.check });
-      report.fixedCheck += 1;
-    }
-    if (result.findings.some((finding) => finding.severity === "error")) {
-      report.rejected.push({
-        stepId: id,
-        rules: [...new Set(result.findings.map((finding) => finding.rule))],
-      });
+    for (const result of results) {
+      const step = steps[result.stepId];
+      report.steps += 1;
+      if (result.cards.length) {
+        report.cards += result.cards.length;
+        lessonCards.push(...result.cards);
+      }
+      if (result.check.length && step?.check?.length) {
+        writeStep(contentDir, slug, { ...step, check: result.check });
+        report.fixedCheck += 1;
+      }
+      if (result.findings.some((finding) => finding.severity === "error")) {
+        report.rejected.push({
+          stepId: result.stepId,
+          rules: [...new Set(result.findings.map((finding) => finding.rule))],
+        });
+      }
     }
   }
 
