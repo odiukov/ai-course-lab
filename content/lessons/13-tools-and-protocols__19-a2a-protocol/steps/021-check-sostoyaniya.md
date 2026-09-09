@@ -9,23 +9,24 @@ check:
       уточнением. Что произойдёт по схеме состояний?
     options:
       - Задача вернётся из completed в working и продолжит работу
-      - 'Задача останется в completed, а на уточнение нужна новая задача'
+      - 'Задача останется в completed, а для уточнения потребуется новая задача'
       - Задача перейдёт в input_required и будет ждать ответа
-      - 'Задача перейдёт в failed, потому что пришло лишнее сообщение'
+      - Задача перейдёт в failed из-за лишнего сообщения
     correct: 1
     explanation: >-
-      completed — один из четырёх финальных исходов, из него выхода нет.
-      Продолжение разговора возможно только как новая задача со своим номером.
-  - question: Какая из цепочек состояний возможна?
+      completed — финальное состояние без исходящих переходов. Для продолжения
+      взаимодействия нужно создать новую задачу с отдельным идентификатором.
+  - question: Какая цепочка соответствует разрешённым переходам жизненного цикла Task?
     options:
-      - 'submitted, working, input_required, working, completed'
-      - 'submitted, working, failed, working, completed'
-      - 'submitted, canceled, working, completed'
-      - 'submitted, input_required, completed, working'
+      - submitted → working → input_required → working → completed
+      - submitted → working → failed → working → completed
+      - submitted → canceled → working → completed
+      - submitted → input_required → completed → working
     correct: 0
     explanation: >-
-      Возврат в working бывает только через input_required — это единственная
-      петля. failed и canceled финальные, из них уже никуда не идут.
+      Вернуться в working можно из input_required после сообщения клиента.
+      failed и canceled являются финальными состояниями, поэтому продолжение
+      работы после них невозможно.
 ---
 
 После [шага 19](#step-19) и [шага 20](#step-20) ты должен уметь отвечать не на вопрос «сколько состояний», а на вопрос «а так можно?». Возьми любую пару состояний и проверь по стрелкам: есть ли между ними переход вообще и в какую сторону.
