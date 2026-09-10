@@ -12,6 +12,7 @@ import { readImportDates } from "@/lib/progress/imports";
 import { readLessonReadCounts } from "@/lib/progress/steps";
 import { readProjectProgress } from "@/lib/progress/projects";
 import { AgentPicker } from "@/components/AgentPicker";
+import { BookButton } from "@/components/BookButton";
 import ImportButton from "@/components/ImportButton";
 
 export const dynamic = "force-dynamic";
@@ -80,13 +81,19 @@ export default function CatalogPage() {
     <main className="mx-auto max-w-3xl">
       <div className="mb-8 flex items-baseline justify-between">
         <h1 className="text-3xl font-semibold">AI Lab</h1>
+        <BookButton />
         <AgentPicker />
       </div>
       {phases.filter((phase) => phase.number !== 19).map((phase) => (
         <section key={phase.dir} className="mb-8">
-          <h2 className="mb-3 text-lg font-medium text-slate-500 dark:text-slate-400">
-            Фаза {phase.number}. {phase.title}
-          </h2>
+          <div className="mb-3 flex items-center gap-3">
+            <h2 className="text-lg font-medium text-slate-500 dark:text-slate-400">
+              Фаза {phase.number}. {phase.title}
+            </h2>
+            {phase.lessons.some((lesson) => plans.has(lesson.slug)) && (
+              <BookButton phase={phase.number} />
+            )}
+          </div>
           <ul className="space-y-1">
             {phase.lessons.map((lesson) => {
               const plan = plans.get(lesson.slug) ?? null;
