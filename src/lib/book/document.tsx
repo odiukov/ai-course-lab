@@ -68,9 +68,9 @@ function formattedDate(date: Date): string {
   return new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).format(date);
 }
 
-function BookDocument({ book }: { book: BookModel }) {
+function BookPhase({ book }: { book: BookModel }) {
   return (
-    <main className="book-root">
+    <>
       <div className="book-footer">AI Engineering · фаза {book.phaseNumber}</div>
       <section className="book-cover">
         <div className="book-eyebrow">AI Engineering from Scratch</div>
@@ -107,6 +107,13 @@ function BookDocument({ book }: { book: BookModel }) {
                   title={section.title}
                 />
               )}
+              {!section.visualHtml && section.visualHref && (
+                <div
+                  className="book-visual-placeholder"
+                  data-visual-src={section.visualHref}
+                  data-visual-title={section.title}
+                />
+              )}
               <StaticStepBody body={section.body} currentStepNumber={section.number} lessonSlug={lesson.slug} />
               {section.clarifications.map((item) => (
                 <aside className="book-clarification" key={`${item.askedAt}-${item.question}`}>
@@ -130,13 +137,93 @@ function BookDocument({ book }: { book: BookModel }) {
           )}
         </article>
       ))}
+    </>
+  );
+}
+
+function BookDocument({ books }: { books: BookModel[] }) {
+  return (
+    <main className="book-root">
+      {books.map((book) => <BookPhase book={book} key={book.phaseNumber} />)}
     </main>
   );
 }
 
+const STATIC_BOOK_CSS = String.raw`
+.book-toolbar { position: sticky; z-index: 10; top: 0; display: flex; gap: 18px; align-items: center; justify-content: space-between; margin: 0 auto; max-width: 860px; border-bottom: 1px solid #dbe3ef; background: rgb(255 255 255 / .96); padding: 12px 18px; box-shadow: 0 6px 18px rgb(15 23 42 / .08); }
+.book-toolbar-copy { display: flex; flex: 1; flex-direction: column; }
+.book-toolbar-copy span { color: #64748b; font-size: 9pt; }
+.book-toolbar a, .book-toolbar button { border: 1px solid #cbd5e1; border-radius: 7px; background: white; color: #172033; padding: 8px 13px; font: inherit; font-size: 10pt; text-decoration: none; cursor: pointer; }
+.book-toolbar button { border-color: #4338ca; background: #4338ca; color: white; font-weight: 700; }
+.book-toolbar button:disabled { cursor: wait; opacity: .45; }
+.book-loading { margin: 12mm auto; max-width: 860px; color: #64748b; }
+.book-visual-placeholder { width: 100%; height: 520px; margin: 5mm 0 7mm; border: 1px solid #dbe3ef; border-radius: 8px; background: #f8fafc; }
+@media (max-width: 680px) { .book-toolbar { flex-wrap: wrap; } .book-toolbar-copy { order: -1; flex-basis: 100%; } }
+@media print { .book-toolbar { display: none; } }
+`;
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function renderBookHtml(book: BookModel, root: string = process.cwd()): string {
   const katexCss = pathToFileURL(path.join(root, "node_modules/katex/dist/katex.min.css")).href;
-  const markup = renderToStaticMarkup(<BookDocument book={book} />);
+  const markup = renderToStaticMarkup(<BookDocument books={[book]} />);
   const title = `AI Engineering · фаза ${book.phaseNumber}`;
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${title}</title><link rel="stylesheet" href="${katexCss}"><style>${BOOK_CSS}</style></head><body>${markup}</body></html>`;
+}
+
+/**
+ * Статическая печатная книга для GitHub Pages.
+ *
+ * Серверного API у Pages нет, поэтому каталог ведёт сюда с `?print=1`: после
+ * загрузки всех встроенных схем страница открывает системный диалог печати.
+ * Кнопка в шапке остаётся запасным и повторным способом сохранить PDF.
+ */
+export function renderStaticBookHtml(options: {
+  basePath: string;
+  title: string;
+  fragments: string[];
+}): string {
+  const markup = renderToStaticMarkup(
+    <>
+      <aside className="book-toolbar" data-pagefind-ignore="all">
+        <a href={`${options.basePath}/`}>← К курсу</a>
+        <span className="book-toolbar-copy">
+          <strong>{options.title}</strong>
+          <span data-book-status>Собираю актуальные материалы…</span>
+        </span>
+        <button type="button" data-print-book disabled>Сохранить в PDF</button>
+      </aside>
+      <main className="book-root" data-book-root>
+        <p className="book-loading" data-book-loading>Загружаю книгу…</p>
+      </main>
+    </>,
+  );
+  const fragments = JSON.stringify(options.fragments).replace(/</g, "\\u003c");
+
+  return `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(options.title)}</title>
+<link rel="stylesheet" href="${options.basePath}/assets/katex/katex.min.css">
+<style>${BOOK_CSS}\n${STATIC_BOOK_CSS}</style>
+</head>
+<body data-pagefind-ignore="all">
+${markup}
+<script type="application/json" data-book-fragments>${fragments}</script>
+<script src="${options.basePath}/assets/book.js"></script>
+</body>
+</html>`;
+}
+
+/** Один фрагмент хранится один раз: его открывает книга фазы и общая книга. */
+export function renderStaticBookPhaseHtml(book: BookModel): string {
+  return renderToStaticMarkup(<BookPhase book={book} />);
 }

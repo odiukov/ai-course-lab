@@ -301,6 +301,18 @@ describe("renderIndexPage", () => {
     expect(html).toContain('href="/base/review/"');
     expect(html).toContain("data-review-due");
   });
+
+  it("offers complete and per-phase printable books", () => {
+    const html = renderIndexPage(
+      [{ number: 3, title: "Transformers", lessons: [] }],
+      { basePath: "/base" },
+    );
+
+    expect(html).toContain('href="/base/book/?print=1"');
+    expect(html).toContain("Собрать весь курс");
+    expect(html).toContain('href="/base/book/phase-03/?print=1"');
+    expect(html).toContain('aria-label="Собрать книгу: фаза 3"');
+  });
 });
 
 /**

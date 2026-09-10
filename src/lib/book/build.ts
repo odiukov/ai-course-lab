@@ -19,6 +19,8 @@ export interface BookSection {
   body: string;
   clarifications: Clarification[];
   visualHtml: string | null;
+  /** URL схемы в статической сборке; серверный PDF вместо него использует srcdoc. */
+  visualHref?: string | null;
 }
 
 export interface BookSolution {

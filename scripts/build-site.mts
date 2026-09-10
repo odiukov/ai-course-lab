@@ -11,8 +11,15 @@
 import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { withHeightReporter } from "../src/lib/api/visual-height.js";
+import { buildPhaseBook, type BookModel } from "../src/lib/book/build.js";
+import {
+  renderStaticBookHtml,
+  renderStaticBookPhaseHtml,
+} from "../src/lib/book/document.js";
 import { readCards, type Card } from "../src/lib/cards/card.js";
+import { loadConfig } from "../src/lib/config.js";
 import {
   exerciseFiles,
   exerciseUrls,
@@ -48,6 +55,12 @@ function write(relPath: string, content: string): void {
   const target = path.join(outDir, relPath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, content, "utf8");
+}
+
+function writeBytes(relPath: string, content: Uint8Array): void {
+  const target = path.join(outDir, relPath);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
 }
 
 /** Подшивает к схеме мерку высоты и политику CSP первым тегом в head. */
@@ -114,6 +127,19 @@ async function buildReview(): Promise<void> {
   await build({
     entryPoints: [path.join(root, "src", "site-review", "index.ts")],
     outfile: path.join(outDir, "assets", "review.js"),
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2020",
+    logLevel: "warning",
+  });
+}
+
+/** Печатная книга: подгружает готовые фазовые фрагменты и вызывает печать. */
+async function buildBook(): Promise<void> {
+  await build({
+    entryPoints: [path.join(root, "src", "site-book", "index.ts")],
+    outfile: path.join(outDir, "assets", "book.js"),
     bundle: true,
     minify: true,
     format: "iife",
@@ -269,6 +295,55 @@ async function main(): Promise<void> {
   write(path.join("cards", "index.json"), JSON.stringify(buildManifest(manifestEntries)));
 
   const phases = groupLessons(catalog);
+  const bookConfig = loadConfig(process.env, root);
+  const books = phases
+    .map((phase) => buildPhaseBook(bookConfig, phase.number))
+    .filter((book): book is BookModel => book !== null && book.lessons.length > 0);
+
+  for (const book of books) {
+    const staticBook: BookModel = {
+      ...book,
+      lessons: book.lessons.map((lesson) => {
+        const visualByStep = new Map(
+          (models.get(lesson.slug)?.blocks ?? []).map((block) => [block.step.id, block.visualHref]),
+        );
+        return {
+          ...lesson,
+          sections: lesson.sections.map((section) => ({
+            ...section,
+            visualHtml: null,
+            visualHref: visualByStep.get(section.id) ?? null,
+          })),
+        };
+      }),
+    };
+    const phaseDir = `phase-${String(book.phaseNumber).padStart(2, "0")}`;
+    const fragment = `${basePath}/book/${phaseDir}/content.html.gz`;
+    writeBytes(
+      path.join("book", phaseDir, "content.html.gz"),
+      gzipSync(renderStaticBookPhaseHtml(staticBook), { level: 9 }),
+    );
+    write(
+      path.join("book", phaseDir, "index.html"),
+      renderStaticBookHtml({
+        basePath,
+        title: `AI Engineering · фаза ${book.phaseNumber}`,
+        fragments: [fragment],
+      }),
+    );
+  }
+  const fragments = books.map(
+    (book) => `${basePath}/book/phase-${String(book.phaseNumber).padStart(2, "0")}/content.html.gz`,
+  );
+  write(
+    path.join("book", "index.html"),
+    renderStaticBookHtml({
+      basePath,
+      title: "AI Engineering from Scratch · полная книга",
+      fragments,
+    }),
+  );
+
   // Порядок курса — как в каталоге: фаза за фазой, урок за уроком. Он же
   // отвечает на вопрос «что читать дальше» в конце урока.
   const ordered = phases.flatMap((phase) => phase.lessons);
@@ -323,12 +398,12 @@ async function main(): Promise<void> {
   write(".nojekyll", "");
   copyKatexAssets();
   copyPyodide();
-  await Promise.all([buildEditor(), buildSearch(), buildReview()]);
+  await Promise.all([buildEditor(), buildSearch(), buildReview(), buildBook()]);
 
   console.log(
     `Собрано: уроков ${catalog.length}, шагов ${renderedSteps}, ` +
       `не написано ${missingSteps}, схем ${copiedVisuals}, ` +
-      `упражнений ${exercises.size}` +
+      `упражнений ${exercises.size}, книг ${books.length + 1}` +
       (skippedLessons > 0 ? `, пропущено уроков ${skippedLessons}` : ""),
   );
 }

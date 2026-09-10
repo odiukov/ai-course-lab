@@ -78,6 +78,19 @@ function renderReviewLink(basePath: string): string {
 </a>`;
 }
 
+function bookHref(basePath: string, phaseNumber?: number): string {
+  const phase = phaseNumber === undefined
+    ? ""
+    : `phase-${String(phaseNumber).padStart(2, "0")}/`;
+  return `${basePath}/book/${phase}?print=1`;
+}
+
+function renderBookLink(basePath: string, phaseNumber?: number): string {
+  const label = phaseNumber === undefined ? "Собрать весь курс" : "Собрать книгу";
+  const aria = phaseNumber === undefined ? label : `${label}: фаза ${phaseNumber}`;
+  return `<a class="nav-button${phaseNumber === undefined ? " is-primary" : ""}" href="${bookHref(basePath, phaseNumber)}" target="_blank" aria-label="${aria}">${label}</a>`;
+}
+
 function htmlDocument(options: {
   title: string;
   basePath: string;
@@ -422,7 +435,10 @@ ${total}
         .join("\n");
 
       return `<section class="phase">
+<div class="phase-heading">
 <h2>Фаза ${phase.number}. ${escapeHtml(phase.title)}</h2>
+${renderBookLink(options.basePath, phase.number)}
+</div>
 <ul class="lessons">
 ${lessons}
 </ul>
@@ -433,7 +449,7 @@ ${lessons}
   return htmlDocument({
     title: SITE_TITLE,
     basePath: options.basePath,
-    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1><span class="header-actions" data-header-actions>${renderReviewLink(options.basePath)}${renderSearchButton()}</span></div></header>\n${sections}`,
+    body: `<header class="index-header"><div class="header-toolbar"><h1>${SITE_TITLE}</h1><span class="header-actions" data-header-actions>${renderBookLink(options.basePath)}${renderReviewLink(options.basePath)}${renderSearchButton()}</span></div></header>\n${sections}`,
     excludeFromSearch: true,
     scripts: [CATALOG_SCRIPT],
     modules: authModules(options),
