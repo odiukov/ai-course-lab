@@ -7,33 +7,34 @@ title: >-
 source_anchor: '### Quantization choice per target'
 check:
   - question: >-
-      Ты скачал GGUF-модель и хочешь запустить её через WebLLM в браузере. Что
-      придётся сделать?
-    options:
-      - 'Передать GGUF прямо в WebLLM: браузер сам выберет ядра WebGPU'
-      - Конвертировать веса в MLC Q4 q4f16_1 и подготовить скомпилированный wasm
-      - Конвертировать модель в Core ML INT4
-      - Перевести веса в NVFP4 и запускать через Edge-LLM
-    correct: 1
-    explanation: >-
-      WebLLM не поддерживает GGUF. Для браузерного пути нужны формат MLC Q4 и
-      совместимый с ним скомпилированный wasm.
-  - question: Какое сопоставление формата и целевого устройства составлено верно?
+      Разработчик пытается запустить на Qualcomm Hexagon модель, подготовленную
+      для Core ML. В чём ошибка?
     options:
       - >-
-        Apple ANE — QNN INT4; Qualcomm Hexagon — Core ML INT4; Jetson Thor —
-        GGUF
-      - Apple ANE — GGUF; WebGPU — NVFP4; Jetson Orin Nano — MLC Q4
+        Core ML предназначен для Apple ANE, а для Hexagon нужен путь через QNN и
+        конвертеры AI Hub
       - >-
-        Apple ANE — Core ML INT4; Qualcomm Hexagon — QNN INT4; Jetson AGX или
-        Thor — NVFP4
-      - >-
-        WebGPU — GGUF; Jetson Orin Nano — Core ML INT4; Qualcomm Hexagon — MLC
-        Q4
-    correct: 2
+        Core ML работает только в браузере, поэтому модель нужно перенести в
+        WebLLM
+      - 'Hexagon принимает только GGUF, поэтому достаточно переименовать файл'
+      - 'Для Hexagon обязательно нужен Edge-LLM, используемый на мощных Jetson'
+    correct: 0
     explanation: >-
-      Формат должен совпадать с путём исполнения: Core ML для Apple, QNN для
-      Qualcomm, а NVFP4 через Edge-LLM — для мощных Jetson.
+      Одинаковая разрядность весов не делает артефакты взаимозаменяемыми: Apple
+      ANE использует путь Core ML, а Qualcomm Hexagon — QNN и инструменты AI
+      Hub.
+  - question: >-
+      Как правильно распределены пути запуска между Jetson Orin Nano и более
+      мощными Jetson AGX или Thor?
+    options:
+      - Orin Nano — GGUF или TRT-LLM; AGX или Thor — Edge-LLM
+      - Orin Nano — Core ML; AGX или Thor — QNN
+      - Orin Nano — MLC с браузерным wasm; AGX или Thor — Core ML
+      - Для всех этих Jetson требуется только WebLLM
+    correct: 0
+    explanation: >-
+      Для Orin Nano предусмотрены Q4 GGUF и TRT-LLM INT4 с учётом ограничения
+      памяти. AGX и Thor поддерживают путь Edge-LLM с NVFP4 и FP8 KV-кэшем.
 ---
 
 Проверь, можешь ли ты после выбора из [шага 23](#step-23) назвать не просто разрядность, а весь путь запуска. INT4 здесь не универсальный файл: Apple ждёт Core ML, Qualcomm — QNN, а браузер — MLC Q4 вместе с `.wasm`. На Jetson Orin Nano подходят Q4 GGUF или TRT-LLM INT4, тогда как AGX и Thor могут идти по пути NVFP4 через Edge-LLM. Главная ловушка — переносить знакомый формат на чужой рантайм.
