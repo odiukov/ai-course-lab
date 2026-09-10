@@ -28,7 +28,8 @@ check:
     correct: 0
     explanation: >-
       Для deceptive alignment целевое сочетание — monitoring и illegibility.
-      Incapability не заменяет недостающее доказательство illegibility.
+      Incapability не заменяет недостающее свидетельство того, что модель не
+      способна выстроить связный скрытый план.
 ---
 
 Теперь ты подбираешь свидетельства не по принципу «чем больше, тем лучше», а под конкретный риск. Для CBRN на уровне ASL-3 ищи подтверждение incapability, прежде всего результат unlearning. Для deceptive alignment нужны monitoring и illegibility. Для cyber uplift потребуется полный набор из трёх опор.
