@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StepBody } from "../../components/StepBody";
+import { COMPLETE_BOOK_DOWNLOAD_URL } from "../book/static";
 import { lessonUrl, stepPageHref, stepPageUrl } from "./anchors";
 import type { CatalogPhase } from "./catalog";
 import {
@@ -79,9 +80,8 @@ function renderReviewLink(basePath: string): string {
 }
 
 function bookHref(basePath: string, phaseNumber?: number): string {
-  const phase = phaseNumber === undefined
-    ? ""
-    : `phase-${String(phaseNumber).padStart(2, "0")}/`;
+  if (phaseNumber === undefined) return COMPLETE_BOOK_DOWNLOAD_URL;
+  const phase = `phase-${String(phaseNumber).padStart(2, "0")}/`;
   return `${basePath}/book/${phase}?print=1`;
 }
 

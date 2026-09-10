@@ -7,6 +7,7 @@ import {
   renderLessonIndexPage,
   renderStepPage,
 } from "./render";
+import { COMPLETE_BOOK_DOWNLOAD_URL } from "../book/static";
 
 const plan: StepMeta[] = [
   { id: "001-a", type: "theory", title: "Первый" },
@@ -308,7 +309,7 @@ describe("renderIndexPage", () => {
       { basePath: "/base" },
     );
 
-    expect(html).toContain('href="/base/book/?print=1"');
+    expect(html).toContain(`href="${COMPLETE_BOOK_DOWNLOAD_URL}"`);
     expect(html).toContain("Собрать весь курс");
     expect(html).toContain('href="/base/book/phase-03/?print=1"');
     expect(html).toContain('aria-label="Собрать книгу: фаза 3"');

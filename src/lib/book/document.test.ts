@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BookModel } from "./build";
-import { renderStaticBookHtml, renderStaticBookPhaseHtml } from "./document";
+import {
+  renderStaticBookDownloadHtml,
+  renderStaticBookHtml,
+  renderStaticBookPhaseHtml,
+} from "./document";
 
 const book: BookModel = {
   phaseNumber: 2,
@@ -48,5 +52,15 @@ describe("static book", () => {
     expect(html).toContain("The <strong>current</strong> material.");
     expect(html).toContain('data-visual-src="/base/visuals/attention.html"');
     expect(html).not.toContain("<iframe");
+  });
+
+  it("redirects the legacy complete-book page to a prepared PDF", () => {
+    const html = renderStaticBookDownloadHtml({
+      basePath: "/base",
+      downloadUrl: "https://example.com/book.pdf",
+    });
+
+    expect(html).toContain('href="https://example.com/book.pdf"');
+    expect(html).toContain('window.location.replace("https://example.com/book.pdf")');
   });
 });

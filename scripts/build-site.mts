@@ -16,8 +16,10 @@ import { withHeightReporter } from "../src/lib/api/visual-height.js";
 import { buildPhaseBook, type BookModel } from "../src/lib/book/build.js";
 import {
   renderStaticBookHtml,
+  renderStaticBookDownloadHtml,
   renderStaticBookPhaseHtml,
 } from "../src/lib/book/document.js";
+import { COMPLETE_BOOK_DOWNLOAD_URL } from "../src/lib/book/static.js";
 import { readCards, type Card } from "../src/lib/cards/card.js";
 import { loadConfig } from "../src/lib/config.js";
 import {
@@ -332,15 +334,11 @@ async function main(): Promise<void> {
       }),
     );
   }
-  const fragments = books.map(
-    (book) => `${basePath}/book/phase-${String(book.phaseNumber).padStart(2, "0")}/content.html.gz`,
-  );
   write(
     path.join("book", "index.html"),
-    renderStaticBookHtml({
+    renderStaticBookDownloadHtml({
       basePath,
-      title: "AI Engineering from Scratch · полная книга",
-      fragments,
+      downloadUrl: COMPLETE_BOOK_DOWNLOAD_URL,
     }),
   );
 

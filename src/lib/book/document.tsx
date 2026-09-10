@@ -157,6 +157,8 @@ const STATIC_BOOK_CSS = String.raw`
 .book-toolbar button { border-color: #4338ca; background: #4338ca; color: white; font-weight: 700; }
 .book-toolbar button:disabled { cursor: wait; opacity: .45; }
 .book-loading { margin: 12mm auto; max-width: 860px; color: #64748b; }
+.book-download { margin: 12vh auto; max-width: 680px; padding: 24px; text-align: center; }
+.book-download a { display: inline-block; margin-top: 16px; border-radius: 7px; background: #4338ca; color: white; padding: 10px 16px; font-weight: 700; text-decoration: none; }
 .book-visual-placeholder { width: 100%; height: 520px; margin: 5mm 0 7mm; border: 1px solid #dbe3ef; border-radius: 8px; background: #f8fafc; }
 @media (max-width: 680px) { .book-toolbar { flex-wrap: wrap; } .book-toolbar-copy { order: -1; flex-basis: 100%; } }
 @media print { .book-toolbar { display: none; } }
@@ -226,4 +228,21 @@ ${markup}
 /** Один фрагмент хранится один раз: его открывает книга фазы и общая книга. */
 export function renderStaticBookPhaseHtml(book: BookModel): string {
   return renderToStaticMarkup(<BookPhase book={book} />);
+}
+
+/** Запасная страница для старой ссылки /book/: сразу ведёт на готовый релиз. */
+export function renderStaticBookDownloadHtml(options: {
+  basePath: string;
+  downloadUrl: string;
+}): string {
+  const markup = renderToStaticMarkup(
+    <main className="book-download" data-pagefind-ignore="all">
+      <h1>Полная книга готова</h1>
+      <p>Скачивание должно начаться автоматически.</p>
+      <a href={options.downloadUrl}>Скачать PDF</a>
+      <p><a href={`${options.basePath}/`}>← Вернуться к курсу</a></p>
+    </main>,
+  );
+  const downloadUrl = JSON.stringify(options.downloadUrl).replace(/</g, "\\u003c");
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Полная книга · AI Engineering</title><style>${BOOK_CSS}\n${STATIC_BOOK_CSS}</style></head><body data-pagefind-ignore="all">${markup}<script>window.location.replace(${downloadUrl})</script></body></html>`;
 }
