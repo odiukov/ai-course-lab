@@ -51,13 +51,20 @@ function splitFrontmatter(source: string): { body: string } {
   return { body: match ? source.slice(match[0].length) : source };
 }
 
-function mathNodes(tree: unknown): MathNode[] {
+/** Узел mdast в объёме, который нужен этой проверке. */
+interface TreeNode {
+  type?: string;
+  value?: unknown;
+  children?: TreeNode[];
+}
+
+function mathNodes(tree: TreeNode): MathNode[] {
   const found: MathNode[] = [];
-  const walk = (node: any) => {
-    if (node?.type === "inlineMath" || node?.type === "math") {
+  const walk = (node: TreeNode) => {
+    if (node.type === "inlineMath" || node.type === "math") {
       found.push({ type: node.type, value: String(node.value ?? "") });
     }
-    for (const child of node?.children ?? []) walk(child);
+    for (const child of node.children ?? []) walk(child);
   };
   walk(tree);
   return found;
@@ -113,7 +120,7 @@ for (const entry of fs.readdirSync(lessonsDir, { withFileTypes: true })) {
     const { body } = splitFrontmatter(source);
     steps += 1;
 
-    const nodes = mathNodes(processor.runSync(processor.parse(normalizeMath(body))));
+    const nodes = mathNodes(processor.runSync(processor.parse(normalizeMath(body))) as TreeNode);
     formulas += nodes.length;
 
     for (const node of nodes) {
