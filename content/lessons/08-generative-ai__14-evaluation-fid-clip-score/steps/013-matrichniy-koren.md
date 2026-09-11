@@ -22,7 +22,8 @@ $$A=\begin{pmatrix}1&1\\1&1\end{pmatrix}$$
 $$\begin{pmatrix}1&1\\1&1\end{pmatrix}
 \begin{pmatrix}1&1\\1&1\end{pmatrix}
 =
-\begin{pmatrix}2&2\\2&2\end{pmatrix},$$
+\begin{pmatrix}2&2\\2&2\end{pmatrix},
+$$
 
 а не $A$. Значит, это не матричный корень, хотя каждый отдельный элемент выглядел «правильно».
 
